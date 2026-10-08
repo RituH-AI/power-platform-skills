@@ -308,6 +308,37 @@
       border-radius: 50%;
       background: currentColor;
     }
+    .state-chip.awaiting-input { color: #754a00; background: #fff1c2; }
+    .state-chip.failed { color: var(--danger); background: #ffebe9; }
+    .state-chip.canceled { color: #5d6478; background: #eceef4; }
+
+    .input-notice {
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 14px;
+      margin-top: 22px;
+      padding: 16px 18px;
+      border: 1px solid #e3b341;
+      border-radius: 14px;
+      color: #4d3700;
+      background: #fff8df;
+      box-shadow: 0 12px 28px rgba(117, 74, 0, .1);
+    }
+    .input-notice[hidden] { display: none; }
+    .input-notice-mark {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      color: #fff;
+      background: var(--warning);
+      font-weight: 800;
+    }
+    .input-notice h3 { margin: 0 0 6px; font-size: 16px; }
+    .input-notice p { margin: 0; font-size: 13px; line-height: 1.5; }
+    .input-notice-location { margin-top: 7px !important; color: #6c5000; }
+    .input-notice-location strong { color: #493600; }
 
     .timeline { display: grid; gap: 4px; margin: 24px 0 0; padding: 0; list-style: none; }
     .step {
@@ -324,29 +355,27 @@
       transition: background .25s ease, border-color .25s ease, box-shadow .25s ease;
     }
 
-    .step.active {
+    .step.working {
       border-color: rgba(52,84,209,.45);
       background: linear-gradient(90deg, #e9e7ff, #f8f9ff);
       transform: translateX(4px);
-      animation: active-status 1.9s ease-in-out infinite;
     }
-    .step.active::before {
+    .step.working::before {
       content: "";
       position: absolute;
       inset: 0 auto 0 0;
       width: 5px;
       background: var(--cobalt);
     }
-    @keyframes active-status {
-      0%, 100% {
-        border-color: rgba(52,84,209,.32);
-        box-shadow: 0 8px 20px rgba(52,84,209,.08);
-      }
-      50% {
-        border-color: rgba(52,84,209,.7);
-        box-shadow: 0 12px 32px rgba(52,84,209,.22);
-      }
+    .step.blocked { border-color: #e3b341; background: #fffaf0; }
+    .step.blocked::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 5px;
+      background: var(--warning);
     }
+    .step.canceled { border-color: #cfd3df; background: #f6f7fa; }
     .step-marker {
       display: grid;
       place-items: center;
@@ -360,24 +389,42 @@
     }
 
     .step.complete .step-marker { border-color: var(--success); color: var(--white); background: var(--success); }
-    .step.active .step-marker {
-      border-color: var(--cobalt);
-      color: var(--white);
-      background: var(--cobalt);
+    .step.working .step-marker {
+      border-color: rgba(52,84,209,.28);
+      color: transparent;
+      background: var(--white);
     }
+    .step.working .step-marker::after {
+      content: "";
+      width: 12px;
+      height: 12px;
+      border: 2px solid rgba(52,84,209,.22);
+      border-top-color: var(--cobalt);
+      border-radius: 50%;
+      animation: working-indicator .85s linear infinite;
+    }
+    @keyframes working-indicator { to { transform: rotate(360deg); } }
+    .step.blocked .step-marker { border-color: var(--warning); color: var(--white); background: var(--warning); }
     .step.error .step-marker { border-color: var(--danger); color: var(--white); background: var(--danger); }
+    .step.canceled .step-marker { border-color: #7a8297; color: var(--white); background: #7a8297; }
     .step-title { font-size: 14px; font-weight: 700; }
     .step-detail { margin-top: 3px; color: var(--muted); font-size: 12px; }
     .step-state { color: var(--muted); font-size: 12px; }
-    .step.active .step-state {
+    .step.working .step-state,
+    .step.blocked .step-state,
+    .step.error .step-state,
+    .step.canceled .step-state {
       padding: 5px 8px;
       border-radius: 999px;
       color: var(--white);
-      background: var(--cobalt);
       font-weight: 800;
       letter-spacing: .04em;
       text-transform: uppercase;
     }
+    .step.working .step-state { background: var(--cobalt); }
+    .step.blocked .step-state { background: var(--warning); }
+    .step.error .step-state { background: var(--danger); }
+    .step.canceled .step-state { background: #6f778c; }
 
     .footer {
       display: flex;
@@ -390,6 +437,14 @@
     }
 
     .footer-note { max-width: 470px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .ai-disclaimer {
+      flex: none;
+      color: #50576b;
+      font-size: 12px;
+      font-weight: 650;
+      line-height: 1.5;
+      text-align: right;
+    }
     .actions { display: flex; align-items: center; gap: 10px; }
     .primary, .secondary {
       min-height: 40px;
@@ -425,10 +480,19 @@
       .layout { grid-template-columns: 1fr; }
       .preview-pane { min-height: 620px; border-right: 0; border-bottom: 1px solid var(--line); }
       .status-pane { padding: 34px; }
+      .footer { align-items: flex-start; flex-direction: column; gap: 10px; }
+      .ai-disclaimer { text-align: left; }
     }
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+      .step.working .step-marker::after {
+        width: 9px;
+        height: 9px;
+        border: 0;
+        background: var(--cobalt);
+        animation: none !important;
+      }
     }
   </style>
 </head>
@@ -471,8 +535,17 @@
             <h2 id="siteName"></h2>
             <div class="site-url" id="siteUrl"></div>
           </div>
-          <div class="state-chip"><span class="pulse"></span><span id="chipText"></span></div>
+          <div class="state-chip" id="stateChip"><span class="pulse"></span><span id="chipText"></span></div>
         </div>
+
+        <section class="input-notice" id="inputNotice" role="alert" aria-labelledby="inputNoticeTitle" hidden>
+          <span class="input-notice-mark" aria-hidden="true">!</span>
+          <div>
+            <h3 id="inputNoticeTitle">Your input is needed</h3>
+            <p id="requiredAction"></p>
+            <p class="input-notice-location"><strong>Where to respond:</strong> <span id="responseLocation"></span></p>
+          </div>
+        </section>
 
         <ol class="timeline" id="timeline"></ol>
 
@@ -483,6 +556,7 @@
 
         <footer class="footer">
           <div class="footer-note" id="refreshNote">This page refreshes automatically as Power Pages advances through provisioning, registration, download, and validation.</div>
+          <div class="ai-disclaimer">AI-generated content may be incorrect</div>
         </footer>
       </section>
     </section>
@@ -536,6 +610,14 @@
     document.getElementById("brandIcon").src = model.brandIcon;
     setText("chipText", model.status.chip);
     setText("statusBadge", model.status.terminal ? model.status.chip : "Live creation status");
+    document.getElementById("stateChip").classList.add(model.status.activityState);
+
+    if (model.status.notification) {
+      setText("inputNoticeTitle", model.status.notification.title);
+      setText("requiredAction", model.status.notification.requiredAction);
+      setText("responseLocation", model.status.notification.responseLocation);
+      document.getElementById("inputNotice").hidden = false;
+    }
 
     document.getElementById("featureList").replaceChildren(
       ...model.template.capabilities.map((capability) => {
@@ -588,24 +670,42 @@
     const timeline = document.getElementById("timeline");
     timeline.replaceChildren(...model.timeline.map((step, index) => {
       const complete = index < model.status.step || model.status.key === "ready";
-      const active = index === model.status.step && !model.status.terminal;
-      const failed = index === model.status.step && model.status.error;
+      const current = index === model.status.step;
+      const working = current && model.status.activityState === "working";
+      const blocked = current && model.status.activityState === "awaiting-input";
+      const failed = current && model.status.activityState === "failed";
+      const canceled = current && model.status.activityState === "canceled";
       const item = document.createElement("li");
-      item.className = `step ${failed ? "error" : complete ? "complete" : active ? "active" : ""}`;
+      item.className = `step ${failed ? "error" : canceled ? "canceled" : blocked ? "blocked" : complete ? "complete" : working ? "working" : ""}`;
       const marker = document.createElement("span");
       marker.className = "step-marker";
-      marker.textContent = complete ? "✓" : failed ? "!" : String(index + 1).padStart(2, "0");
+      marker.setAttribute("aria-hidden", "true");
+      marker.textContent = complete ? "✓" : failed ? "!" : canceled ? "×" : blocked ? "!" : working ? "" : String(index + 1).padStart(2, "0");
       const copy = document.createElement("div");
       const title = document.createElement("div");
       title.className = "step-title";
       title.textContent = step[0];
       const detail = document.createElement("div");
       detail.className = "step-detail";
-      detail.textContent = active || failed ? model.status.message : step[1];
+      detail.textContent = blocked
+        ? model.status.notification.requiredAction
+        : working || failed || canceled
+          ? model.status.message
+          : step[1];
       copy.append(title, detail);
       const state = document.createElement("span");
       state.className = "step-state";
-      state.textContent = complete ? "Complete" : failed ? "Stopped" : active ? "Working" : "Waiting";
+      state.textContent = complete
+        ? "Complete"
+        : failed
+          ? "Stopped"
+          : canceled
+            ? "Canceled"
+            : blocked
+              ? "Your input needed"
+              : working
+                ? "Working"
+                : "Waiting";
       item.append(marker, copy, state);
       return item;
     }));
@@ -618,8 +718,10 @@
     }
 
     if (model.status.terminal) {
-      document.querySelector(".pulse").style.animation = "none";
       setText("refreshNote", "This status is final. You can keep this page open while you begin customizing the downloaded site.");
+    } else if (model.status.activityState === "awaiting-input") {
+      setText("refreshNote", "Creation is paused for your response. This page will update automatically after you reply.");
+      window.setTimeout(() => location.reload(), 5000);
     } else if (model.refresh) {
       window.setTimeout(() => location.reload(), 5000);
     }

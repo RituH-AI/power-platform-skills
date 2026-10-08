@@ -234,6 +234,29 @@ Open `STATUS_PAGE_PATH` in the user's default browser using the OS-native launch
 `STATUS_PAGE_URL` before launching so the user has a direct fallback. Do not block provisioning if
 the browser launcher fails.
 
+### Status-page activity transitions
+
+After the status page exists, keep its activity state aligned with the agent:
+
+- Normal processing uses the lifecycle `--status` alone; nonterminal phases default to the
+  animated `working` state.
+- Immediately before any `AskUserQuestion`, rewrite the same page with the current lifecycle
+  status plus `--activityState "awaiting-input"`, `--requiredAction "<specific action>"`, and
+  `--responseLocation "Return to the site creation conversation and provide your response."`
+  The page continues its silent reload so it can notice the next rewrite, but the current step
+  must not animate or look like background work continues.
+- Immediately after the user responds, rewrite the same lifecycle status without
+  `--activityState`; this clears the notification and restores normal processing. Do this before
+  starting the next command.
+- If the user cancels after the page exists, rewrite the current lifecycle status with
+  `--activityState "canceled"`.
+- If creation cannot continue, rewrite the current lifecycle status with
+  `--activityState "failed"` unless a more specific terminal status such as `model-mismatch`
+  applies.
+
+Queued steps remain `Waiting`; only the current blocked step is labeled `Your input needed`.
+Never show percentages, estimated completion times, or a working indicator while awaiting input.
+
 Run the shared provisioner:
 
 ```bash
@@ -254,9 +277,12 @@ Use a command timeout of at least six minutes.
   ```bash
   --operationLocation "<saved operationLocation>"
   ```
-- `Failed` before acceptance: show the service error. Allow parameter correction where relevant.
+- `Failed` before acceptance: render the current step with `--activityState "failed"`, show the
+  service error, and allow parameter correction where relevant. If asking whether to correct and
+  retry, first use the awaiting-input transition above; restore `working` before the retry.
 - `401`/`403`: repair authentication or permissions, then retry only when the response proves the
-  request was not accepted.
+  request was not accepted. Render awaiting-input before asking the user to complete an
+  authentication or permission action.
 - Template unavailable: return to Phase 2; never substitute a template automatically.
 
 If status-page rendering fails before submission, repair it before the POST. If an update fails
@@ -382,6 +408,11 @@ Use `AskUserQuestion`:
 | Question | Header | Options |
 |---|---|---|
 | Would you like to customize the downloaded declarative template now? | Customize site | Customize now (Recommended), Keep the template unchanged |
+
+Before this question, rewrite the `ready` status with `--activityState "awaiting-input"` and
+`--requiredAction "Choose whether to customize the downloaded template now or keep it unchanged."`
+After receiving either answer, rewrite `ready` without an activity override so the notification
+clears and the page returns to its completed state.
 
 On **Customize now**, invoke `/customize-declarative-site` through the `Skill` tool and provide:
 

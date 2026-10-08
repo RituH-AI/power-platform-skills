@@ -32,6 +32,9 @@ test('buildModel combines Event Portal metadata, embedded previews, and current 
   assert.deepEqual(model.template.requirements, ['Customer Insights - Journeys license']);
   assert.equal(model.status.key, 'accepted');
   assert.equal(model.status.step, 0);
+  assert.equal(model.status.activityState, 'working');
+  assert.equal(model.status.terminal, false);
+  assert.equal(model.status.notification, null);
   assert.equal(model.site.modelVersion, 'Enhanced');
   assert.equal(model.refresh, true);
 });
@@ -39,6 +42,9 @@ test('buildModel combines Event Portal metadata, embedded previews, and current 
 test('buildModel renders Standard completion and model-mismatch details', () => {
   const ready = buildModel(options({ modelVersion: 'Standard', status: 'ready' }));
   assert.match(ready.status.result.message, /Standard model verified/);
+  assert.equal(ready.status.activityState, 'complete');
+  assert.equal(ready.status.terminal, true);
+  assert.equal(ready.refresh, false);
 
   const mismatch = buildModel(
     options({
@@ -48,6 +54,49 @@ test('buildModel renders Standard completion and model-mismatch details', () => 
     })
   );
   assert.match(mismatch.status.message, /Enhanced instead of Standard/);
+  assert.equal(mismatch.status.activityState, 'failed');
+  assert.equal(mismatch.status.terminal, true);
+  assert.equal(mismatch.refresh, false);
+});
+
+test('buildModel represents user-input pauses without implying active processing', () => {
+  const model = buildModel(
+    options({
+      status: 'registration',
+      activityState: 'awaiting-input',
+      requiredAction: 'Confirm the website record selected from PAC.',
+      responseLocation: 'Return to the site creation conversation and provide your response.',
+    }),
+  );
+
+  assert.equal(model.status.step, 2);
+  assert.equal(model.status.activityState, 'awaiting-input');
+  assert.equal(model.status.terminal, false);
+  assert.equal(model.status.chip, 'Input needed');
+  assert.deepEqual(model.status.notification, {
+    title: 'Your input is needed',
+    requiredAction: 'Confirm the website record selected from PAC.',
+    responseLocation: 'Return to the site creation conversation and provide your response.',
+  });
+  assert.equal(model.refresh, true);
+});
+
+test('buildModel renders failed and canceled phases as terminal non-working states', () => {
+  const failed = buildModel(
+    options({ status: 'download', activityState: 'failed' }),
+  );
+  assert.equal(failed.status.activityState, 'failed');
+  assert.equal(failed.status.chip, 'Creation stopped');
+  assert.equal(failed.status.terminal, true);
+  assert.equal(failed.refresh, false);
+
+  const canceled = buildModel(
+    options({ status: 'validation', activityState: 'canceled' }),
+  );
+  assert.equal(canceled.status.activityState, 'canceled');
+  assert.equal(canceled.status.chip, 'Canceled');
+  assert.equal(canceled.status.terminal, true);
+  assert.equal(canceled.refresh, false);
 });
 
 test('buildModel embeds Starter Layout 1 previews and capabilities', () => {
@@ -89,7 +138,10 @@ test('renderStatusPage creates a standalone page and overwrites it as status adv
     assert.match(acceptedHtml, /data:image\/png;base64,/);
     assert.match(acceptedHtml, /id="brandIcon"/);
     assert.match(acceptedHtml, /"modelVersion":"Enhanced"/);
-    assert.match(acceptedHtml, /active-status/);
+    assert.match(acceptedHtml, /working-indicator/);
+    assert.match(acceptedHtml, /id="inputNotice"/);
+    assert.match(acceptedHtml, /prefers-reduced-motion: reduce/);
+    assert.match(acceptedHtml, />AI-generated content may be incorrect</);
     assert.doesNotMatch(acceptedHtml, /id="statusKicker"/);
     assert.doesNotMatch(acceptedHtml, /__JSON_MODEL__/);
 
@@ -97,6 +149,33 @@ test('renderStatusPage creates a standalone page and overwrites it as status adv
     const readyHtml = fs.readFileSync(output, 'utf8');
     assert.match(readyHtml, /"key":"ready"/);
     assert.notEqual(readyHtml, acceptedHtml);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('renderStatusPage clears the input notification when processing resumes', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-declarative-status-resume-'));
+  const output = path.join(tempDir, 'status.html');
+
+  try {
+    renderStatusPage(
+      options({
+        output,
+        status: 'registration',
+        activityState: 'awaiting-input',
+        requiredAction: 'Confirm the website record.',
+      }),
+    );
+    const waitingHtml = fs.readFileSync(output, 'utf8');
+    assert.match(waitingHtml, /"activityState":"awaiting-input"/);
+    assert.match(waitingHtml, /Confirm the website record\./);
+
+    renderStatusPage(options({ output, status: 'registration' }));
+    const resumedHtml = fs.readFileSync(output, 'utf8');
+    assert.match(resumedHtml, /"activityState":"working"/);
+    assert.match(resumedHtml, /"notification":null/);
+    assert.doesNotMatch(resumedHtml, /Confirm the website record\./);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -128,5 +207,21 @@ test('buildModel rejects unknown templates and statuses', () => {
   assert.throws(
     () => buildModel(options({ modelVersion: 'Automatic' })),
     /must be Enhanced or Standard/,
+  );
+  assert.throws(
+    () => buildModel(options({ activityState: 'paused' })),
+    /Unsupported --activityState/,
+  );
+  assert.throws(
+    () => buildModel(options({ activityState: 'awaiting-input' })),
+    /--requiredAction is required/,
+  );
+  assert.throws(
+    () => buildModel(options({ requiredAction: 'Choose a site.' })),
+    /only valid with --activityState awaiting-input/,
+  );
+  assert.throws(
+    () => buildModel(options({ status: 'ready', activityState: 'working' })),
+    /cannot use --activityState working/,
   );
 });

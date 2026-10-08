@@ -13,6 +13,8 @@ const {
   normalizeDeclarativeModelVersion,
 } = require('../../../scripts/lib/site-templates');
 
+const ACTIVITY_STATES = new Set(['working', 'awaiting-input', 'failed', 'canceled']);
+
 const STATUSES = Object.freeze({
   accepted: {
     step: 0,
@@ -133,6 +135,47 @@ function buildModel(options) {
         }
       : undefined,
   };
+  const defaultActivityState =
+    options.status === 'ready' ? 'complete' : status.error ? 'failed' : 'working';
+  const activityState = options.activityState || defaultActivityState;
+  if (
+    activityState !== 'complete' &&
+    !ACTIVITY_STATES.has(activityState)
+  ) {
+    throw new Error(
+      `Unsupported --activityState: ${activityState}. ` +
+        'Use working, awaiting-input, failed, or canceled.',
+    );
+  }
+  if (activityState === 'complete' && options.activityState) {
+    throw new Error('--activityState complete is derived from --status ready and cannot be set directly');
+  }
+  if (status.terminal && activityState === 'working') {
+    throw new Error(`--status ${options.status} cannot use --activityState working`);
+  }
+  if (activityState === 'awaiting-input' && !String(options.requiredAction || '').trim()) {
+    throw new Error('--requiredAction is required when --activityState is awaiting-input');
+  }
+  if (
+    activityState !== 'awaiting-input' &&
+    (options.requiredAction || options.responseLocation)
+  ) {
+    throw new Error(
+      '--requiredAction and --responseLocation are only valid with --activityState awaiting-input',
+    );
+  }
+
+  const awaitingInput = activityState === 'awaiting-input';
+  const failed = activityState === 'failed';
+  const canceled = activityState === 'canceled';
+  const terminal = !awaitingInput && (status.terminal || failed || canceled);
+  const activityChip = awaitingInput
+    ? 'Input needed'
+    : failed
+      ? 'Creation stopped'
+      : canceled
+        ? 'Canceled'
+        : resolvedStatus.chip;
 
   const pluginRoot = path.resolve(__dirname, '..', '..', '..');
   const brandIcon = toDataUrl(
@@ -166,9 +209,21 @@ function buildModel(options) {
     status: {
       key: options.status,
       ...resolvedStatus,
+      chip: activityChip,
+      activityState,
+      terminal,
+      notification: awaitingInput
+        ? {
+            title: 'Your input is needed',
+            requiredAction: String(options.requiredAction).trim(),
+            responseLocation:
+              String(options.responseLocation || '').trim() ||
+              'Return to the site creation conversation and provide your response.',
+          }
+        : null,
     },
     timeline: TIMELINE,
-    refresh: !status.terminal,
+    refresh: !terminal,
   };
 }
 
@@ -184,7 +239,9 @@ function renderStatusPage(options) {
       'Usage: render-declarative-status.js [--output <path>] --templateName <name> ' +
       '--modelVersion <Enhanced|Standard> --status <status> ' +
       '--siteName <name> --subdomain <subdomain> [--siteUrl <url>] [--language <lcid>] ' +
-      '[--websiteRecordId <guid>] [--actualModelVersion <Enhanced|Standard>]',
+      '[--websiteRecordId <guid>] [--actualModelVersion <Enhanced|Standard>] ' +
+      '[--activityState <working|awaiting-input|failed|canceled>] ' +
+      '[--requiredAction <text>] [--responseLocation <text>]',
     );
   }
 
@@ -230,6 +287,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  ACTIVITY_STATES,
   STATUSES,
   TIMELINE,
   buildModel,
