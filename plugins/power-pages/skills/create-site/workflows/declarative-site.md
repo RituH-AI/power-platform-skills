@@ -367,8 +367,11 @@ node "${PLUGIN_ROOT}/skills/create-site/scripts/validate-site.js" --projectRoot 
 ```
 
 After the final validator succeeds, update the status page with terminal status `ready`. Include
-the final site URL and website record ID. Terminal pages stop auto-refreshing but remain available
-in the OS temporary directory for the user to review while beginning customization.
+the service-returned or independently verified HTTPS site URL through `--siteUrl` and include the
+website record ID. The renderer intentionally rejects `ready` without an explicit URL so the
+completion action never links to a guessed subdomain. Terminal pages stop auto-refreshing but
+remain available in the OS temporary directory for the user to review while beginning
+customization.
 
 ## Phase 8: Present Results
 
@@ -411,8 +414,9 @@ Use `AskUserQuestion`:
 
 Before this question, rewrite the `ready` status with `--activityState "awaiting-input"` and
 `--requiredAction "Choose whether to customize the downloaded template now or keep it unchanged."`
-After receiving either answer, rewrite `ready` without an activity override so the notification
-clears and the page returns to its completed state.
+Retain the same verified `--siteUrl` so the completed-site action remains available. After
+receiving either answer, rewrite `ready` without an activity override, again retaining
+`--siteUrl`, so the notification clears and the page returns to its completed state.
 
 On **Customize now**, invoke `/customize-declarative-site` through the `Skill` tool and provide:
 

@@ -100,6 +100,19 @@ function toDataUrl(filePath) {
   return `data:${mimeType};base64,${fs.readFileSync(filePath).toString('base64')}`;
 }
 
+function validateWebsiteUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('--siteUrl must be a valid absolute URL');
+  }
+  if (url.protocol !== 'https:' || url.username || url.password) {
+    throw new Error('--siteUrl must use HTTPS without embedded credentials');
+  }
+  return url.href;
+}
+
 function buildModel(options) {
   const modelVersion = normalizeDeclarativeModelVersion(options.modelVersion);
   const actualModelVersion = options.actualModelVersion
@@ -115,6 +128,10 @@ function buildModel(options) {
   const status = STATUSES[options.status];
   if (!status) {
     throw new Error(`Unsupported --status: ${options.status}`);
+  }
+  const explicitSiteUrl = options.siteUrl ? validateWebsiteUrl(options.siteUrl) : null;
+  if (options.status === 'ready' && !explicitSiteUrl) {
+    throw new Error('--siteUrl is required when --status is ready');
   }
   const resolvedStatus = {
     ...status,
@@ -201,7 +218,7 @@ function buildModel(options) {
     },
     site: {
       name: options.siteName,
-      url: options.siteUrl || `https://${options.subdomain}.powerappsportals.com`,
+      url: explicitSiteUrl || `https://${options.subdomain}.powerappsportals.com`,
       language: options.language || '1033',
       websiteRecordId: options.websiteRecordId || '',
       modelVersion,
@@ -212,6 +229,7 @@ function buildModel(options) {
       chip: activityChip,
       activityState,
       terminal,
+      openWebsiteUrl: options.status === 'ready' ? explicitSiteUrl : null,
       notification: awaitingInput
         ? {
             title: 'Your input is needed',
@@ -292,4 +310,5 @@ module.exports = {
   TIMELINE,
   buildModel,
   renderStatusPage,
+  validateWebsiteUrl,
 };

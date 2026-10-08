@@ -474,6 +474,28 @@
     .result-card.warning { background: #fff6e8; border-color: #f1d09d; }
     .result-card h4 { margin: 0 0 7px; }
     .result-card p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+    .open-website {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 44px;
+      margin-top: 16px;
+      padding: 0 18px;
+      border: 1px solid var(--cobalt);
+      border-radius: 10px;
+      color: var(--white);
+      background: var(--cobalt);
+      font-weight: 750;
+      text-decoration: none;
+      box-shadow: 0 9px 20px rgba(52,84,209,.2);
+    }
+    .open-website[hidden] { display: none; }
+    .open-website:hover { background: var(--cobalt-dark); }
+    .open-website:focus-visible {
+      outline: 3px solid rgba(52,84,209,.3);
+      outline-offset: 3px;
+    }
 
     @media (max-width: 960px) {
       .shell { width: min(100% - 24px, 760px); }
@@ -482,6 +504,7 @@
       .status-pane { padding: 34px; }
       .footer { align-items: flex-start; flex-direction: column; gap: 10px; }
       .ai-disclaimer { text-align: left; }
+      .open-website { width: 100%; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -552,6 +575,9 @@
         <div class="result-card" id="resultCard">
           <h4 id="resultTitle">Your site is ready</h4>
           <p id="resultMessage">The selected data model was verified, downloaded, and validated locally.</p>
+          <a class="open-website" id="openWebsite" target="_blank" rel="noopener noreferrer" aria-label="Open website in a new tab" hidden>
+            Open website <span aria-hidden="true">↗</span>
+          </a>
         </div>
 
         <footer class="footer">
@@ -715,6 +741,11 @@
       resultCard.className = `result-card visible${model.status.error ? " warning" : ""}`;
       setText("resultTitle", model.status.result.title);
       setText("resultMessage", model.status.result.message);
+    }
+    if (model.status.openWebsiteUrl) {
+      const openWebsite = document.getElementById("openWebsite");
+      openWebsite.href = model.status.openWebsiteUrl;
+      openWebsite.hidden = false;
     }
 
     if (model.status.terminal) {

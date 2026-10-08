@@ -9,6 +9,8 @@ const {
   renderStatusPage,
 } = require('../../skills/create-site/scripts/render-declarative-status');
 
+const SITE_URL = 'https://contoso-events.powerappsportals.com/';
+
 function options(overrides = {}) {
   return {
     output: path.join(os.tmpdir(), 'unused-declarative-status.html'),
@@ -34,16 +36,20 @@ test('buildModel combines Event Portal metadata, embedded previews, and current 
   assert.equal(model.status.step, 0);
   assert.equal(model.status.activityState, 'working');
   assert.equal(model.status.terminal, false);
+  assert.equal(model.status.openWebsiteUrl, null);
   assert.equal(model.status.notification, null);
   assert.equal(model.site.modelVersion, 'Enhanced');
   assert.equal(model.refresh, true);
 });
 
 test('buildModel renders Standard completion and model-mismatch details', () => {
-  const ready = buildModel(options({ modelVersion: 'Standard', status: 'ready' }));
+  const ready = buildModel(
+    options({ modelVersion: 'Standard', status: 'ready', siteUrl: SITE_URL }),
+  );
   assert.match(ready.status.result.message, /Standard model verified/);
   assert.equal(ready.status.activityState, 'complete');
   assert.equal(ready.status.terminal, true);
+  assert.equal(ready.status.openWebsiteUrl, SITE_URL);
   assert.equal(ready.refresh, false);
 
   const mismatch = buildModel(
@@ -56,6 +62,7 @@ test('buildModel renders Standard completion and model-mismatch details', () => 
   assert.match(mismatch.status.message, /Enhanced instead of Standard/);
   assert.equal(mismatch.status.activityState, 'failed');
   assert.equal(mismatch.status.terminal, true);
+  assert.equal(mismatch.status.openWebsiteUrl, null);
   assert.equal(mismatch.refresh, false);
 });
 
@@ -88,6 +95,7 @@ test('buildModel renders failed and canceled phases as terminal non-working stat
   assert.equal(failed.status.activityState, 'failed');
   assert.equal(failed.status.chip, 'Creation stopped');
   assert.equal(failed.status.terminal, true);
+  assert.equal(failed.status.openWebsiteUrl, null);
   assert.equal(failed.refresh, false);
 
   const canceled = buildModel(
@@ -96,7 +104,24 @@ test('buildModel renders failed and canceled phases as terminal non-working stat
   assert.equal(canceled.status.activityState, 'canceled');
   assert.equal(canceled.status.chip, 'Canceled');
   assert.equal(canceled.status.terminal, true);
+  assert.equal(canceled.status.openWebsiteUrl, null);
   assert.equal(canceled.refresh, false);
+});
+
+test('buildModel retains the completed website link while awaiting customization input', () => {
+  const ready = buildModel(
+    options({
+      status: 'ready',
+      siteUrl: SITE_URL,
+      activityState: 'awaiting-input',
+      requiredAction: 'Choose whether to customize the downloaded template.',
+    }),
+  );
+
+  assert.equal(ready.status.activityState, 'awaiting-input');
+  assert.equal(ready.status.openWebsiteUrl, SITE_URL);
+  assert.equal(ready.status.terminal, false);
+  assert.equal(ready.refresh, true);
 });
 
 test('buildModel embeds Starter Layout 1 previews and capabilities', () => {
@@ -140,14 +165,19 @@ test('renderStatusPage creates a standalone page and overwrites it as status adv
     assert.match(acceptedHtml, /"modelVersion":"Enhanced"/);
     assert.match(acceptedHtml, /working-indicator/);
     assert.match(acceptedHtml, /id="inputNotice"/);
+    assert.match(
+      acceptedHtml,
+      /id="openWebsite" target="_blank" rel="noopener noreferrer"/,
+    );
     assert.match(acceptedHtml, /prefers-reduced-motion: reduce/);
     assert.match(acceptedHtml, />AI-generated content may be incorrect</);
     assert.doesNotMatch(acceptedHtml, /id="statusKicker"/);
     assert.doesNotMatch(acceptedHtml, /__JSON_MODEL__/);
 
-    renderStatusPage(options({ output, status: 'ready' }));
+    renderStatusPage(options({ output, status: 'ready', siteUrl: SITE_URL }));
     const readyHtml = fs.readFileSync(output, 'utf8');
     assert.match(readyHtml, /"key":"ready"/);
+    assert.match(readyHtml, /"openWebsiteUrl":"https:\/\/contoso-events\.powerappsportals\.com\/"/);
     assert.notEqual(readyHtml, acceptedHtml);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -221,7 +251,25 @@ test('buildModel rejects unknown templates and statuses', () => {
     /only valid with --activityState awaiting-input/,
   );
   assert.throws(
-    () => buildModel(options({ status: 'ready', activityState: 'working' })),
+    () =>
+      buildModel(
+        options({ status: 'ready', siteUrl: SITE_URL, activityState: 'working' }),
+      ),
     /cannot use --activityState working/,
   );
+  assert.throws(
+    () => buildModel(options({ status: 'ready' })),
+    /--siteUrl is required when --status is ready/,
+  );
+  for (const siteUrl of [
+    'not-a-url',
+    'http://contoso-events.powerappsportals.com',
+    'https://user:secret@contoso-events.powerappsportals.com',
+  ]) {
+    assert.throws(
+      () => buildModel(options({ status: 'ready', siteUrl })),
+      /--siteUrl must/,
+      siteUrl,
+    );
+  }
 });
