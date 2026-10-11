@@ -76,6 +76,28 @@
       text-transform: uppercase;
     }
 
+    .preview-notice {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 11px 28px;
+      border-bottom: 1px solid #ead9ad;
+      color: #654a0b;
+      background: #fff8e7;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .preview-notice strong {
+      flex: 0 0 auto;
+      padding: 2px 7px;
+      border-radius: 999px;
+      color: #fff;
+      background: #8a5a00;
+      font-size: 10px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
     .layout {
       display: grid;
       grid-template-columns: minmax(360px, .86fr) minmax(480px, 1.14fr);
@@ -505,6 +527,7 @@
       .footer { align-items: flex-start; flex-direction: column; gap: 10px; }
       .ai-disclaimer { text-align: left; }
       .open-website { width: 100%; }
+      .preview-notice { padding-inline: 22px; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -525,6 +548,10 @@
       <div class="brand"><img class="brand-mark" id="brandIcon" alt="">Power Pages</div>
       <span class="status-badge" id="statusBadge">Preparing site</span>
     </header>
+    <aside class="preview-notice" role="note" aria-label="Preview experience">
+      <strong>Preview</strong>
+      <span>This declarative site creation and customization experience is in preview. Review environments, plans, and local changes before approval or deployment.</span>
+    </aside>
 
     <section class="layout">
       <aside class="preview-pane">

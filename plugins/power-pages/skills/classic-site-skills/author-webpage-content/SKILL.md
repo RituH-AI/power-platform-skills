@@ -25,6 +25,12 @@ Generate and fill one supplied localized Design Studio-compatible webpage body.
 
 **Initial request:** $ARGUMENTS
 
+## Preview disclosure
+
+Read `${PLUGIN_ROOT}/references/declarative-preview.md` and apply its **Entry and handoff
+protocol**. Unless the initial request contains the explicit marker from an actual covered-skill
+handoff, present the **Customization notice** before project inspection or task creation.
+
 ## Authoritative references
 
 Always read and follow:

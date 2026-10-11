@@ -1,10 +1,10 @@
 ---
 name: style-site
 description: >-
-  Styles CLASSIC Power Pages sites in local VS Code Desktop: general CSS, branding,
-  sections, forms/lists, Liquid/web templates, and optional runtime DOM discovery.
-  Applies approved local changes for listed/unlisted Studio properties, preserving native structure.
-  Not for SPA/code sites, PCF/third-party internals, migration, or deployment.
+  Styles classic Power Pages sites locally with CSS, branding, components,
+  Liquid/templates, and runtime inspection.
+  Preserves native structure. Not for SPA/code sites, PCF/third-party internals,
+  migration, or deployment.
 user-invocable: true
 allowed-tools: Read, Write, Grep, Glob, Bash, AskUserQuestion, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch, mcp__plugin_power-pages_playwright__browser_navigate, mcp__plugin_power-pages_playwright__browser_evaluate, mcp__plugin_power-pages_playwright__browser_run_code_unsafe
 model: opus
@@ -17,11 +17,16 @@ model: opus
 
 **Initial request:** $ARGUMENTS
 
-Read [quick-start.md](references/quick-start.md). Show **Inspect/propose → Approve → Apply → Independently verify → Report**, not task bookkeeping. No final-completion confirmation, HTML preview, local server or required browser review.
+Before inspection, read [quick-start.md](references/quick-start.md) and
+`${PLUGIN_ROOT}/references/declarative-preview.md`; apply its **Customization notice** and handoff
+protocol. Show **Inspect/propose → Approve → Apply → Independently verify → Report**, not task
+bookkeeping. No final-completion confirmation, HTML preview, local server, or browser review.
 
 ## Inspect and select the route
 
-Resolve classic export, locale, external work directory, local sources and Bootstrap; reject SPAs. Default to local authoring for listed/unlisted properties and general CSS, not property/gradient allowlists.
+Resolve the classic export, locale, external workspace, sources, and Bootstrap; reject SPAs.
+Default to local authoring for listed/unlisted properties and general CSS, not
+property/gradient allowlists.
 
 <!-- not-a-gate: missing inputs; no navigation/write authority -->
 Use `AskUserQuestion` only for missing/ambiguous inputs.

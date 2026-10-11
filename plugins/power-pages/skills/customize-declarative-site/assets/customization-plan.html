@@ -25,6 +25,8 @@ button{font:inherit}
 .top-tags,.hero-tags,.change-tags{display:flex;gap:7px;flex-wrap:wrap}
 .tag{padding:5px 9px;border-radius:999px;background:var(--soft);color:#514957;font-size:11px;font-weight:650}
 .tag.accent{background:var(--plum-soft);color:var(--plum-dark)}
+.preview-notice{display:flex;align-items:flex-start;gap:10px;padding:11px clamp(20px,4vw,48px);border-bottom:1px solid #e5d4a8;background:#fff8e7;color:#654a0b;font-size:13px}
+.preview-notice strong{flex:0 0 auto;padding:2px 7px;border-radius:999px;background:#8a5a00;color:#fff;font-size:10px;letter-spacing:.08em;text-transform:uppercase}
 .layout{display:grid;grid-template-columns:238px minmax(0,980px);gap:34px;max-width:1320px;margin:0 auto;padding:34px 24px 76px}
 .sidebar{position:sticky;top:88px;align-self:start;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:10px;box-shadow:var(--shadow)}
 .nav-label{padding:10px 12px 7px;color:var(--muted);font:700 10px var(--mono);letter-spacing:.1em;text-transform:uppercase}
@@ -160,6 +162,10 @@ code{font-family:var(--mono);font-size:12px;background:var(--soft);padding:2px 5
     <span class="tag">__MOOD__</span>
   </div>
 </header>
+<aside class="preview-notice" role="note" aria-label="Preview experience">
+  <strong>Preview</strong>
+  <span>This declarative site creation and customization experience is in preview. Review environments, plans, and local changes before approval or deployment.</span>
+</aside>
 <div class="layout">
   <nav class="sidebar" aria-label="Plan sections">
     <div class="nav-label">Plan</div>

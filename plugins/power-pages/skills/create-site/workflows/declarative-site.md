@@ -8,6 +8,13 @@ owners, unless the user explicitly chooses to keep the bare template.
 Use approved direct HTTPS image URLs for image additions, not downloaded/imported Web Files.
 Existing template images may be reused without creating new files.
 
+## Preview disclosure
+
+Read `${PLUGIN_ROOT}/references/declarative-preview.md`. Before prerequisite checks, task creation,
+environment discovery, or the first declarative question, present the **Creation notice** from
+that reference. This is informational, not an additional approval gate. After presenting it,
+carry `previewNoticeShown: true` through this workflow and every covered-skill handoff.
+
 ## Invariants
 
 - Require an explicit `MODEL_VERSION` of `Enhanced` or `Standard`; never choose a default.
@@ -418,7 +425,11 @@ Retain the same verified `--siteUrl` so the completed-site action remains availa
 receiving either answer, rewrite `ready` without an activity override, again retaining
 `--siteUrl`, so the notification clears and the page returns to its completed state.
 
-On **Customize now**, invoke `/customize-declarative-site` through the `Skill` tool and provide:
+On **Customize now**, tell the user:
+
+> Continuing with the preview declarative customization experience.
+
+Then invoke `/customize-declarative-site` through the `Skill` tool and provide:
 
 - exact `PROJECT_ROOT` and declarative site root;
 - site name and selected template;
@@ -428,6 +439,7 @@ On **Customize now**, invoke `/customize-declarative-site` through the `Skill` t
 - the user's original site intent, when present;
 - `creationIntent: "new-site"` and `verifiedBootstrapMajor: <BOOTSTRAP_VERSION>` with the inspected
   evidence; for the Standard path, include the user's explicit compatibility choice;
+- `previewNoticeShown: true` and `invocationSource: create-site`;
 - `imageDelivery: "external-url"`: record this as `newSiteDesign.imageDelivery` and use direct
   approved HTTPS URLs for new images. Skip image staging/downloads, `author-web-file` image
   imports, and fabricated import dependencies. Retain source/license, alt text, sizing/crop,

@@ -44,6 +44,11 @@ test('renders a declarative customization plan and copies the shared icon', () =
   assert.match(html, /Conference speaker presenting to an audience/);
   assert.match(html, /Retain the template structure while adding pages and sections/);
   assert.match(html, /Page relationships/);
+  assert.match(html, /role="note" aria-label="Preview experience"/);
+  assert.match(
+    html,
+    /This declarative site creation and customization experience is in preview/,
+  );
   assert.match(html, /Approval authorizes local customization only/);
   assert.match(html, /<details class="technical" id="technicalDetails">/);
   assert.doesNotMatch(html, /<details class="technical" id="technicalDetails" open>/);

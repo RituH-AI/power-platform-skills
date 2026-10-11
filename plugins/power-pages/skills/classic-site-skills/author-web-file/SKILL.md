@@ -25,6 +25,14 @@ site downloaded by PAC CLI.
 
 **Initial request:** $ARGUMENTS
 
+## Preview disclosure
+
+Read `${PLUGIN_ROOT}/references/declarative-preview.md` and apply its **Entry and handoff
+protocol**. Unless the initial request contains the explicit marker from an actual covered-skill
+handoff, present the **Customization notice** before project inspection or task creation. Include
+`previewNoticeShown: true` and `invocationSource: author-web-file` in every covered child-skill
+request.
+
 ## Authoritative references
 
 Always read and follow:

@@ -165,6 +165,11 @@ test('renderStatusPage creates a standalone page and overwrites it as status adv
     assert.match(acceptedHtml, /"modelVersion":"Enhanced"/);
     assert.match(acceptedHtml, /working-indicator/);
     assert.match(acceptedHtml, /id="inputNotice"/);
+    assert.match(acceptedHtml, /role="note" aria-label="Preview experience"/);
+    assert.match(
+      acceptedHtml,
+      /This declarative site creation and customization experience is in preview/,
+    );
     assert.match(
       acceptedHtml,
       /id="openWebsite" target="_blank" rel="noopener noreferrer"/,

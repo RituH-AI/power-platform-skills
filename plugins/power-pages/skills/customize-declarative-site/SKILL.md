@@ -23,6 +23,15 @@ Do not duplicate their PAC metadata, identity, serialization, or validation rule
 
 **Initial request:** $ARGUMENTS
 
+## Preview disclosure
+
+Read `${PLUGIN_ROOT}/references/declarative-preview.md` and apply its **Entry and handoff
+protocol**. Unless the initial request contains the explicit marker from an actual covered-skill
+handoff, present the **Customization notice** before site discovery, task creation, or any other
+project inspection. This notice is informational and does not replace plan or deployment
+approval. Include `previewNoticeShown: true` and
+`invocationSource: customize-declarative-site` in every covered child-skill request.
+
 Read:
 
 - `${PLUGIN_ROOT}/references/design-studio-site-discovery.md`
@@ -283,8 +292,10 @@ For each ready operation:
    handling. Previously approved receipts without this optional field remain resumable, but do
    not claim their image sources were checked. A source change needs a new verified plan.
 3. Include the exact selected site root, action, target identity, locales, final values, callers,
-   and preservation requirements. The operation may be expressed as structured YAML/JSON or
-   unambiguous natural language; it must resolve the same decisions as the plan contract.
+   preservation requirements, `previewNoticeShown: true`, and
+   `invocationSource: customize-declarative-site`. The operation may be expressed as structured
+   YAML/JSON or unambiguous natural language; it must resolve the same decisions as the plan
+   contract.
 4. Tell the child skill to revalidate every supplied path and existing ID before writing.
 5. After completion, re-read the changed files, write actual stable outputs to a temporary JSON
    object, and mark the operation `complete --outputs <path>`. Remove that temporary file after the

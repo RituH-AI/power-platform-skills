@@ -9,6 +9,73 @@ function read(relativePath) {
   return fs.readFileSync(path.join(pluginRoot, relativePath), 'utf8');
 }
 
+test('all declarative preview entry points disclose once and propagate the handoff marker', () => {
+  const policy = read(path.join('references', 'declarative-preview.md'));
+  const createSkill = read(path.join('skills', 'create-site', 'SKILL.md'));
+  const createWorkflow = read(
+    path.join('skills', 'create-site', 'workflows', 'declarative-site.md')
+  );
+  const coveredSkills = [
+    path.join('skills', 'customize-declarative-site', 'SKILL.md'),
+    path.join('skills', 'style-site', 'SKILL.md'),
+    path.join('skills', 'classic-site-skills', 'author-webpage', 'SKILL.md'),
+    path.join('skills', 'classic-site-skills', 'author-webpage-content', 'SKILL.md'),
+    path.join('skills', 'classic-site-skills', 'author-content-snippet', 'SKILL.md'),
+    path.join('skills', 'classic-site-skills', 'author-web-file', 'SKILL.md'),
+    path.join('skills', 'classic-site-skills', 'author-web-template', 'SKILL.md'),
+    path.join('skills', 'classic-site-skills', 'author-page-template', 'SKILL.md'),
+  ];
+
+  assert.match(
+    policy,
+    /not to Power Pages, the Enhanced\s+data model, Design Studio, or PAC CLI generally/,
+  );
+  assert.match(policy, /The notice is informational/);
+  assert.match(policy, /previewNoticeShown: true/);
+  assert.match(policy, /invocationSource: <calling-skill-name>/);
+  assert.match(
+    policy,
+    /It will not update the[\s>]+live website unless deployment is separately requested and approved/,
+  );
+  assert.match(
+    policy,
+    /Do not extend this disclosure\s+to code-site workflows or `deploy-site`/,
+  );
+
+  assert.match(
+    createSkill,
+    /Declarative site from a Microsoft template \(Preview\)/,
+  );
+  const codeSiteWorkflow = createSkill.split('## Code-Site Workflow')[1];
+  assert.doesNotMatch(codeSiteWorkflow, /declarative-preview\.md|Preview experience/);
+  assert.match(createWorkflow, /references\/declarative-preview\.md/);
+  assert.match(createWorkflow, /present the \*\*Creation notice\*\*/);
+  assert.match(createWorkflow, /previewNoticeShown: true/);
+  assert.match(createWorkflow, /invocationSource: create-site/);
+  assert.match(
+    createWorkflow,
+    /Continuing with the preview declarative customization experience/,
+  );
+
+  for (const skillPath of coveredSkills) {
+    const skill = read(skillPath);
+    assert.match(skill, /user-invocable: true/, skillPath);
+    assert.match(skill, /references\/declarative-preview\.md/, skillPath);
+    assert.match(skill, /\*\*Customization notice\*\*/, skillPath);
+    assert.match(
+      skill,
+      /before (?:site discovery|inspecting|inspection|project inspection)/i,
+      skillPath,
+    );
+  }
+
+  const customization = read(
+    path.join('skills', 'customize-declarative-site', 'SKILL.md')
+  );
+  assert.match(customization, /previewNoticeShown: true/);
+  assert.match(customization, /invocationSource: customize-declarative-site/);
+});
+
 test('create-site can hand a Standard or Enhanced baseline to declarative customization', () => {
   const skill = read(path.join('skills', 'create-site', 'SKILL.md'));
   const workflow = read(path.join('skills', 'create-site', 'workflows', 'declarative-site.md'));

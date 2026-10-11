@@ -59,7 +59,7 @@ If the request is ambiguous, use `AskUserQuestion`:
 
 | Question | Header | Options |
 |---|---|---|
-| Which type of Power Pages site should I create? | Site type | Declarative site from a Microsoft template, Code site using React/Vue/Angular/Astro |
+| Which type of Power Pages site should I create? | Site type | Declarative site from a Microsoft template (Preview), Code site using React/Vue/Angular/Astro |
 
 After the route is known:
 
