@@ -412,3 +412,46 @@ test('the existing final review treats an unimplemented custom layout as incompl
   assert.match(customization, /--imageChecks "<APPROVED_REVIEW_DIR>\/plan.html.image-checks.json"/);
   assert.match(customization, /exact-diff\/hash approval is a separate binding/);
 });
+
+test('classic webpage composition supports the Generative AI Search component', () => {
+  const content = read(path.join('skills', 'classic-site-skills', 'author-webpage-content', 'SKILL.md'));
+  const composition = read(path.join('skills', 'classic-site-skills', 'author-webpage-content',
+    'references', 'webpage-content-composition.md'));
+  const search = read(path.join('skills', 'classic-site-skills', 'page-elements',
+    'references', 'design-studio-generative-ai-search-component.md'));
+
+  assert.match(content, /design-studio-generative-ai-search-component\.md/);
+  assert.match(content, /Generative AI Search components/);
+  assert.match(content, /Do not substitute\s+`\{% include 'Search' %\}`/);
+  assert.match(composition, /Generative AI Search component/);
+  assert.match(search, /^# Generative AI Search Component$/m);
+  assert.match(search, /Use this reference only to add or edit/);
+  assert.match(search, /Do not use it for `\{% include 'Search' %\}`/);
+  assert.match(search, /Search web templates, Search content snippets/);
+  assert.match(search, /\{% codecomponent name:Pages\.SearchSummary enableRedirectToSearchPage:'true' %\}/);
+  assert.match(search, /\{% codecomponent name:Pages\.SearchSummary %\}/);
+  assert.match(search, /Attributes are independently composable/);
+  assert.match(search, /Allow multiple instances/);
+  assert.match(search, /Do not impose a column width, breakpoint, padding, or margin/);
+  assert.match(search, /Show results inline \| `enableRedirectToSearchPage` \| `'false'`/);
+  assert.match(search, /Redirect to the Search Results page \| `enableRedirectToSearchPage` \| `'true'`/);
+  assert.match(search, /`searchResultHeading`/);
+  assert.match(search, /Search Results page only/);
+  assert.match(search, /Base64-encoded JSON/);
+  assert.match(search, /"SearchBar": \{\}/);
+  assert.match(search, /Preserve unknown sectors and properties/);
+  assert.match(search, /Preserve existing `enableFeedback`, `enableFollowUpActions`/);
+  assert.match(search, /Treat it as a leaf component/);
+  assert.doesNotMatch(search, /## Studio toolbar|## Design panel/);
+  assert.match(search, /Faceted search is unavailable/);
+  assert.match(search, /Dataverse search must be enabled for the environment/);
+  assert.match(search, /\*\*Enable Site search with generative AI\*\* must be on/);
+  assert.match(search, /Tenant governance must allow generative AI usage/);
+  assert.match(search, /available for the website's region and language/);
+  assert.match(search, /search index must be provisioned and synchronized/);
+  assert.match(search, /Redirect mode requires a valid page assigned to the `Search` site marker/);
+  assert.match(search, /uses `id` as its record query-string parameter/);
+  assert.match(search, /Report\s+environment, tenant, region\/language, or index readiness/);
+  assert.match(search, /\[Add a search component\]\(https:\/\/learn\.microsoft\.com\/power-pages\/getting-started\/add-search\)/);
+  assert.match(search, /\[Power Pages search with generative AI\]\(https:\/\/learn\.microsoft\.com\/power-pages\/configure\/search\/generative-ai\)/);
+});

@@ -109,8 +109,10 @@ h3{margin:0;font-size:16px}
 .wire-elements{display:grid;gap:8px}
 .wire-element{min-width:0;padding:10px;border:1px solid var(--line);border-radius:6px;background:#faf9fb;overflow-wrap:anywhere}
 .wire-type{display:block;color:var(--ink);font-size:11px;font-weight:700}
-.wire-element.image,.wire-element.video{min-height:90px;display:grid;align-content:center;text-align:center;border-style:dashed;background:var(--cyan-soft)}
+.wire-element.image,.wire-element.video,.wire-element.iframe,.wire-element.search{min-height:90px;display:grid;align-content:center;text-align:center;border-style:dashed;background:var(--cyan-soft)}
 .wire-element.button{background:var(--plum-soft);border-color:#ceb5d3;border-radius:16px;text-align:center}
+.wire-element.flex-container{border-style:dashed;background:var(--soft)}
+.wire-flex-children{display:grid;gap:8px;margin-top:8px;padding:8px;border-left:3px solid var(--plum)}
 .wire-element.spacer{border-style:dashed;background:repeating-linear-gradient(135deg,var(--panel),var(--panel) 5px,var(--soft) 5px,var(--soft) 6px)}
 .wire-empty{margin:0;padding:12px 0;color:var(--muted);font-size:12px}
 .composition-copy{display:grid;gap:4px;margin-top:8px;color:var(--muted);font-size:12px}
@@ -262,7 +264,7 @@ const categories={
   component:operations.filter(item=>categoryFor(item.skill)==="component"),
   styling:operations.filter(item=>categoryFor(item.skill)==="styling")
 };
-const copyKeys=new Set(["content","text","heading","title","label","description","alt"]);
+const copyKeys=new Set(["content","text","heading","title","label","description","alt","placeholderText","searchSummaryHeading","searchResultHeading"]);
 const collectCopy=(value,key="",result=[])=>{
   if(typeof value==="string"&&copyKeys.has(key)&&value.trim())result.push(value.trim());
   else if(Array.isArray(value))value.forEach(item=>collectCopy(item,key,result));
@@ -299,9 +301,10 @@ const renderValue=value=>{
 };
 const wireElement=element=>{
   const type=element.type||"component";
-  const kind=["text","image","button","video","spacer"].includes(type)?type:"other";
-  const copy=collectCopy(element);
-  return`<div class="wire-element ${kind}"><span class="wire-type">${esc(words(type))}</span>${copy.length?`<div class="composition-copy">${copy.map(value=>`<span>${esc(value)}</span>`).join("")}</div>`:""}</div>`;
+  const kind=["text","image","button","video","iframe","search","spacer","flex-container"].includes(type)?type:"other";
+  const children=kind==="flex-container"&&Array.isArray(element.children)?element.children:[];
+  const copy=collectCopy({...element,children:[]});
+  return`<div class="wire-element ${kind}"><span class="wire-type">${esc(words(type))}</span>${copy.length?`<div class="composition-copy">${copy.map(value=>`<span>${esc(value)}</span>`).join("")}</div>`:""}${children.length?`<div class="wire-flex-children">${children.map(wireElement).join("")}</div>`:""}</div>`;
 };
 const composition=item=>{
   const sections=Array.isArray(item.inputs&&item.inputs.sections)?item.inputs.sections:[];

@@ -164,8 +164,8 @@ page-template assignments, localized content shells, and requested navigation li
 #### `/author-webpage-content`
 
 Composes or modifies one localized `.webpage.copy.html` file from a resolved page design,
-using Design Studio-compatible sections, columns, text, images, buttons, videos, and
-spacers.
+using Design Studio-compatible sections, columns, text, images, buttons, videos, iframes,
+Generative AI Search components, Flex Containers, and spacers.
 
 #### `/author-content-snippet`
 

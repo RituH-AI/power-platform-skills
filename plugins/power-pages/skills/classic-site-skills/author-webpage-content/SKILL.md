@@ -6,7 +6,8 @@ description: >-
   specification. Use whenever an orchestrator or author-webpage has already
   created the webpage metadata and asks to compose, replace, append, or modify
   the exact localized `.webpage.copy.html` file with Design Studio-compatible
-  sections, columns, text, images, buttons, videos, or spacers. This skill owns
+  sections, columns, flex containers, text, images, buttons, videos, iframes,
+  Generative AI Search components, or spacers. This skill owns
   only HTML generation and the supplied target file; author-webpage owns all
   webpage discovery, records, metadata, languages, routes, templates,
   navigation, and companion-file creation. Do not use for React, Angular, Vue,
@@ -35,10 +36,13 @@ Always read and follow:
 Read only the page-element references used by the requested composition:
 
 - `design-studio-section-layouts.md`
+- `design-studio-flex-container-component.md`
 - `design-studio-text-component.md`
 - `design-studio-image-component.md`
 - `design-studio-button-component.md`
 - `design-studio-video-component.md`
+- `design-studio-iframe-component.md`
+- `design-studio-generative-ai-search-component.md`
 - `design-studio-spacer-component.md`
 
 All page-element references are under:
@@ -50,6 +54,11 @@ ${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/
 These references own serialized section and component markup, editing
 boundaries, preservation, accessibility, and verification rules. Do not invent
 competing markup contracts.
+
+For an add or edit Generative AI Search component request, target only
+`{% codecomponent name:Pages.SearchSummary ... %}`. Do not substitute
+`{% include 'Search' %}`, a Search web template, Search content snippets, the
+Search Results page record, site markers, or search indexing/settings.
 
 ## Ownership boundary
 
@@ -104,8 +113,9 @@ Stop before writing when a material choice remains unresolved, including:
 - multiple target files, target sections, or components;
 - an unresolved section geometry or ambiguous component-to-column mapping, not merely
   a layout name missing from the recipe examples;
-- missing visitor-facing text, image source, destination, alternative text, or
-  video title required by the selected component;
+- missing Flex Container child mapping, visitor-facing text, image source, destination,
+  alternative text, video title, iframe title, or search behavior/text required by the
+  selected component;
 - an unresolved web-file URL, snippet name, or page destination;
 - a replacement that does not state what existing content must be preserved;
 - custom HTML whose safety or intended rendering boundary cannot be established.

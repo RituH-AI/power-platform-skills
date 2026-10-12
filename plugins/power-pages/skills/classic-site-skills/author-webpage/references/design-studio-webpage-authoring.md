@@ -27,8 +27,10 @@ Create a webpage in this order:
    language record, generate a distinct localized webpage UUID, and write:
    - `<Page>.<locale>.webpage.yml`;
    - an empty `<Page>.<locale>.webpage.copy.html`.
-7. If navigation is part of the request, follow **Navigation links** to add the
-   language-specific web-link records.
+7. By default, follow **Navigation links** to add the web-link record for the new
+   page. Skip this step only when the request explicitly excludes navigation, or
+   the page matches an established no-navigation page type (for example, a Search
+   Results page reached only by redirect).
 
 Use these webpage defaults unless the user's request or an existing site-local convention
 requires a different value:
@@ -163,8 +165,10 @@ Before writing a new webpage:
 6. Inspect sibling pages under the chosen parent to determine route uniqueness,
    companion-file conventions, page-local HTML formatting, and whether PAC has serialized
    `adx_displayorder` on webpage records.
-7. Determine whether the request includes navigation. Webpage creation and navigation
-   are separate component changes.
+7. Determine whether the request excludes navigation. By default, a new page is
+   added to navigation; webpage creation and navigation remain separate component
+   changes, but navigation is created unless the request opts out or the page
+   matches an established no-navigation page type.
 
 The required creation inputs are:
 
@@ -174,7 +178,8 @@ The required creation inputs are:
 - page template;
 - initial localized content or the selected blank-page baseline;
 - search and sitemap visibility;
-- whether navigation links should be created.
+- whether navigation links should be created (default: yes, unless the request
+  excludes navigation or the page matches a no-navigation page type).
 
 Use `${PLUGIN_ROOT}/scripts/generate-uuid.js` for every new UUID. Generate one UUID for the
 root record and a different UUID for each localized record.
@@ -288,23 +293,28 @@ the visitor-facing HTML in the exact existing localized copy file it receives.
 ## Navigation links
 
 Creating the webpage record does not by itself define the intended navigation experience.
-When navigation is requested, add a web link for the root webpage to each selected
-language's web link set, using:
+By default, add a web link for the root webpage to the web link set targeted by the
+header, using:
 
 - a new web link UUID;
 - `adx_pageid` set to the root webpage ID;
 - `adx_name` set to the localized navigation label;
 - the selected publishing state;
-- the language's corresponding web link set;
+- the web link set targeted by the header (see below);
 - one greater than the highest existing web link display order, or `1` when no existing
   link has an order;
 - page validation, image-only display, child-link display, and new-window behavior set
   to `false`;
 - robots-follow-link set to `true`.
 
-Only create or modify web links when navigation placement is part of the request.
-Do not add the page to every menu automatically, and do not remove or reorder unrelated
-links. If the page should remain hidden from navigation, leave web link sets unchanged.
+**Resolving the web link set targeted by the header**: find the web link set named
+exactly `Default`, scoped to the website's base/default language, with an active state.
+That is the only set a newly created page is linked into; do not add the page to every
+web link set, and do not remove or reorder unrelated links.
+
+Skip adding the web link only when the request explicitly excludes navigation, or the
+page matches an established no-navigation page type. If the page should remain hidden
+from navigation, leave web link sets unchanged.
 
 ## Modifying an existing webpage
 

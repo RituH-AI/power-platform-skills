@@ -84,6 +84,7 @@ page
 └── section[]
     └── column[]
         └── element[]
+            └── flex-container.children[] (optional)
 ```
 
 Preserve order at every level. A page plan that lists section A before section B must
@@ -104,6 +105,10 @@ children of the same `.columnBlockLayout`. Do not wrap each element in another s
 container, or column merely to satisfy a recipe. Preserve required native boundaries and
 explicitly planned grouping, with editing compatibility disclosed; empty planned columns remain.
 
+A Flex Container is an element whose ordered `children` are other supported elements,
+including nested Flex Containers. Preserve the resolved tree; do not convert its children
+into columns or sibling page elements.
+
 A spacer may be:
 
 - an element within a selected column; or
@@ -121,6 +126,7 @@ that must appear in HTML:
 | Web file | Final public URL |
 | Internal page | Final route |
 | Content snippet | Exact `adx_name` |
+| Generative AI Search component | Final behavior, localized text, and optional encoded styles |
 | Liquid variable or include | Final expression or include contract |
 | External URL | Absolute safe URL with the required scheme |
 
@@ -248,7 +254,7 @@ resolved for that locale.
 - [ ] Approved removals are absent; required and explicitly preserved source remains intact.
 - [ ] No `<!-- COMPONENT_HTML -->`, sample content, unresolved token, or TODO remains.
 - [ ] No web-file URL, internal route, snippet name, or Liquid value remains symbolic.
-- [ ] Text, links, images, buttons, videos, and spacers pass their component checklist.
+- [ ] Flex containers, text, links, images, buttons, videos, iframes, Generative AI Search components, and spacers pass their component checklist.
 - [ ] Accessibility values are present and meaningful where required.
 - [ ] Unrequested locales and unrelated existing content are unchanged.
 - [ ] Only the selected localized HTML file changed.
