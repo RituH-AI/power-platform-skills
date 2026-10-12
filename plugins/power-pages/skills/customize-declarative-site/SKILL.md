@@ -221,7 +221,12 @@ site-derived defaults and do not repeat known information.
 Generate context-aware feature choices from the selected template and current site. Do not offer
 a capability whose required local structure is absent without presenting the missing prerequisite
 and remediation. Do not promise declarative form/list or data-model authoring unless a verified
-owning skill supports the requested operation.
+owning skill supports the requested operation. When the missing prerequisite is a basic form,
+list, multistep form (advanced form/step), or its backing Dataverse table/view/table-permission,
+never offer, as a selectable choice, to run PAC/Dataverse commands, create Dataverse tables, or
+otherwise construct that record or its backing table locally — this skill and every skill it
+invokes does not upload, activate, or modify Dataverse, and creating prerequisite tables is
+modifying Dataverse.
 
 ## Phase 3: Resolve and prepare the plan
 

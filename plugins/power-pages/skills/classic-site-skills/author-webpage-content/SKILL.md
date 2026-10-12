@@ -7,7 +7,8 @@ description: >-
   created the webpage metadata and asks to compose, replace, append, or modify
   the exact localized `.webpage.copy.html` file with Design Studio-compatible
   sections, columns, flex containers, text, images, buttons, videos, iframes,
-  Generative AI Search components, or spacers. This skill owns
+  Generative AI Search components, basic forms, lists, multistep forms, or
+  spacers. This skill owns
   only HTML generation and the supplied target file; author-webpage owns all
   webpage discovery, records, metadata, languages, routes, templates,
   navigation, and companion-file creation. Do not use for React, Angular, Vue,
@@ -49,6 +50,9 @@ Read only the page-element references used by the requested composition:
 - `design-studio-video-component.md`
 - `design-studio-iframe-component.md`
 - `design-studio-generative-ai-search-component.md`
+- `design-studio-basic-form-component.md`
+- `design-studio-list-component.md`
+- `design-studio-multistep-form-component.md`
 - `design-studio-spacer-component.md`
 
 All page-element references are under:
@@ -65,6 +69,17 @@ For an add or edit Generative AI Search component request, target only
 `{% codecomponent name:Pages.SearchSummary ... %}`. Do not substitute
 `{% include 'Search' %}`, a Search web template, Search content snippets, the
 Search Results page record, site markers, or search indexing/settings.
+
+For an add or edit Basic Form, List, or Multistep form request, target only
+`{% entityform name:'...' %}`, `{% include 'entity_list' key:'...' ... %}`, or
+`{% webform name:'...' %}` respectively, pointing at a record already present in
+the downloaded site. This skill does not create the backing basic form, list,
+multistep form, Dataverse table form/view, or table permissions — see each
+component reference's **Scope** section. If the named (or implied) record is
+not found in the downloaded site, do not assist with constructing it: do not
+query Dataverse (API, SDK, Web API, or CLI) and do not ask the user for IDs,
+GUIDs, or permissions to assemble it locally. When asking the user how to
+proceed, the only valid options are (a) embed an existing record, or (b) stop.
 
 ## Ownership boundary
 
@@ -85,6 +100,8 @@ This skill does not create or modify:
 - page-template or web-template records;
 - content-snippet records;
 - web files or their metadata;
+- basic form, list, multistep form (advanced form/step), Dataverse table
+  form/view, or table-permission records;
 - localized summary, custom CSS, or custom JavaScript companion files;
 - another locale unless the request supplies a separately resolved composition
   for that locale.
@@ -123,6 +140,10 @@ Stop before writing when a material choice remains unresolved, including:
   alternative text, video title, iframe title, or search behavior/text required by the
   selected component;
 - an unresolved web-file URL, snippet name, or page destination;
+- a requested basic form, list, or multistep form record not found in the
+  downloaded site — never query Dataverse or assist with constructing it
+  locally, and never present "create a new one" as a selectable option in a
+  clarification question;
 - a replacement that does not state what existing content must be preserved;
 - custom HTML whose safety or intended rendering boundary cannot be established.
 

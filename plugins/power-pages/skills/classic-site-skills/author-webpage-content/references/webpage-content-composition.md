@@ -127,6 +127,9 @@ that must appear in HTML:
 | Internal page | Final route |
 | Content snippet | Exact `adx_name` |
 | Generative AI Search component | Final behavior, localized text, and optional encoded styles |
+| Basic Form | Exact `adx_name` of an existing basic form record |
+| List | Exact `adx_name` of an existing list record |
+| Multistep form | Exact `adx_name` of an existing multistep (advanced) form record |
 | Liquid variable or include | Final expression or include contract |
 | External URL | Absolute safe URL with the required scheme |
 
@@ -254,7 +257,7 @@ resolved for that locale.
 - [ ] Approved removals are absent; required and explicitly preserved source remains intact.
 - [ ] No `<!-- COMPONENT_HTML -->`, sample content, unresolved token, or TODO remains.
 - [ ] No web-file URL, internal route, snippet name, or Liquid value remains symbolic.
-- [ ] Flex containers, text, links, images, buttons, videos, iframes, Generative AI Search components, and spacers pass their component checklist.
+- [ ] Flex containers, text, links, images, buttons, videos, iframes, Generative AI Search components, basic forms, lists, multistep forms, and spacers pass their component checklist.
 - [ ] Accessibility values are present and meaningful where required.
 - [ ] Unrequested locales and unrelated existing content are unchanged.
 - [ ] Only the selected localized HTML file changed.
