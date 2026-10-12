@@ -473,7 +473,7 @@ When **removing** a gate, also remove its catalog row in the same PR.
 
 | ID | Kind | Category | Phase | Trigger / question | Cancel leaves |
 |---|---|---|---|---|---|
-| `create-site:0.site-type` | gate | plan | 0 | Ambiguous request — choose generated SPA or platform-provisioned declarative site | nothing |
+| `create-site:0.site-type` | gate | plan | 0 | Ambiguous request — choose SPA site or platform-provisioned traditional site | nothing |
 | `create-site:1.purpose` | gate | plan | 1 | Site purpose unclear — multi-question prompt (site name, framework, purpose, audience, location) | nothing |
 | `create-site:3.requirements` | gate | plan | 3 | *"Which features? / Aesthetic / Mood"* — three sub-prompts sharing this gate; shape the rendered Phase 4 plan | nothing |
 | `create-site:4.7.plan-approval` | gate | plan | 4.7 | HTML plan rendered — *"Approve and start building / I'd like to make changes"* | nothing |

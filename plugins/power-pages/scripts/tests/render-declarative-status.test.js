@@ -10,6 +10,8 @@ const {
 } = require('../../skills/create-site/scripts/render-declarative-status');
 
 const SITE_URL = 'https://contoso-events.powerappsportals.com/';
+const CATALOG_SHA = '0123456789abcdef0123456789abcdef01234567';
+const PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgo=';
 
 function options(overrides = {}) {
   return {
@@ -20,12 +22,55 @@ function options(overrides = {}) {
     siteName: 'Contoso Events',
     subdomain: 'contoso-events',
     language: '1033',
+    catalogOwner: 'microsoft',
+    catalogRepo: 'power-pages-samples',
+    catalogSha: CATALOG_SHA,
     ...overrides,
   };
 }
 
+function template(overrides = {}) {
+  return {
+    name: 'EventPortal',
+    displayName: 'Event Portal',
+    description: 'Event Portal description',
+    capabilities: [
+      'Customizable event template',
+      'List of events',
+      'Event details with location, agenda, speakers, and sponsors',
+      'Event registration page',
+    ],
+    requirements: ['Customer Insights - Journeys license'],
+    warning: 'Some components require pro-developer customization.',
+    previews: [{
+      name: 'home',
+      displayName: 'Home page',
+      desktop: PNG_DATA_URL,
+      mobile: PNG_DATA_URL,
+    }],
+    catalog: {
+      owner: 'microsoft',
+      repo: 'power-pages-samples',
+      sha: CATALOG_SHA,
+    },
+    ...overrides,
+  };
+}
+
+function rendererDeps(templateOverrides = {}) {
+  return {
+    loadTraditionalTemplatePresentation: async () => template(templateOverrides),
+  };
+}
+
 test('buildModel combines Event Portal metadata, embedded previews, and current status', () => {
-  const model = buildModel(options());
+  const model = buildModel(options(), template({
+    previews: [
+      { name: 'home', displayName: 'Home page', desktop: PNG_DATA_URL, mobile: PNG_DATA_URL },
+      { name: 'registration', displayName: 'Registration page', desktop: PNG_DATA_URL, mobile: PNG_DATA_URL },
+      { name: 'about', displayName: 'About page', desktop: PNG_DATA_URL, mobile: PNG_DATA_URL },
+    ],
+  }));
 
   assert.equal(model.template.displayName, 'Event Portal');
   assert.match(model.brandIcon, /^data:image\/png;base64,/);
@@ -39,12 +84,14 @@ test('buildModel combines Event Portal metadata, embedded previews, and current 
   assert.equal(model.status.openWebsiteUrl, null);
   assert.equal(model.status.notification, null);
   assert.equal(model.site.modelVersion, 'Enhanced');
+  assert.equal(model.template.catalog.sha, CATALOG_SHA);
   assert.equal(model.refresh, true);
 });
 
 test('buildModel renders Standard completion and model-mismatch details', () => {
   const ready = buildModel(
     options({ modelVersion: 'Standard', status: 'ready', siteUrl: SITE_URL }),
+    template(),
   );
   assert.match(ready.status.result.message, /Standard model verified/);
   assert.equal(ready.status.activityState, 'complete');
@@ -57,7 +104,8 @@ test('buildModel renders Standard completion and model-mismatch details', () => 
       modelVersion: 'Standard',
       actualModelVersion: 'Enhanced',
       status: 'model-mismatch',
-    })
+    }),
+    template(),
   );
   assert.match(mismatch.status.message, /Enhanced instead of Standard/);
   assert.equal(mismatch.status.activityState, 'failed');
@@ -74,6 +122,7 @@ test('buildModel represents user-input pauses without implying active processing
       requiredAction: 'Confirm the website record selected from PAC.',
       responseLocation: 'Return to the site creation conversation and provide your response.',
     }),
+    template(),
   );
 
   assert.equal(model.status.step, 2);
@@ -91,6 +140,7 @@ test('buildModel represents user-input pauses without implying active processing
 test('buildModel renders failed and canceled phases as terminal non-working states', () => {
   const failed = buildModel(
     options({ status: 'download', activityState: 'failed' }),
+    template(),
   );
   assert.equal(failed.status.activityState, 'failed');
   assert.equal(failed.status.chip, 'Creation stopped');
@@ -100,6 +150,7 @@ test('buildModel renders failed and canceled phases as terminal non-working stat
 
   const canceled = buildModel(
     options({ status: 'validation', activityState: 'canceled' }),
+    template(),
   );
   assert.equal(canceled.status.activityState, 'canceled');
   assert.equal(canceled.status.chip, 'Canceled');
@@ -116,6 +167,7 @@ test('buildModel retains the completed website link while awaiting customization
       activityState: 'awaiting-input',
       requiredAction: 'Choose whether to customize the downloaded template.',
     }),
+    template(),
   );
 
   assert.equal(ready.status.activityState, 'awaiting-input');
@@ -125,7 +177,19 @@ test('buildModel retains the completed website link while awaiting customization
 });
 
 test('buildModel embeds Starter Layout 1 previews and capabilities', () => {
-  const model = buildModel(options({ templateName: 'StarterLayout1' }));
+  const model = buildModel(
+    options({ templateName: 'StarterLayout1' }),
+    template({
+      name: 'StarterLayout1',
+      displayName: 'Starter Layout 1',
+      capabilities: ['Home page', 'Subpages', 'Contact us', 'Search results'],
+      previews: [
+        { name: 'home', displayName: 'Home page', desktop: PNG_DATA_URL, mobile: PNG_DATA_URL },
+        { name: 'subpage-1', displayName: 'Sub page 1', desktop: PNG_DATA_URL, mobile: PNG_DATA_URL },
+        { name: 'subpage-2', displayName: 'Sub page 2', desktop: PNG_DATA_URL, mobile: PNG_DATA_URL },
+      ],
+    }),
+  );
 
   assert.equal(model.template.displayName, 'Starter Layout 1');
   assert.equal(model.template.previews.length, 3);
@@ -140,7 +204,14 @@ test('buildModel embeds Starter Layout 1 previews and capabilities', () => {
 });
 
 test('buildModel embeds the Blank page desktop and mobile previews', () => {
-  const model = buildModel(options({ templateName: 'BlankPage', modelVersion: 'Standard' }));
+  const model = buildModel(
+    options({ templateName: 'BlankPage', modelVersion: 'Standard' }),
+    template({
+      name: 'BlankPage',
+      displayName: 'Blank page',
+      capabilities: ['Home page'],
+    }),
+  );
 
   assert.equal(model.template.displayName, 'Blank page');
   assert.deepEqual(model.template.capabilities, ['Home page']);
@@ -149,12 +220,12 @@ test('buildModel embeds the Blank page desktop and mobile previews', () => {
   assert.match(model.template.previews[0].mobile, /^data:image\/png;base64,/);
 });
 
-test('renderStatusPage creates a standalone page and overwrites it as status advances', () => {
+test('renderStatusPage creates a standalone page and overwrites it as status advances', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-declarative-status-'));
   const output = path.join(tempDir, 'status.html');
 
   try {
-    const first = renderStatusPage(options({ output }));
+    const first = await renderStatusPage(options({ output }), rendererDeps());
     const acceptedHtml = fs.readFileSync(output, 'utf8');
     assert.equal(first.creationStatus, 'accepted');
     assert.match(first.url, /^file:/);
@@ -163,12 +234,13 @@ test('renderStatusPage creates a standalone page and overwrites it as status adv
     assert.match(acceptedHtml, /data:image\/png;base64,/);
     assert.match(acceptedHtml, /id="brandIcon"/);
     assert.match(acceptedHtml, /"modelVersion":"Enhanced"/);
+    assert.match(acceptedHtml, new RegExp(CATALOG_SHA));
     assert.match(acceptedHtml, /working-indicator/);
     assert.match(acceptedHtml, /id="inputNotice"/);
     assert.match(acceptedHtml, /role="note" aria-label="Preview experience"/);
     assert.match(
       acceptedHtml,
-      /This declarative site creation and customization experience is in preview/,
+      /This traditional site creation and customization experience is in preview/,
     );
     assert.match(
       acceptedHtml,
@@ -179,7 +251,10 @@ test('renderStatusPage creates a standalone page and overwrites it as status adv
     assert.doesNotMatch(acceptedHtml, /id="statusKicker"/);
     assert.doesNotMatch(acceptedHtml, /__JSON_MODEL__/);
 
-    renderStatusPage(options({ output, status: 'ready', siteUrl: SITE_URL }));
+    await renderStatusPage(
+      options({ output, status: 'ready', siteUrl: SITE_URL }),
+      rendererDeps(),
+    );
     const readyHtml = fs.readFileSync(output, 'utf8');
     assert.match(readyHtml, /"key":"ready"/);
     assert.match(readyHtml, /"openWebsiteUrl":"https:\/\/contoso-events\.powerappsportals\.com\/"/);
@@ -189,24 +264,25 @@ test('renderStatusPage creates a standalone page and overwrites it as status adv
   }
 });
 
-test('renderStatusPage clears the input notification when processing resumes', () => {
+test('renderStatusPage clears the input notification when processing resumes', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-declarative-status-resume-'));
   const output = path.join(tempDir, 'status.html');
 
   try {
-    renderStatusPage(
+    await renderStatusPage(
       options({
         output,
         status: 'registration',
         activityState: 'awaiting-input',
         requiredAction: 'Confirm the website record.',
       }),
+      rendererDeps(),
     );
     const waitingHtml = fs.readFileSync(output, 'utf8');
     assert.match(waitingHtml, /"activityState":"awaiting-input"/);
     assert.match(waitingHtml, /Confirm the website record\./);
 
-    renderStatusPage(options({ output, status: 'registration' }));
+    await renderStatusPage(options({ output, status: 'registration' }), rendererDeps());
     const resumedHtml = fs.readFileSync(output, 'utf8');
     assert.match(resumedHtml, /"activityState":"working"/);
     assert.match(resumedHtml, /"notification":null/);
@@ -216,8 +292,11 @@ test('renderStatusPage clears the input notification when processing resumes', (
   }
 });
 
-test('renderStatusPage uses a stable temporary path when output is omitted', () => {
-  const result = renderStatusPage(options({ output: undefined, subdomain: 'contoso-event-status-test' }));
+test('renderStatusPage uses a stable temporary path when output is omitted', async () => {
+  const result = await renderStatusPage(
+    options({ output: undefined, subdomain: 'contoso-event-status-test' }),
+    rendererDeps(),
+  );
 
   try {
     assert.match(
@@ -230,40 +309,79 @@ test('renderStatusPage uses a stable temporary path when output is omitted', () 
   }
 });
 
+test('renderStatusPage requires and preserves the selected catalog identity', async () => {
+  let loadedOptions;
+  const deps = {
+    loadTraditionalTemplatePresentation: async (value) => {
+      loadedOptions = value;
+      return template();
+    },
+  };
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-declarative-catalog-'));
+
+  try {
+    await renderStatusPage(options({ output: path.join(tempDir, 'status.html') }), deps);
+    assert.deepEqual(
+      {
+        owner: loadedOptions.owner,
+        repo: loadedOptions.repo,
+        sha: loadedOptions.sha,
+        templateName: loadedOptions.templateName,
+      },
+      {
+        owner: 'microsoft',
+        repo: 'power-pages-samples',
+        sha: CATALOG_SHA,
+        templateName: 'EventPortal',
+      },
+    );
+    await assert.rejects(
+      renderStatusPage(options({
+        output: path.join(tempDir, 'missing-sha.html'),
+        catalogSha: '',
+      }), deps),
+      /--catalogSha/,
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('buildModel rejects unknown templates and statuses', () => {
   assert.throws(
-    () => buildModel(options({ templateName: 'UnknownTemplate' })),
-    /Unsupported --templateName/,
+    () => buildModel(options({ templateName: 'UnknownTemplate' }), template()),
+    /Catalog metadata does not match --templateName/,
   );
   assert.throws(
-    () => buildModel(options({ status: 'invented' })),
+    () => buildModel(options({ status: 'invented' }), template()),
     /Unsupported --status/,
   );
   assert.throws(
-    () => buildModel(options({ modelVersion: 'Automatic' })),
+    () => buildModel(options({ modelVersion: 'Automatic' }), template()),
     /must be Enhanced or Standard/,
   );
   assert.throws(
-    () => buildModel(options({ activityState: 'paused' })),
+    () => buildModel(options({ activityState: 'paused' }), template()),
     /Unsupported --activityState/,
   );
   assert.throws(
-    () => buildModel(options({ activityState: 'awaiting-input' })),
+    () => buildModel(options({ activityState: 'awaiting-input' }), template()),
     /--requiredAction is required/,
   );
   assert.throws(
-    () => buildModel(options({ requiredAction: 'Choose a site.' })),
+    () => buildModel(options({ requiredAction: 'Choose a site.' }), template()),
     /only valid with --activityState awaiting-input/,
   );
   assert.throws(
     () =>
       buildModel(
         options({ status: 'ready', siteUrl: SITE_URL, activityState: 'working' }),
+        template(),
       ),
     /cannot use --activityState working/,
   );
   assert.throws(
-    () => buildModel(options({ status: 'ready' })),
+    () => buildModel(options({ status: 'ready' }), template()),
     /--siteUrl is required when --status is ready/,
   );
   for (const siteUrl of [
@@ -272,7 +390,7 @@ test('buildModel rejects unknown templates and statuses', () => {
     'https://user:secret@contoso-events.powerappsportals.com',
   ]) {
     assert.throws(
-      () => buildModel(options({ status: 'ready', siteUrl })),
+      () => buildModel(options({ status: 'ready', siteUrl }), template()),
       /--siteUrl must/,
       siteUrl,
     );

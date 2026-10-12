@@ -44,9 +44,13 @@ test('all declarative preview entry points disclose once and propagate the hando
 
   assert.match(
     createSkill,
-    /Declarative site from a Microsoft template \(Preview\)/,
+    /Traditional site from a Microsoft template \(Preview\)/,
   );
-  const codeSiteWorkflow = createSkill.split('## Code-Site Workflow')[1];
+  assert.match(
+    createSkill,
+    /Which type of Power Pages site should I create\?[\s\S]*Traditional site from a Microsoft template \(Preview\), SPA site using React\/Vue\/Angular\/Astro/,
+  );
+  const codeSiteWorkflow = createSkill.split('## SPA-Site Workflow')[1];
   assert.doesNotMatch(codeSiteWorkflow, /declarative-preview\.md|Preview experience/);
   assert.match(createWorkflow, /references\/declarative-preview\.md/);
   assert.match(createWorkflow, /present the \*\*Creation notice\*\*/);
@@ -54,7 +58,7 @@ test('all declarative preview entry points disclose once and propagate the hando
   assert.match(createWorkflow, /invocationSource: create-site/);
   assert.match(
     createWorkflow,
-    /Continuing with the preview declarative customization experience/,
+    /Continuing with the preview traditional-site customization experience/,
   );
 
   for (const skillPath of coveredSkills) {
@@ -83,12 +87,12 @@ test('create-site can hand a Standard or Enhanced baseline to declarative custom
   assert.match(skill, /allowed-tools: [^\n]*\bSkill\b/);
   assert.match(skill, /create-site:declarative-1-select-model/);
   assert.match(skill, /create-site:declarative-8-customize/);
-  assert.match(workflow, /Which data model should the new declarative site use\?/);
+  assert.match(workflow, /Which data model should the new traditional site use\?/);
   assert.match(workflow, /enabled for this environment\?/);
   assert.match(workflow, /disabled for this environment\?/);
   assert.match(workflow, /--modelVersion "<MODEL_VERSION>"/);
   assert.match(workflow, /verify the site reports `MODEL_VERSION`/);
-  assert.match(workflow, /Would you like to customize the downloaded declarative template now\?/);
+  assert.match(workflow, /Would you like to customize the downloaded traditional template now\?/);
   assert.match(workflow, /invoke `\/customize-declarative-site` through the `Skill` tool/);
   assert.match(workflow, /validated, committed baseline/);
 });
@@ -150,7 +154,7 @@ test('deploy-site keeps code and declarative upload commands isolated', () => {
   assert.match(declarative, /Which data model should be used for the first upload\?/);
   assert.match(declarative, /Do not recommend, preselect, or silently default either model/);
   assert.match(declarative, /different website record with the same site name/);
-  assert.match(declarative, /Create this declarative site in the selected\s+environment using the chosen data model\?/);
+  assert.match(declarative, /Create this traditional site in the selected\s+environment using the chosen data model\?/);
   assert.match(declarative, /--websiteRecordId "<WEBSITE_RECORD_ID>"/);
   assert.match(declarative, /--siteRoot "<PROJECT_RELATIVE_SITE_ROOT>"/);
   assert.match(declarative, /Do not invoke `activate-site`/);
@@ -161,7 +165,7 @@ test('classic creation uses verified Bootstrap 5 and image-rich design without S
   const skill = read(path.join('skills', 'create-site', 'SKILL.md'));
   const workflow = read(path.join('skills', 'create-site', 'workflows', 'declarative-site.md'));
   const customization = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
-  const common = skill.split('## Code-Site Workflow')[0];
+  const common = skill.split('## SPA-Site Workflow')[0];
   assert.match(common, /references\/site-design-quality\.md/);
   assert.match(common, /Classic sites need no dev server or live preview/);
   assert.doesNotMatch(common, /dev server MUST|scaffold-status\.json|images\.unsplash\.com\/photo-/);

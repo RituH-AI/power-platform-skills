@@ -164,7 +164,7 @@ code{font-family:var(--mono);font-size:12px;background:var(--soft);padding:2px 5
 </header>
 <aside class="preview-notice" role="note" aria-label="Preview experience">
   <strong>Preview</strong>
-  <span>This declarative site creation and customization experience is in preview. Review environments, plans, and local changes before approval or deployment.</span>
+  <span>This traditional site creation and customization experience is in preview. Review environments, plans, and local changes before approval or deployment.</span>
 </aside>
 <div class="layout">
   <nav class="sidebar" aria-label="Plan sections">
@@ -294,7 +294,7 @@ document.getElementById("assetCount").textContent=assets.length;
 document.getElementById("styleCount").textContent=categories.styling.length;
 const site=read("siteData");
 const facts=[
-  ["Template",site.templateName||"Existing declarative site"],
+  ["Template",site.templateName||"Existing traditional site"],
   ["Languages",(site.languages||[]).join(", ")||"Default site language"]
 ];
 document.getElementById("siteFacts").innerHTML=facts.map(([label,value])=>`<div class="fact"><div class="label">${esc(label)}</div><strong>${esc(value)}</strong></div>`).join("");

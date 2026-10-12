@@ -1,8 +1,8 @@
 ---
 name: deploy-site
 description: >-
-  Deploys an existing Power Pages site to a Power Pages environment using PAC CLI. Routes code
-  sites to the existing build and upload-code-site workflow, and PAC-downloaded declarative sites
+  Deploys an existing Power Pages site to a Power Pages environment using PAC CLI. Routes SPA
+  sites to the existing build and upload-code-site workflow, and PAC-downloaded traditional sites
   to an isolated upload workflow with explicit data-model and website-identity checks. Handles
   tooling verification, authentication, environment confirmation, upload approval, and
   verification. Use when the user wants to deploy, upload, publish, or push either site type.
@@ -32,9 +32,9 @@ logic.
 
 Classify explicit request signals first:
 
-- React, Vue, Angular, Astro, SPA, code site, or `powerpages.config.json` → **Code site**
+- React, Vue, Angular, Astro, SPA, code site, or `powerpages.config.json` → **SPA site**
 - declarative, Enhanced, EDM, Standard data model, `.portalconfig`, or `website.yml`
-  → **Declarative site**
+  → **Traditional site**
 
 When the request is not explicit, search the current workspace for:
 
@@ -48,8 +48,8 @@ arbitrarily.
 
 <!-- gate: deploy-site:0.project-type | category=plan | cancel-leaves=nothing -->
 
-> 🚦 **Gate (plan · deploy-site:0.project-type):** Select the exact project when code and
-> declarative sites, or multiple valid roots, remain possible.
+> 🚦 **Gate (plan · deploy-site:0.project-type):** Select the exact project when SPA and
+> traditional sites, or multiple valid roots, remain possible.
 >
 > **Trigger:** Project type or root is ambiguous after discovery.
 > **Why:** The two site types require incompatible PAC upload commands.
@@ -57,10 +57,10 @@ arbitrarily.
 
 If ambiguous, use `AskUserQuestion` to select the exact project root and detected type.
 
-- **Declarative site:** Read and follow
+- **Traditional site:** Read and follow
   `${PLUGIN_ROOT}/skills/deploy-site/workflows/declarative-site.md`. Do not continue into the
   code-site phases below.
-- **Code site:** Continue with the existing workflow below.
+- **SPA site:** Continue with the existing workflow below.
 
 ### Declarative upload approval
 
@@ -72,7 +72,7 @@ cloud-mutation gate visible to the repository gate catalog.
 > 🚦 **Gate (final · deploy-site:declarative-5.upload):** Approve the exact declarative root,
 > environment, website identity, model, and local change summary immediately before upload.
 
-## Code-Site Deployment Workflow
+## SPA-Site Deployment Workflow
 
 The following phases retain the existing SPA/code-site behavior.
 

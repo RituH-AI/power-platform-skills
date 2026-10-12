@@ -1,7 +1,7 @@
 ---
 name: create-site
 description: >-
-  Creates a new Power Pages site. For code sites (SPAs) using React, Angular, Vue, or Astro, guides
+  Creates a new Power Pages site. For SPA sites using React, Angular, Vue, or Astro, guides
   the full process from requirements discovery through scaffolding, component planning, design,
   implementation, validation, and deployment. For Standard or Enhanced data model declarative
   sites, provisions a documented Microsoft template, verifies the selected model, downloads the
@@ -39,9 +39,9 @@ Determine the site type before creating the phase task list.
 
 Classify the signals in `$ARGUMENTS`:
 
-- React, Vue, Angular, Astro, SPA, or code site → **Code site**
+- React, Vue, Angular, Astro, SPA, or code site → **SPA site**
 - Classic, Liquid, EDM, enhanced data model, SDM, standard data model, Program Registration, Event Portal,
-  Schedule Meetings, or Power Pages template → **Declarative site**
+  Schedule Meetings, or Power Pages template → **Traditional site**
 
 Infer the route only when exactly one site type is indicated. If both types are indicated, treat the
 request as ambiguous and ask the site-type question below.
@@ -49,7 +49,7 @@ request as ambiguous and ask the site-type question below.
 <!-- gate: create-site:0.site-type | category=plan | cancel-leaves=nothing -->
 
 > 🚦 **Gate (plan · create-site:0.site-type):** Ambiguous creation request — choose between a
-> generated SPA code site and a platform-provisioned declarative site.
+> generated SPA site and a platform-provisioned traditional site.
 >
 > **Trigger:** `$ARGUMENTS` does not establish the site type.
 > **Why we ask:** The two routes create different artifacts and use different provisioning models.
@@ -59,14 +59,14 @@ If the request is ambiguous, use `AskUserQuestion`:
 
 | Question | Header | Options |
 |---|---|---|
-| Which type of Power Pages site should I create? | Site type | Declarative site from a Microsoft template (Preview), Code site using React/Vue/Angular/Astro |
+| Which type of Power Pages site should I create? | Site type | Traditional site from a Microsoft template (Preview), SPA site using React/Vue/Angular/Astro |
 
 After the route is known:
 
-- **Declarative site:** Read and follow
+- **Traditional site:** Read and follow
   `${PLUGIN_ROOT}/skills/create-site/workflows/declarative-site.md`. Do not continue into the code-site
   phases below.
-- **Code site:** Continue with the existing workflow below.
+- **SPA site:** Continue with the existing workflow below.
 
 ### Declarative Approval Gates
 
@@ -105,9 +105,9 @@ load-bearing declarative question paired with the repository gate catalog.
 
 ---
 
-## Code-Site Workflow
+## SPA-Site Workflow
 
-The following server, preview, SPA asset, and scaffold instructions apply **only to code sites**.
+The following server, preview, SPA asset, and scaffold instructions apply **only to SPA sites**.
 Only static SPA frameworks are supported here (React, Vue, Angular, Astro), not Next.js, Nuxt.js,
 Remix, SvelteKit, or Liquid. Classic Liquid sites use the declarative route above.
 
@@ -117,7 +117,7 @@ Remix, SvelteKit, or Liquid. Classic Liquid sites use the declarative route abov
 - **Use real images**: Source approved, relevant photos using exact discovered Unsplash IDs and sized/cropped URLs. Never leave placeholders or broken image references. Follow the code-site design adapter for asset delivery.
 - **Git checkpoints**: Commit after each page and component so coherent changes can be reverted.
 
-Guide the user through creating a complete, production-quality Power Pages code site from initial
+Guide the user through creating a complete, production-quality Power Pages SPA site from initial
 concept to deployed site. Discover requirements, scaffold and launch immediately, plan components
 and design, implement with design applied, validate, review, and deploy.
 

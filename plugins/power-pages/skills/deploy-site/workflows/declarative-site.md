@@ -1,7 +1,7 @@
-# Deploy a Declarative Power Pages Site
+# Deploy a Traditional Power Pages Site
 
 Follow this workflow only after `deploy-site` routes the request to a PAC CLI-downloaded
-declarative site. It supports Enhanced and Standard sites when their model can be verified, but it
+traditional site. It supports Enhanced and Standard sites when their model can be verified, but it
 never guesses a model or uses PAC's default implicitly. When the website does not yet exist in the
 selected environment, it requires the user to choose the first-upload model explicitly.
 
@@ -22,12 +22,12 @@ Create these tasks:
 
 | Task subject | Active form | Description |
 |---|---|---|
-| Verify declarative project | Verifying declarative project | Resolve one site root, model, identity, and local validity |
+| Verify traditional project | Verifying traditional project | Resolve one site root, model, identity, and local validity |
 | Verify PAC authentication | Verifying PAC authentication | Confirm PAC CLI and the active environment |
 | Confirm deployment target | Confirming deployment target | Match the local website identity or establish an explicit first-upload model |
-| Review declarative upload | Reviewing declarative upload | Summarize changed component categories and warnings |
-| Upload declarative site | Uploading declarative site | Obtain final approval and run the explicit-model PAC upload |
-| Verify declarative deployment | Verifying declarative deployment | Confirm upload success, identity, model, and next checks |
+| Review traditional upload | Reviewing traditional upload | Summarize changed component categories and warnings |
+| Upload traditional site | Uploading traditional site | Obtain final approval and run the explicit-model PAC upload |
+| Verify traditional deployment | Verifying traditional deployment | Confirm upload success, identity, model, and next checks |
 
 ## Phase 1: Verify the project
 
@@ -79,7 +79,7 @@ ID.
 Show:
 
 ```text
-Project type: Declarative Power Pages site
+Project type: Traditional Power Pages site
 Site name: <site name>
 Website record ID: <website record id>
 Data model: Pending verification
@@ -176,7 +176,7 @@ before approval.
 For **Update existing site**, ask: **Upload these declarative changes to this site?** Options:
 **Upload changes**, **Review again**, **Cancel**.
 
-For **First upload — create site records**, ask: **Create this declarative site in the selected
+For **First upload — create site records**, ask: **Create this traditional site in the selected
 environment using the chosen data model?** Options: **Create and upload**, **Review again**,
 **Cancel**.
 

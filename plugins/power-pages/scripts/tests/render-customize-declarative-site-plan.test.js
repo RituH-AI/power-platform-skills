@@ -47,7 +47,7 @@ test('renders a declarative customization plan and copies the shared icon', () =
   assert.match(html, /role="note" aria-label="Preview experience"/);
   assert.match(
     html,
-    /This declarative site creation and customization experience is in preview/,
+    /This traditional site creation and customization experience is in preview/,
   );
   assert.match(html, /Approval authorizes local customization only/);
   assert.match(html, /<details class="technical" id="technicalDetails">/);

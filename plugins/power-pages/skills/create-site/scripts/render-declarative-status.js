@@ -9,9 +9,11 @@ const {
   parseArgs,
 } = require('../../../scripts/lib/render-template');
 const {
-  DECLARATIVE_SITE_TEMPLATES,
   normalizeDeclarativeModelVersion,
 } = require('../../../scripts/lib/site-templates');
+const {
+  loadTraditionalTemplatePresentation,
+} = require('../../../scripts/lib/traditional-template-catalog');
 
 const ACTIVITY_STATES = new Set(['working', 'awaiting-input', 'failed', 'canceled']);
 
@@ -89,7 +91,7 @@ const TIMELINE = Object.freeze([
   ['Template provisioning', 'The asynchronous operation is running'],
   ['Website registration', 'Waiting for the service-assigned website ID'],
   ['Data model verification', 'Checking the site with PAC'],
-  ['Template download', 'Downloading declarative site assets'],
+  ['Template download', 'Downloading traditional site assets'],
   ['Local validation', 'Checking identity, assets, and project structure'],
   ['Git baseline', 'Saving the downloaded starting point'],
 ]);
@@ -113,16 +115,13 @@ function validateWebsiteUrl(value) {
   return url.href;
 }
 
-function buildModel(options) {
+function buildModel(options, template) {
   const modelVersion = normalizeDeclarativeModelVersion(options.modelVersion);
   const actualModelVersion = options.actualModelVersion
     ? normalizeDeclarativeModelVersion(options.actualModelVersion)
     : null;
-  const template = DECLARATIVE_SITE_TEMPLATES.find(
-    (candidate) => candidate.name === options.templateName
-  );
-  if (!template) {
-    throw new Error(`Unsupported --templateName: ${options.templateName}`);
+  if (!template || template.name !== options.templateName) {
+    throw new Error(`Catalog metadata does not match --templateName: ${options.templateName}`);
   }
 
   const status = STATUSES[options.status];
@@ -198,13 +197,6 @@ function buildModel(options) {
   const brandIcon = toDataUrl(
     path.join(pluginRoot, 'skills', 'create-site', 'assets', 'shared', 'power-pages-icon.png'),
   );
-  const previews = (template.previews || []).map((preview) => ({
-    name: preview.name,
-    displayName: preview.displayName,
-    desktop: toDataUrl(path.join(pluginRoot, preview.desktop)),
-    mobile: toDataUrl(path.join(pluginRoot, preview.mobile)),
-  }));
-
   return {
     brandIcon,
     template: {
@@ -214,7 +206,8 @@ function buildModel(options) {
       capabilities: template.capabilities || [],
       requirements: template.requirements || [],
       warning: template.warning || '',
-      previews,
+      previews: template.previews || [],
+      catalog: template.catalog,
     },
     site: {
       name: options.siteName,
@@ -245,9 +238,12 @@ function buildModel(options) {
   };
 }
 
-function renderStatusPage(options) {
+async function renderStatusPage(options, deps = {}) {
   if (
     !options.templateName ||
+    !options.catalogOwner ||
+    !options.catalogRepo ||
+    !options.catalogSha ||
     !options.modelVersion ||
     !options.status ||
     !options.siteName ||
@@ -255,6 +251,7 @@ function renderStatusPage(options) {
   ) {
     throw new Error(
       'Usage: render-declarative-status.js [--output <path>] --templateName <name> ' +
+      '--catalogOwner <owner> --catalogRepo <repo> --catalogSha <sha> ' +
       '--modelVersion <Enhanced|Standard> --status <status> ' +
       '--siteName <name> --subdomain <subdomain> [--siteUrl <url>] [--language <lcid>] ' +
       '[--websiteRecordId <guid>] [--actualModelVersion <Enhanced|Standard>] ' +
@@ -272,7 +269,16 @@ function renderStatusPage(options) {
         options.subdomain.replace(/[^a-z0-9-]/gi, '-'),
         'status.html',
       );
-  const model = buildModel(options);
+  const loadTemplate = deps.loadTraditionalTemplatePresentation ||
+    loadTraditionalTemplatePresentation;
+  const template = await loadTemplate({
+    owner: options.catalogOwner,
+    repo: options.catalogRepo,
+    sha: options.catalogSha,
+    templateName: options.templateName,
+    cacheRoot: options.cacheRoot,
+  }, deps);
+  const model = buildModel(options, template);
   renderTemplate({
     templatePath: path.join(__dirname, '..', 'assets', 'declarative-creation-status-template.html'),
     outputPath,
@@ -290,9 +296,9 @@ function renderStatusPage(options) {
   };
 }
 
-function main() {
+async function main() {
   try {
-    const result = renderStatusPage(parseArgs(process.argv));
+    const result = await renderStatusPage(parseArgs(process.argv));
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (error) {
     process.stderr.write(`${error.message}\n`);

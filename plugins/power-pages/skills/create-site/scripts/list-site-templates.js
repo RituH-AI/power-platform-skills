@@ -1,18 +1,23 @@
 #!/usr/bin/env node
 
-// Returns the curated declarative templates used by the current creation experience.
-// Microsoft does not currently publish an environment template-catalog API or
-// an API that reads the environment-level EDM creation toggle, so this helper
-// labels both limitations explicitly instead of presenting the list as live data.
+// Discovers declarative Create Website templates from the release-pinned public
+// samples catalog. The environment EDM toggle remains administrator-confirmed
+// because Microsoft does not publish a supported API for reading it.
 
 const {
-  DECLARATIVE_SITE_TEMPLATES,
   BOOTSTRAP_5_DOCUMENTATION_URL,
   BOOTSTRAP_5_TEMPLATE_NAMES,
   normalizeBootstrapVersion,
   parseBootstrapVersionArgs,
   normalizeDeclarativeModelVersion,
 } = require('../../../scripts/lib/site-templates');
+const {
+  fetchCatalog,
+  isCreateWebsiteApiTemplate,
+} = require('../../../scripts/lib/template-catalog');
+const {
+  normalizeTraditionalTemplate,
+} = require('../../../scripts/lib/traditional-template-catalog');
 
 function parseArgs(argv) {
   const values = new Set(argv);
@@ -27,16 +32,30 @@ function parseArgs(argv) {
   };
 }
 
-function buildResult({ administratorConfirmed = false, modelVersion, bootstrapVersion = null } = {}) {
+function buildResult({
+  administratorConfirmed = false,
+  modelVersion,
+  bootstrapVersion = null,
+  catalogResult,
+} = {}) {
   const selectedModel = normalizeDeclarativeModelVersion(modelVersion);
   const selectedBootstrap = bootstrapVersion === null ? null : normalizeBootstrapVersion(bootstrapVersion);
   if (selectedBootstrap === 5 && selectedModel !== 'Enhanced') {
     throw new Error('New Bootstrap 5 sites require --modelVersion Enhanced');
   }
+  if (!catalogResult?.ok) {
+    throw new Error(`Traditional template catalog unavailable: ${catalogResult?.error || 'unknown error'}`);
+  }
   const requiredToggleState = selectedModel === 'Enhanced' ? 'enabled' : 'disabled';
+  const discoveredTemplates = catalogResult.catalog.templates
+    .filter(isCreateWebsiteApiTemplate)
+    .map((template) => normalizeTraditionalTemplate(template, catalogResult));
   const templates = selectedBootstrap === 5
-    ? DECLARATIVE_SITE_TEMPLATES.filter((template) => BOOTSTRAP_5_TEMPLATE_NAMES.includes(template.name))
-    : DECLARATIVE_SITE_TEMPLATES;
+    ? discoveredTemplates.filter((template) => BOOTSTRAP_5_TEMPLATE_NAMES.includes(template.name))
+    : discoveredTemplates;
+  if (templates.length === 0) {
+    throw new Error('Traditional template catalog contains no templates for the selected creation path');
+  }
   return {
     modelVersion: selectedModel,
     bootstrapVersion: selectedBootstrap,
@@ -59,13 +78,20 @@ function buildResult({ administratorConfirmed = false, modelVersion, bootstrapVe
             `${selectedModel} site creation.`,
         },
     catalog: {
-      source: 'plugin-declarative-template-allowlist',
+      source: 'power-pages-samples',
       environmentSpecific: false,
+      owner: catalogResult.owner,
+      repo: catalogResult.repo,
+      requestedRef: catalogResult.ref,
+      resolvedRef: catalogResult.resolvedRef,
+      commitSha: catalogResult.sha,
+      releaseName: catalogResult.releaseName || null,
+      releaseUrl: catalogResult.releaseUrl || null,
       templates: templates.map((template) => ({ ...template })),
       ...(selectedBootstrap === 5 ? {
         bootstrapCompatibility: {
           source: BOOTSTRAP_5_DOCUMENTATION_URL,
-          omittedTemplateNames: DECLARATIVE_SITE_TEMPLATES
+          omittedTemplateNames: discoveredTemplates
             .filter((template) => !BOOTSTRAP_5_TEMPLATE_NAMES.includes(template.name))
             .map((template) => template.name),
           reason:
@@ -78,11 +104,14 @@ function buildResult({ administratorConfirmed = false, modelVersion, bootstrapVe
   };
 }
 
-function main() {
+async function run(argv = process.argv.slice(2), deps = {}) {
+  const catalogResult = await (deps.fetchCatalog || fetchCatalog)();
+  return buildResult({ ...parseArgs(argv), catalogResult });
+}
+
+async function main() {
   try {
-    process.stdout.write(
-      `${JSON.stringify(buildResult(parseArgs(process.argv.slice(2))), null, 2)}\n`
-    );
+    process.stdout.write(`${JSON.stringify(await run(), null, 2)}\n`);
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;
@@ -94,8 +123,9 @@ if (require.main === module) {
 }
 
 module.exports = {
-  DECLARATIVE_SITE_TEMPLATES,
   parseArgs,
   normalizeModelVersion: normalizeDeclarativeModelVersion,
+  normalizeTraditionalTemplate,
   buildResult,
+  run,
 };

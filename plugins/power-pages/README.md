@@ -4,8 +4,8 @@ Create and deploy Power Pages sites using modern frontend frameworks or first-pa
 templates. This plugin provides a complete workflow—from site creation to deployment, data
 modeling, authentication, Web API integration, and ALM—through conversational AI skills.
 
-**Supported creation models**: Standard and Enhanced data model declarative sites; React, Angular,
-Vue, and Astro static SPAs
+**Supported creation models**: Standard and Enhanced data model traditional sites; React, Angular,
+Vue, and Astro SPA sites
 
 For an existing **classic, server-rendered Power Pages site**, `/style-site` provides a separate local Desktop styling workflow; it does not create a SPA or deploy changes.
 
@@ -53,13 +53,13 @@ The `/practice-site-check` and `/add-button` descriptions below are retained for
 
 > "Create a Power Pages site with React for a job board"
 
-Creates either a code site from a framework template or a Standard/Enhanced data model declarative
+Creates either an SPA site from a framework template or a Standard/Enhanced data model traditional
 site from a template accepted by the documented Power Platform Create Website API.
 
-- **Code sites:** choose React, Vue, Angular, or Astro; scaffold the complete SPA; apply a custom
+- **SPA sites:** choose React, Vue, Angular, or Astro; scaffold the complete SPA; apply a custom
   design with real imagery; build pages, components, and routing; preview live throughout
   development; validate the result; and commit implementation milestones.
-- **Classic/declarative sites:** recommend Enhanced with Bootstrap 5, confirm the selected model
+- **Traditional sites:** recommend Enhanced with Bootstrap 5, confirm the selected model
   and environment toggle with an administrator, and choose a Bootstrap-compatible first-party
   template. Provision through the Power Platform API, verify the resulting model and downloaded
   Bootstrap assets, and create a Git baseline. Continue through `/customize-declarative-site` for
@@ -591,7 +591,7 @@ The plugin host must provide an absolute `PLUGIN_ROOT` (GitHub Copilot) or `CLAU
 A common end-to-end workflow looks like this:
 
 ```
-Code site:
+SPA site:
 1.  /create-site            →  Scaffold + design + build pages
 2.  /deploy-site            →  Build and upload the code site
 3.  /activate-site          →  Provision a public URL when needed
@@ -606,7 +606,7 @@ Code site:
 12. /deploy-site            →  Push final changes live
 13. /test-site              →  Runtime smoke test
 
-Declarative site:
+Traditional site:
 1.  /create-site                    →  Provision, download, and verify Bootstrap 5 (Enhanced recommended)
 2.  /customize-declarative-site     →  Approve and author coordinated design, content, and imagery
 3.  /deploy-site                    →  Verify identity/model and upload the declarative site

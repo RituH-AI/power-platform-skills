@@ -1,14 +1,14 @@
 ---
 name: customize-declarative-site
 description: >-
-  Plans and coordinates broad customization of a newly created or existing PAC CLI-downloaded declarative
+  Plans and coordinates broad customization of a newly created or existing PAC CLI-downloaded traditional
   Power Pages site, including Enhanced data model sites created from Microsoft templates and
   sites created manually in Design Studio. Use for multi-part requests that combine pages,
   localized content, navigation, assets, snippets, Liquid/web templates, page layouts, or
   styling. Produces an approved browser-viewable plan, invokes the specialized declarative
   authoring skills in dependency order, verifies the combined local result, and optionally
   hands off to deployment. For one narrow component change, use the owning authoring skill
-  directly. Not for React, Angular, Vue, or Astro code sites.
+  directly. Not for React, Angular, Vue, or Astro SPA sites.
 user-invocable: true
 allowed-tools: Read, Write, Grep, Glob, Bash, WebSearch, AskUserQuestion, Skill, TaskCreate, TaskUpdate, TaskList
 model: opus
@@ -16,7 +16,7 @@ model: opus
 
 > **Plugin check**: Run `node "${PLUGIN_ROOT}/scripts/check-version.js"` — if it outputs a message, show it to the user before proceeding.
 
-# Customize a Declarative Power Pages Site
+# Customize a Traditional Power Pages Site
 
 Coordinate a coherent local customization across the specialized declarative authoring skills.
 Do not duplicate their PAC metadata, identity, serialization, or validation rules.
@@ -68,11 +68,11 @@ Create these tasks before starting:
 
 | Task subject | Active form | Description |
 |---|---|---|
-| Discover declarative site | Discovering declarative site | Select and validate one PAC-downloaded declarative site |
+| Discover traditional site | Discovering traditional site | Select and validate one PAC-downloaded traditional site |
 | Gather customization intent | Gathering customization intent | Resolve pages, content, assets, languages, preservation, and visual direction |
 | Prepare customization plan | Preparing customization plan | Build persistent JSON and browser-viewable HTML plan artifacts |
 | Approve customization plan | Reviewing customization plan | Review and approve the complete coordinated local plan |
-| Execute customization | Customizing declarative site | Invoke owning authoring skills in dependency order |
+| Execute customization | Customizing traditional site | Invoke owning authoring skills in dependency order |
 | Verify customization | Verifying customization | Validate component results, combined references, diff, and Git state |
 | Complete customization | Completing customization | Commit coherent changes, report local/live state, and offer deployment |
 
@@ -255,7 +255,7 @@ Use `AskUserQuestion`:
 
 | Question | Header | Options |
 |---|---|---|
-| Does this declarative-site customization plan look good? | Customization plan | Approve and customize, Revise plan, Cancel |
+| Does this traditional-site customization plan look good? | Customization plan | Approve and customize, Revise plan, Cancel |
 
 On revision, create a fresh review directory, render and open it, and repeat approval. Never edit
 the rendered HTML as the source of truth.

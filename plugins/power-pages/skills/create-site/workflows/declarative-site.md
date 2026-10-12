@@ -1,7 +1,7 @@
-# Create a Declarative Power Pages Site
+# Create a Traditional Power Pages Site
 
 Follow this workflow only after `create-site` routes the request to a Standard or Enhanced data
-model declarative site. The platform creates the baseline from a documented first-party template;
+model traditional site. The platform creates the baseline from a documented first-party template;
 the skill downloads that baseline rather than generating Power Pages metadata.
 Then coordinate a polished, image-rich design through the existing customization and styling
 owners, unless the user explicitly chooses to keep the bare template.
@@ -28,8 +28,11 @@ carry `previewNoticeShown: true` through this workflow and every covered-skill h
 - An environment administrator must verify **Switch to enhanced data model** is enabled for
   Enhanced creation or disabled for Standard creation. The skill never automates that shared
   environment change.
-- The template list is a plugin-owned declarative allowlist. It is not presented as an
-  environment-specific catalog because no public template-catalog API is available.
+- Traditional template discovery uses the release-pinned
+  `microsoft/power-pages-samples` manifest. It is not presented as an environment-specific
+  catalog because no public API reports which templates are enabled in a specific environment.
+- Resolve the samples release to one immutable commit SHA per run. Fail clearly when the catalog
+  is unavailable or malformed; never substitute a bundled or stale traditional catalog.
 - Do not submit `websiteRecordId` for a new declarative site. The platform creates the Dataverse website
   record and returns or exposes its ID after provisioning.
 - Never retry a Create Website POST after `202 Accepted`. Poll or resume the accepted operation.
@@ -47,14 +50,14 @@ Create all eight tasks before starting:
 
 | Task subject | Active form | Description |
 |---|---|---|
-| Verify declarative prerequisites | Verifying declarative prerequisites | Select the model and verify tools, authentication, environment identity, and administrator confirmation |
-| Select a declarative template | Selecting a declarative template | Load the supported templates and select one |
-| Configure the declarative site | Configuring the declarative site | Gather name, language, subdomain, and destination |
-| Approve declarative provisioning | Reviewing declarative provisioning | Present the complete cloud and local plan for final consent |
-| Provision the declarative site | Provisioning the declarative site | Create the website and poll the accepted operation |
-| Download the declarative site | Downloading the declarative site | Verify and download explicitly with the selected model |
-| Validate the declarative baseline | Validating the declarative baseline | Validate declarative artifacts and initialize Git |
-| Complete declarative setup | Completing declarative setup | Present the baseline and continue into approved image-rich design unless the user opts out |
+| Verify traditional-site prerequisites | Verifying traditional-site prerequisites | Select the model and verify tools, authentication, environment identity, and administrator confirmation |
+| Select a traditional template | Selecting a traditional template | Load the supported templates and select one |
+| Configure the traditional site | Configuring the traditional site | Gather name, language, subdomain, and destination |
+| Approve traditional-site provisioning | Reviewing traditional-site provisioning | Present the complete cloud and local plan for final consent |
+| Provision the traditional site | Provisioning the traditional site | Create the website and poll the accepted operation |
+| Download the traditional site | Downloading the traditional site | Verify and download explicitly with the selected model |
+| Validate the traditional baseline | Validating the traditional baseline | Validate downloaded artifacts and initialize Git |
+| Complete traditional-site setup | Completing traditional-site setup | Present the baseline and continue into approved image-rich design unless the user opts out |
 
 ## Phase 1: Select the Model and Verify Prerequisites
 
@@ -73,7 +76,7 @@ Create all eight tasks before starting:
 
    | Question | Header | Options |
    |---|---|---|
-   | Which data model should the new declarative site use? | Data model | Enhanced with Bootstrap 5 (Recommended), Standard with Bootstrap 3 compatibility, Cancel |
+   | Which data model should the new traditional site use? | Data model | Enhanced with Bootstrap 5 (Recommended), Standard with Bootstrap 3 compatibility, Cancel |
 
    Explain the Bootstrap 5 prerequisites; recommend Enhanced, but do not preselect or silently
    override the user's model. An explicit Standard request is not consent to migrate or change
@@ -153,8 +156,8 @@ Create all eight tasks before starting:
 
 Present the returned templates with the disclosure:
 
-> These are the declarative template identifiers supported by this plugin. Microsoft does not publish an
-> environment-specific template-catalog API, so this may not include every template shown in
+> These templates come from the published Power Pages samples catalog. Microsoft does not publish
+> an environment-specific template-catalog API, so this may not include every template shown in
 > Power Pages design studio.
 
 > 🚦 **Gate (plan · create-site:declarative-2-select-template):** Select the exact supported template
@@ -171,7 +174,11 @@ offer the unfiltered catalog on the Bootstrap 5 path: not every template support
 creation (for example, Event Portal is not on the documented supported list). Never infer
 compatibility from a display name or substitute another template automatically.
 
-Keep the exact `name` from the helper result as `TEMPLATE_NAME`.
+Keep the exact `name` from the helper result as `TEMPLATE_NAME`. This is the samples manifest's
+`provisioning.templateName`, not a value inferred from its display name or catalog ID. Retain the
+returned catalog `owner`, `repo`, release/ref, and commit SHA as `CATALOG_OWNER`, `CATALOG_REPO`,
+and `CATALOG_SHA` in the provisioning review and status reporting. Every status-renderer call must
+use those same values; never resolve `latest-release` again after template selection.
 Show the selected template's description, capabilities, requirements, and warning from the helper
 result. Do not rewrite or duplicate this metadata in the workflow.
 
@@ -200,7 +207,7 @@ Validate before any cloud mutation:
 Show:
 
 ```text
-Site type: Declarative Power Pages site
+Site type: Traditional Power Pages site
 Data model: <MODEL_VERSION>
 Bootstrap target: <BOOTSTRAP_VERSION> (verified after download)
 Toggle confirmation: Switch to enhanced data model is <enabled for Enhanced|disabled for Standard>
@@ -208,6 +215,7 @@ Environment URL: <environmentUrl>
 Environment ID: <environmentId>
 Template: <template display name> (<templateName>)
 Template requirements: <requirements, or "None listed">
+Template catalog revision: <owner/repo>@<commitSha> (<releaseName or resolvedRef>)
 Site name: <siteName>
 Language LCID: <lcid>
 Subdomain: <subdomain>
@@ -229,12 +237,14 @@ Ask: **Create this site and download it?** Options: **Create site**, **Change se
 Before submitting the request, generate the browser status page:
 
 ```bash
-node "${PLUGIN_ROOT}/skills/create-site/scripts/render-declarative-status.js" --templateName "<templateName>" --modelVersion "<MODEL_VERSION>" --status "provisioning" --siteName "<siteName>" --subdomain "<subdomain>" --language "<lcid>"
+node "${PLUGIN_ROOT}/skills/create-site/scripts/render-declarative-status.js" --templateName "<templateName>" --catalogOwner "<CATALOG_OWNER>" --catalogRepo "<CATALOG_REPO>" --catalogSha "<CATALOG_SHA>" --modelVersion "<MODEL_VERSION>" --status "provisioning" --siteName "<siteName>" --subdomain "<subdomain>" --language "<lcid>"
 ```
 
 Store the returned `output` as `STATUS_PAGE_PATH` and `url` as `STATUS_PAGE_URL`. The renderer
-uses a stable OS temporary path derived from the validated subdomain, embeds all preview images,
-and overwrites the same file as the workflow advances.
+uses a stable OS temporary path derived from the validated subdomain, reloads the selected template
+from the exact catalog SHA, securely caches and embeds its responsive preview images, and overwrites
+the same file as the workflow advances. Catalog or preview failures are explicit; do not fall back
+to plugin-owned template metadata or images.
 
 Open `STATUS_PAGE_PATH` in the user's default browser using the OS-native launcher pattern from
 `plan-alm`: `Start-Process` on Windows, `open` on macOS, or `xdg-open` on Linux. Print
@@ -247,6 +257,8 @@ After the status page exists, keep its activity state aligned with the agent:
 
 - Normal processing uses the lifecycle `--status` alone; nonterminal phases default to the
   animated `working` state.
+- Every rewrite includes the original `--catalogOwner`, `--catalogRepo`, and `--catalogSha`.
+  Never replace the pinned SHA with a release name, branch, or `latest-release`.
 - Immediately before any `AskUserQuestion`, rewrite the same page with the current lifecycle
   status plus `--activityState "awaiting-input"`, `--requiredAction "<specific action>"`, and
   `--responseLocation "Return to the site creation conversation and provide your response."`
@@ -301,7 +313,7 @@ operation; a presentation failure must never cause a second creation POST.
 Update the status page before website identity lookup:
 
 ```bash
-node "${PLUGIN_ROOT}/skills/create-site/scripts/render-declarative-status.js" --output "<statusPagePath>" --templateName "<templateName>" --modelVersion "<MODEL_VERSION>" --status "registration" --siteName "<siteName>" --subdomain "<subdomain>" --siteUrl "<siteUrl>" --language "<lcid>"
+node "${PLUGIN_ROOT}/skills/create-site/scripts/render-declarative-status.js" --output "<statusPagePath>" --templateName "<templateName>" --catalogOwner "<CATALOG_OWNER>" --catalogRepo "<CATALOG_REPO>" --catalogSha "<CATALOG_SHA>" --modelVersion "<MODEL_VERSION>" --status "registration" --siteName "<siteName>" --subdomain "<subdomain>" --siteUrl "<siteUrl>" --language "<lcid>"
 ```
 
 1. If the terminal operation result did not include `websiteRecordId`, run this read-only lookup
@@ -364,7 +376,7 @@ Update the status page with `--status "git"` immediately before Git initializati
 ```bash
 git init
 git add -A
-git commit -m "Initial <MODEL_VERSION> declarative site from <template display name> template"
+git commit -m "Initial <MODEL_VERSION> traditional site from <template display name> template"
 ```
 
 Run the validator again after Git initialization.
@@ -417,7 +429,7 @@ Use `AskUserQuestion`:
 
 | Question | Header | Options |
 |---|---|---|
-| Would you like to customize the downloaded declarative template now? | Customize site | Customize now (Recommended), Keep the template unchanged |
+| Would you like to customize the downloaded traditional template now? | Customize site | Customize now (Recommended), Keep the template unchanged |
 
 Before this question, rewrite the `ready` status with `--activityState "awaiting-input"` and
 `--requiredAction "Choose whether to customize the downloaded template now or keep it unchanged."`
@@ -427,7 +439,7 @@ receiving either answer, rewrite `ready` without an activity override, again ret
 
 On **Customize now**, tell the user:
 
-> Continuing with the preview declarative customization experience.
+> Continuing with the preview traditional-site customization experience.
 
 Then invoke `/customize-declarative-site` through the `Skill` tool and provide:
 

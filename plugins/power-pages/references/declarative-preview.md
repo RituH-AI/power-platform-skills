@@ -50,7 +50,7 @@ preview.
 
 > **Preview experience**
 >
-> Declarative Power Pages site creation and customization are currently in preview. Supported
+> Traditional Power Pages site creation and customization are currently in preview. Supported
 > templates, components, and workflow behavior may change as the experience evolves.
 >
 > Creating a site provisions a website in the selected Power Platform environment. Review the
@@ -59,13 +59,13 @@ preview.
 
 Use this notice after `create-site` has selected the declarative route and before declarative
 prerequisite or environment discovery. For an ambiguous site-type request, also label the choice
-`Declarative site from a Microsoft template (Preview)` before the route is selected.
+`Traditional site from a Microsoft template (Preview)` before the route is selected.
 
 ## Customization notice
 
 > **Preview experience**
 >
-> Declarative Power Pages customization is currently in preview. Supported components and
+> Traditional Power Pages customization is currently in preview. Supported components and
 > workflow behavior may change as the experience evolves.
 >
 > This workflow will inspect and may modify locally downloaded site files. It will not update the
@@ -80,7 +80,7 @@ skill, including sites created in Design Studio or downloaded independently with
 When `create-site` has already shown the creation notice and the user chooses customization, use
 this short transition before invoking the coordinator:
 
-> Continuing with the preview declarative customization experience.
+> Continuing with the preview traditional-site customization experience.
 
 Pass the handoff marker so the coordinator and its child skills do not repeat the full notice.
 
@@ -88,7 +88,7 @@ Pass the handoff marker so the coordinator and its child skills do not repeat th
 
 Creation status and customization-plan approval pages should retain compact context:
 
-> **Preview:** This declarative site creation and customization experience is in preview. Review
+> **Preview:** This traditional site creation and customization experience is in preview. Review
 > environments, plans, and local changes before approval or deployment.
 
 This browser text supports the terminal disclosure; it does not replace it.
