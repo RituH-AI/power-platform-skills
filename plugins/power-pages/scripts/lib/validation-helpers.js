@@ -106,7 +106,8 @@ function findProjectRoot(dir) {
   let current = path.resolve(dir);
   while (true) {
     if (fs.existsSync(path.join(current, 'powerpages.config.json')) ||
-        fs.existsSync(path.join(current, '.powerpages-site'))) {
+        fs.existsSync(path.join(current, '.powerpages-site')) ||
+        isDeclarativeSiteRoot(current)) {
       return current;
     }
 
@@ -121,7 +122,49 @@ function findProjectRoot(dir) {
   const fallbackConfigPath = findPath(dir, 'powerpages.config.json');
   if (fallbackConfigPath) return path.dirname(fallbackConfigPath);
   const fallbackSiteDir = findPath(dir, '.powerpages-site');
-  return fallbackSiteDir ? path.dirname(fallbackSiteDir) : null;
+  if (fallbackSiteDir) return path.dirname(fallbackSiteDir);
+  const fallbackPortalConfig = findPath(dir, '.portalconfig');
+  if (fallbackPortalConfig) {
+    const candidate = path.dirname(fallbackPortalConfig);
+    if (isDeclarativeSiteRoot(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Returns true when a directory is a direct PAC declarative-site root.
+ *
+ * PAC exports contain both markers at the component root. Requiring both avoids
+ * treating an unrelated website.yml or .portalconfig directory as a site.
+ */
+function isDeclarativeSiteRoot(dir) {
+  return fs.existsSync(path.join(dir, '.portalconfig')) &&
+    fs.existsSync(path.join(dir, 'website.yml'));
+}
+
+/**
+ * Resolves the directory that contains PAC component folders such as
+ * web-pages/, basic-forms/, and lists/.
+ *
+ * Code sites and plugin-created traditional projects keep those components in
+ * <projectRoot>/.powerpages-site. A manually opened PAC export uses projectRoot
+ * itself as the component root.
+ */
+function resolvePowerPagesSiteRoot(projectRoot) {
+  if (!projectRoot) return null;
+  const resolvedProjectRoot = path.resolve(projectRoot);
+  const nested = path.join(resolvedProjectRoot, '.powerpages-site');
+  const nestedHasSiteMarkers = fs.existsSync(path.join(nested, '.portalconfig')) ||
+    fs.existsSync(path.join(nested, 'website.yml'));
+  if (nestedHasSiteMarkers || (
+    fs.existsSync(path.join(resolvedProjectRoot, 'powerpages.config.json')) &&
+    fs.existsSync(nested)
+  )) {
+    return nested;
+  }
+  if (isDeclarativeSiteRoot(resolvedProjectRoot)) return resolvedProjectRoot;
+  if (fs.existsSync(nested)) return nested;
+  return null;
 }
 
 /**
@@ -535,6 +578,8 @@ module.exports = {
   findPath,
   findProjectRoot,
   findPowerPagesSiteDir,
+  isDeclarativeSiteRoot,
+  resolvePowerPagesSiteRoot,
   UUID_REGEX,
   validateDataverseEnvironmentUrl,
   validateTokenResourceUrl,

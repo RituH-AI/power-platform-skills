@@ -201,8 +201,12 @@ templates, and explicitly requested webpage assignments.
 
 Analyzes your site's requirements and creates Dataverse tables, columns, and relationships via OData API calls.
 
-- Spawns a **Data Model Architect** agent that proposes tables based on your site's code
+- Supports SPA/code sites and PAC-downloaded traditional sites
+- Spawns a **Data Model Architect** agent that proposes tables from framework source or active
+  traditional components such as Forms, Advanced Forms, Lists, Liquid, permissions, Web API
+  settings, and page/template JavaScript
 - Alternatively, you can upload an ER diagram
+- Queries Dataverse to distinguish schema that can be reused, extended, or must be created
 - Generates a `.datamodel-manifest.json` used by downstream skills
 - Visualizes the data model as a Mermaid ER diagram
 

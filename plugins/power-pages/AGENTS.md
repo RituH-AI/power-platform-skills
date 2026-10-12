@@ -282,7 +282,14 @@ Every ALM execution skill enforces this with a Phase 0 ALM-plan gate. If a user 
 
 Auto-triggered by the main conversation when relevant:
 
-- `data-model-architect`: Read-only agent that analyzes site requirements, discovers existing Dataverse tables via OData API, and proposes a data model (new/modified/reused tables + Mermaid ER diagram). Uses `pac env who` + Azure CLI auth to query Dataverse. Renders the ER diagram visually in the browser via Playwright (writes a temp HTML file with Mermaid.js CDN, navigates to it, takes a screenshot) before entering plan mode. Does NOT create, modify, or delete any tables — purely advisory. The main conversation uses its output to create tables.
+- `data-model-architect`: Read-only agent that analyzes code-site source or active traditional-site
+  evidence (Forms, Advanced Forms, Lists, Liquid, permissions, Web API settings, reachable
+  templates/snippets, and JavaScript), discovers existing Dataverse tables via OData API, and
+  proposes a data model (new/modified/reused tables + evidence matrix + Mermaid ER diagram). Uses
+  `pac env who` + Azure CLI auth to query Dataverse. Traditional components remain read-only
+  evidence; the agent never edits them. Renders the ER diagram visually in the browser via
+  Playwright before entering plan mode. Does NOT create, modify, or delete any tables — purely
+  advisory. The main conversation uses its output to create tables.
 - `webapi-integration`: Implementation agent that creates production-ready Web API integration code for a single Dataverse table in a Power Pages code site. Detects the frontend framework (React/Vue/Angular/Astro), creates a shared `powerPagesApi.ts` client (token management, retry logic, OData URL builder) if one doesn't exist, then generates TypeScript entity types, a domain mapper, and a CRUD service layer for the target table. Also creates framework-specific hooks (React), composables (Vue), or injectable services (Angular). Follows Power Pages Web API best practices: `/_api/` endpoints, dual token headers, `@odata.bind` for lookups, explicit `$select` (never `*`), formatted value annotations, exponential backoff retry, and 8-minute token TTL. Handles one table per invocation — invoke separately for multiple tables.
 - `table-permissions-architect`: Read-only agent that analyzes site code, discovers existing web roles and table permissions, and proposes a table-permissions plan (web roles → table permissions with CRUD flags and scopes) rendered as a Mermaid flowchart. Checks for `.powerpages-site` folder to verify site deployment. Presents the plan via plan mode; after approval, creates web role and table-permission YAML files using deterministic scripts. Supports an **AI-only read posture** (invoked transitively by `/add-ai-webapi` via `/integrate-webapi`) that proposes `read: true` only, with Parent scope + `appendTo` for `$expand` targets. Invoked by `/integrate-webapi` and `/audit-permissions`.
 - `webapi-settings-architect`: Read-only agent that queries Dataverse for exact field and relationship metadata and proposes `Webapi/<table>/enabled` and `Webapi/<table>/fields` site settings. Uses LogicalNames for ordinary columns, `_<LogicalName>_value` for lookup reads, and the exact Navigation Property used by `@odata.bind` for lookup writes. Presents the plan via plan mode; after approval, creates site-setting YAML files using `create-site-setting.js`. Invoked by `/integrate-webapi`.
@@ -327,7 +334,12 @@ User-invocable via `/power-pages:<skill-name>`:
   exact environment and website match when one exists, or asks for an explicit Standard/Enhanced
   model with no default on first upload. It reviews component changes, obtains final upload
   consent, and runs `pac pages upload` with an explicit model.
-- `setup-datamodel`: 7-step workflow — verify prerequisites, invoke data-model-architect agent, review proposal, pre-creation checks, create tables & columns via OData API, create relationships, publish & verify. Writes `.datamodel-manifest.json` for hook validation.
+- `setup-datamodel`: 8-phase workflow for code and traditional sites — verify authentication and
+  resolve site context, choose an uploaded or agent-derived model, analyze framework source or
+  active declarative components, review the evidence-backed reuse/extend/create proposal,
+  preflight the exact target environment, create approved tables/columns/relationships via OData,
+  publish and verify. Writes `.datamodel-manifest.json` for hook validation and never edits
+  traditional-site components.
 - `add-sample-data`: 6-step workflow — verify prerequisites, discover tables (from `.datamodel-manifest.json` or OData API), select tables & configure record count, generate & review sample data plan, insert records via OData API with relationship handling, verify & summarize.
 - `activate-site`: 5-step workflow — verify prerequisites (PAC CLI auth + Azure CLI token + cloud-aware API URL resolution + activation status check via shared script), gather parameters (site name, subdomain, website record ID), confirm with user, activate & poll via `skills/activate-site/scripts/activate-site.js`, present summary with site URL.
 - `add-seo`: 7-step workflow — verify site exists, gather SEO config (production URL, exclusions, meta description), plan & approve, create robots.txt, generate sitemap.xml from discovered routes, add meta tags (title, description, viewport, Open Graph, Twitter Card, favicon) to index.html, verify via Playwright & commit.

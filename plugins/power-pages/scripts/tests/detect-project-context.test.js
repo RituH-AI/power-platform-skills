@@ -28,6 +28,7 @@ test('detectProjectContext: code site (powerpages.config.json) reports siteType 
   const result = detectProjectContext({ projectRoot });
   assert.equal(result.siteType, 'code');
   assert.equal(result.siteName, 'Code Site');
+  assert.equal(result.siteRoot, path.join(projectRoot, '.powerpages-site'));
 });
 
 test('detectProjectContext: declarative (data-model) site resolves identity from .powerpages-site/website.yml', (t) => {
@@ -49,7 +50,27 @@ test('detectProjectContext: declarative (data-model) site resolves identity from
   assert.equal(result.siteType, 'declarative');
   assert.equal(result.websiteRecordId, '2ecc32f6-8665-f111-a826-000d3a5a7777');
   assert.equal(result.siteName, 'Application processing EDM site - permitapplication-elyyn');
+  assert.equal(result.siteRoot, path.join(projectRoot, '.powerpages-site'));
   // Declarative sites carry no environment URL locally — callers re-confirm via `pac env who`.
+  assert.equal(result.environmentUrl, null);
+});
+
+test('detectProjectContext: direct PAC root resolves declarative identity and siteRoot', (t) => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-direct-'));
+  t.after(() => fs.rmSync(projectRoot, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(projectRoot, '.portalconfig'), { recursive: true });
+  fs.writeFileSync(path.join(projectRoot, '.portalconfig', 'manifest.yml'), 'modelVersion: 2\n');
+  fs.writeFileSync(
+    path.join(projectRoot, 'website.yml'),
+    'id: 3ecc32f6-8665-f111-a826-000d3a5a7777\nname: Direct Traditional Site\n',
+  );
+
+  const result = detectProjectContext({ projectRoot });
+  assert.equal(result.siteType, 'declarative');
+  assert.equal(result.projectRoot, projectRoot);
+  assert.equal(result.siteRoot, projectRoot);
+  assert.equal(result.siteName, 'Direct Traditional Site');
+  assert.equal(result.websiteRecordId, '3ecc32f6-8665-f111-a826-000d3a5a7777');
   assert.equal(result.environmentUrl, null);
 });
 

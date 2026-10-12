@@ -182,6 +182,21 @@ test('findProjectRoot recognizes a declarative .powerpages-site directory as a p
   assert.equal(findProjectRoot(root), path.resolve(root));
 });
 
+test('findProjectRoot recognizes a direct PAC declarative-site root', (t) => {
+  const fs = require('fs');
+  const os = require('os');
+  const { findProjectRoot, resolvePowerPagesSiteRoot } = require(helpersPath);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fpr-direct-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, '.portalconfig'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'web-pages'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'website.yml'), 'id: x\nname: Direct Site\n');
+
+  assert.equal(findProjectRoot(path.join(root, 'web-pages')), path.resolve(root));
+  assert.equal(resolvePowerPagesSiteRoot(root), path.resolve(root));
+});
+
 test('findProjectRoot: still recognizes powerpages.config.json (code sites)', (t) => {
   const fs = require('fs');
   const os = require('os');

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Reads Power Pages project context files from the project root.
-// Locates powerpages.config.json (code/SPA sites) OR a .powerpages-site/ config tree
+// Locates powerpages.config.json (code/SPA sites) OR a nested/direct PAC config tree
 // (declarative sites — Power Pages design-studio sites), plus
 // .solution-manifest.json and .datamodel-manifest.json.
 //
@@ -17,7 +17,8 @@
 // Site identity resolution order (first match wins):
 //   1. powerpages.config.json  -> siteType "code"  (code/SPA sites; has siteName,
 //                                  websiteRecordId, environmentUrl)
-//   2. .powerpages-site/ (.portalconfig/ + website.yml) -> siteType "declarative"
+//   2. .powerpages-site/ or direct root (.portalconfig/ + website.yml)
+//                                  -> siteType "declarative"
 //                                  (declarative design-studio sites; standard or
 //                                  enhanced data model. website.yml carries `id` and
 //                                  `name` but no environment URL — callers re-confirm
@@ -34,6 +35,7 @@
 //   {
 //     "projectRoot": "...",
 //     "siteType": "code" | "declarative",   // "declarative" was formerly "data-model"
+//     "siteRoot": "...",                    // directory containing PAC components
 //     "siteName": "...",
 //     "websiteRecordId": "...",
 //     "environmentUrl": "..." | null,
@@ -41,14 +43,17 @@
 //     "datamodelManifest": { ... } | null
 //   }
 //
-// Exit 0 on success, exit 1 if neither powerpages.config.json nor
-// .powerpages-site/website.yml is found (not a Power Pages project).
+// Exit 0 on success, exit 1 if neither powerpages.config.json nor a nested/direct
+// declarative component root is found (not a Power Pages project).
 
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
-const { findProjectRoot } = require('./validation-helpers');
+const {
+  findProjectRoot,
+  resolvePowerPagesSiteRoot,
+} = require('./validation-helpers');
 
 function parseArgs(argv) {
   const args = argv.slice(2);
@@ -139,6 +144,7 @@ function detectProjectContext(options = {}) {
     }
     return {
       projectRoot,
+      siteRoot: resolvePowerPagesSiteRoot(projectRoot),
       siteType: 'code',
       siteName: config.siteName || null,
       websiteRecordId: config.websiteRecordId || null,
@@ -157,9 +163,10 @@ function detectProjectContext(options = {}) {
   //    "declarative" on its own (a `.portalconfig/` site with no website.yml is still
   //    declarative; its identity resolves at runtime). No environment URL in the local
   //    files — callers re-confirm via `pac env who`.
-  const portalConfigDir = path.join(projectRoot, '.powerpages-site', '.portalconfig');
-  const websiteYmlPath = path.join(projectRoot, '.powerpages-site', 'website.yml');
-  if (isDirectory(portalConfigDir) || fs.existsSync(websiteYmlPath)) {
+  const siteRoot = resolvePowerPagesSiteRoot(projectRoot);
+  const portalConfigDir = siteRoot && path.join(siteRoot, '.portalconfig');
+  const websiteYmlPath = siteRoot && path.join(siteRoot, 'website.yml');
+  if (siteRoot && (isDirectory(portalConfigDir) || fs.existsSync(websiteYmlPath))) {
     let site = null;
     if (fs.existsSync(websiteYmlPath)) {
       site = readWebsiteYml(websiteYmlPath);
@@ -169,6 +176,7 @@ function detectProjectContext(options = {}) {
     }
     return {
       projectRoot,
+      siteRoot,
       siteType: 'declarative',
       siteName: site ? (site.name || null) : null,
       websiteRecordId: site ? (site.id || null) : null,
@@ -179,8 +187,8 @@ function detectProjectContext(options = {}) {
   }
 
   throw new Error(
-    `No site identity found at ${projectRoot}: neither powerpages.config.json nor ` +
-    '.powerpages-site/website.yml is present.'
+    `No site identity found at ${projectRoot}: neither powerpages.config.json nor a ` +
+    'nested/direct declarative site root is present.'
   );
 }
 
