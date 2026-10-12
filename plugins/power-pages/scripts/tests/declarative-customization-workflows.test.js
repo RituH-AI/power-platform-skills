@@ -60,6 +60,18 @@ test('all declarative preview entry points disclose once and propagate the hando
     createWorkflow,
     /Continuing with the preview traditional-site customization experience/,
   );
+  assert.match(
+    createWorkflow,
+    /generate-subdomain\.js"/,
+  );
+  assert.doesNotMatch(createWorkflow, /generate-subdomain\.js" --siteName/);
+  assert.match(
+    createWorkflow,
+    /\| Subdomain \| Subdomain \| `<SUGGESTED_SUBDOMAIN>` \|/,
+  );
+  assert.match(createWorkflow, /one editable text field pre-populated with the suggestion/);
+  assert.doesNotMatch(createWorkflow, /Would you like to use this subdomain|Enter a custom subdomain/);
+  assert.match(createWorkflow, /never append another random suffix or otherwise change it/);
 
   for (const skillPath of coveredSkills) {
     const skill = read(skillPath);

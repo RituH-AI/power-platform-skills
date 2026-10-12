@@ -204,13 +204,31 @@ Use `AskUserQuestion` to collect:
 - Site name
 - Base language LCID; default to English `1033` unless the user requires another supported
   language
-- Subdomain
 - Destination: current directory, a new child folder, or another directory
+
+Generate the same random subdomain suggestion used by the SPA activation workflow:
+
+```bash
+node "${PLUGIN_ROOT}/skills/activate-site/scripts/generate-subdomain.js"
+```
+
+Store stdout as `SUGGESTED_SUBDOMAIN`. It has the Power Pages Studio-style form
+`site-<five base-36 characters>`.
+
+Collect the subdomain as one editable text field pre-populated with the suggestion:
+
+| Question | Header | Default value |
+|---|---|---|
+| Subdomain | Subdomain | `<SUGGESTED_SUBDOMAIN>` |
+
+The field remains editable so the user can replace the suggestion before submitting it. Store the
+submitted value as `SUBDOMAIN`; never append another random suffix or otherwise change it.
 
 Validate before any cloud mutation:
 
 - Site name is non-empty and no longer than 200 characters.
-- Subdomain contains 2-63 lowercase letters, numbers, or hyphens and does not start/end with `-`.
+- The confirmed subdomain contains 2-63 lowercase letters, numbers, or hyphens and does not
+  start/end with `-`.
 - Destination resolves to a concrete path.
 - Destination does not contain an unrelated Power Pages project.
 - A non-empty destination requires a different directory; do not overwrite.
