@@ -1,13 +1,16 @@
 # Readable, coherent classic styling
 
-Read for a new visual treatment, palette/background, typography, or readability fix. Skip for isolated spacing/radius changes. Read and apply [shared site design quality](../../../references/site-design-quality.md) for the visual principles; this adapter owns their classic-site application. [Create-site's code-site adapter](../../create-site/references/design-aesthetics.md) is a separate execution path: **do not execute that SPA workflow** or generate a preview.
+Read for a new visual treatment, palette/background, typography, or readability fix. Skip for isolated spacing/radius changes. Read and apply [shared site design quality](../../../references/site-design-quality.md) for the visual principles; this adapter owns their classic-site application. The [code-site adapter](../../../references/design-aesthetics.md) is a separate execution path: **do not execute that SPA workflow** or generate a preview.
 
 ## Design the complete treatment
 
 - Match the user's approved direction. An explicit new-site design brief allows intentionally establishing a complete cohesive visual identity, not just preserving the downloaded template's appearance. Existing-site narrow changes remain preservation-first: preserve the site aesthetic unless a redesign was requested. Apply the shared aesthetic/mood, hierarchy, spacing, responsive-composition and imagery guidance in either case.
+- For new-site work, the creation template is data-model/domain and requirements context, not a constraint on layout, branding, palette, typography or presentation. Honor explicit preservation preferences, not implicit fidelity to the starter design. Style the approved native composition after its owners have authored it; return missing structural changes to those owners rather than reducing the brief to a recolor of the old layout or faking new structure with CSS.
+- Custom layout is part of the new-site deliverable, not something a palette, font or image swap can replace. If the actual native source still has the starter composition where the approved plan calls for a custom one, report the structural dependency as incomplete before styling that surface. Reused forms/lists/snippets can remain intact inside the new layout; their unchanged internals are not a defect.
+- Reuse the approved experience brief and `designContext`: strengthen its focal point, action hierarchy, narrative rhythm, and organization-specific detail through the existing native source. Do not restart planning or require a marketing hero, new font, image acquisition, or signature interaction for a narrow edit. Structural/content changes belong to their native owners, not a CSS workaround.
 - Apply the shared coordinated palette roles to the actual components. A background change includes all text and interactive states on that background, not just the container.
 - Reuse existing approved fonts, tokens and Bootstrap spacing/grid conventions where suitable. Newly approved fonts may be imported through [author-web-file](../../classic-site-skills/author-web-file/SKILL.md) and applied with reviewed `style-site` CSS, including appropriate `@font-face` definitions and fallback stacks. Do not import the SPA reference's font bans/downloads, theme.css rewrite or dependency installation. General CSS fonts, tokens, animation and explicit global themes are supported through the reviewed classic-site contract, not the SPA workflow.
-- Define reusable site-global tokens/classes in custom CSS with explicit scope and expanded review, not by rewriting protected defaults. Preserve native DOM, Liquid, component IDs, accessibility/Studio markers, Bootstrap assets, `theme.css`, `portalbasictheme.css`, and existing default-file ordering. A new identity does not authorize replacing native components or unrelated source.
+- Define reusable site-global tokens/classes in custom CSS with explicit scope and expanded review, not by rewriting protected defaults. During styling, preserve the native DOM delivered by structural authoring, Liquid, component IDs, accessibility/Studio markers, Bootstrap assets, `theme.css`, `portalbasictheme.css`, and existing default-file ordering. These are native-integrity constraints, not a requirement that native owners retain the creation template's arrangement. A new identity does not authorize replacing required native behavior or unrelated source.
 - Inspect actual **heading, paragraph, nested span, link and button source/rules**, including existing inline styles and Bootstrap utilities. A white container `color` does not override a child's explicit dark color. A requested token may resolve differently in the site theme. Optional separately consented runtime discovery can clarify the existing cascade, not verify the proposed local patch.
 - Choose the verified local declaration **per property before choosing placement**. Native Studio typography/colors do not require handoffs: update an existing static child inline declaration when it wins; otherwise use effective scoped CSS. Add a quoted style attribute only where it is the right component representation, not a blanket palette technique. Preserve exact-property inline importance. Authored `!important` requires `importantReason` and expanded review; do not blindly add it or raise specificity/remove classes to evade a winning declaration. If the child edit is ambiguous or unrepresentable, block the dependent background with a specific local source-repair step.
 
@@ -27,6 +30,27 @@ These are separate stylesheet groups on the same verified `pp-*` component, not 
 When responsive/state rules need to replace a winning inline property, the inline group may explicitly remove that exact existing property using `null` and supply scoped CSS in the same approved plan. Preserve other inline declarations/priority and inspect all affected states. Removing a shorthand removes its whole declaration; retain needed longhands in the planned treatment. Null is an inline-only request directive, not a CSS value or a gradient-specific workaround.
 
 These parts are examples, not a closed list. Use general declarations or a raw responsive stylesheet for the requested design, including font stacks, shadows, layout functions, transitions, transforms, tokens and all gradient kinds. Check logical visual order against DOM/keyboard order. For animations, add `prefers-reduced-motion` alternatives and preserve visibility/function without motion. Namespace new keyframe/font/property/layer names with `pp-`/`--pp-`, or explicitly review shared naming with raw `global: true`. Global themes affect all matching elements in their placement scope and require expanded review. Review font/resource licensing, availability and CSP; external HTTPS references require exact `externalResources`, not automatic fetching.
+
+## Coordinate header styling
+
+For new-site design or full-site redesign, carry the approved header treatment from the plan
+through the same final styling pass as the page content. Resolve the actual header source and
+winning logo/navigation/control rules; do not assume body colors or typography reach them.
+Coordinate header surfaces, link/button states, spacing and responsive rules with the approved
+custom composition. Keep declared preservation preferences, site-wide scope and expanded
+exact-diff review; this is not an extra approval stage.
+
+For every header update, carry the approved logo or wordmark decision through desktop/mobile
+treatment: preserve its aspect ratio, avoid cropping or stretching the mark, and size it for the
+approved header. CSS-only restyling does not replace an unsuitable starter logo or update its
+accessible brand name and home link. Follow the native owner's approved source/value change,
+or the plan's justified logo-retention decision; do not silently substitute another brand asset.
+Return missing snippet, markup or Liquid changes to their native owners before styling.
+Do not duplicate/hide the global header, replace its behavior with CSS, or rebind `website.yml`
+as a styling shortcut. Preserve navigation, authentication, locale, accessibility and caching
+contracts while changing presentation. Narrow edits do not authorize unrelated header styling.
+Verify local source and supplied contrast pairs; mobile-menu interaction and rendered states
+remain pending separately authorized observation.
 
 ## Deliver imagery through the existing asset workflow
 
@@ -51,6 +75,12 @@ The result's `evidence: "supplied-color-pair-only"` is **not a cascade check**. 
 Gradients are one use of [general CSS](proposal-and-verification.md#general-css-authoring), not a special-case grammar. `background-image`, including removal with `none`, triggers readability review. Inspect text across the full surface and alpha/fallback layers; checking only endpoint colors is not proof of contrast. The bundled parser's acceptance does not prove rendering; unknown or semantic-grammar-unverified values need explicit review. Fix invalid values or verify newer browser support before approving, not a blanket Power Pages rejection or a guessed solid-color pass.
 
 Resolve known failures and local declaration dependencies before approval; there is no native-color Studio prerequisite. Gradients/images, group opacity, overlays, text effects, dynamic/native controls, unresolved tokens and fonts remain **pending real-surface verification**, not presumed passes. Keep unlisted/unknown/conditional Design-panel warnings in review, approval and the final report, without promising local values populate native controls. No HTML generation or browser review is required. Do not start a dev server or require a live preview. Later separately authorized checks should cover desktop/mobile wrapping, clipping, focus, keyboard behavior and affected states; source inspection and color math alone are not a complete WCAG audit or runtime/Studio proof.
+
+## Design critique without changing the local contract
+
+Use the [classic critique adapter](design-critique.md) to interpret the shared categories only for conclusions supported by the affected source and approved brief. This is not a second score-to-pass gate: retain the lean local workflow and exact-diff/hash approval for every revision. Report unobserved rendering separately, not a fabricated visual score or a failed design merely because no browser ran. The unchanged SPA rubric's surrounding capture/fix workflow and font rules do not apply here.
+
+For a separately requested `/exceptional-web-design` review, provide the selected site/locale, approved brief, known source files, and an authorized runtime URL when available. Its screenshots review deployed content, not unpublished local changes; it does not invoke deployment, Studio Sync, cache clearing, or automatic fixes. Its broader visual capture is not authorized by `style-site:2.runtime`, which remains bounded structural discovery. Apply subsequent recommendations only through the owning classic skill and its normal approval.
 
 ## Sources and classic boundaries
 

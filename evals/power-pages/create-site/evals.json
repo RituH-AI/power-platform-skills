@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "Create a Power Pages site for our company called 'Contoso Solutions Portal'. It should be a public-facing company portal built with React. We want to showcase our services, share company news, and let customers reach out to us.",
-      "expected_output": "The skill discovers the site requirements (name: Contoso Solutions Portal, framework: React, purpose: Company Portal, audience: External, location: new folder in current directory), scaffolds the React template with placeholders replaced (__SITE_NAME__ = Contoso Solutions Portal, __SITE_SLUG__ = contoso-solutions-portal), runs npm install, initializes git, starts the dev server, and shares the URL. During component planning, the user selects Bold & Vibrant aesthetic with features like Services Catalog, News/Blog, Contact Form, and Team/About section. The plan is presented and approved. Implementation applies distinctive Google Fonts, a vibrant color palette via CSS variables, motion/animations, and builds all pages with real Unsplash images. Each page and component gets its own git commit. Accessibility is verified with axe-core on every route, all critical/serious violations are fixed and re-verified. The user reviews the site via the dev server URL and is asked about deployment.",
+      "expected_output": "The skill discovers the site requirements (name: Contoso Solutions Portal, framework: React, purpose: Company Portal, audience: External, location: new folder in current directory), scaffolds the React template with placeholders replaced (__SITE_NAME__ = Contoso Solutions Portal, __SITE_SLUG__ = contoso-solutions-portal), runs npm install, initializes git, starts the dev server, and shares the URL. During component planning, the user selects Bold & Vibrant aesthetic with features like Services Catalog, News/Blog, Contact Form, and Team/About section, and a brand source; the skill writes an experience brief. The plan, with its Design direction section, is presented and approved. Implementation applies distinctive Google Fonts, the full color token set via CSS variables, motion/animations, and purposeful visuals, building Home and its hero first and reviewing the first impression from screenshots. Each page and component gets its own git commit. A screenshot-based design critique scores every page against the 10-category rubric. Accessibility is verified with axe-core on every route, all critical/serious violations are fixed and re-verified. The user reviews the site via the dev server URL and is asked about deployment.",
       "files": [],
       "expectations": [
         "Discovery phase asks for site name, framework, purpose, audience, and project location via AskUserQuestion",
@@ -15,23 +15,26 @@
         "Git repository is initialized with an initial scaffold commit",
         "Dev server is started in background via 'npm run dev' and the localhost URL is shared with the user",
         "Playwright browser_navigate and browser_snapshot are used to verify the scaffold loads (no screenshots taken)",
-        "Component planning asks for features (context-aware options for an external company portal), aesthetic direction (Bold & Vibrant selected), and mood",
-        "Design aesthetics reference is read from ${PLUGIN_ROOT}/skills/create-site/references/design-aesthetics.md",
+        "Component planning asks for features (context-aware options for an external company portal), aesthetic direction (Bold & Vibrant selected), mood, and brand source (fresh identity, existing website, or brand colors or logo)",
+        "Design references are read from ${PLUGIN_ROOT}/references/design-aesthetics.md and ${PLUGIN_ROOT}/references/page-blueprints.md, and an experience brief (audience and job, primary and secondary action, principal doubt, proof strategy, design thesis, hero concept, signature moment) is written before tokens are chosen",
         "A component plan table is presented showing pages, shared components, design elements, and routes",
-        "Color palette is determined with 6 CSS variables (--color-primary, --color-secondary, --color-bg, --color-surface, --color-text, --color-text-muted)",
-        "Implementation plan is presented with Section A (Design & Pages) and Section B (Review & Deployment) and user approval is requested",
+        "Color tokens cover every role in design-aesthetics.md section 3 (background, surfaces, text, muted text, borders, primary and on-primary, accent, focus, success, warning, danger), with each text and background pair checked against WCAG AA contrast",
+        "The implementation plan is rendered to docs/create-site-plan.html with render-createsite-plan.js, including its Design direction section, and user approval is requested",
         "Design foundations are applied first: distinctive Google Fonts (not Inter/Roboto/Arial), CSS variables for colors, motion/animation utilities, and background treatments",
         "The scaffold loading screen is completely replaced — no trace of Power Pages branded animation remains",
-        "Real Unsplash images are sourced via WebSearch and used in hero sections, feature cards, and content areas",
+        "Visuals follow design-aesthetics.md section 6: the site's own UI composed as a product moment or bespoke inline SVG first; any photography is task-specific Unsplash imagery found via WebSearch, sharing one art direction - never placeholder services",
         "Each individual page gets its own dedicated git commit (not batched together)",
         "Each shared component gets its own dedicated git commit",
-        "Playwright browser_snapshot is used to verify each page after creation (no screenshots)",
-        "axe-core audit script is run on every route passing --url, --routes, and --project-root flags",
+        "Playwright browser_snapshot checks each page's structure after creation; visual judgement comes from capture-design-review.js screenshots, not per-page browser_take_screenshot calls",
+        "Home and its hero are built first, then a first-impression review of / runs via capture-design-review.js at desktop (1440x900) and mobile (390x844) before the other pages",
+        "The Phase 5.7 design critique captures every route at desktop and mobile with one capture-design-review.js call per round, sending the URL and routes as a JSON request on stdin, scores the 10-category rubric, and fixes failing critical gates and categories below 3; after three rounds, a critical gate that still fails goes to the user through the critique-blocked prompt",
+        "axe-core audit script is run on every route, with the dev server URL and routes sent as a JSON request on stdin (--input -) rather than as command-line flags",
         "All critical and serious accessibility violations are fixed and committed",
         "axe-core is re-run after fixes to confirm zero critical/serious violations",
         "An accessibility summary table is presented showing violations found vs fixed per page",
         "User is asked to review the site at the dev server URL via AskUserQuestion",
-        "Deployment is offered via AskUserQuestion with 'Deploy now (Recommended)' and 'Skip for now' options",
+        "The Phase 7 review summary includes the design thesis and the critique scorecard, and lists every SAMPLE CONTENT marker with its file",
+        "Deployment is offered via AskUserQuestion with 'Deploy now' and 'Skip for now'; 'Deploy now' is recommended unless SAMPLE CONTENT placeholders remain, in which case they are listed first and 'Skip for now' is recommended",
         "TaskCreate is used to create todos for all 8 phases before starting work"
       ]
     },
@@ -58,6 +61,7 @@
         "Navigation/header component is updated with links to all pages",
         "Individual git commits are made for each page and each shared component separately",
         "Playwright browser_snapshot verifies each page after implementation",
+        "The Phase 5.7 design critique captures every route at desktop and mobile with one capture-design-review.js call per round, sending the URL and routes as a JSON request on stdin, scores the 10-category rubric, and fixes failing critical gates and categories below 3; after three rounds, a critical gate that still fails goes to the user through the critique-blocked prompt",
         "axe-core audit runs on every route; all critical/serious violations are fixed",
         "Re-verification confirms zero critical/serious violations across all pages",
         "User review is requested with the dev server URL and list of all available routes",
@@ -85,8 +89,9 @@
         "Real Unsplash images are sourced matching luxury/jewelry aesthetic with cohesive style and lighting",
         "Images use appropriate sizing (w=1600 for heroes, w=800 for cards) with descriptive alt text",
         "Each page gets its own dedicated git commit; each component gets its own commit",
-        "Playwright browser_snapshot verifies each page (no screenshots taken)",
-        "axe-core audit script runs with --routes flag covering all site routes",
+        "Playwright browser_snapshot checks each page's structure after creation; visual judgement comes from capture-design-review.js screenshots, not per-page browser_take_screenshot calls",
+        "The Phase 5.7 design critique captures every route at desktop and mobile with one capture-design-review.js call per round, sending the URL and routes as a JSON request on stdin, scores the 10-category rubric, and fixes failing critical gates and categories below 3; after three rounds, a critical gate that still fails goes to the user through the critique-blocked prompt",
+        "axe-core audit script runs on all site routes, sent as a JSON request on stdin (--input -)",
         "All critical/serious accessibility violations are fixed, committed, and re-verified",
         "Accessibility summary table shows per-page violations found vs fixed",
         "User reviews the site and is asked for feedback via AskUserQuestion",
@@ -110,17 +115,80 @@
         "Google Fonts chosen convey authority and professionalism (not generic Inter/Roboto/Arial)",
         "Angular-specific: styles.css (not theme.css) is used for design tokens and CSS variables",
         "Angular-specific: Angular router is configured with all new routes",
-        "Color palette uses corporate, trustworthy tones defined via 6 CSS variables",
+        "Color palette uses corporate, trustworthy tones across every color role in design-aesthetics.md section 3, defined as CSS variables in styles.css",
         "Motion/animations are confident and restrained, matching Professional & Trustworthy mood",
         "TodoList is created upfront with all 8 phases tracked via TaskCreate before any work begins",
         "Each individual page and component gets its own dedicated git commit",
         "Playwright browser_snapshot verifies each page after creation",
+        "The Phase 5.7 design critique captures every route at desktop and mobile with one capture-design-review.js call per round, sending the URL and routes as a JSON request on stdin, scores the 10-category rubric, and fixes failing critical gates and categories below 3; after three rounds, a critical gate that still fails goes to the user through the critique-blocked prompt",
         "axe-core audit runs on every route; violations are fixed and re-verified until zero critical/serious issues",
         "Review phase presents a summary table of pages, components, design elements, and git commits",
         "Dev server URL and all available routes are shared with user for review",
         "User is asked for feedback via AskUserQuestion during review phase",
-        "Deployment is offered with 'Deploy now (Recommended)' and 'Skip for now' options",
+        "Deployment is offered via AskUserQuestion with 'Deploy now' and 'Skip for now'; 'Deploy now' is recommended unless SAMPLE CONTENT placeholders remain, in which case they are listed first and 'Skip for now' is recommended",
         "Skill usage is recorded via skill tracking reference before deployment prompt"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Create a classic Power Pages summer camp site for college students. Use a supported template with the program registration capabilities we need, reuse its working program list, registration form and eligibility content snippet, and give the site a modern student-focused experience.",
+      "expected_output": "After the normal explicit model, environment and provisioning decisions, the new-site customization handoff treats the selected template as domain context and reusable components. It requires a custom Home and primary-journey layout, not a reskin. The approved plan separately identifies the retained native source/bindings and the new first-screen hierarchy, sections, component placements and responsive composition, mapped to native owner operations before final styling. Verification checks implemented composition against the plan and downloaded baseline without claiming rendered proof.",
+      "files": [],
+      "expectations": [
+        "Template selection does not choose the site's visual identity, page outline or section sequence",
+        "The creation handoff includes creationIntent new-site, verified Bootstrap evidence, a custom-layout requirement and the existing newSiteDesign/designContext brief",
+        "The working program list, registration form and eligibility snippet are inventoried as reusable components with actual source, bindings, callers and locale scope, not copied together with the full starter page",
+        "Home and the primary visitor journey receive requirement-led first-screen hierarchy, section composition, actions, responsive behavior and explicit placements for reused components",
+        "Native operation inputs and preservation requirements resolve the actual composition work; a descriptive design brief plus only copy/image swaps, extra pages or CSS is not accepted as complete planning",
+        "Template-owned layout or shell source is assigned to the web-template/page-template owner when needed instead of leaving the old layout in place",
+        "Required native source and bindings remain intact at approved destinations; no invented type: form, type: list or type: reuse serialization, fabricated programs or static substitutes for working forms/lists are introduced",
+        "External-image pre-approval verification and exact-plan --imageChecks publication are retained; styling follows structural operations and keeps exact-diff/hash approval",
+        "The existing final verification compares Home and primary-journey source composition against the approved plan and baseline; the same template layout with new colors, text or images is reported as incomplete custom-layout work",
+        "There is no mandatory browser, dev server, extra approval gate or claim that source verification proves runtime appearance; deployment still needs separate consent"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Continue creating my new classic program-registration site from the baseline we just downloaded. Keep our approved logo and the registration form's fields and behavior, but make the site design and layout custom. Do not provision another site.",
+      "expected_output": "The unambiguous creation continuation routes to new-site customization even without a literal creationIntent argument. Logo and form behavior are scoped preservation requirements; the surrounding Home, journey and shell composition are custom. The plan reuses component source/bindings and resolves actual native layout operations without reprovisioning, changing form fields or freezing the whole page.",
+      "files": [],
+      "expectations": [
+        "The request/session intent establishes new-site customization despite the missing literal creationIntent field; file timestamps or template metadata alone are not used to classify unrelated existing sites",
+        "No provisioning, model migration or duplicate website is attempted",
+        "The existing logo and registration form fields/behavior remain protected, but those exceptions do not preserve the surrounding starter layout",
+        "A custom Home and primary-journey composition is resolved in native owner operation inputs, with required component source and destinations",
+        "Existing metadata and rendering bindings are reused when compatible with the custom layout; table compatibility alone does not justify retaining the starter shell",
+        "Unknown relocation dependencies are reported to the caller/native owner rather than dropping the form, replacing it with static HTML or silently keeping the whole template layout",
+        "Final styling consumes the implemented custom composition; missing layout work is not declared complete merely because all CSS edits validate"
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "For the classic site we are creating, keep the Microsoft template unchanged. I only need the provisioned and downloaded baseline for now.",
+      "expected_output": "The explicit bare-baseline preference overrides the custom-layout default. The workflow completes the separately approved provisioning/download/validation steps and leaves the template unchanged, without starting customization or introducing a new-site styling plan.",
+      "files": [],
+      "expectations": [
+        "The explicit Keep the template unchanged choice is honored without treating custom design as a prerequisite to returning the baseline",
+        "No native layout, component, branding, imagery or styling operations run after the baseline is established",
+        "The result is described as an unchanged baseline, not a completed custom design",
+        "The ordinary explicit model, environment and provisioning consent boundaries remain intact"
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "Continue creating our new classic camp site from the downloaded template. Give it a fresh design and layout. The starter carousel and newsletter sign-up form are not needed and can be removed. Keep the working program list, registration form, our logo and their required behavior. Do not delete any underlying records or deploy.",
+      "expected_output": "The customization plan accounts for removing the unused starter carousel and newsletter form placement, retaining required program/registration behavior and the logo, and composing a fresh native layout. It records removal rationale in existing operation summaries/inputs and preservation in preserve, then uses supported native replacement or scoped modification. Removed placements disappear from source rather than being hidden by CSS; backing records, permissions, data and unrelated callers remain untouched.",
+      "files": [],
+      "expectations": [
+        "Template presence alone does not make a section or component mandatory; reuse is optional for unneeded components, not required for every native form/list/snippet",
+        "The plan inventories retain, relocate, replace and remove decisions against actual requirements and explicit preservation preferences, including the carousel and unused newsletter form placement",
+        "Removal scope and rationale are visible in the existing approved operation summaries and inputs without adding a schema, deletion action or approval gate",
+        "Supported native replace or scoped modify operations remove the planned source boundaries after inspecting dependent scripts, IDs, Liquid scope and callers; unknown dependencies are resolved before writing",
+        "The working program list, registration form, logo, native rendering contracts, locale scope and required behavior remain intact in the new composition",
+        "Removing the newsletter form placement does not delete its basic-form record, permissions, underlying data or other callers",
+        "Final source verification checks that approved removals are absent rather than hidden by CSS, while retained components and dependencies remain intact",
+        "Image verification, exact-plan approval and separate styling approval remain required; no deployment or runtime-proof claim is made",
+        "This new-site permission does not broaden unrelated existing-site narrow edits or override explicit preservation choices"
       ]
     }
   ]

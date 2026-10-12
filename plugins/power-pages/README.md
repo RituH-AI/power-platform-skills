@@ -43,7 +43,7 @@ This keeps hook behavior in one place and avoids relying on skill-frontmatter ho
 
 ## Skills
 
-The plugin provides 42 skills that cover the full lifecycle of a Power Pages site — scaffolding, deployment, declarative-site customization, classic-site authoring and styling, data modeling, backend integration, authentication, ALM and CI/CD, security review, testing, auditing, and platform migrations. Each skill is invoked conversationally — just describe what you want to do.
+The plugin provides 43 skills that cover the full lifecycle of a Power Pages site — scaffolding, deployment, declarative-site customization, classic-site authoring and styling, data modeling, backend integration, authentication, ALM and CI/CD, security review, testing, auditing, and platform migrations. Each skill is invoked conversationally — just describe what you want to do.
 
 The `/practice-site-check` and `/add-button` descriptions below are retained for reference, but these skills are not bundled with the plugin and are excluded from this count.
 
@@ -56,18 +56,26 @@ The `/practice-site-check` and `/add-button` descriptions below are retained for
 Creates either an SPA site from a framework template or a Standard/Enhanced data model traditional
 site from a template accepted by the documented Power Platform Create Website API.
 
-- **SPA sites:** choose React, Vue, Angular, or Astro; scaffold the complete SPA; apply a custom
-  design with real imagery; build pages, components, and routing; preview live throughout
-  development; validate the result; and commit implementation milestones.
-- **Traditional sites:** recommend Enhanced with Bootstrap 5, confirm the selected model
+- **Code sites (SPAs):** choose React, Vue, Angular, or Astro; scaffold the complete SPA; apply a
+  custom design with real imagery from an experience brief and page narratives; build pages,
+  components, and routing; preview live and run a batched desktop/mobile visual critique; validate
+  the result and commit implementation milestones.
+- **Classic/declarative sites (traditional sites):** recommend Enhanced with Bootstrap 5, confirm
+  the selected model
   and environment toggle with an administrator, and choose a Bootstrap-compatible first-party
   template. Provision through the Power Platform API, verify the resulting model and downloaded
   Bootstrap assets, and create a Git baseline. Continue through `/customize-declarative-site` for
-  cohesive typography, palette, responsive composition, and meaningful images using direct HTTPS
+  a coherent experience brief, first-screen hierarchy, narrative, typography, palette, responsive
+  composition, and meaningful images using direct HTTPS
   URLs without image downloads or Web File creation, or explicitly
   keep the template unchanged. Standard/Bootstrap 3 remains an explicit compatibility option.
   No dev server or live site preview is required; the browser documents show provisioning status
   and the approval plan, not the site's final rendering.
+  The selected template supplies data-model/domain and requirements context, not constraints on
+  the new site's visual design, page composition, layout or branding. Custom design and layout
+  are required, not just a new palette or replacement content on the starter arrangement.
+  Reuse needed native forms, lists and content snippets within the custom composition, preserving
+  required capabilities/content, platform contracts and explicit user preservation preferences.
 
 #### `/deploy-site`
 
@@ -102,7 +110,17 @@ whether it was provisioned by `/create-site` or created manually in Design Studi
   hosted illustrations using approved direct HTTPS URLs, not new image Web Files; imagery can
   be explicitly declined. Existing template images can be reused, and explicit Web File imports
   remain available for other customization work
-- Preserves platform behavior and existing-site visual intent, resolves dependencies before
+- Sources external Unsplash images through WebSearch and direct CDN URLs, like SPA creation;
+  photo-page and photographer metadata are optional when unavailable. License information remains
+  required; network checks are opt-in, and unchecked images are explicitly labeled unverified
+- New-site plans separate reusable components from custom Home/primary-journey composition,
+  map layout work to native owners, and flag an unchanged starter layout during final verification;
+  existing-site narrow edits remain preservation-first unless a redesign is requested
+- Can remove unneeded starter sections and component placements for a fresh approved layout,
+  while preserving required functionality, explicit preservation preferences and backing records
+- Uses native layout recipes as defaults rather than a design limit; explicit column spans and
+  responsive styling retain their intended geometry and disclose unverified Studio editing behavior
+- Preserves platform behavior and explicit visual preferences, resolves dependencies before
   consumers run, and applies guarded styling after structural authoring
 - Verifies and commits the combined local result, then optionally hands off to `/deploy-site`
 - Leaves narrow changes directly available through the individual authoring skills
@@ -147,8 +165,8 @@ page-template assignments, localized content shells, and requested navigation li
 #### `/author-webpage-content`
 
 Composes or modifies one localized `.webpage.copy.html` file from a resolved page design,
-using Design Studio-compatible sections, columns, text, images, buttons, videos, and
-spacers.
+using Design Studio-compatible sections, columns, text, images, buttons, videos, iframes,
+Generative AI Search components, Flex Containers, and spacers.
 
 #### `/author-content-snippet`
 
@@ -502,6 +520,21 @@ Styles **classic, server-rendered sites only**, from a local download in **VS Co
 - Uses exact source/context/hash guards on real rendered tags, including input/textarea/SVG and outer local iframe/embedded elements: only class/style attributes change, never embedded contents. Static tags/CSS values may span lines; whitespace/newline matching remains exact. Entity spelling may normalize only in the style attribute; other source stays intact. Declarations retain authored order and shorthand protection. Unknown parser semantics yield warnings, not blanket Power Pages rejection; malformed/injected/executable CSS fails
 - Leaves inspection/proposal/recovery artifacts outside the uploadable site tree; **no upload, publishing, activation, remote writes, or cache clearing**
 - Not for SPA/code sites, PCF/third-party internals, Bootstrap migration, or VS Code for the Web remote saves
+
+#### `/exceptional-web-design`
+
+> "Review the design of https://contoso.powerappsportals.com"
+>
+> "Why does my site look generic? What should I change?"
+
+Reviews the design of an existing classic/traditional or SPA site - an authorized live URL or a local project folder - and tells you what to change, without changing anything.
+With a running URL it captures up to eight key pages at desktop and mobile widths and runs an automated accessibility audit. Classic reviews interpret the shared ten-category rubric through native platform and approved-brand requirements, with source-only or incomplete findings explicitly provisional rather than verified totals out of 40. SPA reviews retain their existing workflow and scoring contract. Pages beyond the selected scope are listed in the report.
+The result is a scorecard plus prioritized recommendations, each naming the page and element, why it matters, and the exact change, with a redesign direction when the site needs more than fixes.
+
+- Reads classic PAC metadata, localized page copy, styles and Liquid/templates, or code-site routes and components. Classic sites need no SPA dev server or deployment for a source-only review
+- Runs nothing from your project and changes nothing in it; screenshots go to a private temporary folder. The plugin's pinned browser package may enter npm's cache, never the project
+- Lists sign-in-protected pages as not reviewed. The classic workflow also explicitly excludes query/fragment-dependent states the capture cannot establish
+- A deployed URL does not prove unpublished local changes. Recommendations retain native scope and fresh approval; no automatic fixes, Studio sync, deployment, or additional mandatory classic review stage
 
 #### `/add-seo`
 

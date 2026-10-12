@@ -111,8 +111,10 @@ h3{margin:0;font-size:16px}
 .wire-elements{display:grid;gap:8px}
 .wire-element{min-width:0;padding:10px;border:1px solid var(--line);border-radius:6px;background:#faf9fb;overflow-wrap:anywhere}
 .wire-type{display:block;color:var(--ink);font-size:11px;font-weight:700}
-.wire-element.image,.wire-element.video{min-height:90px;display:grid;align-content:center;text-align:center;border-style:dashed;background:var(--cyan-soft)}
+.wire-element.image,.wire-element.video,.wire-element.iframe,.wire-element.search{min-height:90px;display:grid;align-content:center;text-align:center;border-style:dashed;background:var(--cyan-soft)}
 .wire-element.button{background:var(--plum-soft);border-color:#ceb5d3;border-radius:16px;text-align:center}
+.wire-element.flex-container{border-style:dashed;background:var(--soft)}
+.wire-flex-children{display:grid;gap:8px;margin-top:8px;padding:8px;border-left:3px solid var(--plum)}
 .wire-element.spacer{border-style:dashed;background:repeating-linear-gradient(135deg,var(--panel),var(--panel) 5px,var(--soft) 5px,var(--soft) 6px)}
 .wire-empty{margin:0;padding:12px 0;color:var(--muted);font-size:12px}
 .composition-copy{display:grid;gap:4px;margin-top:8px;color:var(--muted);font-size:12px}
@@ -123,14 +125,6 @@ h3{margin:0;font-size:16px}
 .check{display:flex;gap:11px;align-items:flex-start}
 .check-mark{width:20px;height:20px;border:2px solid var(--cyan);border-radius:6px;flex:0 0 auto;margin-top:1px}
 .deploy.recommended{border-color:#b88cc0;background:linear-gradient(135deg,#fff,var(--plum-soft))}
-.technical{margin-top:24px;background:var(--panel);border:1px solid var(--line);border-radius:14px}
-.technical>summary{padding:16px 19px;cursor:pointer;color:var(--plum-dark);font-weight:700}
-.technical-copy{padding:0 19px 17px;color:var(--muted)}
-.trace{margin:0 19px 13px;padding:16px;border-radius:11px;background:#faf9fb;border:1px solid var(--line)}
-.trace:last-child{margin-bottom:19px}
-.trace-title{font:700 12px var(--mono);overflow-wrap:anywhere}
-.trace-meta{display:flex;gap:6px;flex-wrap:wrap;margin:9px 0}
-.trace pre{margin:9px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.5 var(--mono);color:#463d4b}
 code{font-family:var(--mono);font-size:12px;background:var(--soft);padding:2px 5px;border-radius:5px;overflow-wrap:anywhere}
 @media(max-width:800px){
   .topbar{align-items:flex-start}.top-tags{display:none}
@@ -236,11 +230,6 @@ code{font-family:var(--mono);font-size:12px;background:var(--soft);padding:2px 5
       <div id="checks"></div>
       <h2 class="section-title">After local verification</h2>
       <div id="deployments"></div>
-      <details class="technical" id="technicalDetails">
-        <summary>Technical implementation trace</summary>
-        <div class="technical-copy">For maintainers: owning skills, operation IDs, dependency bindings, exact targets, and expected outputs.</div>
-        <div id="technicalOperations"></div>
-      </details>
     </section>
   </main>
 </div>
@@ -252,6 +241,7 @@ code{font-family:var(--mono);font-size:12px;background:var(--soft);padding:2px 5
 <script id="imageChecksData" type="application/json">__JSON_IMAGE_CHECKS_DATA__</script>
 <script id="newSiteDesignData" type="application/json">__JSON_NEW_SITE_DESIGN_DATA__</script>
 <script id="operationsData" type="application/json">__JSON_OPERATIONS_DATA__</script>
+<script id="compositionsData" type="application/json">__JSON_COMPOSITIONS_DATA__</script>
 <script id="warningsData" type="application/json">__JSON_WARNINGS_DATA__</script>
 <script id="verificationData" type="application/json">__JSON_VERIFICATION_DATA__</script>
 <script id="deploymentData" type="application/json">__JSON_DEPLOYMENT_DATA__</script>
@@ -261,10 +251,13 @@ const esc=value=>{const node=document.createElement("span");node.textContent=val
 const words=value=>String(value||"").replace(/[-_]/g," ").replace(/([a-z])([A-Z])/g,"$1 $2").replace(/\b\w/g,char=>char.toUpperCase());
 const basename=value=>String(value||"").split(/[\\/]/).pop();
 const operations=read("operationsData");
+const compositions=read("compositionsData");
 const assets=read("assetsData");
 const imageChecks=read("imageChecksData");
 if(imageChecks&&imageChecks.images.length){
   document.getElementById("imageVerification").innerHTML=`<div class="card plan-note"><strong>Image source checks passed before review</strong><p>Each unique external URL returned an image response. These checks do not guarantee future availability or site rendering.</p><ul class="preserve-list">${imageChecks.images.map(image=>`<li>${esc(image.url)} · ${esc(image.mimeType)} · ${esc(image.checkedAt)}</li>`).join("")}</ul></div>`;
+}else if(assets.some(asset=>asset.delivery==="external-url")){
+  document.getElementById("imageVerification").innerHTML=`<div class="card plan-note"><strong>External images are unverified</strong><p>Network checks were not run. Availability and image content are unverified. A loaded preview does not verify site rendering.</p></div>`;
 }
 const categoryFor=skill=>{
   if(["author-webpage","author-page-template"].includes(skill))return"page";
@@ -277,7 +270,7 @@ const categories={
   component:operations.filter(item=>categoryFor(item.skill)==="component"),
   styling:operations.filter(item=>categoryFor(item.skill)==="styling")
 };
-const copyKeys=new Set(["content","text","heading","title","label","description","alt"]);
+const copyKeys=new Set(["content","text","heading","title","label","description","alt","placeholderText","searchSummaryHeading","searchResultHeading"]);
 const collectCopy=(value,key="",result=[])=>{
   if(typeof value==="string"&&copyKeys.has(key)&&value.trim())result.push(value.trim());
   else if(Array.isArray(value))value.forEach(item=>collectCopy(item,key,result));
@@ -312,26 +305,26 @@ const renderValue=value=>{
   }
   return esc(value);
 };
-// These large-screen proportions follow the five native layouts in
-// classic-site-skills/page-elements/references/design-studio-section-layouts.md.
-const layoutColumns={"one-column":[12],"two-equal-columns":[6,6],"three-equal-columns":[4,4,4],"one-third-left":[4,8],"one-third-right":[8,4]};
 const wireElement=element=>{
   const type=element.type||"component";
-  const kind=["text","image","button","video","spacer"].includes(type)?type:"other";
-  const copy=collectCopy(element);
-  return`<div class="wire-element ${kind}"><span class="wire-type">${esc(words(type))}</span>${copy.length?`<div class="composition-copy">${copy.map(value=>`<span>${esc(value)}</span>`).join("")}</div>`:""}</div>`;
+  const kind=["text","image","button","video","iframe","search","spacer","flex-container"].includes(type)?type:"other";
+  const children=kind==="flex-container"&&Array.isArray(element.children)?element.children:[];
+  const copy=collectCopy({...element,children:[]});
+  return`<div class="wire-element ${kind}"><span class="wire-type">${esc(words(type))}</span>${copy.length?`<div class="composition-copy">${copy.map(value=>`<span>${esc(value)}</span>`).join("")}</div>`:""}${children.length?`<div class="wire-flex-children">${children.map(wireElement).join("")}</div>`:""}</div>`;
 };
 const composition=item=>{
   const sections=Array.isArray(item.inputs&&item.inputs.sections)?item.inputs.sections:[];
   if(!sections.length)return"";
   return`<div class="change-detail"><div class="label">Page composition</div><p class="composition-note">Structure only, not a live site preview. Column proportions show the planned large-screen layout, not final mobile rendering.</p><div class="composition">${sections.map((section,index)=>{
     const columns=Array.isArray(section.columns)?section.columns:[];
-    const widths=Object.hasOwn(layoutColumns,section.layout)?layoutColumns[section.layout]:null;
+    const layout=compositions[item.id][index];
+    const widths=layout.spans;
     const resolved=widths&&widths.length===columns.length;
-    const tracks=columns.map((_,columnIndex)=>`minmax(0,${resolved?widths[columnIndex]:1}fr)`).join(" ");
-    return`<section class="composition-row" aria-label="Section ${index+1}"><div class="composition-heading"><strong>Section ${index+1}${section.name?`: ${esc(section.name)}`:""}</strong><span>${esc(words(section.layout||"unspecified layout"))}</span></div>${!resolved?`<p class="composition-note">Column widths unresolved; confirm the layout and column count.</p>`:""}${columns.length?`<div class="wire-scroll${columns.length>1?" multi":""}"${columns.length>1?` tabindex="0" role="region" aria-label="Section ${index+1} columns"`:""}><div class="wire-columns" style="grid-template-columns:${tracks}">${columns.map((column,columnIndex)=>{
+    const tracks=layout.source==="explicit"?"repeat(12,minmax(0,1fr))":columns.map((_,columnIndex)=>`minmax(0,${resolved?widths[columnIndex]:1}fr)`).join(" ");
+    return`<section class="composition-row" aria-label="Section ${index+1}"><div class="composition-heading"><strong>Section ${index+1}${section.name?`: ${esc(section.name)}`:""}</strong><span>${esc(words(section.layout||"unspecified layout"))}</span></div>${layout.warning?`<p class="composition-note">${esc(layout.warning)}</p>`:""}${!resolved?`<p class="composition-note">Column widths unresolved or CSS-driven geometry not depicted; use the design details. This is not a restriction on local authoring.</p>`:""}${columns.length?`<div class="wire-scroll${columns.length>1?" multi":""}"${columns.length>1?` tabindex="0" role="region" aria-label="Section ${index+1} columns"`:""}><div class="wire-columns" style="grid-template-columns:${tracks}">${columns.map((column,columnIndex)=>{
       const elements=Array.isArray(column.elements)?column.elements:[];
-      return`<div class="wire-column"><div class="wire-column-label">Column ${columnIndex+1}${resolved?` · ${widths[columnIndex]}/12 width`:" · Width unspecified"}</div><div class="wire-elements">${elements.length?elements.map(wireElement).join(""):`<p class="wire-empty">Empty column</p>`}</div></div>`;
+      const position=layout.positions&&layout.positions[columnIndex];
+      return`<div class="wire-column"${position?` style="grid-column:${position.start}/span ${position.span};grid-row:${position.row}"`:""}><div class="wire-column-label">Column ${columnIndex+1}${resolved?` · ${widths[columnIndex]}/12 width`:" · Width unspecified"}</div><div class="wire-elements">${elements.length?elements.map(wireElement).join(""):`<p class="wire-empty">Empty column</p>`}</div></div>`;
     }).join("")}</div></div>${columns.length>1?`<p class="composition-scroll-hint">Scroll sideways to inspect columns.</p>`:""}`:`<p class="wire-empty">No columns specified.</p>`}</section>`;
   }).join("")}</div></div>`;
 };
@@ -390,8 +383,9 @@ const assetCard=asset=>{
   const prep=asset.preparation||{};
   const alt=Object.entries((asset.accessibility&&asset.accessibility.altByLocale)||{}).map(([locale,value])=>`${locale}: ${value||"Decorative image"}`).join(" · ");
   const details=[
-    ["Source",source.type==="unsplash"?`Unsplash · ${source.photographer}`:words(source.type)],
+    ["Source",source.type==="unsplash"?["Unsplash",source.photographer].filter(Boolean).join(" · "):words(source.type)],
     ["Delivery",asset.delivery==="external-url"?"Direct external HTTPS URL (not imported)":"Local Power Pages Web File"],
+    ["Source checks",asset.delivery==="external-url"?(imageChecks?"Passed (HTTP/content only)":"Unverified (not checked)"):null],
     ["Image URL",asset.externalUrl||source.downloadUrl],
     ["Source page",source.sourcePage],
     ["License",source.license],
@@ -421,8 +415,6 @@ const checks=read("verificationData");
 document.getElementById("checks").innerHTML=checks.length?checks.map(item=>`<div class="card check"><span class="check-mark"></span><div><strong>${esc(typeof item==="string"?item:item.label)}</strong>${typeof item==="object"&&item.description?`<div>${esc(item.description)}</div>`:""}</div></div>`).join(""):`<div class="card empty">No verification checks recorded.</div>`;
 const deployments=read("deploymentData");
 document.getElementById("deployments").innerHTML=deployments.length?deployments.map(item=>`<div class="card deploy ${item.recommended?"recommended":""}"><strong>${esc(item.title)}</strong><p>${esc(item.description||"")}</p></div>`).join(""):`<div class="card empty">Keep the verified changes local.</div>`;
-const technical=item=>`<article class="trace"><div class="trace-title">${esc(item.id)}</div><div class="trace-meta"><span class="tag">${esc(item.skill)}</span>${actionBadge(item.action)}${(item.dependsOn||[]).map(value=>`<span class="tag">after ${esc(value)}</span>`).join("")}</div><pre>${esc(JSON.stringify({target:item.target,inputs:item.inputs,outputBindings:item.outputBindings,expectedOutputs:item.expectedOutputs},null,2))}</pre></article>`;
-document.getElementById("technicalOperations").innerHTML=operations.length?operations.map(technical).join(""):`<div class="technical-copy">No implementation operations are planned.</div>`;
 document.querySelectorAll(".nav-btn").forEach(button=>button.addEventListener("click",()=>{
   document.querySelectorAll(".nav-btn").forEach(node=>node.classList.toggle("active",node===button));
   document.querySelectorAll(".view").forEach(node=>node.classList.toggle("active",node.id===button.dataset.view));

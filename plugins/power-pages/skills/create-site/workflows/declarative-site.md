@@ -3,6 +3,13 @@
 Follow this workflow only after `create-site` routes the request to a Standard or Enhanced data
 model traditional site. The platform creates the baseline from a documented first-party template;
 the skill downloads that baseline rather than generating Power Pages metadata.
+Use the selected template for data-model/domain context and requirements interpretation only,
+not as a constraint on visual design, page composition, layout, branding, or modern presentation.
+Custom design and layout are required on the customization path, not an optional enhancement.
+Reuse needed native forms, lists, content snippets and other components inside that custom
+composition; do not deliver the starter layout with only different content, imagery or colors.
+Unneeded starter sections and component placements may be removed for the fresh composition;
+preserve required functionality and explicit user exceptions, not everything the template contains.
 Then coordinate a polished, image-rich design through the existing customization and styling
 owners, unless the user explicitly chooses to keep the bare template.
 Use approved direct HTTPS image URLs for image additions, not downloaded/imported Web Files.
@@ -160,6 +167,12 @@ Present the returned templates with the disclosure:
 > an environment-specific template-catalog API, so this may not include every template shown in
 > Power Pages design studio.
 
+Explain that selection determines the provisioned baseline and informs the site's domain/data
+requirements, not its final appearance. Template previews and starter layouts are references,
+not a visual commitment. Carry forward genuinely requested capabilities and content; customization
+may recompose supported native sections and establish a new identity without changing the data
+model or weakening platform contracts. Honor explicit user preservation preferences.
+
 > 🚦 **Gate (plan · create-site:declarative-2-select-template):** Select the exact supported template
 > identifier submitted to Create Website.
 >
@@ -215,6 +228,7 @@ Environment URL: <environmentUrl>
 Environment ID: <environmentId>
 Template: <template display name> (<templateName>)
 Template requirements: <requirements, or "None listed">
+Template role: Data/domain and requirements reference; final visual design is customizable
 Template catalog revision: <owner/repo>@<commitSha> (<releaseName or resolvedRef>)
 Site name: <siteName>
 Language LCID: <lcid>
@@ -444,14 +458,32 @@ On **Customize now**, tell the user:
 Then invoke `/customize-declarative-site` through the `Skill` tool and provide:
 
 - exact `PROJECT_ROOT` and declarative site root;
-- site name and selected template;
+- site name and selected template as data-model/domain and requirements context, not a visual
+  constraint; include genuinely requested capabilities/content and explicit preservation preferences;
 - environment URL;
 - `WEBSITE_RECORD_ID`;
 - configured base language;
 - the user's original site intent, when present;
+- the requirement for a custom modern page composition, layout, branding and presentation,
+  reusing needed native forms/lists/snippets rather than their surrounding starter layout.
+  Allow removal of unneeded starter sections and component placements within the approved scope,
+  without deleting backing records or discarding required capabilities.
+  Record it in the existing `summary` and
+  `newSiteDesign.composition` brief and carry it through `designContext`; do not default to retaining
+  the starter arrangement or ask for separate redesign permission merely because it differs;
+- any already established experience brief, brand source, primary action, and narrative intent;
+  let the customizer complete only missing decisions rather than asking for them again;
+- native-editing requirements: known layout recipes are defaults, not an exhaustive list.
+  Explicit broader safe local geometry carries a Studio-editing-unverified warning through
+  planning, authoring and verification; no automatic deployment or preview-component creation;
 - `creationIntent: "new-site"` and `verifiedBootstrapMajor: <BOOTSTRAP_VERSION>` with the inspected
   evidence; for the Standard path, include the user's explicit compatibility choice;
 - `previewNoticeShown: true` and `invocationSource: create-site`;
+- the requirement to include header branding, navigation styling and mobile treatment in the
+  existing customization plan, including an explicit website-appropriate logo or wordmark
+  decision. Pass any supplied approved logo and known brand requirements; replace an unsuitable
+  starter logo rather than inheriting it by default, and honor explicit preservation preferences.
+  Header work is part of the custom composition, not a replacement for page design;
 - `imageDelivery: "external-url"`: record this as `newSiteDesign.imageDelivery` and use direct
   approved HTTPS URLs for new images. Skip image staging/downloads, `author-web-file` image
   imports, and fabricated import dependencies. Retain source/license, alt text, sizing/crop,
@@ -459,6 +491,11 @@ Then invoke `/customize-declarative-site` through the `Skill` tool and provide:
 - the requirement for a coordinated design and meaningful images, unless the user explicitly
   declines imagery. The customizer records these decisions in `newSiteDesign`, not an existing-site
   preservation-only plan.
+
+The customization plan must include actual composition work for Home and the primary visitor
+journey, not only extra pages or CSS over the starter. Reuse the existing layout-planning reference
+to resolve component placements and native owner operations before plan approval. Explicitly
+preserved regions remain exceptions within their stated scope; they do not freeze the rest of the site.
 
 The customization skill owns its own plan approval, authoring-skill coordination, local
 verification, commits, and deployment handoff. Do not duplicate those phases here.

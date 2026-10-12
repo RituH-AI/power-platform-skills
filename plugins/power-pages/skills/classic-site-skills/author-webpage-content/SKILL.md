@@ -6,7 +6,8 @@ description: >-
   specification. Use whenever an orchestrator or author-webpage has already
   created the webpage metadata and asks to compose, replace, append, or modify
   the exact localized `.webpage.copy.html` file with Design Studio-compatible
-  sections, columns, text, images, buttons, videos, or spacers. This skill owns
+  sections, columns, flex containers, text, images, buttons, videos, iframes,
+  Generative AI Search components, or spacers. This skill owns
   only HTML generation and the supplied target file; author-webpage owns all
   webpage discovery, records, metadata, languages, routes, templates,
   navigation, and companion-file creation. Do not use for React, Angular, Vue,
@@ -41,10 +42,13 @@ Always read and follow:
 Read only the page-element references used by the requested composition:
 
 - `design-studio-section-layouts.md`
+- `design-studio-flex-container-component.md`
 - `design-studio-text-component.md`
 - `design-studio-image-component.md`
 - `design-studio-button-component.md`
 - `design-studio-video-component.md`
+- `design-studio-iframe-component.md`
+- `design-studio-generative-ai-search-component.md`
 - `design-studio-spacer-component.md`
 
 All page-element references are under:
@@ -56,6 +60,11 @@ ${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/
 These references own serialized section and component markup, editing
 boundaries, preservation, accessibility, and verification rules. Do not invent
 competing markup contracts.
+
+For an add or edit Generative AI Search component request, target only
+`{% codecomponent name:Pages.SearchSummary ... %}`. Do not substitute
+`{% include 'Search' %}`, a Search web template, Search content snippets, the
+Search Results page record, site markers, or search indexing/settings.
 
 ## Ownership boundary
 
@@ -108,9 +117,11 @@ Choose independently when safe:
 Stop before writing when a material choice remains unresolved, including:
 
 - multiple target files, target sections, or components;
-- an unknown section layout or component-to-column mapping;
-- missing visitor-facing text, image source, destination, alternative text, or
-  video title required by the selected component;
+- an unresolved section geometry or ambiguous component-to-column mapping, not merely
+  a layout name missing from the recipe examples;
+- missing Flex Container child mapping, visitor-facing text, image source, destination,
+  alternative text, video title, iframe title, or search behavior/text required by the
+  selected component;
 - an unresolved web-file URL, snippet name, or page destination;
 - a replacement that does not state what existing content must be preserved;
 - custom HTML whose safety or intended rendering boundary cannot be established.
@@ -125,6 +136,8 @@ Prefer a structured specification containing:
 - operation mode: `create`, `replace`, `append`, or `modify`;
 - ordered sections;
 - each section's supported layout and ordered elements by column;
+- optional explicit `columns[].span` values and intended wrapping/unused space; otherwise
+  resolve CSS-driven widths with the styling owner instead of guessing a preset;
 - resolved content, URLs, snippet names, and accessibility values;
 - explicit preservation requirements for an existing page.
 
@@ -132,6 +145,16 @@ The specification may be Markdown, YAML, JSON, or an unambiguous natural
 language plan. Normalize it internally according to the composition reference;
 do not require the user to rewrite a complete plan merely to match an example
 format.
+
+An approved new-site handoff requires custom composition using supported native sections,
+columns and elements, not just text/image substitutions. Follow its resolved composition and
+`designContext`, not the creation template's arrangement. Retain/place required existing components through the
+resolved-source rules in **Whole-page composition**, without inventing new native element types.
+Remove unneeded starter sections or component placements when the approved handoff accounts for
+their removal and dependencies. Do not retain them solely because they came with the template,
+hide them with CSS, or delete their backing records.
+Preserve required content/capabilities and native serialization as described in **Whole-page
+composition**; an unrelated existing-site `append` or `modify` remains a narrow edit.
 
 ## Workflow
 
@@ -190,7 +213,11 @@ For `append` or `modify`, follow **Existing-page operations**. Resolve exact
 structural boundaries before changing the file, preserve unrelated markup, and
 do not reserialize the entire page for a narrow edit.
 
-Use page-element examples only as serialization contracts. Replace every sample
+Use the section-layout reference's recipes as defaults, not exhaustive geometry constraints.
+Broader safe local layouts may proceed with **Studio editing compatibility unverified**
+disclosed in the existing review and final report. Other page-element serialization contracts
+remain unchanged; do not invent Studio controls, preview components, or an additional gate.
+Replace every sample
 value and marker with resolved plan values. Do not leave placeholder text,
 placeholder URLs, `<!-- COMPONENT_HTML -->`, TODOs, or unexplained empty
 components.
