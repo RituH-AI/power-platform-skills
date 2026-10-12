@@ -91,8 +91,9 @@ for (const [label, tile] of Object.entries(TILES)) {
 
 // A tile's height is its rowspan, counted in rows of the client's dashboard grid, and the client
 // draws a one-row tile as its title bar alone: no chart, no list. The platform's own dashboards give
-// chart and list tiles 12 rows. The build used to send `rowspan: 1` for every tile the spec did not
-// size, so a generated dashboard rendered as a column of title bars (live-verified). This pushes the
+// chart and list tiles 9 to 24 rows, most often 12, the default chosen here. The build used to send
+// `rowspan: 1` for every tile the spec did not size, so a generated dashboard rendered as a column of
+// title bars (live-verified). This pushes the
 // payload PRODUCTION builds, through `dashboardComponent`, and reads the cells the bundle wrote:
 //   <cell id="{…}" colspan="1" rowspan="12" showlabel="true"><labels>…</labels><control …>…</control></cell>
 test('REAL BUNDLE: a tile the spec does not size is pushed 12 rows tall, and a sized one keeps its size', async () => {

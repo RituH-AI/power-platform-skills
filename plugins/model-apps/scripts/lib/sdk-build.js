@@ -267,9 +267,10 @@ function dashboardTileOpts(spec, tile, result) {
 // payload through the real bundle.
 //
 // A tile's height is its rowspan, in rows of the client's dashboard grid. The client draws a one-row
-// tile as its title bar alone — no chart, no list — and the platform's own dashboards give chart and
-// list tiles 12 rows, so a tile the spec does not size gets 12. The default used to be 1, and every
-// tile of a generated dashboard rendered as a bare title bar (live-verified).
+// tile as its title bar alone — no chart, no list. The platform's own dashboards give chart and list
+// tiles 9 to 24 rows, most often 12, so a tile the spec does not size gets that common height. The
+// default used to be 1, and every tile of a generated dashboard rendered as a bare title bar
+// (live-verified).
 const DEFAULT_TILE_ROWSPAN = 12;
 function dashboardComponent(t, index) {
   const parameters = {};
