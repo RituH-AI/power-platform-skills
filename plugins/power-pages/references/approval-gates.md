@@ -616,7 +616,7 @@ When **removing** a gate, also remove its catalog row in the same PR.
 
 | ID | Kind | Category | Phase | Trigger / question | Cancel leaves |
 |---|---|---|---|---|---|
-| `audit-permissions:6.fix-offer` | gate | plan | 6 | Audit complete — *"Would you like me to fix any of these issues? Yes / No"* — declining leaves the audit report untouched; accepting routes to the table-permissions-architect agent | nothing |
+| `audit-permissions:6.fix-offer` | gate | plan | 6 | Audit complete — *"Would you like me to fix any of these issues? Yes / No"* — declining leaves the audit report untouched; accepting routes supported permission fixes to the table-permissions architect and unsupported standard/native metadata changes to an exact maker handoff | nothing |
 
 ---
 

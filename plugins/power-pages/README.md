@@ -315,11 +315,15 @@ Integrates Power Automate cloud flows into a Power Pages site. Discovers flows a
 
 > "Create web roles for my site"
 
-Generates web role YAML files in your `.powerpages-site` directory for managing user access.
+Generates web role YAML files for SPA and traditional sites. SPA sites retain the existing
+`.powerpages-site/web-roles/` workflow; traditional sites can use nested or directly opened PAC
+metadata.
 
 - Discovers existing roles before creating new ones
 - Generates proper UUIDs for each role
 - Enforces uniqueness constraints (one anonymous role, one authenticated role)
+- Preserves existing SPA prompts and caller-suppress behavior
+- Deploys through the correct SPA or declarative `/deploy-site` route
 
 #### `/setup-auth`
 
@@ -337,10 +341,16 @@ Adds login/logout functionality and role-based authorization to your site.
 
 > "Check my table permissions for security issues"
 
-Audits existing table permissions on a deployed or in-progress site by analyzing them against the site code and live Dataverse metadata. Produces a visual HTML audit report grouped by severity with suggested fixes.
+Audits existing table permissions on a deployed or in-progress SPA or traditional site by
+analyzing them against active site behavior and live Dataverse metadata. Traditional audits cover
+standard and enhanced PAC formats, native Forms/Lists, Liquid, Web API callers, web roles, and
+inherited webpage access rules. Produces a visual HTML audit report grouped by severity with
+suggested fixes.
 
 - Findings grouped as critical / warning / info / pass
-- Cross-references code usage, web roles, and Dataverse schema
+- Cross-references code or native-component usage, web roles, page access, and Dataverse schema
+- Detects native components with table-permission enforcement disabled
+- Preserves existing SPA audit phases, checks, report format, and fix prompt
 - Suggests concrete fixes for each issue
 
 #### `/scan-site`

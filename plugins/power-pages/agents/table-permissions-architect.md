@@ -92,6 +92,19 @@ before table permissions can be configured.
 
 Read all existing web roles and table permissions to understand the current state.
 
+For a traditional site, first run:
+
+```bash
+node "${PLUGIN_ROOT}/skills/audit-permissions/scripts/collect-traditional-permission-evidence.js" \
+  --projectRoot "<PROJECT_ROOT>"
+```
+
+Use its normalized roles and table permissions for both enhanced per-record metadata and standard
+`webrole.yml` / `adx_`-prefixed metadata. Retain `dataModelFormat` and each record's
+`sourceFormat`. If the format is `standard` or a target permission is `sourceFormat: standard`,
+the architect may analyze and propose a fix but must not prepare or execute enhanced-format
+creation scripts for that record.
+
 ### 2.1 Discover Web Roles
 
 Read all files in `.powerpages-site/web-roles/`:
@@ -100,7 +113,8 @@ Read all files in `.powerpages-site/web-roles/`:
 **/.powerpages-site/web-roles/*.yml
 ```
 
-For a traditional site, read `<siteRoot>/web-roles/*.yml` instead.
+For an enhanced traditional site, read `<siteRoot>/web-roles/*.yml`. For a standard traditional
+site, use the collector's normalized records from `<siteRoot>/webrole.yml`.
 
 Each web role file has this format:
 
@@ -113,7 +127,10 @@ name: Authenticated Users
 
 Compile a list of all web roles with their `id`, `name`, and flags. You will need the role IDs to associate table permissions with roles.
 
-**If no web roles exist:** You will need to create them in Step 6 before creating table permissions. At minimum, plan to create `Anonymous Users` (with `anonymoususersrole: true`) and `Authenticated Users` (with `authenticatedusersrole: true`) using the `create-web-role.js` script. Note these as proposed roles in the plan (Step 5).
+**If no web roles exist:** You will need them before creating table permissions. At minimum, plan
+for `Anonymous Users` and `Authenticated Users`. Use `create-web-role.js` only for code-site or
+enhanced traditional metadata. For standard aggregate `webrole.yml`, return the exact maker/manual
+role creation instead. Note the proposed roles and creation path in the plan (Step 5).
 
 ### 2.2 Discover Existing Table Permissions
 
@@ -123,7 +140,8 @@ Read all files in `.powerpages-site/table-permissions/`:
 **/.powerpages-site/table-permissions/*.tablepermission.yml
 ```
 
-For a traditional site, read `<siteRoot>/table-permissions/*.tablepermission.yml` instead.
+For a traditional site, read `<siteRoot>/table-permissions/*.tablepermission.yml` and use the
+collector to normalize either stripped enhanced fields or `adx_`-prefixed standard fields.
 
 Each table permission file has this format (code site / git format — fields alphabetically sorted, `adx_` prefix stripped except for M2M relationships):
 
@@ -440,7 +458,10 @@ For each permission, include:
   - One entry per **enabled** privilege explaining why it is necessary (e.g., `read`: "Products must be visible for catalog browsing", `append`: "Referenced by orders via a lookup column — other records link to this table")
   - Omit keys for disabled privileges — only explain what is turned on
 
-For each permission, prepare the exact `create-table-permission.js` script invocation that will be used in Step 6:
+For each code-site or enhanced-format permission, prepare the exact
+`create-table-permission.js` script invocation that will be used in Step 6. For standard-format
+records, present the exact maker/manual remediation instead; do not prepare an incompatible
+enhanced-format command.
 
 **For Global/Contact/Account/Self scope:**
 
@@ -472,15 +493,20 @@ Prepare the JSON data file and run the render script following the data format r
 
 Prepare for the plan mode message. Include:
 
-1. **Summary table** of all table permission files to be created:
+1. **Summary table** of all proposed table permissions. For code-site or enhanced-format
+   metadata, identify the files to be created. For standard-format metadata, label every row
+   maker/manual remediation and do not imply that files will be written:
 
    | Permission Name | Table | Scope | Web Role | CRUD |
    |----------------|-------|-------|----------|------|
    | `Product - Read` | `cra5b_product` | Global | Anonymous Users, Authenticated Users | R |
    | `Order - Authenticated Access` | `cra5b_order` | Contact | Authenticated Users | RCWD |
 
-2. **New web roles needed** — List any web roles that need to be created (the script will generate UUIDs)
-3. **Script invocations** — The exact `create-table-permission.js` commands for each permission (from section 5.1)
+2. **New web roles needed** — List any web roles that need to be created. State whether the
+   deterministic script will generate UUIDs or standard-format maker/manual creation is required.
+3. **Implementation actions** — For code-site or enhanced-format metadata, include the exact
+   `create-table-permission.js` commands from section 5.1. For standard-format metadata, include
+   only the exact maker/manual remediation and explicitly state that no script will run.
 4. **HTML plan file location** — Tell the user where the detailed plan file was saved
 5. **Any discovery steps skipped** due to auth errors
 
@@ -494,7 +520,8 @@ Use `EnterPlanMode` to present the complete proposal (sections 5.1 and 5.3) to t
 
 After the user approves the plan:
 
-1. **Create web roles** if the plan identified missing web roles. Use the `create-web-role.js` script from the create-webroles skill:
+1. **Create web roles** if the plan identified missing web roles. For code-site or enhanced
+   traditional metadata, use the `create-web-role.js` script from the create-webroles skill:
 
 ```bash
 node "${PLUGIN_ROOT}/skills/create-webroles/scripts/create-web-role.js" --projectRoot "<PROJECT_ROOT>" --name "<Role Name>" [--anonymous] [--authenticated]
@@ -502,7 +529,13 @@ node "${PLUGIN_ROOT}/skills/create-webroles/scripts/create-web-role.js" --projec
 
 Capture the JSON output (`{ "id": "<uuid>", "filePath": "<path>" }`) — you need the `id` for `--webRoleIds` in table permissions.
 
-1. **Create table permissions** using `create-table-permission.js`. Process **parent permissions before child permissions** (children need the parent's UUID from JSON output).
+For standard aggregate `webrole.yml`, do not run this script; return the approved maker/manual
+role creation path instead.
+
+1. **Create table permissions** using `create-table-permission.js` only for code-site or enhanced
+   traditional metadata. Process **parent permissions before child permissions** (children need
+   the parent's UUID from JSON output). For standard-format metadata, stop after the approved plan
+   and return the exact maker/manual remediation; do not change serialization formats.
 
 Run each script invocation prepared in section 5.1:
 
@@ -530,10 +563,13 @@ If this local validation reports relationship or schema problems, stop and revis
 
 ## Step 7: Return Summary
 
-After creating all files, return a summary to the calling context:
+After executing the approved supported changes, or completing the standard-format plan-only
+handoff, return a summary to the calling context:
 
-1. **Web Roles Created** — List of new web roles with their UUIDs and file paths
-2. **Table Permissions Created** — List of permissions with their UUIDs and file paths
+1. **Web Roles** — List created roles with UUIDs/file paths, or standard-format roles requiring
+   maker/manual creation
+2. **Table Permissions** — List created permissions with UUIDs/file paths, or standard-format
+   permissions requiring maker/manual remediation
 3. **Plan File** — Path to the HTML permissions plan file
 4. **Issues** — Any errors encountered during file creation
 
@@ -544,7 +580,10 @@ After creating all files, return a summary to the calling context:
 - **No Administrators permissions by default**: Do NOT create table permissions for the `Administrators` web role unless the user explicitly asks for them. Administrators already have highly privileged access, so adding CRUD table permissions for them is unnecessary and creates security noise. If the user specifically requests Administrators permissions, include them in the plan — otherwise omit them entirely.
 - **No manual YAML writes**: Do NOT use `Write` or `Edit` to create YAML files in `.powerpages-site/`. Always use the deterministic scripts (`create-table-permission.js`, `create-web-role.js`) via `Bash`.
 - **Traditional direct-root writes use the same scripts**: When `siteType: declarative` resolves
-  directly to a PAC root, do not create YAML manually under `<siteRoot>/`.
+  directly to an enhanced PAC root, do not create YAML manually under `<siteRoot>/`.
+- **Standard traditional metadata stays plan-only**: Aggregate `webrole.yml` or `adx_`-prefixed
+  table permissions are not compatible with the enhanced-format creation scripts. Analyze them,
+  but return a maker/manual remediation rather than writing or converting those records.
 - **No manual HTML generation**: Do NOT use `Write` or `Edit` to create the `permissions-plan.html` file directly. ALWAYS use `render-permissions-plan.js` with a JSON data file as described in Step 5.2. The only files you may write directly are the temporary JSON data file for the render script.
 - **LOOKUP COLUMNS REQUIRE APPENDTO/APPEND**: When a table has `create` or `write` permissions AND has lookup columns to other tables, the source table (with the lookup) MUST have `appendto: true` and each target table (referenced by the lookup) MUST have `append: true`. Missing these causes "You don't have permission to associate or disassociate" errors. Always query Dataverse for lookup columns (Step 4.3) to detect these requirements.
 - **No speculative scope rewrites**: Never convert Parent scope to Contact/Account scope (or vice versa) based only on a runtime Web API failure or a guessed internal Power Pages behavior. Require deterministic code evidence plus Dataverse relationship evidence on the exact table being secured.
