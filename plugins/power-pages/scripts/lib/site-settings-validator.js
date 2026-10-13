@@ -1,6 +1,7 @@
 const path = require('path');
 const { SITE_SETTING_FILE_SUFFIX, loadYamlRecordsWithErrors, listYamlFiles } = require('./powerpages-config');
 const { addFinding, findUnexpectedKeys, findMissingKeys, summarize } = require('./powerpages-validation-utils');
+const { resolvePowerPagesSiteRoot } = require('./validation-helpers');
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const WEB_API_FIELDS_SETTING_REGEX = /^Webapi\/[^/]+\/fields$/i;
@@ -21,7 +22,8 @@ const SITE_SETTING_REQUIRED_KEYS = new Set([
 
 function validateSiteSettings(projectRoot) {
   const findings = [];
-  const siteSettingsDir = path.join(projectRoot, '.powerpages-site', 'site-settings');
+  const siteRoot = resolvePowerPagesSiteRoot(projectRoot);
+  const siteSettingsDir = siteRoot && path.join(siteRoot, 'site-settings');
 
   for (const filePath of listYamlFiles(siteSettingsDir)) {
     const fileName = path.basename(filePath);

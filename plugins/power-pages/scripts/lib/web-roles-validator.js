@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { WEB_ROLE_FILE_SUFFIX, listYamlFiles } = require('./powerpages-config');
 const { addFinding, findUnexpectedKeys, findMissingKeys, summarize } = require('./powerpages-validation-utils');
+const { resolvePowerPagesSiteRoot } = require('./validation-helpers');
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const WEB_ROLE_ALLOWED_KEYS = new Set([
@@ -59,7 +60,8 @@ function loadWebRoles(webRolesDir) {
 
 function validateWebRoles(projectRoot) {
   const findings = [];
-  const webRolesDir = path.join(projectRoot, '.powerpages-site', 'web-roles');
+  const siteRoot = resolvePowerPagesSiteRoot(projectRoot);
+  const webRolesDir = siteRoot && path.join(siteRoot, 'web-roles');
 
   for (const filePath of listYamlFiles(webRolesDir)) {
     const fileName = path.basename(filePath);

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Creates a site setting YAML file for Power Pages code sites.
+// Creates a site setting YAML file for Power Pages SPA or traditional sites.
 // Generates UUID, validates inputs, writes correctly-formatted YAML.
 //
 // Usage:
@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const generateUuid = require('./generate-uuid');
 const { loadSiteSettings, SITE_SETTING_FILE_SUFFIX } = require('./lib/powerpages-config');
+const { resolvePowerPagesSiteRoot } = require('./lib/validation-helpers');
 
 // --- CLI arg parsing (same pattern as update-skill-tracking.js) ---
 
@@ -79,10 +80,11 @@ if (isWebApiFieldsSetting && hasWildcardField) {
   process.exit(1);
 }
 
-const siteSettingsDir = path.join(projectRoot, '.powerpages-site', 'site-settings');
-if (!fs.existsSync(siteSettingsDir)) {
-  console.error(`Error: Site settings directory not found at ${siteSettingsDir}`);
-  console.error('The site must be deployed at least once before site settings can be created.');
+const siteRoot = resolvePowerPagesSiteRoot(projectRoot);
+const siteSettingsDir = siteRoot && path.join(siteRoot, 'site-settings');
+if (!siteSettingsDir || !fs.existsSync(siteSettingsDir)) {
+  console.error(`Error: Site settings directory not found for project root ${projectRoot}`);
+  console.error('The site must have downloaded or deployed Power Pages metadata before site settings can be created.');
   process.exit(1);
 }
 

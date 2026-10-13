@@ -1,6 +1,7 @@
 const path = require('path');
 const { TABLE_PERMISSION_FILE_SUFFIX, loadYamlRecordsWithErrors, listYamlFiles } = require('./powerpages-config');
 const { addFinding, findUnexpectedKeys, findMissingKeys, summarize } = require('./powerpages-validation-utils');
+const { resolvePowerPagesSiteRoot } = require('./validation-helpers');
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BOOLEAN_FIELDS = ['append', 'appendto', 'create', 'delete', 'read', 'write'];
@@ -53,7 +54,8 @@ function validateTablePermissions(projectRoot, options = {}) {
 
 function validateTablePermissionsWithOptions(projectRoot, options = {}) {
   const findings = [];
-  const tablePermissionsDir = path.join(projectRoot, '.powerpages-site', 'table-permissions');
+  const siteRoot = resolvePowerPagesSiteRoot(projectRoot);
+  const tablePermissionsDir = siteRoot && path.join(siteRoot, 'table-permissions');
 
   for (const filePath of listYamlFiles(tablePermissionsDir)) {
     const fileName = path.basename(filePath);

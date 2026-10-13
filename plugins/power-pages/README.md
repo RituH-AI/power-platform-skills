@@ -236,9 +236,25 @@ Router skill that analyzes your business problem and recommends the right backen
 
 > "Connect my site to the Dataverse tables"
 
-Orchestrates the full Web API integration lifecycle — from analyzing your site's code to identify where data is needed, through generating typed API code for each table, to configuring table permissions and site settings so the APIs work in production.
+Orchestrates the full Dataverse integration lifecycle for SPA and traditional sites. Invoke it
+with a specific request, or with no arguments to discover and select integration opportunities.
 
-The skill first scans your codebase to find components using mock data, placeholder fetch calls, or hardcoded arrays, then maps them to your Dataverse tables. It processes each table sequentially, spawning a dedicated **Web API Integration** agent that creates the integration code. After all tables are wired up, a **Table Permissions** agent proposes CRUD permissions and scopes, and a **Web API Settings** agent proposes site settings with case-sensitive validated column names queried directly from Dataverse — or you can upload your own permissions diagram instead.
+For SPA sites, the skill scans the codebase for components using mock data, placeholder fetch
+calls, or hardcoded arrays, then maps them to Dataverse tables. It processes the first table
+sequentially because that creates the shared client, then processes remaining tables in parallel
+with dedicated **Web API Integration** agents. After the tables are wired up, a
+**Table Permissions** agent proposes CRUD permissions and scopes, and a **Web API Settings** agent
+proposes site settings with case-sensitive validated column names queried directly from
+Dataverse — or you can upload your own permissions diagram instead.
+
+For traditional sites, it inspects active Forms, Advanced Forms, Lists, Liquid, Web Templates,
+webpages, JavaScript Web Files, settings, and permissions. It reuses native components when they
+already satisfy the requirement and adds Web API JavaScript only when custom client behavior is
+necessary.
+
+Both routes present an implementation and least-privilege security plan before changes. The
+**Table Permissions** and **Web API Settings** agents resolve exact Dataverse metadata and propose
+permissions, scopes, roles, and explicit case-sensitive field allowlists.
 
 **What gets created:**
 
@@ -246,12 +262,14 @@ The skill first scans your codebase to find components using mock data, placehol
 - TypeScript entity types and domain mappers per table
 - CRUD service layer per table using `/_api/` endpoints with dual token headers and `@odata.bind` for lookups
 - Framework-specific patterns: React hooks, Vue composables, Angular injectable services
+- Traditional-site Liquid, JavaScript Web Files, or caller updates when native components are not sufficient
 - Table permission YAML files and site setting YAML files with explicit validated column lists
 
 **What gets updated:**
 
 - Existing components are refactored to use real API calls (mock data and placeholder fetches are replaced)
-- `.powerpages-site/table-permissions/` and `.powerpages-site/site-settings/` directories are populated for deployment
+- SPA `.powerpages-site/table-permissions/` and `.powerpages-site/site-settings/` metadata receives
+  the approved changes; traditional sites may use nested or directly opened PAC metadata
 
 #### `/add-ai-webapi`
 

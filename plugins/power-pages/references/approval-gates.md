@@ -566,7 +566,7 @@ When **removing** a gate, also remove its catalog row in the same PR.
 
 | ID | Kind | Category | Phase | Trigger / question | Cancel leaves |
 |---|---|---|---|---|---|
-| `integrate-webapi:3.2.confirm-tables` | gate | plan | 3.2 | *"Which tables to integrate? All / Let me select / Add more"* | nothing |
+| `integrate-webapi:3.2.confirm-tables` | gate | plan | 3.2 | SPA: *"Which tables to integrate? All / Let me select / Add more"*; Traditional: approve the focused plan or select discovered native/Web API opportunities | nothing |
 | `integrate-webapi:6.1.deploy-first` | gate | plan | 6.1 | `.powerpages-site` missing — *"Deploy now (Recommended) / Skip permissions setup"* | nothing |
 | `integrate-webapi:6.2.permissions-source` | gate | plan | 6.2 | *"Upload existing diagram / Let architects figure it out"* | nothing |
 | `integrate-webapi:6.2.permissions-approval` | gate | plan | 6.2 (Path A) | Parsed permissions plan rendered — *"Approve and create files / Request changes / Cancel"* | nothing |

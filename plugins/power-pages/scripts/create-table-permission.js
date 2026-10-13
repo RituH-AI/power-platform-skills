@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Creates a table permission YAML file for Power Pages code sites.
+// Creates a table permission YAML file for Power Pages SPA or traditional sites.
 // Generates UUID, validates inputs, writes correctly-formatted YAML in code site git format.
 //
 // Usage:
@@ -20,6 +20,7 @@ const fs = require('fs');
 const path = require('path');
 const generateUuid = require('./generate-uuid');
 const { loadTablePermissions, TABLE_PERMISSION_FILE_SUFFIX } = require('./lib/powerpages-config');
+const { resolvePowerPagesSiteRoot } = require('./lib/validation-helpers');
 
 // --- CLI arg parsing ---
 
@@ -148,10 +149,11 @@ if ((scopeCode === 756150000 || scopeCode === 756150004) &&
 }
 
 // Validate target directory
-const tablePermissionsDir = path.join(projectRoot, '.powerpages-site', 'table-permissions');
-if (!fs.existsSync(tablePermissionsDir)) {
-  console.error(`Error: Table permissions directory not found at ${tablePermissionsDir}`);
-  console.error('The site must be deployed at least once before table permissions can be created.');
+const siteRoot = resolvePowerPagesSiteRoot(projectRoot);
+const tablePermissionsDir = siteRoot && path.join(siteRoot, 'table-permissions');
+if (!tablePermissionsDir || !fs.existsSync(tablePermissionsDir)) {
+  console.error(`Error: Table permissions directory not found for project root ${projectRoot}`);
+  console.error('The site must have downloaded or deployed Power Pages metadata before table permissions can be created.');
   process.exit(1);
 }
 

@@ -3,10 +3,12 @@ name: integrate-webapi
 description: >-
   Integrates Power Pages Web API into a site's frontend code with proper permissions and
   deployment. Orchestrates the full integration lifecycle: code integration, table permissions
-  setup, and deployment for Dataverse CRUD operations. Use when the user wants to add Web API
-  calls, connect to Dataverse, or add data fetching to their frontend.
+  setup, and deployment for Dataverse CRUD operations. Also supports PAC-downloaded traditional
+  sites by preferring native Forms, Lists, and Liquid before custom Web API JavaScript. Use when
+  the user wants to add Web API calls, connect to Dataverse, add data fetching to their frontend,
+  or integrate a traditional page with Dataverse.
 user-invocable: true
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Skill, Task, TaskCreate, TaskUpdate, TaskList
 model: opus
 ---
 
@@ -14,7 +16,33 @@ model: opus
 
 # Integrate Web API
 
-Integrate Power Pages Web API into a code site's frontend. This skill orchestrates the full lifecycle: analyzing where integrations are needed, implementing API client code for each table, configuring permissions and site settings, and deploying the site.
+Integrate a Power Pages site with Dataverse. SPA sites retain the framework-specific client,
+service, and hook workflow. Traditional sites use native Forms, Lists, and Liquid first, adding
+Web API JavaScript only when the requested client interaction requires it.
+
+## Site Type Routing
+
+Before reading or executing the workflow below, perform the existing SPA project lookup first:
+
+- Look for `powerpages.config.json` in the current directory or immediate subdirectories using the
+  existing file-search patterns.
+- If found, continue with the existing SPA workflow below. Do not run any traditional-site
+  detection or change the SPA phases, prompts, gates, generated files, or deployment behavior.
+- Only when that existing SPA lookup finds no `powerpages.config.json`, run:
+
+  ```bash
+  node "${PLUGIN_ROOT}/scripts/lib/detect-project-context.js"
+  ```
+
+- If it returns `siteType: "declarative"`, read and follow the complete seven-phase workflow in
+  `${PLUGIN_ROOT}/skills/integrate-webapi/references/traditional-site-workflow.md`. Do not execute
+  any of the SPA workflow below.
+- Otherwise, continue to Phase 1 and preserve its existing not-found handling.
+
+The traditional route supports request-focused and discovery invocation as defined in its
+workflow reference. SPA invocation semantics remain those defined by the existing workflow below.
+
+---
 
 ## Core Principles
 

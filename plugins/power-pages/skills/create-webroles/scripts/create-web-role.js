@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Creates a web role YAML file for Power Pages code sites.
+// Creates a web role YAML file for Power Pages SPA or traditional sites.
 // Generates UUID, validates inputs, writes correctly-formatted YAML.
 //
 // Usage:
@@ -14,6 +14,15 @@
 const fs = require('fs');
 const path = require('path');
 const generateUuid = require(path.join(__dirname, '..', '..', '..', 'scripts', 'generate-uuid'));
+const { resolvePowerPagesSiteRoot } = require(path.join(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  'scripts',
+  'lib',
+  'validation-helpers'
+));
 
 // --- CLI arg parsing ---
 
@@ -40,10 +49,11 @@ if (!projectRoot || !roleName) {
   process.exit(1);
 }
 
-const webRolesDir = path.join(projectRoot, '.powerpages-site', 'web-roles');
-if (!fs.existsSync(webRolesDir)) {
-  console.error(`Error: Web roles directory not found at ${webRolesDir}`);
-  console.error('The site must be deployed at least once before web roles can be created.');
+const siteRoot = resolvePowerPagesSiteRoot(projectRoot);
+const webRolesDir = siteRoot && path.join(siteRoot, 'web-roles');
+if (!webRolesDir || !fs.existsSync(webRolesDir)) {
+  console.error(`Error: Web roles directory not found for project root ${projectRoot}`);
+  console.error('The site must have downloaded or deployed Power Pages metadata before web roles can be created.');
   process.exit(1);
 }
 
