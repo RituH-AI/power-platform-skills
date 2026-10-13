@@ -14,7 +14,16 @@ function dataDisclosure(plugin) {
         "   eventInfo.aadObjectId when PAC exposes it, and the SPA framework of the\n" +
         "   Power Pages code site being worked in as eventInfo.framework when detected.\n" +
         "   The framework is one of react, vue, angular, or astro and describes the\n" +
-        "   scaffold only — it is never a site name or path.\n"
+        "   scaffold only — it is never a site name or path.\n" +
+        "   Non-SPA creation also records template_used and classic_creation_success\n" +
+        "   or classic_creation_failure with a shared correlationId, public catalog\n" +
+        "   eventInfo.templateId, eventInfo.templateKind (non-spa), optional\n" +
+        "   eventInfo.audience (internal/external), and a fixed failure category.\n" +
+        "   Success means a validated, committed downloaded baseline, not customization.\n" +
+        "   Private correlation receipts remain in telemetry/power-pages/classic-creations\n" +
+        "   under the config directory even when transmission is off. They contain the\n" +
+        "   selected public catalog revision, common context and terminal marker; receipts\n" +
+        "   older than 14 days are pruned on a later selection. Hard-off writes none.\n"
       : plugin === "model-apps"
         ? "   Model Apps excludes the signed-in user's Entra object ID.\n"
         : "";

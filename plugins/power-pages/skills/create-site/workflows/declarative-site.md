@@ -195,6 +195,36 @@ use those same values; never resolve `latest-release` again after template selec
 Show the selected template's description, capabilities, requirements, and warning from the helper
 result. Do not rewrite or duplicate this metadata in the workflow.
 
+### Record the selected template
+
+Keep the selected entry's catalog `id` as `TEMPLATE_ID`, separately from API `TEMPLATE_NAME`.
+After the user selects a valid template, record the selection through the existing telemetry
+transport:
+
+```bash
+node "${PLUGIN_ROOT}/scripts/emit-classic-creation-telemetry.js" --eventName template_used --templateId "<TEMPLATE_ID>" --catalogSha "<CATALOG_SHA>"
+```
+
+Retain the returned `correlationId` as `CREATION_CORRELATION_ID` in the conversation's creation
+resume context. On repeated selection calls for the **same unfinished creation**, append
+`--correlationId "<CREATION_CORRELATION_ID>"`; do not generate another ID. The helper validates
+membership in the already-cached traditional catalog, saves a private receipt outside the site
+tree, and reuses context without additional PAC calls at completion. If audience is already known
+to be `internal` or `external`, append `--audience "<audience>"`; otherwise omit it. Do not ask
+another question or infer audience from the catalog's maker personas. Pass `--sessionId` only
+when the host conversation ID is already available, never a site identifier.
+
+Keep the same correlation across polling, authentication repair, download retries, parameter
+correction and resume of this unfinished creation. A different selected template/catalog revision
+or an intentional new attempt after a **recorded terminal outcome** needs a new selection ID.
+Retain any accepted provisioning operation separately: a new telemetry ID never authorizes a
+second POST. Never put these receipts in the downloaded project, Git baseline, or status HTML.
+
+Treat telemetry as best-effort: `{ "ok": false }`, a skipped result, or a command failure does not
+block, restart, or otherwise change creation. If no correlation was returned, omit later creation
+events rather than invent a result-only ID. Do not re-fetch the catalog or retry telemetry to fix
+a recording failure. Existing default skill telemetry is unchanged.
+
 ## Phase 3: Gather Site and Destination Configuration
 
 <!-- not-a-gate: creation parameters are data gathering; Phase 4 is the final cloud-mutation gate -->
@@ -340,6 +370,28 @@ If status-page rendering fails before submission, repair it before the POST. If 
 after the request was accepted, report the status-page error but continue polling the accepted
 operation; a presentation failure must never cause a second creation POST.
 
+### Record only an observed terminal creation failure
+
+For any phase after template selection **before baseline success**, emit the following once only when an
+observed error ends this creation attempt, after applicable retries/repair have ended:
+
+```bash
+node "${PLUGIN_ROOT}/scripts/emit-classic-creation-telemetry.js" --eventName classic_creation_failure --correlationId "<CREATION_CORRELATION_ID>" --errorClass "<errorClass>"
+```
+
+Use only these fixed classes: `Configuration` (invalid creation settings), `Authentication`
+(unresolved authentication/permission rejection), `TemplateCatalog` (selected template unavailable),
+`Provisioning` (terminal API failure), `ModelVerification` (identity/model cannot be verified),
+`Download` (download exhausted), `Validation` (downloaded identity/assets/Bootstrap or final
+validator fails), `GitBaseline` (Git initialization/commit fails), or `Unknown` (other observed
+terminal creation error). Never pass error messages, CLI output, names, URLs, paths, or IDs.
+
+Do **not** emit failure for Cancel, awaiting input, `Running`/accepted operations, a polling timeout
+with an unresolved operation, recoverable retries, an interrupted session, or a status-page-only
+error while creation continues. An unknown result stays unknown. Do not use status-renderer calls
+or Skill hooks as success/failure evidence, and do not count later customization/deployment errors
+as creation failures. If recording fails, report the original creation error, not a telemetry error.
+
 ## Phase 6: Verify and Download
 
 Update the status page before website identity lookup:
@@ -416,6 +468,17 @@ Run the validator again after Git initialization.
 ```bash
 node "${PLUGIN_ROOT}/skills/create-site/scripts/validate-site.js" --projectRoot "<projectRoot>" --websiteRecordId "<websiteRecordId>" --bootstrapVersion "<BOOTSTRAP_VERSION>"
 ```
+
+Only after explicit-model/identity verification, download, Bootstrap/assets validation, the Git
+baseline commit, and this final validator have **all succeeded**, record baseline completion:
+
+```bash
+node "${PLUGIN_ROOT}/scripts/emit-classic-creation-telemetry.js" --eventName classic_creation_success --correlationId "<CREATION_CORRELATION_ID>"
+```
+
+Use the saved selection correlation; skip this call if it is unavailable. The helper allows only
+one terminal outcome per correlation. API acceptance/provisioning alone is not creation success.
+Recording is nonblocking and happens before optional customization, not after it.
 
 After the final validator succeeds, update the status page with terminal status `ready`. Include
 the service-returned or independently verified HTTPS site URL through `--siteUrl` and include the

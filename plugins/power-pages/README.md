@@ -711,6 +711,13 @@ This plugin sends usage telemetry by default to help Microsoft improve it.
 Events include skill name, plugin/PAC/agent versions, OS/Node versions, session and correlation IDs, and, when PAC is signed in, the Dataverse organization GUID and Entra tenant GUID.
 When PAC exposes the signed-in user's Entra object ID, Power Pages stores it under `eventInfo.aadObjectId`; otherwise that field is omitted.
 When you are working in a Power Pages code site, the site's SPA framework (`react`, `vue`, `angular`, or `astro`) is recorded under `eventInfo.framework`; that field is omitted otherwise. It names the scaffold only, never your site or its location.
+Non-SPA site creation additionally records `template_used`, `classic_creation_success`, or
+`classic_creation_failure` using one creation `correlationId`. These events include only the
+public catalog `templateId`, `templateKind: "non-spa"`, and optional already-known audience
+(`internal` or `external`) beyond the existing common context. A failure adds a fixed error
+category, never the error text. Success means the downloaded identity/model, Bootstrap/assets,
+Git baseline commit, and final validation succeeded, before optional design customization.
+Cancellation, unresolved operations, and later customization errors are not creation failures.
 Events do not include file paths, prompts, tool inputs, site names, Dataverse URLs, credentials, usernames, or hostnames.
 
 **Turn it on or off (per-user, applies to every project):**
@@ -729,6 +736,15 @@ so you can see exactly what would have been sent; delete it anytime. Run
 `/power-pages:telemetry status` to see the logs directory and the most recent
 session file. The setting is stored at `~/.power-platform-skills/config.json`
 (`{ "telemetry": { "power-pages": "off" } }`).
+
+Classic creation also keeps a private correlation receipt under
+`~/.power-platform-skills/telemetry/power-pages/classic-creations/<correlationId>/`
+to join selection and outcome across retries/resume and suppress duplicate calls. It holds the
+selected public catalog ID/revision, audience when known, originating session/common event context,
+cloud-routing stamp, and terminal event marker; it never goes into the site or Git baseline.
+Receipts older than 14 days are pruned best-effort on a subsequent selection. You can delete them
+anytime, but a resumed run then cannot attribute its outcome. Hard-disabled telemetry writes
+neither receipts nor the diagnostic mirror.
 
 For automation / CI, set the per-plugin opt-out environment variable instead of
 editing that file:
