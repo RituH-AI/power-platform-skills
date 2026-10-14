@@ -176,6 +176,25 @@ test('portable MCP configuration adds the schema, portable transport type, and u
     }
   );
 
+  assert.throws(
+    () => expectedPortableMcp({
+      mcpServers: {
+        docs: { type: 'http', url: 'https://example.com/docs' },
+        'local-plugin-docs': { type: 'http', url: 'https://example.com/plugin-docs' },
+      },
+    }, 'local-plugin'),
+    /legacy MCP server names collide at portable name "local-plugin-docs"/
+  );
+
+  const collisionRoot = fixture(OPEN_REMOTE, LEGACY_REMOTE);
+  writeJson(path.join(collisionRoot, 'plugins', 'local-plugin', '.mcp.json'), {
+    mcpServers: {
+      docs: { type: 'http', url: 'https://example.com/docs' },
+      'local-plugin-docs': { type: 'http', url: 'https://example.com/plugin-docs' },
+    },
+  });
+  assert.ok(validate(collisionRoot).some((error) => /legacy MCP server names collide/.test(error)));
+
   const root = fixture(OPEN_REMOTE, LEGACY_REMOTE);
   fs.rmSync(path.join(root, 'plugins', 'local-plugin', 'mcp.json'));
   assert.ok(validate(root).some((error) => /missing root mcp\.json/.test(error)));

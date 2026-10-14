@@ -19,7 +19,7 @@ Parse `$ARGUMENTS` for: environment ID, flow ID, run ID.
 ## Tools
 
 This skill uses the **FlowAgent MCP tools**, referred to by bare name (clients
-surface them as `mcp__flowagent__<tool>` in Claude Code or `flowagent-<tool>` in
+surface them as `mcp__flowagent__<tool>` in Claude Code or `power-automate-flowagent-<tool>` in
 Copilot CLI). If no MCP tools are present, the plugin is not wired up — run the `setup` skill.
 
 ## Workflow

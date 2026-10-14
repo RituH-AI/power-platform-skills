@@ -115,7 +115,7 @@ Run `/configure-canvas-mcp`, or ask:
 
 ## Technical reference
 
-You do not need to call MCP tools directly - this section is here for reference only. In VS Code, open Chat in Agent mode and select **Configure Tools** to review the tools provided by `canvas-authoring`.
+You do not need to call MCP tools directly - this section is here for reference only. In VS Code, open Chat in Agent mode and select **Configure Tools** to review the tools provided by `canvas-apps-canvas-authoring` (or `canvas-authoring` in legacy hosts).
 
 | Tool | What it does |
 |------|--------------|
@@ -163,7 +163,7 @@ For more information, see:
 
 | Problem | What to do |
 |---------|------------|
-| **The `canvas-authoring` tools do not appear** | Confirm that the plugin is installed and enabled, then restart or reload your coding agent. In VS Code Chat, select **Configure Tools** and find `canvas-authoring`. If **Update Tools** fails, review the server error and the package-download guidance above. |
+| **The Canvas Authoring tools do not appear** | Confirm that the plugin is installed and enabled, then restart or reload your coding agent. In VS Code Chat, select **Configure Tools** and find `canvas-apps-canvas-authoring` (or `canvas-authoring` in legacy hosts). If **Update Tools** fails, review the server error and the package-download guidance above. |
 | **Connection fails after you provide the Studio URL** | Copy the URL from the app's edit session in Power Apps Studio, not from the app player or the Power Apps home page. Confirm that the app is saved, coauthoring is enabled, and the Studio tab remains open and signed in. |
 | **Sign-in fails or uses the wrong account** | Retry the connection and choose the correct organizational account. If your host offers connection options, select browser sign-in or provide the account email as a login hint. |
 | **Access is denied or coauthoring is unavailable** | Confirm that your account can edit the app. Ask your Power Platform administrator whether coauthoring is enabled for the app and environment, and whether organizational policies block third-party MCP servers. |

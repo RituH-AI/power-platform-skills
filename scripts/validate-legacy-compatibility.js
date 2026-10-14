@@ -57,18 +57,21 @@ function portableMetadata(manifest) {
 }
 
 function expectedPortableMcp(legacyMcp, pluginName) {
-  const servers = Object.fromEntries(
-    Object.entries(legacyMcp.mcpServers || {}).map(([name, server]) => {
-      const type = server.type === 'http'
-        ? 'streamable-http'
-        : server.type || (server.url ? 'streamable-http' : 'stdio');
-      const { type: ignoredType, ...configuration } = server;
-      const portableName = name === pluginName || name.startsWith(`${pluginName}-`)
-        ? name
-        : `${pluginName}-${name}`;
-      return [portableName, { type, ...configuration }];
-    })
-  );
+  const servers = {};
+  for (const [name, server] of Object.entries(legacyMcp.mcpServers || {})) {
+    const type = server.type === 'http'
+      ? 'streamable-http'
+      : server.type || (server.url ? 'streamable-http' : 'stdio');
+    const { type: ignoredType, ...configuration } = server;
+    const portableName = name === pluginName || name.startsWith(`${pluginName}-`)
+      ? name
+      : `${pluginName}-${name}`;
+    assert.ok(
+      !(portableName in servers),
+      `legacy MCP server names collide at portable name "${portableName}"`
+    );
+    servers[portableName] = { type, ...configuration };
+  }
   return { $schema: AGENT_MCP_SCHEMA, mcpServers: servers };
 }
 

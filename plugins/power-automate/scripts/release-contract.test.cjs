@@ -18,6 +18,25 @@ test("debug workflows allow bounded action content and describe the public repet
   }
 });
 
+test("skills document the portable and legacy FlowAgent tool prefixes", () => {
+  const skillNames = [
+    "browse-flows",
+    "build-flow",
+    "create-flow",
+    "debug-flow",
+    "diagnose-flow",
+    "manage-desktop-flows",
+    "manage-flows",
+    "route-environments",
+    "setup",
+  ];
+  for (const name of skillNames) {
+    const skill = fs.readFileSync(path.join(root, "skills", name, "SKILL.md"), "utf8");
+    assert.ok(skill.includes("power-automate-flowagent-"), `${name} must name the portable tool prefix`);
+    assert.ok(skill.includes("mcp__flowagent__"), `${name} must retain the legacy Claude tool prefix`);
+  }
+});
+
 test("the telemetry guide is portable in a plugin-only installation", () => {
   const readme = fs.readFileSync(path.join(root, "README.md"), "utf8");
   assert.ok(readme.includes("(references/telemetry.md)"));

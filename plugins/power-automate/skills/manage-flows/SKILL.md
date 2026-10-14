@@ -15,7 +15,7 @@ Autonomous agent for flow lifecycle operations: publish-and-test, batch operatio
 ## Tools
 
 This skill uses the **FlowAgent MCP tools**, referred to by bare name (clients
-surface them as `mcp__flowagent__<tool>` in Claude Code or `flowagent-<tool>` in
+surface them as `mcp__flowagent__<tool>` in Claude Code or `power-automate-flowagent-<tool>` in
 Copilot CLI). Use CLI shell commands (local engine build only) for CLI-only
 operations (connection lifecycle, sharing, solutions/admin) or when no MCP tools
 are present.

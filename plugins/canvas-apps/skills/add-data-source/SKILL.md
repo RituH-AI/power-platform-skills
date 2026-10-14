@@ -4,7 +4,7 @@ version: 1.0.0
 description: Guide the user to add a data source, connection, or API connector to a Canvas App via Power Apps Studio, then verify and continue. USE WHEN the user asks to add a data source, add a connection, add an API, add a connector, connect to SharePoint / Dataverse / SQL / Excel / OneDrive / Teams / Office 365, or any similar request to make new data available to the app. DO NOT USE WHEN the user is asking to list or describe existing data sources — call list_data_sources or list_apis directly instead.
 author: Microsoft Corporation
 user-invocable: false
-allowed-tools: AskUserQuestion, mcp__canvas-authoring__list_data_sources, mcp__canvas-authoring__list_apis, mcp__canvas-authoring__get_data_source_schema, mcp__canvas-authoring__describe_api
+allowed-tools: AskUserQuestion, mcp__canvas-authoring__list_data_sources, canvas-apps-canvas-authoring/list_data_sources, mcp__canvas-authoring__list_apis, canvas-apps-canvas-authoring/list_apis, mcp__canvas-authoring__get_data_source_schema, canvas-apps-canvas-authoring/get_data_source_schema, mcp__canvas-authoring__describe_api, canvas-apps-canvas-authoring/describe_api
 ---
 
 Data sources, connections, and API connectors cannot be added by the coding agent — they must be added through the Power Apps Studio interface. This skill informs the user, guides them to add the connection in their Studio session, verifies it is available via the MCP server, and then continues with any pending work.

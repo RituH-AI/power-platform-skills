@@ -140,14 +140,15 @@ reports the effective settings instead of promising a picker in those cases.
 
 ## Step 4: Check the FlowAgent tools are wired
 
-The plugin talks to Power Automate through the **FlowAgent MCP server**, which is
-registered as `flowagent` in the plugin's MCP configuration and started automatically.
+The plugin talks to Power Automate through the **FlowAgent MCP server**, registered
+as `power-automate-flowagent` in portable `mcp.json` and `flowagent` in legacy
+`.mcp.json`, and started automatically.
 Both `mcp.json` and legacy `.mcp.json` load the bundled `server/mcp.mjs` through a small Node bootstrap
 that resolves the plugin's installation directory (`PLUGIN_ROOT`, else
 `CLAUDE_PLUGIN_ROOT`, else the current directory) and prints an actionable error
 if the bundle can't be found.
 
-- **If `flowagent-*` / `mcp__flowagent__*` tools appear in your tool list**: tell
+- **If `power-automate-flowagent-*` / `mcp__flowagent__*` tools appear in your tool list**: tell
   them "The Power Automate tools are connected" and move on.
 - **If they're missing**: the MCP server isn't registered. Fix it automatically:
 
@@ -161,13 +162,14 @@ if the bundle can't be found.
      the user which one to register rather than guessing.
 
   2. **If exactly one was found**, read `~/.copilot/mcp-config.json`, add the
-     `flowagent` MCP entry, and write it back:
+     `power-automate-flowagent` MCP entry, and write it back:
      ```bash
-     node -e "const fs=require('fs'),p=require('path');const home=process.env.HOME||process.env.USERPROFILE;const cfgPath=p.join(home,'.copilot','mcp-config.json');let cfg;try{cfg=JSON.parse(fs.readFileSync(cfgPath,'utf8'))}catch{cfg={mcpServers:{}}};if(!cfg.mcpServers)cfg.mcpServers={};if(cfg.mcpServers.flowagent){console.log('already registered');process.exit(0)}const d=p.join(home,'.copilot','installed-plugins');const find=(dir)=>{let out=[];for(const e of fs.readdirSync(dir,{withFileTypes:true})){const f=p.join(dir,e.name);if(e.isDirectory()){try{out=out.concat(find(f))}catch{}}else if(e.name==='mcp.mjs'&&p.basename(p.dirname(dir))==='power-automate'){out.push(dir)}}return out};const hits=find(d);if(hits.length!==1){console.log(hits.length?'ambiguous: '+JSON.stringify(hits):'mcp.mjs not found');process.exit(1)}const mcpPath=p.join(hits[0],'mcp.mjs');cfg.mcpServers.flowagent={command:'node',args:[mcpPath]};fs.writeFileSync(cfgPath,JSON.stringify(cfg,null,2)+'\n');console.log('registered flowagent MCP at '+mcpPath)"
+     node -e "const fs=require('fs'),p=require('path');const home=process.env.HOME||process.env.USERPROFILE;const cfgPath=p.join(home,'.copilot','mcp-config.json');let cfg;try{cfg=JSON.parse(fs.readFileSync(cfgPath,'utf8'))}catch{cfg={mcpServers:{}}};if(!cfg.mcpServers)cfg.mcpServers={};const name='power-automate-flowagent';if(cfg.mcpServers[name]){console.log('already registered');process.exit(0)}const d=p.join(home,'.copilot','installed-plugins');const find=(dir)=>{let out=[];for(const e of fs.readdirSync(dir,{withFileTypes:true})){const f=p.join(dir,e.name);if(e.isDirectory()){try{out=out.concat(find(f))}catch{}}else if(e.name==='mcp.mjs'&&p.basename(p.dirname(dir))==='power-automate'){out.push(dir)}}return out};const hits=find(d);if(hits.length!==1){console.log(hits.length?'ambiguous: '+JSON.stringify(hits):'mcp.mjs not found');process.exit(1)}const mcpPath=p.join(hits[0],'mcp.mjs');cfg.mcpServers[name]={command:'node',args:[mcpPath]};fs.writeFileSync(cfgPath,JSON.stringify(cfg,null,2)+'\n');console.log('registered '+name+' MCP at '+mcpPath)"
      ```
 
   3. **Tell the user** to restart the agent (Copilot CLI: `/restart`, Claude Code:
-     restart the process). After restart, `flowagent-*` tools should appear.
+     restart the process). After restart, `power-automate-flowagent-*` tools
+     should appear in Copilot CLI or `mcp__flowagent__*` tools in Claude Code.
 
   4. **If not found** (plugin not installed at all): tell them to install the
      plugin first:

@@ -6,7 +6,8 @@ plugin. The authoritative reference is this plugin's `CLAUDE.md` and the
 
 ## Tool routing (read first)
 
-**If `flowagent-*` MCP tools are present in your tool surface, USE THEM** for any
+**If `power-automate-flowagent-*` or `mcp__flowagent__*` MCP tools are present
+in your tool surface, USE THEM** for any
 flow/env/connection/run operation — list/get/create/update/**edit**/**copy**/
 publish/run flows, environments, connections, connectors, run history + run
 management (**cancel**, **cancel_all**, **resubmit**, **diagnose**, loop
@@ -23,8 +24,8 @@ local build, only for CLI-only commands the MCP does not wrap (connection
 lifecycle, sharing, solutions/admin), and not for plugin users when MCP tools
 are available.
 
-If the `flowagent-*` tools are missing, the MCP isn't wired — point the user at
-this plugin's MCP configuration / the install steps in `README.md`.
+If both tool prefixes are missing, the MCP isn't wired - point the user at this
+plugin's MCP configuration or the install steps in `README.md`.
 
 ## Layout
 

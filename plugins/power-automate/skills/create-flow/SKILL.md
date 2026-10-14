@@ -14,8 +14,8 @@ Walk the user through creating a Power Automate flow step by step.
 ## Tools
 
 This skill uses the **FlowAgent MCP tools**. Clients surface them with a
-client-specific prefix — `mcp__flowagent__<tool>` (Claude Code) or
-`flowagent-<tool>` (Copilot CLI) — so they're referred to by bare name below
+client-specific prefix - `mcp__flowagent__<tool>` (Claude Code) or
+`power-automate-flowagent-<tool>` (Copilot CLI) - so they're referred to by bare name below
 (e.g. `create_flow`). Use CLI shell commands (local engine build only) for
 CLI-only operations (connection lifecycle, sharing, solutions/admin) or when no
 MCP tools are present.
