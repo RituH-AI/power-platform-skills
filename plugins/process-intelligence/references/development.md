@@ -9,7 +9,6 @@ process-intelligence/
   .claude-plugin/plugin.json # Claude Code compatibility manifest
   .mcp.json
   AGENTS.md
-  CLAUDE.md
   README.md
   references/
   skills/

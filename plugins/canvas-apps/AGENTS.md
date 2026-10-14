@@ -24,7 +24,6 @@ mcp.json                       ← Portable canvas-authoring MCP config
 .claude-plugin/plugin.json     ← Claude Code metadata mirror
 .mcp.json                      ← Legacy MCP config
 AGENTS.md                      ← Plugin guidance for AI agents (this file)
-CLAUDE.md                      ← Symlink → AGENTS.md
 hooks.json                     ← Copilot-format hooks: userPromptTransformed
 hooks/
   hooks.json                   ← Claude-format hooks: UserPromptSubmit

@@ -43,7 +43,7 @@ able to tell what moved from the docs alone):
 
 | Doc | What it holds | Update when… |
 |-----|---------------|--------------|
-| `AGENTS.md` (this file — `CLAUDE.md` symlinks to it) | Per-component behavioral specs, the canonical file tree, conventions, build/test | You add/rename a script, change a component's behavior, or change how to build/test |
+| `AGENTS.md` (this file) | Per-component behavioral specs, the canonical file tree, conventions, build/test | You add/rename a script, change a component's behavior, or change how to build/test |
 | [`docs/architecture.md`](docs/architecture.md) | Wiring / flow **diagrams** for both skills (`/genpage` + `/app-builder`) | You change the orchestration, phase pipeline, or how the pieces connect |
 | [`docs/app-builder-capabilities.md`](docs/app-builder-capabilities.md) | `/app-builder` **capabilities** — what ships today, with the evidence for each | You ship an app-builder capability |
 | [`docs/app-builder-design.md`](docs/app-builder-design.md) | `/app-builder` **design record** — Part I staged-flow architecture (**cited from code by section number — never renumber**), Part II the `--changed-only` contract | You change the staged flow or the partial-apply contract |
@@ -1384,7 +1384,6 @@ mcp.json                       ← Portable Playwright MCP config
 .claude-plugin/plugin.json     ← Claude Code metadata mirror
 .mcp.json                      ← Legacy Playwright MCP config
 AGENTS.md                      ← Plugin guidance for AI agents (this file)
-CLAUDE.md                      ← Symlink → AGENTS.md
 README.md                      ← User-facing intro and prereqs
 CHANGELOG.md                   ← Keep-a-Changelog
 feature-flags.json             ← Feature flags (custom-api, custom-telemetry)
