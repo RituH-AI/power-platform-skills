@@ -15,14 +15,13 @@ import { CONNECTION_TOOLS } from '../src/connection-session.mjs';
 
 const schema = kind => `https://agent-plugins.org/schemas/1.0.0/${kind}.schema.json`;
 const json = async file => JSON.parse(await readFile(file, 'utf8'));
-const portableManifest = await json(path.join(pluginRoot, 'plugin.json'));
+const legacyManifest = await json(path.join(pluginRoot, '.plugin', 'plugin.json'));
 const legacyMcp = await json(path.join(pluginRoot, '.mcp.json'));
 
-test('portable package has matching Claude metadata and one shared stdio registration', async () => {
-  const portable = portableManifest;
-  const { $schema, ...metadata } = portable;
-  assert.equal($schema, schema('plugin'));
-  assert.deepEqual(await json(path.join(pluginRoot, '.claude-plugin', 'plugin.json')), metadata);
+test('dual-format package has matching portable metadata and one shared stdio registration', async () => {
+  const portable = await json(path.join(pluginRoot, 'plugin.json'));
+  assert.deepEqual(portable, { $schema: schema('plugin'), ...legacyManifest });
+  assert.deepEqual(await json(path.join(pluginRoot, '.claude-plugin', 'plugin.json')), legacyManifest);
   assert.equal(portable.version, '0.7.0');
   const mcp = await json(path.join(pluginRoot, 'mcp.json'));
   assert.deepEqual(mcp, { $schema: schema('mcp'), mcpServers: {
@@ -38,11 +37,11 @@ test('portable package has matching Claude metadata and one shared stdio registr
   }
 });
 
-test('portable and Claude documentation states precedence and version-specific client limits', async () => {
+test('hybrid documentation states precedence, no merging and version-specific client limits', async () => {
   for (const file of ['README.md', 'references/development.md']) {
     const text = (await readFile(path.join(pluginRoot, file), 'utf8')).replace(/\s+/g, ' ');
     assert.match(text, /Agent Plugins 1\.0\.0/);
-    for (const name of ['plugin.json', 'mcp.json', '.claude-plugin/plugin.json', '.mcp.json'])
+    for (const name of ['plugin.json', 'mcp.json', '.plugin/plugin.json', '.claude-plugin/plugin.json', '.mcp.json'])
       assert.ok(text.includes(name), `${file}: ${name}`);
     assert.match(text, /precedence/);
     assert.match(text, /not merged/);

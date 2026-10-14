@@ -4,7 +4,7 @@ version: 2.1.0
 description: Configure the Canvas Authoring MCP server for the current coauthoring session. USE WHEN "configure MCP", "set up MCP server", "MCP not working", "connect Canvas Apps MCP", "canvas-authoring not available", "MCP not configured", "set up canvas apps".
 author: Microsoft Corporation
 user-invocable: true
-allowed-tools: Bash, AskUserQuestion, mcp__canvas-authoring__connect, canvas-apps-canvas-authoring/connect
+allowed-tools: Bash, AskUserQuestion, mcp__canvas-authoring__connect
 ---
 
 # Configure the Canvas Authoring MCP Server
@@ -58,9 +58,7 @@ Example URL: `https://make.powerapps.com/e/Default-91bee3d9-0c15-4f17-8624-c92bb
 
 ### 3. Configure the MCP server
 
-Call the `connect` MCP tool (`mcp__canvas-authoring__connect` in Claude Code or
-`canvas-apps-canvas-authoring/connect` in portable clients) to connect the server
-to the user's coauthoring session:
+Call the `connect` MCP tool to connect the server to the user's coauthoring session:
 
 ```
 mcp__canvas-authoring__connect(
@@ -82,10 +80,7 @@ mcp__canvas-authoring__connect(
 - `tenant_id`: Pass a tenant GUID **only** for Entra B2B guest access — set it to the host/resource tenant where the user is a guest so the token is issued by that tenant rather than the user's home tenant. Combine with `login_hint` (the guest's home UPN) to pre-fill the account. Omit for normal same-tenant sign-in.
 - `force_account_select`: Pass `true` **only** to force the account picker instead of silently reusing a cached account — set this when a previous connect failed with a 401/403 and no `login_hint` was given, so the user can pick the correct account. Omit otherwise.
 
-If neither `mcp__canvas-authoring__connect` nor
-`canvas-apps-canvas-authoring/connect` is available (the MCP server did not
-start), run the following command to check whether the server failed to launch
-due to a missing .NET 10 SDK:
+If the `mcp__canvas-authoring__connect` tool is **not available** (the MCP server did not start), run the following command to check whether the server failed to launch due to a missing .NET 10 SDK:
 
 ```bash
 dotnet --list-sdks

@@ -25,9 +25,9 @@ function createInstalledPlugin(t, localVersion) {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   const installedPluginRoot = path.join(root, 'mobile-app');
-  fs.mkdirSync(installedPluginRoot, { recursive: true });
+  fs.mkdirSync(path.join(installedPluginRoot, '.plugin'), { recursive: true });
   fs.writeFileSync(
-    path.join(installedPluginRoot, 'plugin.json'),
+    path.join(installedPluginRoot, '.plugin', 'plugin.json'),
     JSON.stringify({ name: 'mobile-app', version: localVersion })
   );
 

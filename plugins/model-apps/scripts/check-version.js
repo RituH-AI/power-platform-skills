@@ -16,10 +16,11 @@ const fs = require('fs');
 
 const MARKETPLACE_PATHS = [
   'marketplace.json',
+  '.plugin/marketplace.json',
   '.claude-plugin/marketplace.json',
 ];
 const PLUGIN_MANIFEST_PATHS = [
-  'plugin.json',
+  '.plugin/plugin.json',
   '.claude-plugin/plugin.json',
 ];
 
@@ -84,7 +85,7 @@ function readJsonFromGit(ref, relativePaths, cwd) {
       });
       return JSON.parse(content);
     } catch {
-      // Portable and legacy installs use different manifest paths.
+      // Open Plugins and legacy installs use different manifest paths.
     }
   }
   return null;

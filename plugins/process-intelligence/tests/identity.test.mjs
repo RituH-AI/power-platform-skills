@@ -12,7 +12,7 @@ const workspace = path.resolve(root, '..', '..');
 const json = async file => JSON.parse(await fs.readFile(file, 'utf8'));
 test('public plugin identity and lockfile match the marketplace entry', async () => {
   assert.equal(path.basename(root), 'process-intelligence');
-  for (const file of ['package.json', 'plugin.json', '.claude-plugin/plugin.json']) {
+  for (const file of ['package.json', '.plugin/plugin.json', '.claude-plugin/plugin.json']) {
     const manifest = await json(path.join(root, file));
     assert.equal(manifest.name, 'process-intelligence');
     assert.equal(manifest.version, '0.7.0');

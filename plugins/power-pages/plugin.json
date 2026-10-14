@@ -39,5 +39,10 @@
     "shared-lib",
     "solution-splitting",
     "asset-advisory"
-  ]
+  ],
+  "extensions": {
+    "com.github.copilot": {
+      "hooks": "./com.github.copilot/hooks/hooks.json"
+    }
+  }
 }

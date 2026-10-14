@@ -1,5 +1,4 @@
 {
-  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "canvas-apps",
   "version": "3.1.0",
   "description": "Build Power Apps Canvas Apps using the Canvas Authoring MCP server.",

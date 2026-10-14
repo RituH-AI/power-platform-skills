@@ -14,12 +14,9 @@ try {
   const server = path.join(root, 'server');
   if ((await fs.lstat(server)).isSymbolicLink()) throw new Error('Refusing to build through a linked server directory.');
   const manifest = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
-  const portable = JSON.parse(await fs.readFile(path.join(root, 'plugin.json'), 'utf8'));
-  const claude = JSON.parse(await fs.readFile(path.join(root, '.claude-plugin', 'plugin.json'), 'utf8'));
-  const { $schema, ...portableMetadata } = portable;
-  if ($schema !== 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json' ||
-      JSON.stringify(portableMetadata) !== JSON.stringify(claude) ||
-      portable.version !== manifest.version) throw new Error('Plugin version and portable/legacy manifests must agree.');
+  const canonical = await fs.readFile(path.join(root, '.plugin', 'plugin.json'), 'utf8');
+  if (canonical !== await fs.readFile(path.join(root, '.claude-plugin', 'plugin.json'), 'utf8') ||
+      JSON.parse(canonical).version !== manifest.version) throw new Error('Plugin version and byte-identical manifests must agree.');
   const result = await build({ absWorkingDir: root, entryPoints: ['src/entry.mjs'], outfile: 'server/mcp.mjs',
     platform: 'node', format: 'esm', target: 'node22', bundle: true, write: false, metafile: true,
     legalComments: 'inline', charset: 'utf8', logLevel: 'warning',

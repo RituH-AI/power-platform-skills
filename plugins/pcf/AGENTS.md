@@ -8,8 +8,7 @@ Primary references: [`references/pcf-hosts.md`](references/pcf-hosts.md), [`refe
 
 ## Layout
 
-- `plugin.json` — Agent Plugins 1.0 metadata; `.claude-plugin/plugin.json` is
-  the Claude Code compatibility mirror without `$schema`.
+- `.plugin/plugin.json` and `.claude-plugin/plugin.json` — plugin metadata and legacy mirror.
 - `compatibility-matrix.json` — PCF toolchain, host and dependency source of truth.
 - `lock/standard` and `lock/virtual` — committed dependency snapshots used by scaffolds and CI.
 - `templates/`, `shared/`, `recipes/` and `pipelines/` — generated-project source material.

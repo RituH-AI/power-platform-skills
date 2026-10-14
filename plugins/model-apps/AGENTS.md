@@ -1379,14 +1379,13 @@ The canonical layout of the plugin (architecture **diagrams** live in
 [`docs/architecture.md`](docs/architecture.md)):
 
 ```
-plugin.json                    ← Agent Plugins 1.0 metadata
-mcp.json                       ← Portable Playwright MCP config
-.claude-plugin/plugin.json     ← Claude Code metadata mirror
-.mcp.json                      ← Legacy Playwright MCP config
+.plugin/plugin.json            ← Open Plugins metadata (name, version, keywords)
+.mcp.json                      ← MCP server config (Playwright for browser verification)
 AGENTS.md                      ← Plugin guidance for AI agents (this file)
 README.md                      ← User-facing intro and prereqs
 CHANGELOG.md                   ← Keep-a-Changelog
 feature-flags.json             ← Feature flags (custom-api, custom-telemetry)
+.claude-plugin/plugin.json     ← Legacy plugin metadata mirror
 docs/
   architecture.md              ← Wiring/flow diagrams for BOTH skills (/genpage + /app-builder)
   app-builder-capabilities.md       ← /app-builder capabilities (what ships today, with evidence)

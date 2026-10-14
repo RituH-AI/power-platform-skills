@@ -6,15 +6,13 @@ plugin-local routing rule.
 
 ## Tool routing (read first)
 
-**If `power-automate-flowagent-*` or `mcp__flowagent__*` MCP tools are present
-in your tool surface, USE THEM** for any
+**If `flowagent-*` MCP tools are present in your tool surface, USE THEM** for any
 flow/env/connection/run operation — list/get/create/update/**edit**/**copy**/
 publish/run flows, environments, connections, connectors, run history + run
 management (**cancel**, **cancel_all**, **resubmit**, **diagnose**, loop
 repetitions), dynamic resolvers, templates, and `get_expression_help`.
 
-The FlowAgent MCP server (`power-automate-flowagent` in portable `mcp.json`,
-`flowagent` in legacy `.mcp.json`) is the supported integration path:
+The MCP server (`.mcp.json` → `flowagent`) is the supported integration path:
 it handles auth (Azure CLI + MSAL), session-scoped current env/flow, structured
 errors, and stays in-process. Shelling out re-pays auth cost and breaks session
 state.
@@ -24,17 +22,17 @@ local build, only for CLI-only commands the MCP does not wrap (connection
 lifecycle, sharing, solutions/admin), and not for plugin users when MCP tools
 are available.
 
-If both tool prefixes are missing, the MCP isn't wired - point the user at this
-plugin's MCP configuration or the install steps in `README.md`.
+If the `flowagent-*` tools are missing, the MCP isn't wired — point the user at
+this plugin's `.mcp.json` / the install steps in `README.md`.
 
 ## Layout
 
 - `skills/<skill>/SKILL.md` — user-invocable skills (verb-first names)
 - `references/*.md` — shared reference docs (CLI commands, definition rules,
   connection patterns, error troubleshooting)
-- `plugin.json` + `mcp.json` — portable Agent Plugins 1.0 metadata and MCP wiring
-- `.claude-plugin/plugin.json` — Claude Code compatibility metadata mirror
-- `.mcp.json` — legacy MCP wiring (FlowAgent + Microsoft Learn)
+- `.claude-plugin/plugin.json` + `.plugin/plugin.json` — Claude / Copilot
+  manifests
+- `.mcp.json` — MCP server wiring (FlowAgent + Microsoft Learn)
 
 The flow-definition rules, auth model (Azure CLI + MSAL), error reference, and
 known issues live in the `references/` docs — see `definition-reference.md`,
@@ -63,7 +61,7 @@ The `references/*.md` files are curated, plugin-specific docs covering:
 Learn docs don't cover or bury across many articles.
 
 ### Tier 2: Microsoft Learn MCP (live, comprehensive, up-to-date)
-Both MCP configurations wire `microsoft-learn` (`https://learn.microsoft.com/api/mcp`)
+The `.mcp.json` wires `microsoft-learn` (`https://learn.microsoft.com/api/mcp`)
 which provides:
 - `microsoft_docs_search` — search Learn docs by topic
 - `microsoft_docs_fetch` — fetch a complete article by URL

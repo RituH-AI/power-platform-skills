@@ -116,8 +116,8 @@ function shortPathOnWindows(p) {
 }
 
 function writePluginManifest(pluginDir, version) {
-  fs.mkdirSync(pluginDir, { recursive: true });
-  fs.writeFileSync(path.join(pluginDir, 'plugin.json'), JSON.stringify({ name: 'model-apps', version }));
+  fs.mkdirSync(path.join(pluginDir, '.plugin'), { recursive: true });
+  fs.writeFileSync(path.join(pluginDir, '.plugin', 'plugin.json'), JSON.stringify({ name: 'model-apps', version }));
 }
 
 // A user project that is a git repo with its own origin: the script must never fetch it.

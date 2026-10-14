@@ -24,7 +24,7 @@ Monitor the running app through the project-local `.powernative/metro-logs/` fil
 | `/debug-app "<symptom text>"` | **Symptom-driven mode** (recommended when there's a user-visible problem). Free-text symptom such as `"todos not appearing on home screen"`, `"login button does nothing"`, `"list empty after refresh"`. Run Phase 0 → Phase 0.5 (parse symptom → ask the user to reproduce/navigate → walk the likely data path from terminal traces) → enter monitor loop. Catches silent failures (empty lists, blank screens, swallowed errors) that pure log polling misses. |
 | `/debug-app status` | Discover all project-local Metro logs and print each valid session's project, platform, PID, port, start time, and log path. Mark the session referenced by the saved cursor when present, then print fixes and unresolved errors. Do NOT ask for a selection or enter the loop. |
 | `/debug-app stop` | Stop only the foreground debug loop and preserve `.powernative/debug-app/` state. It does not stop Metro; the user owns the `npm run dev` process. |
-| `/debug-app version` | Print the installed `mobile-app` plugin name and version from `${PLUGIN_ROOT}/plugin.json`, then exit. |
+| `/debug-app version` | Print the installed `mobile-app` plugin name and version from `${PLUGIN_ROOT}/.plugin/plugin.json`, then exit. |
 
 ### Monitoring options
 
@@ -72,7 +72,7 @@ For `help` / `--help` / `-h`, print the subcommands and monitoring-options table
 **Early-return subcommands:**
 
 - `stop`: if received while this foreground loop owns the conversation, clean up any injected traces using Phase 0.5.5 and exit at the next safe boundary. For a standalone `stop` invocation, report that no loop is active. Never stop Metro or delete `.powernative/debug-app/` state.
-- `version` / `--version`: read `${PLUGIN_ROOT}/plugin.json`, print `<name> <version>`, and exit without resolving a project or writing state. If the manifest is missing or malformed, report that the plugin version is unavailable and exit.
+- `version` / `--version`: read `${PLUGIN_ROOT}/.plugin/plugin.json`, print `<name> <version>`, and exit without resolving a project or writing state. If the manifest is missing or malformed, report that the plugin version is unavailable and exit.
 - `status`: validate `workingDir`, then execute only Phase 0.0 discovery through the status branch below. Do not run project preflight, create state files, ask for a session, initialize a baseline, or enter the monitor loop.
 
 **Tip — "play around then debug":** Metro persists recent app output in `.powernative/metro-logs/` even across chat/editor restarts. If something weird just happened, keep using the app normally, then run `/debug-app` or `/debug-app "<what you saw>"`. The first cycle reads the latest persisted log window; subsequent cycles read only bytes appended after the saved cursor.

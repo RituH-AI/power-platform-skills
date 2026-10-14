@@ -13,7 +13,7 @@ You are helping the user work with Power Platform environment routing — the fe
 
 > Uses the **FlowAgent MCP tools** (`resolve_environment`, `list_environments`,
 > `set_current_env`), referred to by bare name. In Claude Code they appear as
-> `mcp__flowagent__<tool>`; in Copilot CLI as `power-automate-flowagent-<tool>`.
+> `mcp__flowagent__<tool>`; in Copilot CLI as `flowagent-<tool>`.
 
 ## Step 1: Check Current State
 

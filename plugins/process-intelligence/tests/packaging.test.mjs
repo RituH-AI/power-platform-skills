@@ -24,13 +24,13 @@ test('marketplace entries are minimal and Process Intelligence manifests match',
       [{ name: 'process-intelligence', source: './plugins/process-intelligence' }]);
     for (const entry of index.plugins) assert.deepEqual(Object.keys(entry).sort(), ['name', 'source']);
   }
-  const plugin = await json(path.join(root, 'plugin.json'));
-  const claude = await json(path.join(root, '.claude-plugin', 'plugin.json'));
-  const { $schema, ...metadata } = plugin;
-  assert.deepEqual(metadata, claude);
+  const plugin = await json(path.join(root, '.plugin', 'plugin.json'));
+  assert.deepEqual(plugin, await json(path.join(root, '.claude-plugin', 'plugin.json')));
   assert.equal(plugin.name, 'process-intelligence');
   assert.match(plugin.version, /^\d+\.\d+\.\d+$/);
   assert.equal(plugin.version, '0.7.0');
+  assert.equal(await readFile(path.join(root, '.plugin', 'plugin.json'), 'utf8'),
+    await readFile(path.join(root, '.claude-plugin', 'plugin.json'), 'utf8'));
   assert.equal(plugin.license, 'MIT');
   assert.deepEqual(plugin.author, { name: 'Microsoft', url: 'https://www.microsoft.com' });
   assert.equal(plugin.homepage, 'https://github.com/microsoft/power-platform-skills/');
@@ -97,7 +97,7 @@ test('first-party source comments describe current contracts rather than impleme
 test('package uses repository integration layout without changing safety or capabilities', async () => {
   const docs = ['README.md', 'AGENTS.md', 'skills/setup/SKILL.md',
     'references/connection-patterns.md', 'references/development.md',
-    'plugin.json', '.claude-plugin/plugin.json'];
+    '.plugin/plugin.json', '.claude-plugin/plugin.json'];
   for (const file of docs) {
     const text = await readFile(path.join(root, file), 'utf8');
     assert.doesNotMatch(text, /UNLICENSED|untrusted source/i);
@@ -221,7 +221,7 @@ test('manifest bootstrap reports a missing bundle and permits unconfigured start
 
 test('install-time files exist within the plugin and contain no fixed local machine paths', async () => {
   for (const file of ['README.md', 'AGENTS.md', 'scripts/build.mjs', 'scripts/test.mjs',
-    'server/mcp.mjs', 'plugin.json', 'mcp.json', '.claude-plugin/plugin.json', '.mcp.json']) {
+    'server/mcp.mjs', 'plugin.json', 'mcp.json', '.plugin/plugin.json', '.claude-plugin/plugin.json', '.mcp.json']) {
     const text = await readFile(path.join(root, file), 'utf8');
     assert.doesNotMatch(text, /C:\\(?:Users|ProcessMining)|microsoft\.ghe\.com/i);
   }

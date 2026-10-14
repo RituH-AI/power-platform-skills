@@ -13,19 +13,19 @@ tools:
   - edit
   - apply_patch
   - mcp__canvas-authoring__list_controls
-  - canvas-apps-canvas-authoring/list_controls
+  - canvas-authoring/list_controls
   - mcp__canvas-authoring__describe_control
-  - canvas-apps-canvas-authoring/describe_control
+  - canvas-authoring/describe_control
   - mcp__canvas-authoring__list_data_sources
-  - canvas-apps-canvas-authoring/list_data_sources
+  - canvas-authoring/list_data_sources
   - mcp__canvas-authoring__get_data_source_schema
-  - canvas-apps-canvas-authoring/get_data_source_schema
+  - canvas-authoring/get_data_source_schema
   - mcp__canvas-authoring__list_apis
-  - canvas-apps-canvas-authoring/list_apis
+  - canvas-authoring/list_apis
   - mcp__canvas-authoring__describe_api
-  - canvas-apps-canvas-authoring/describe_api
+  - canvas-authoring/describe_api
   - mcp__canvas-authoring__search_stock_images
-  - canvas-apps-canvas-authoring/search_stock_images
+  - canvas-authoring/search_stock_images
 ---
 
 # Discover Feasible Implementations

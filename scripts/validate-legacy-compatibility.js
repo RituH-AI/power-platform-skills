@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * Validates the Agent Plugins manifests and the Claude Code marketplace mirror.
+ * Validates that the legacy .claude-plugin manifests mirror their portable
+ * counterparts. Most plugins still use the transitional .plugin/plugin.json
+ * location; plugins that have migrated use root plugin.json.
  *
  * The one intentional difference is the `source` of a plugin hosted in another
  * repository, which each host spells differently. See REMOTE PLUGIN SOURCES below.
@@ -12,20 +14,6 @@ const path = require('path');
 const assert = require('assert/strict');
 
 const ROOT = path.resolve(__dirname, '..');
-const AGENT_PLUGIN_SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json';
-const AGENT_MCP_SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json';
-const AGENT_PLUGIN_FIELDS = [
-  '$schema',
-  'author',
-  'description',
-  'extensions',
-  'homepage',
-  'keywords',
-  'license',
-  'name',
-  'repository',
-  'version',
-];
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -35,8 +23,8 @@ function normalizeRelative(relativePath) {
   return relativePath.replace(/\\/g, '/').replace(/\/+$/, '');
 }
 
-function pluginDirectoryFromMarketplaceEntry(root, marketplace, plugin) {
-  const pluginRoot = marketplace.metadata?.pluginRoot || '.';
+function pluginDirectoryFromOpenEntry(root, openMarketplace, plugin) {
+  const pluginRoot = openMarketplace.metadata?.pluginRoot || '.';
   return path.resolve(root, pluginRoot, plugin.source);
 }
 
@@ -44,28 +32,15 @@ function expectedLegacySource(root, pluginDirectory) {
   return `./${normalizeRelative(path.relative(root, pluginDirectory))}`;
 }
 
-function portableMetadata(manifest) {
-  const { $schema, ...metadata } = manifest;
+function manifestMetadata(manifest) {
+  // The root manifest may carry client-specific extension metadata that has no
+  // meaning in the Claude Code compatibility manifest.
+  const { $schema, extensions, ...metadata } = manifest;
   return metadata;
 }
 
-function expectedPortableMcp(legacyMcp, pluginName) {
-  const servers = {};
-  for (const [name, server] of Object.entries(legacyMcp.mcpServers || {})) {
-    const type = server.type === 'http'
-      ? 'streamable-http'
-      : server.type || (server.url ? 'streamable-http' : 'stdio');
-    const { type: ignoredType, ...configuration } = server;
-    const portableName = name === pluginName || name.startsWith(`${pluginName}-`)
-      ? name
-      : `${pluginName}-${name}`;
-    assert.ok(
-      !(portableName in servers),
-      `legacy MCP server names collide at portable name "${portableName}"`
-    );
-    servers[portableName] = { type, ...configuration };
-  }
-  return { $schema: AGENT_MCP_SCHEMA, mcpServers: servers };
+function assertManifestMirror(legacyPath, sourcePath) {
+  assert.deepEqual(manifestMetadata(readJson(legacyPath)), manifestMetadata(readJson(sourcePath)));
 }
 
 // ── REMOTE PLUGIN SOURCES ─────────────────────────────────────
@@ -132,7 +107,7 @@ function expectedLegacyRemoteSource(openSource) {
 function assertMinimalMarketplaceEntry(plugin) {
   // Marketplace entries only require `name` and `source`. Optional
   // fields like description/version/license/keywords are override fields, so keep
-  // the marketplace as an index and let each plugin's root `plugin.json` remain
+  // the marketplace as an index and let each plugin's `.plugin/plugin.json` remain
   // the single source of truth for display and update metadata.
   // See: https://open-plugins.com/plugin-builders/marketplace
   assert.deepEqual(Object.keys(plugin).sort(), ['name', 'source']);
@@ -146,7 +121,7 @@ function assertMinimalMarketplaceEntry(plugin) {
 function assertMinimalMarketplace(marketplace) {
   // Keep marketplace-level metadata here because it describes the collection, not
   // any individual plugin. Per-plugin optional fields still stay out of `plugins`
-  // entries to avoid overriding the corresponding root `plugin.json` metadata.
+  // entries to avoid overriding the corresponding `.plugin/plugin.json` metadata.
   assert.deepEqual(Object.keys(marketplace).sort(), ['metadata', 'name', 'owner', 'plugins']);
   assert.equal(typeof marketplace.name, 'string', 'name must be a string');
   assert.notEqual(marketplace.name.trim(), '', 'name must not be empty');
@@ -184,16 +159,8 @@ function assertPluginMetadata(pluginName, manifest) {
   }
 }
 
-function assertPortableManifest(pluginName, manifest) {
-  assert.equal(manifest.$schema, AGENT_PLUGIN_SCHEMA, 'unsupported or missing Agent Plugins schema');
-  for (const field of Object.keys(manifest)) {
-    assert.ok(AGENT_PLUGIN_FIELDS.includes(field), `unsupported Agent Plugins field "${field}"`);
-  }
-  assertPluginMetadata(pluginName, manifest);
-}
-
 function validate(root = ROOT) {
-  const marketplacePath = path.join(root, 'marketplace.json');
+  const openMarketplacePath = path.join(root, 'marketplace.json');
   const legacyMarketplacePath = path.join(root, '.claude-plugin', 'marketplace.json');
   const errors = [];
 
@@ -210,11 +177,11 @@ function validate(root = ROOT) {
   });
   if (errors.length > 0) return errors;
 
-  const marketplace = readJson(marketplacePath);
+  const openMarketplace = readJson(openMarketplacePath);
   const legacyMarketplace = readJson(legacyMarketplacePath);
 
   check('marketplace shape', () => {
-    assertMinimalMarketplace(marketplace);
+    assertMinimalMarketplace(openMarketplace);
     assertMinimalMarketplace(legacyMarketplace);
   });
   if (errors.length > 0) return errors;
@@ -223,8 +190,8 @@ function validate(root = ROOT) {
   // so compare the files with those sources swapped for their expected legacy form.
   check('legacy marketplace manifest', () => {
     const expectedLegacy = {
-      ...marketplace,
-      plugins: marketplace.plugins.map((plugin) =>
+      ...openMarketplace,
+      plugins: openMarketplace.plugins.map((plugin) =>
         isRemoteSource(plugin.source) ? { ...plugin, source: expectedLegacyRemoteSource(plugin.source) } : plugin
       ),
     };
@@ -232,10 +199,10 @@ function validate(root = ROOT) {
   });
 
   const legacyPlugins = new Map(legacyMarketplace.plugins.map((plugin) => [plugin.name, plugin]));
-  const marketplacePluginNames = new Set();
+  const openPluginNames = new Set();
 
-  for (const plugin of marketplace.plugins) {
-    marketplacePluginNames.add(plugin.name);
+  for (const plugin of openMarketplace.plugins) {
+    openPluginNames.add(plugin.name);
 
     if (isRemoteSource(plugin.source)) {
       // The plugin's manifests live in its own repository, which owns their metadata
@@ -251,11 +218,14 @@ function validate(root = ROOT) {
       continue;
     }
 
-    const pluginDirectory = pluginDirectoryFromMarketplaceEntry(root, marketplace, plugin);
-    const portableManifestPath = path.join(pluginDirectory, 'plugin.json');
+    const pluginDirectory = pluginDirectoryFromOpenEntry(root, openMarketplace, plugin);
+    const rootManifestPath = path.join(pluginDirectory, 'plugin.json');
+    const openManifestPath = fs.existsSync(rootManifestPath)
+      ? rootManifestPath
+      : path.join(pluginDirectory, '.plugin', 'plugin.json');
     const legacyManifestPath = path.join(pluginDirectory, '.claude-plugin', 'plugin.json');
-    const portableMcpPath = path.join(pluginDirectory, 'mcp.json');
-    const legacyMcpPath = path.join(pluginDirectory, '.mcp.json');
+    const relativeLegacyManifestPath = normalizeRelative(path.relative(root, legacyManifestPath));
+
     check(`${plugin.name} legacy marketplace entry`, () => {
       const legacyPlugin = legacyPlugins.get(plugin.name);
       assert.ok(legacyPlugin, 'missing from .claude-plugin/marketplace.json');
@@ -264,27 +234,20 @@ function validate(root = ROOT) {
       assertMinimalMarketplaceEntry(legacyPlugin);
     });
 
-    check(`${plugin.name} Agent Plugins manifest`, () => {
-      assert.ok(fs.existsSync(portableManifestPath), 'missing root plugin.json');
-      const portableManifest = readJson(portableManifestPath);
-      assertPortableManifest(plugin.name, portableManifest);
-      assert.ok(fs.existsSync(legacyManifestPath), 'missing .claude-plugin/plugin.json');
-      assert.deepEqual(readJson(legacyManifestPath), portableMetadata(portableManifest));
+    check(`${plugin.name} plugin manifest`, () => {
+      const pluginManifest = readJson(openManifestPath);
+      assertPluginMetadata(plugin.name, pluginManifest);
     });
 
-    check(`${plugin.name} MCP configuration`, () => {
-      if (!fs.existsSync(legacyMcpPath)) {
-        assert.ok(!fs.existsSync(portableMcpPath), 'root mcp.json has no legacy .mcp.json counterpart');
-        return;
-      }
-      assert.ok(fs.existsSync(portableMcpPath), 'missing root mcp.json');
-      assert.deepEqual(readJson(portableMcpPath), expectedPortableMcp(readJson(legacyMcpPath), plugin.name));
+    check(relativeLegacyManifestPath, () => {
+      assert.ok(fs.existsSync(legacyManifestPath), 'missing legacy plugin manifest');
+      assertManifestMirror(legacyManifestPath, openManifestPath);
     });
   }
 
   for (const legacyPluginName of legacyPlugins.keys()) {
     check(`${legacyPluginName} legacy marketplace entry`, () => {
-      assert.ok(marketplacePluginNames.has(legacyPluginName), 'not present in marketplace.json');
+      assert.ok(openPluginNames.has(legacyPluginName), 'not present in marketplace.json');
     });
   }
 
@@ -294,18 +257,13 @@ function validate(root = ROOT) {
 if (require.main === module) {
   const errors = validate();
   if (errors.length > 0) {
-    console.log('Found Agent Plugins or legacy compatibility issues:');
+    console.log('Found legacy compatibility metadata issues:');
     for (const error of errors) {
       console.log(`- ${error}`);
     }
     process.exit(1);
   }
-  console.log('Agent Plugins manifests and legacy compatibility files are in sync.');
+  console.log('Legacy .claude-plugin compatibility metadata is in sync.');
 }
 
-module.exports = {
-  validate,
-  expectedLegacyRemoteSource,
-  expectedPortableMcp,
-  assertRemoteOpenSource,
-};
+module.exports = { validate, expectedLegacyRemoteSource, assertRemoteOpenSource };

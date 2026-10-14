@@ -19,10 +19,9 @@ claude --plugin-dir /path/to/plugins/canvas-apps
 ## Architecture
 
 ```
-plugin.json                    ← Agent Plugins 1.0 metadata
-mcp.json                       ← Portable canvas-authoring MCP config
-.claude-plugin/plugin.json     ← Claude Code metadata mirror
-.mcp.json                      ← Legacy MCP config
+.claude-plugin/plugin.json     ← Claude Code metadata (mirrors .plugin/plugin.json)
+.plugin/plugin.json            ← Open Plugins metadata (name, version, keywords)
+.mcp.json                      ← MCP server config (canvas-authoring, auto-registered)
 AGENTS.md                      ← Plugin guidance for AI agents (this file)
 hooks.json                     ← Copilot-format hooks: userPromptTransformed
 hooks/
@@ -90,8 +89,7 @@ Agents are invoked by skills via the `Task` tool — they are not user-invocable
 
 ## MCP Tools
 
-The portable `canvas-apps-canvas-authoring` MCP server, named `canvas-authoring`
-in the legacy configuration, exposes the following tools:
+The `canvas-authoring` MCP server exposes the following tools:
 
 | Tool | Description |
 |------|-------------|
@@ -126,7 +124,7 @@ emit the output shape each host expects.
 
 Keep the two files separate. Claude Code rejects unrecognized hook event names, so putting
 `userPromptTransformed` in `hooks/hooks.json` makes Claude fail to load the plugin, disabling its
-Canvas Authoring MCP server. Neither manifest should declare a `"hooks"` field: Claude Code
+`canvas-authoring` MCP server. Neither manifest should declare a `"hooks"` field: Claude Code
 auto-discovers `hooks/hooks.json`, and pointing at it explicitly is treated as a duplicate hook
 source, which also disables MCP.
 

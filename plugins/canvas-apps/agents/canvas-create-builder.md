@@ -13,7 +13,7 @@ tools:
   - edit
   - apply_patch
   - mcp__canvas-authoring__describe_control
-  - canvas-apps-canvas-authoring/describe_control
+  - canvas-authoring/describe_control
 ---
 
 # Implement One Screen

@@ -3,7 +3,7 @@
  * Power Platform Skills — Installation Script
  *
  * Clones the marketplace repository and uses CLI commands to register
- * the plugin marketplace and install plugins for Claude Code and GitHub Copilot.
+ * the Open Plugins marketplace and install plugins for Claude Code and GitHub Copilot.
  *
  * Usage:
  *   node scripts/install.js [--include-dataverse]                        (from local clone)
@@ -176,6 +176,7 @@ async function loadMarketplace() {
   const roots = [...new Set([repoRoot, process.cwd()])];
   const marketplacePaths = [
     "marketplace.json",
+    path.join(".plugin", "marketplace.json"),
     path.join(".claude-plugin", "marketplace.json"),
   ];
   const errors = [];
@@ -194,7 +195,7 @@ async function loadMarketplace() {
   }
 
   info("Fetching marketplace manifest from GitHub...");
-  for (const relativePath of ["marketplace.json", ".claude-plugin/marketplace.json"]) {
+  for (const relativePath of ["marketplace.json", ".plugin/marketplace.json", ".claude-plugin/marketplace.json"]) {
     try {
       const raw = await httpsGet(`${GITHUB_RAW}/${relativePath}`);
       return parseMarketplaceManifest(raw);
