@@ -1,7 +1,7 @@
 {
   "name": "power-pages",
   "version": "2.8.0",
-  "description": "Create and deploy Power Pages sites using modern development approaches. Supports Standard and Enhanced data model traditional sites provisioned from documented first-party templates and code sites (SPAs) with React, Angular, Vue, or Astro. Includes ALM orchestration, per-solution pipelines, solution splitting, and deployment diagnostics.",
+  "description": "Create and deploy Power Pages sites using modern development approaches. Supports Standard and Enhanced data model non-SPA sites provisioned from documented first-party templates and SPA sites with React, Angular, Vue, or Astro. Includes ALM orchestration, per-solution pipelines, solution splitting, and deployment diagnostics.",
   "author": {
     "name": "Microsoft",
     "url": "https://www.microsoft.com"
@@ -12,9 +12,9 @@
   "keywords": [
     "power-pages",
     "site-builder",
-    "code-sites",
+    "spa-sites",
     "enhanced-data-model",
-    "declarative-sites",
+    "non-spa-sites",
     "spa",
     "react",
     "angular",

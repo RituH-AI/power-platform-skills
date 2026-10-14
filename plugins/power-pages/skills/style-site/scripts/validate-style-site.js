@@ -4,7 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { validatePlan } = require('../../../scripts/lib/style-site-plan');
-const { readText, inspectSite, parseArgs, assertOutsideSite } = require('../../../scripts/lib/classic-site-style-context');
+const { readText, inspectSite, parseArgs, assertOutsideSite } = require('../../../scripts/lib/non-spa-site-style-context');
 const { runValidation, approve, block } = require('../../../scripts/lib/validation-helpers');
 
 function verify(plan, receipt) {

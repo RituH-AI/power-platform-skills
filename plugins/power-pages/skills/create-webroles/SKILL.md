@@ -1,10 +1,10 @@
 ---
 name: create-webroles
 description: >-
-  Creates and configures web roles for a Power Pages code site. Web roles control access
+  Creates and configures web roles for a Power Pages SPA site. Web roles control access
   and permissions for site users, including authenticated and anonymous roles. Use when the
   user wants to create, add, set up, or manage web roles for their site. Also supports
-  PAC-downloaded traditional sites with nested or directly opened metadata roots.
+  PAC-downloaded non-SPA sites with nested or directly opened metadata roots.
 user-invocable: true
 allowed-tools: Read, Write, Bash, Grep, Glob, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList
 model: opus
@@ -14,9 +14,9 @@ model: opus
 
 # Create Web Roles
 
-Create web roles for a Power Pages code site. Web roles define the permissions and access levels for different types of site users.
+Create web roles for a Power Pages SPA site. Web roles define the permissions and access levels for different types of site users.
 
-Traditional sites use the same role schema and uniqueness constraints, but their metadata root can
+Non-SPA sites use the same role schema and uniqueness constraints, but their metadata root can
 be either `<projectRoot>/.powerpages-site` or a directly opened PAC export.
 
 ## Site Type Routing
@@ -33,8 +33,8 @@ Before reading or executing the workflow below, perform the existing SPA project
   node "${PLUGIN_ROOT}/scripts/lib/detect-project-context.js"
   ```
 
-- If it returns `siteType: "declarative"`, read and follow
-  `${PLUGIN_ROOT}/skills/create-webroles/references/traditional-site-workflow.md`. Do not execute
+- If it returns `siteType: "non-spa"`, read and follow
+  `${PLUGIN_ROOT}/skills/create-webroles/references/non-spa-site-workflow.md`. Do not execute
   any of the SPA workflow below.
 - Otherwise, continue to Phase 1 and preserve its existing not-found handling.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-const { parseArgs, readText } = require('../../../scripts/lib/classic-site-style-context');
+const { parseArgs, readText } = require('../../../scripts/lib/non-spa-site-style-context');
 const { compactSummary } = require('../../../scripts/lib/style-site-summary');
 const { studioSupport, requestSupport } = require('../../../scripts/lib/studio-style-capabilities');
 

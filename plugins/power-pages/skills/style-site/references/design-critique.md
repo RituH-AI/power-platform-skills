@@ -1,6 +1,6 @@
-# Classic design critique adapter
+# Non-SPA design critique adapter
 
-Read for the final coordinated classic design review or a separately requested classic visual critique, not for every small styling operation. Read and apply [shared site design quality](../../../references/site-design-quality.md) and the [classic styling adapter](design-quality.md). This file governs classic interpretation only; it does not change the SPA design references, scoring, fonts, or build loop.
+Read for the final coordinated non-SPA design review or a separately requested non-SPA visual critique, not for every small styling operation. Read and apply [shared site design quality](../../../references/site-design-quality.md) and the [non-SPA styling adapter](design-quality.md). This file governs non-SPA interpretation only; it does not change the SPA design references, scoring, fonts, or build loop.
 
 ## Reuse the rubric, not the SPA execution contract
 
@@ -33,6 +33,6 @@ Score only evidenced categories when scoring is useful. With source-only or miss
 
 No browser, local server, deployment, or extra gate is required. Reuse child verification and any approved image-check receipt without repeating unchanged probes; unchecked images remain unverified, not a reason to add mandatory network checks. Preserve exact-diff/hash approval, native ownership, Bootstrap/Studio structures, authentication, navigation and locales.
 
-The SPA automatic capture/fix/commit loop does not apply to classic creation, customization, styling, or read-only critique. Missing rendering cannot block an otherwise independently verified local edit or authorize deploying it for screenshots. Known local failures still follow the existing owner and approval rules.
+The SPA automatic capture/fix/commit loop does not apply to non-SPA creation, customization, styling, or read-only critique. Missing rendering cannot block an otherwise independently verified local edit or authorize deploying it for screenshots. Known local failures still follow the existing owner and approval rules.
 
-A separately requested classic `/exceptional-web-design` review follows [its native workflow](../../exceptional-web-design/workflows/classic-site.md). Its broader screenshot capture is not authorized by `style-site:2.runtime`, which remains bounded structural/computed-style discovery. Recommendations require fresh owner/scope/diff/hash approval; no automatic fix loop or deployment follows.
+A separately requested non-SPA `/exceptional-web-design` review follows [its native workflow](../../exceptional-web-design/workflows/non-spa-site.md). Its broader screenshot capture is not authorized by `style-site:2.runtime`, which remains bounded structural/computed-style discovery. Recommendations require fresh owner/scope/diff/hash approval; no automatic fix loop or deployment follows.

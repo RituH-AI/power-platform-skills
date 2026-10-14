@@ -17,7 +17,7 @@ function createTempProject(t) {
   return projectRoot;
 }
 
-function createTempDeclarativeSite(t) {
+function createTempNonSpaSite(t) {
   const siteRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'powerpages-declarative-'));
   t.after(() => fs.rmSync(siteRoot, { recursive: true, force: true }));
 
@@ -34,7 +34,7 @@ function createTempDeclarativeSite(t) {
   }
   fs.writeFileSync(
     path.join(siteRoot, 'website.yml'),
-    'id: 11111111-1111-4111-8111-111111111111\nname: Traditional Test Site\n',
+    'id: 11111111-1111-4111-8111-111111111111\nname: Non-SPA Test Site\n',
     'utf8'
   );
 
@@ -54,7 +54,7 @@ function findingMessages(findings) {
 
 module.exports = {
   createTempProject,
-  createTempDeclarativeSite,
+  createTempNonSpaSite,
   writeProjectFile,
   findingMessages,
 };

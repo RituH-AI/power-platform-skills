@@ -92,12 +92,12 @@ function findPath(dir, target) {
  * Finds the project root directory of a Power Pages site.
  *
  * A project root is marked by EITHER:
- *   - `powerpages.config.json` — code/SPA sites (`pac pages download-code-site`), OR
- *   - a `.powerpages-site/` directory — declarative design-studio sites
+ *   - `powerpages.config.json` — SPA sites (`pac pages download-code-site`), OR
+ *   - a `.powerpages-site/` directory — non-SPA Design Studio sites
  *     (`pac pages download`; standard or enhanced data model). These have NO
  *     `powerpages.config.json`.
  *
- * Code sites have both markers; declarative sites have only
+ * SPA sites have both markers; non-SPA sites have only
  * `.powerpages-site/`. Checking for either makes root discovery work for both site types.
  *
  * @returns {string|null} Project root path, or null
@@ -107,7 +107,7 @@ function findProjectRoot(dir) {
   while (true) {
     if (fs.existsSync(path.join(current, 'powerpages.config.json')) ||
         fs.existsSync(path.join(current, '.powerpages-site')) ||
-        isDeclarativeSiteRoot(current)) {
+        isNonSpaSiteRoot(current)) {
       return current;
     }
 
@@ -126,18 +126,18 @@ function findProjectRoot(dir) {
   const fallbackPortalConfig = findPath(dir, '.portalconfig');
   if (fallbackPortalConfig) {
     const candidate = path.dirname(fallbackPortalConfig);
-    if (isDeclarativeSiteRoot(candidate)) return candidate;
+    if (isNonSpaSiteRoot(candidate)) return candidate;
   }
   return null;
 }
 
 /**
- * Returns true when a directory is a direct PAC declarative-site root.
+ * Returns true when a directory is a direct PAC non-SPA site root.
  *
  * PAC exports contain both markers at the component root. Requiring both avoids
  * treating an unrelated website.yml or .portalconfig directory as a site.
  */
-function isDeclarativeSiteRoot(dir) {
+function isNonSpaSiteRoot(dir) {
   return fs.existsSync(path.join(dir, '.portalconfig')) &&
     fs.existsSync(path.join(dir, 'website.yml'));
 }
@@ -146,7 +146,7 @@ function isDeclarativeSiteRoot(dir) {
  * Resolves the directory that contains PAC component folders such as
  * web-pages/, basic-forms/, and lists/.
  *
- * Code sites and plugin-created traditional projects keep those components in
+ * SPA sites and plugin-created non-SPA projects keep those components in
  * <projectRoot>/.powerpages-site. A manually opened PAC export uses projectRoot
  * itself as the component root.
  */
@@ -162,7 +162,7 @@ function resolvePowerPagesSiteRoot(projectRoot) {
   )) {
     return nested;
   }
-  if (isDeclarativeSiteRoot(resolvedProjectRoot)) return resolvedProjectRoot;
+  if (isNonSpaSiteRoot(resolvedProjectRoot)) return resolvedProjectRoot;
   if (fs.existsSync(nested)) return nested;
   return null;
 }
@@ -578,7 +578,7 @@ module.exports = {
   findPath,
   findProjectRoot,
   findPowerPagesSiteDir,
-  isDeclarativeSiteRoot,
+  isNonSpaSiteRoot,
   resolvePowerPagesSiteRoot,
   UUID_REGEX,
   validateDataverseEnvironmentUrl,

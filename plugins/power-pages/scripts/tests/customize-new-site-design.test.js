@@ -4,14 +4,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { renderDocument, successfulImageCheck } = require('./customization-plan-test-helpers');
-const { validateCustomizationPlan, planHash } = require('../lib/customize-declarative-site-plan');
-const { renderCustomizationPlan, renderReviewedPlan } = require('../render-customize-declarative-site-plan');
-const { publishApprovedPlan } = require('../promote-customize-declarative-site-plan');
-const { updateExecution } = require('../update-customize-declarative-site-execution');
+const { validateCustomizationPlan, planHash } = require('../lib/customize-non-spa-site-plan');
+const { renderCustomizationPlan, renderReviewedPlan } = require('../render-customize-non-spa-site-plan');
+const { publishApprovedPlan } = require('../promote-customize-non-spa-site-plan');
+const { updateExecution } = require('../update-customize-non-spa-site-execution');
 
 function newSitePlan() {
   const plan = JSON.parse(fs.readFileSync(
-    path.join(__dirname, 'fixtures', 'customize-declarative-site-plan.json'), 'utf8'
+    path.join(__dirname, 'fixtures', 'customize-non-spa-site-plan.json'), 'utf8'
   ));
   plan.site.templateName = 'StarterLayout1';
   plan.newSiteDesign = {
@@ -403,7 +403,7 @@ test('URL-based creation renders exact delivery details and resolves image input
   } });
   assert.deepEqual(checkedUrls, [plan.assets[0].externalUrl]);
   publishApprovedPlan({ projectRoot: root, dataPath, imageChecksPath: review.imageChecks });
-  const htmlPath = path.join(root, 'docs', 'customize-declarative-site', 'current-plan.html');
+  const htmlPath = path.join(root, 'docs', 'customize-non-spa-site', 'current-plan.html');
   const document = renderDocument(fs.readFileSync(htmlPath, 'utf8'));
   const assetCard = document.get('assetChanges').innerHTML;
   assert.match(assetCard, /Direct external HTTPS URL \(not imported\)/);
@@ -759,7 +759,7 @@ test('published execution carries the hashed design context without mixing it in
     updateExecution({ projectRoot: root, action: 'complete', operationId: operation.id, outputsPath });
   }
   assert.equal(updateExecution({ projectRoot: root, action: 'finish' }).status, 'completed');
-  const canonical = path.join(root, 'docs', 'customize-declarative-site', 'current-plan.json');
+  const canonical = path.join(root, 'docs', 'customize-non-spa-site', 'current-plan.json');
   plan.newSiteDesign.composition = 'Unapproved changed composition';
   fs.writeFileSync(canonical, JSON.stringify(plan), 'utf8');
   assert.throws(() => updateExecution({

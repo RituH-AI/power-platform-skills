@@ -37,7 +37,7 @@ function successfulImageCheck(url) {
 }
 
 function externalImagePlan(urls = ['https://images.unsplash.com/photo-example?w=800']) {
-  const plan = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'customize-declarative-site-plan.json')));
+  const plan = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'customize-non-spa-site-plan.json')));
   const asset = plan.assets[0];
   plan.operations = [{
     ...plan.operations[1], dependsOn: [], outputBindings: {},

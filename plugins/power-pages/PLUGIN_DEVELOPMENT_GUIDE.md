@@ -307,10 +307,10 @@ their own contacts and create new ones, but cannot modify or delete existing rec
 
 > **Acceptance criterion:** Every skill must implement the three-point approval pattern or the documented `style-site` local-only gates. No approval-gated action may proceed without explicit user confirmation via `AskUserQuestion`. Skills must work autonomously between checkpoints — no mid-analysis questions.
 
-### Shared design quality and classic creation
+### Shared design quality and non-SPA creation
 
-Author common visual guidance once in `references/site-design-quality.md`, with code-site and
-classic adapters for platform-specific execution. New classic sites use the Enhanced/Bootstrap 5
+Author common visual guidance once in `references/site-design-quality.md`, with SPA and
+non-SPA adapters for platform-specific execution. New non-SPA sites use the Enhanced/Bootstrap 5
 creation path after explicit model and administrator confirmation, filtered documented templates,
 and validation of the downloaded Bootstrap assets. Preserve explicit Standard/Bootstrap 3
 compatibility without silently migrating or inferring Bootstrap from the model.
@@ -322,11 +322,11 @@ consumer inputs, without downloads or image Web File imports. Review hosting, pr
 and CSP; schema validation does not prove remote availability. Explicit file imports outside
 that path retain staged preparation and typed public-URL bindings. Reuse native content owners
 and final guarded `style-site`. Require meaningful content images unless explicitly declined.
-Existing-site plans need no new brief or forced imagery. No classic dev server or live preview is
+Existing-site plans need no new brief or forced imagery. No non-SPA dev server or live preview is
 required; status pages and approval plans are separate artifacts. Local contract/contrast checks
 do not establish Studio/runtime rendering fidelity.
 
-### Lean classic styling guidance
+### Lean non-SPA styling guidance
 
 Keep `style-site/SKILL.md` plus its mandatory `references/quick-start.md` within **12,000 UTF-8 bytes**, with SKILL.md at most **6,000 characters** as the target. The quick start contains one validated request and typical properties, not duplicated schema/allowlists. Load policy/version/deep request/CLI references only when applicable. Routine CSS uses bundled verified guidance; web documentation is for unknown/conflicting/stale guidance or explicit requests. Reuse the unchanged version-check script's result once per installed plugin version in the current conversation.
 

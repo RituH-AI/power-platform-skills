@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-const { parseArgs } = require('../../../scripts/lib/classic-site-style-context');
+const { parseArgs } = require('../../../scripts/lib/non-spa-site-style-context');
 const { checkColorPair } = require('../../../scripts/lib/style-site-contrast');
 
 function main(argv = process.argv.slice(2)) {

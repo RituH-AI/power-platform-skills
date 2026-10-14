@@ -10,7 +10,7 @@ const { validateCatalogShape } = require('../lib/template-catalog');
 
 const SHA = '0123456789abcdef0123456789abcdef01234567';
 
-function traditionalTemplate({
+function nonSpaTemplate({
   id = 'starter-layout-1',
   templateName = 'StarterLayout1',
   displayName = 'Starter Layout 1',
@@ -20,8 +20,8 @@ function traditionalTemplate({
     id,
     displayName,
     description: `${displayName} description`,
-    kind: 'traditional',
-    keywords: ['traditional'],
+    kind: 'non-spa',
+    keywords: ['non-spa'],
     audience: ['makers'],
     author: 'Microsoft',
     provisioning: {
@@ -33,15 +33,15 @@ function traditionalTemplate({
     responsivePreviews: previews ? [{
       id: 'home',
       displayName: 'Home page',
-      desktop: `templates/traditional/${id}/previews/desktop-home.png`,
-      mobile: `templates/traditional/${id}/previews/mobile-home.png`,
+      desktop: `templates/non-spa/${id}/previews/desktop-home.png`,
+      mobile: `templates/non-spa/${id}/previews/mobile-home.png`,
     }] : [],
   };
 }
 
 function catalogResult(templates = [
-  traditionalTemplate(),
-  traditionalTemplate({
+  nonSpaTemplate(),
+  nonSpaTemplate({
     id: 'event-portal',
     templateName: 'EventPortal',
     displayName: 'Event Portal',
@@ -61,11 +61,11 @@ function catalogResult(templates = [
 }
 
 test('samples manifest contract accepts Create Website API templates without artifact fields', () => {
-  assert.equal(validateCatalogShape({ templates: [traditionalTemplate()] }), null);
+  assert.equal(validateCatalogShape({ templates: [nonSpaTemplate()] }), null);
 });
 
-test('samples manifest contract rejects malformed traditional provisioning metadata', () => {
-  const template = traditionalTemplate();
+test('samples manifest contract rejects malformed non-SPA provisioning metadata', () => {
+  const template = nonSpaTemplate();
   delete template.provisioning.templateName;
   assert.match(
     validateCatalogShape({ templates: [template] }),
@@ -73,7 +73,7 @@ test('samples manifest contract rejects malformed traditional provisioning metad
   );
 });
 
-test('returns traditional samples metadata with immutable preview URLs', () => {
+test('returns non-SPA samples metadata with immutable preview URLs', () => {
   const result = buildResult({
     modelVersion: 'Standard',
     bootstrapVersion: 3,
@@ -88,7 +88,7 @@ test('returns traditional samples metadata with immutable preview URLs', () => {
   );
   assert.equal(
     result.catalog.templates[0].previews[0].desktop,
-    `https://raw.githubusercontent.com/microsoft/power-pages-samples/${SHA}/templates/traditional/starter-layout-1/previews/desktop-home.png`,
+    `https://raw.githubusercontent.com/microsoft/power-pages-samples/${SHA}/templates/non-spa/starter-layout-1/previews/desktop-home.png`,
   );
 });
 
@@ -106,7 +106,7 @@ test('retains documented Bootstrap 5 filtering while metadata comes from samples
   assert.deepEqual(result.catalog.bootstrapCompatibility.omittedTemplateNames, ['EventPortal']);
 });
 
-test('fails closed when the samples catalog is unavailable or contains no traditional templates', () => {
+test('fails closed when the samples catalog is unavailable or contains no non-SPA templates', () => {
   assert.throws(
     () => buildResult({
       modelVersion: 'Enhanced',

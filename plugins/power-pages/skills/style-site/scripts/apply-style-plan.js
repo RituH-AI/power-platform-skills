@@ -7,7 +7,7 @@ const generateUuid = require('../../../scripts/generate-uuid');
 const { preparePlanFromSnapshot, validatePlan, saveJson } = require('../../../scripts/lib/style-site-plan');
 const {
   safePath, readText, hash, resolveSiteRoot, captureSite, assertOutsideSite, parseArgs,
-} = require('../../../scripts/lib/classic-site-style-context');
+} = require('../../../scripts/lib/non-spa-site-style-context');
 
 function currentHash(root, relative) {
   const file = safePath(root, relative);

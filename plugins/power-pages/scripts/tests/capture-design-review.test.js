@@ -84,7 +84,7 @@ const consoleMessage = (type, text) => ({ type: () => type, text: () => text });
 const response = (status, url) => ({ status: () => status, url: () => url });
 const failedRequest = (url, errorText) => ({ url: () => url, failure: () => (errorText ? { errorText } : null) });
 
-test('classic localized paths with system fonts need no framework or downloaded font faces', async () => {
+test('non-SPA localized paths with system fonts need no framework or downloaded font faces', async () => {
   const { playwright, calls } = fakePlaywright({ fonts: [] });
   const result = await review.captureDesignReview({
     playwright, channel: 'chrome', url: 'https://contoso.example',

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Discovers declarative Create Website templates from the release-pinned public
+// Discovers non-SPA Create Website templates from the release-pinned public
 // samples catalog. The environment EDM toggle remains administrator-confirmed
 // because Microsoft does not publish a supported API for reading it.
 
@@ -9,15 +9,15 @@ const {
   BOOTSTRAP_5_TEMPLATE_NAMES,
   normalizeBootstrapVersion,
   parseBootstrapVersionArgs,
-  normalizeDeclarativeModelVersion,
+  normalizeNonSpaModelVersion,
 } = require('../../../scripts/lib/site-templates');
 const {
   fetchCatalog,
   isCreateWebsiteApiTemplate,
 } = require('../../../scripts/lib/template-catalog');
 const {
-  normalizeTraditionalTemplate,
-} = require('../../../scripts/lib/traditional-template-catalog');
+  normalizeNonSpaTemplate,
+} = require('../../../scripts/lib/non-spa-template-catalog');
 
 function parseArgs(argv) {
   const values = new Set(argv);
@@ -38,23 +38,23 @@ function buildResult({
   bootstrapVersion = null,
   catalogResult,
 } = {}) {
-  const selectedModel = normalizeDeclarativeModelVersion(modelVersion);
+  const selectedModel = normalizeNonSpaModelVersion(modelVersion);
   const selectedBootstrap = bootstrapVersion === null ? null : normalizeBootstrapVersion(bootstrapVersion);
   if (selectedBootstrap === 5 && selectedModel !== 'Enhanced') {
     throw new Error('New Bootstrap 5 sites require --modelVersion Enhanced');
   }
   if (!catalogResult?.ok) {
-    throw new Error(`Traditional template catalog unavailable: ${catalogResult?.error || 'unknown error'}`);
+    throw new Error(`Non-SPA template catalog unavailable: ${catalogResult?.error || 'unknown error'}`);
   }
   const requiredToggleState = selectedModel === 'Enhanced' ? 'enabled' : 'disabled';
   const discoveredTemplates = catalogResult.catalog.templates
     .filter(isCreateWebsiteApiTemplate)
-    .map((template) => normalizeTraditionalTemplate(template, catalogResult));
+    .map((template) => normalizeNonSpaTemplate(template, catalogResult));
   const templates = selectedBootstrap === 5
     ? discoveredTemplates.filter((template) => BOOTSTRAP_5_TEMPLATE_NAMES.includes(template.name))
     : discoveredTemplates;
   if (templates.length === 0) {
-    throw new Error('Traditional template catalog contains no templates for the selected creation path');
+    throw new Error('Non-SPA template catalog contains no templates for the selected creation path');
   }
   return {
     modelVersion: selectedModel,
@@ -124,8 +124,8 @@ if (require.main === module) {
 
 module.exports = {
   parseArgs,
-  normalizeModelVersion: normalizeDeclarativeModelVersion,
-  normalizeTraditionalTemplate,
+  normalizeModelVersion: normalizeNonSpaModelVersion,
+  normalizeNonSpaTemplate,
   buildResult,
   run,
 };

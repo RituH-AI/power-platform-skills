@@ -2,7 +2,7 @@
 name: setup-datamodel
 description: >-
   Creates Dataverse tables, columns, and relationships for a Power Pages site based on a data
-  model proposal. Supports code sites and PAC-downloaded traditional sites. Use when the user
+  model proposal. Supports SPA sites and PAC-downloaded non-SPA sites. Use when the user
   wants to set up the data model, create database tables, or build the Dataverse schema for
   their site.
 user-invocable: true
@@ -43,8 +43,8 @@ identify the local site context when one exists
 
    The result distinguishes:
 
-   - `siteType: "code"` — a generated code site identified by `powerpages.config.json`
-   - `siteType: "declarative"` — a traditional PAC export, either nested under
+   - `siteType: "spa"` — a generated SPA site identified by `powerpages.config.json`
+   - `siteType: "non-spa"` — a non-SPA PAC export, either nested under
      `<PROJECT_ROOT>/.powerpages-site/` or opened directly at the directory containing
      `.portalconfig/` and `website.yml`
 
@@ -52,8 +52,8 @@ identify the local site context when one exists
    site is present, continue using the user's request as the requirements source; this skill can
    design a Dataverse model before a site is created.
 
-4. For a declarative site, treat the environment returned by `pac env who` as the exact target
-   environment. Traditional exports do not carry a reliable environment URL. Display that target
+4. For a non-SPA site, treat the environment returned by `pac env who` as the exact target
+   environment. Non-SPA exports do not carry a reliable environment URL. Display that target
    environment in the proposal and final approval context so the user can catch a wrong PAC
    authentication before any Dataverse write.
 
@@ -107,9 +107,9 @@ If the user chooses to upload an existing diagram:
 4. If a local site exists, cross-check the uploaded model against its existing table bindings and
    source evidence. Existing Basic Forms, Advanced Forms, Lists, table permissions, Web API
    settings, Liquid, and JavaScript references are evidence for reuse or extension; they are not
-   permission to modify those site components. For a traditional site, follow the evidence,
+   permission to modify those site components. For a non-SPA site, follow the evidence,
    reachability, Dataverse-resolution, and classification workflow in
-   `${PLUGIN_ROOT}/skills/setup-datamodel/references/traditional-site-analysis.md`.
+   `${PLUGIN_ROOT}/skills/setup-datamodel/references/non-spa-site-analysis.md`.
 
 5. Generate a Mermaid ER diagram from the parsed data (if the user provided an image or text) for visual confirmation.
 
@@ -131,8 +131,8 @@ If the user chooses to let the Data Model Architect figure it out, proceed to **
 
 1. Use the `Task` tool to spawn the `data-model-architect` agent. This agent autonomously:
    - Analyzes the site's source code to infer data requirements
-   - For a traditional site, follows
-     `${PLUGIN_ROOT}/skills/setup-datamodel/references/traditional-site-analysis.md`
+   - For a non-SPA site, follows
+     `${PLUGIN_ROOT}/skills/setup-datamodel/references/non-spa-site-analysis.md`
    - Queries existing Dataverse tables via OData GET requests
    - Identifies reuse opportunities (reuse, extend, or create new)
    - Proposes a complete data model with an ER diagram
@@ -149,7 +149,7 @@ If the user chooses to let the Data Model Architect figure it out, proceed to **
 
        Project root: <projectRoot or "none">
        Site root: <siteRoot or "none">
-       Site type: <code | declarative | none>
+       Site type: <code | non-SPA | none>
        Site name: <siteName or "unknown">
        Website record ID: <websiteRecordId or "unknown">
        Target Dataverse environment: <envUrl>
@@ -185,7 +185,7 @@ Present the data model proposal directly to the user as a formatted message, inc
 - Relationship descriptions
 - Mermaid ER diagram
 - Which tables are new vs. modified vs. reused
-- For traditional sites, the active forms, lists, permissions, settings, Liquid, or JavaScript
+- For non-SPA sites, the active forms, lists, permissions, settings, Liquid, or JavaScript
   evidence supporting each reuse/extend/create decision
 - Any references that were ignored because they were unreachable, presentational only, or lacked
   enough evidence to justify schema creation
@@ -207,7 +207,7 @@ Use `AskUserQuestion` to get approval:
 | Does this data model look correct? | Data Model Proposal | Approve and create tables (Recommended), Request changes, Cancel |
 
 The approval context must repeat the exact target environment. Approval covers only the proposed
-Dataverse schema changes; it does not authorize edits to traditional-site forms, lists, pages,
+Dataverse schema changes; it does not authorize edits to non-SPA site forms, lists, pages,
 templates, snippets, permissions, settings, or scripts.
 
 - **If "Approve and create tables (Recommended)"**: Proceed to Phase 5
@@ -406,12 +406,12 @@ Include:
 After the summary, suggest:
 
 - Review created tables in the Power Pages maker portal
-- For a code site or no-site schema session, populate tables with sample data for testing:
+- For a SPA site or no-site schema session, populate tables with sample data for testing:
   `/add-sample-data`
-- For a traditional site, do not suggest `/add-sample-data`; downloaded sites can share live
+- For a non-SPA site, do not suggest `/add-sample-data`; downloaded sites can share live
   Dataverse tables, so sample-record creation requires a separate explicit request
-- For a code site, integrate tables with the frontend via Web API: `/integrate-webapi`
-- For a traditional site, bind the verified schema through the appropriate native Forms, Advanced
+- For a SPA site, integrate tables with the frontend via Web API: `/integrate-webapi`
+- For a non-SPA site, bind the verified schema through the appropriate native Forms, Advanced
   Forms, Lists, Liquid, or page JavaScript workflow; this skill intentionally does not edit those
   components
 - If the site is not yet built: `/create-site`
@@ -443,7 +443,7 @@ Before starting Phase 1, create a task list with all phases using `TaskCreate`:
 
 | Task subject | activeForm | Description |
 |-------------|------------|-------------|
-| Verify prerequisites | Verifying prerequisites | Confirm PAC CLI auth, acquire Azure CLI token, verify API access, resolve code/traditional site context |
+| Verify prerequisites | Verifying prerequisites | Confirm PAC CLI auth, acquire Azure CLI token, verify API access, resolve code/non-SPA site context |
 | Choose data model source | Choosing data model source | Ask user to upload ER diagram or let AI analyze the site |
 | Invoke data model architect | Invoking data model architect | Spawn agent to analyze site and propose data model |
 | Review and approve proposal | Reviewing proposal | Present data model proposal to user, get explicit approval |

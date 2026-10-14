@@ -1,6 +1,6 @@
 const path = require('path');
 const { TABLE_PERMISSION_FILE_SUFFIX, loadYamlRecordsWithErrors, listYamlFiles } = require('./powerpages-config');
-const { normalizeTablePermission } = require('./declarative-metadata');
+const { normalizeTablePermission } = require('./non-spa-metadata');
 const { addFinding, findUnexpectedKeys, findMissingKeys, summarize } = require('./powerpages-validation-utils');
 const { resolvePowerPagesSiteRoot } = require('./validation-helpers');
 

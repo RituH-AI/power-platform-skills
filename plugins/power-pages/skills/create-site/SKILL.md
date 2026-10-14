@@ -1,10 +1,10 @@
 ---
 name: create-site
 description: >-
-  Creates a new Power Pages site. For SPA sites using React, Angular, Vue, or Astro, guides
+  Creates a new Power Pages site. For SPA (code) sites using React, Angular, Vue, or Astro, guides
   the full process from requirements discovery through scaffolding, component planning, design,
-  implementation, validation, and deployment. For Standard or Enhanced data model declarative
-  sites, provisions a documented Microsoft template, verifies the selected model, downloads the
+  implementation, validation, and deployment. For Standard or Enhanced data model non-SPA
+  (classic) sites, provisions a documented Microsoft template, verifies the selected model, downloads the
   site, validates its identity and Bootstrap assets, and coordinates approved image-rich design.
   Use when the user wants to create, build, or
   scaffold a new Power Pages website or portal.
@@ -25,10 +25,10 @@ template-specific details.
 
 - **Use best judgement for design details**: Once the user picks an aesthetic direction and mood, make confident decisions about specific fonts, colors, page layouts, and component behavior. Do not ask the user to specify every detail — use the design reference and your own taste to make creative, distinctive choices.
 - **Use TaskCreate/TaskUpdate**: Track all progress throughout all phases — create the todo list upfront with all phases before starting any work.
-- **Platform-scoped design guidance**: After routing, code sites follow the existing SPA design references and workflow below unchanged. Classic sites use `${PLUGIN_ROOT}/references/site-design-quality.md` and the native adapters for the experience brief, composition, imagery, and accessibility. Carry known classic design decisions through native handoffs; classic exceptions never alter SPA fonts, plan fields, rendering requirements, scores, or completion gates.
-- **Classic template role**: Use the selected creation template as data-model/domain and requirements context, not a constraint on visual design, page composition, layout, or branding. Require a custom design and layout, reusing needed native forms, lists and snippets as components rather than inheriting their surrounding page composition. Carry the user's modern design intent and explicit preservation preferences into the classic customization workflow; copy/image swaps and recoloring alone do not complete it.
-- **Image URLs during classic creation**: Add images using approved direct HTTPS URLs, not downloads or new image Web Files. Reuse template images when they fit the approved design; do not upload local images or publish generated illustrations automatically.
-- **Classic sites need no dev server or live preview**: Use native Bootstrap-aware authoring and local verification. Provisioning status pages and approval documents are not site previews.
+- **Platform-scoped design guidance**: After routing, SPA sites follow the existing SPA design references and workflow below unchanged. Non-SPA sites use `${PLUGIN_ROOT}/references/site-design-quality.md` and the native adapters for the experience brief, composition, imagery, and accessibility. Carry known non-SPA design decisions through native handoffs; non-SPA exceptions never alter SPA fonts, plan fields, rendering requirements, scores, or completion gates.
+- **Non-SPA template role**: Use the selected creation template as data-model/domain and requirements context, not a constraint on visual design, page composition, layout, or branding. Require a custom design and layout, reusing needed native forms, lists and snippets as components rather than inheriting their surrounding page composition. Carry the user's modern design intent and explicit preservation preferences into the non-SPA customization workflow; copy/image swaps and recoloring alone do not complete it.
+- **Image URLs during non-SPA creation**: Add images using approved direct HTTPS URLs, not downloads or new image Web Files. Reuse template images when they fit the approved design; do not upload local images or publish generated illustrations automatically.
+- **Non-SPA sites need no dev server or live preview**: Use native Bootstrap-aware authoring and local verification. Provisioning status pages and approval documents are not site previews.
 
 **Initial request:** $ARGUMENTS
 
@@ -41,8 +41,9 @@ Determine the site type before creating the phase task list.
 Classify the signals in `$ARGUMENTS`:
 
 - React, Vue, Angular, Astro, SPA, or code site → **SPA site**
-- Classic, Liquid, EDM, enhanced data model, SDM, standard data model, Program Registration, Event Portal,
-  Schedule Meetings, or Power Pages template → **Traditional site**
+- Non-SPA, classic, traditional, declarative, Liquid, EDM, enhanced data model, SDM, standard data
+  model, Program Registration, Event Portal, Schedule Meetings, or Power Pages template →
+  **Non-SPA site**
 
 Infer the route only when exactly one site type is indicated. If both types are indicated, treat the
 request as ambiguous and ask the site-type question below.
@@ -50,7 +51,7 @@ request as ambiguous and ask the site-type question below.
 <!-- gate: create-site:0.site-type | category=plan | cancel-leaves=nothing -->
 
 > 🚦 **Gate (plan · create-site:0.site-type):** Ambiguous creation request — choose between a
-> generated SPA site and a platform-provisioned traditional site.
+> generated SPA site and a platform-provisioned non-SPA site.
 >
 > **Trigger:** `$ARGUMENTS` does not establish the site type.
 > **Why we ask:** The two routes create different artifacts and use different provisioning models.
@@ -60,49 +61,49 @@ If the request is ambiguous, use `AskUserQuestion`:
 
 | Question | Header | Options |
 |---|---|---|
-| Which type of Power Pages site should I create? | Site type | Traditional site from a Microsoft template (Preview), SPA site using React/Vue/Angular/Astro |
+| Which type of Power Pages site should I create? | Site type | Non-SPA site from a Microsoft template (Preview), SPA site using React/Vue/Angular/Astro |
 
 After the route is known:
 
-- **Traditional site:** Read and follow
-  `${PLUGIN_ROOT}/skills/create-site/workflows/declarative-site.md`. Do not continue into the code-site
+- **Non-SPA site:** Read and follow
+  `${PLUGIN_ROOT}/skills/create-site/workflows/non-spa-site.md`. Do not continue into the SPA
   phases below.
 - **SPA site:** Continue with the existing workflow below.
 
-### Declarative Approval Gates
+### Non-SPA Approval Gates
 
-The declarative workflow file contains the detailed call sites. These markers keep every
-load-bearing declarative question paired with the repository gate catalog.
+The non-SPA workflow file contains the detailed call sites. These markers keep every
+load-bearing non-SPA question paired with the repository gate catalog.
 
-<!-- gate: create-site:declarative-1-select-model | category=plan | cancel-leaves=nothing -->
+<!-- gate: create-site:non-spa-1-select-model | category=plan | cancel-leaves=nothing -->
 
-> 🚦 **Gate (plan · create-site:declarative-1-select-model):** Select Standard or Enhanced when
-> the request did not already specify the declarative model.
+> 🚦 **Gate (plan · create-site:non-spa-1-select-model):** Select Standard or Enhanced when
+> the request did not already specify the non-SPA model.
 
-<!-- gate: create-site:declarative-1-confirm-environment | category=consent | cancel-leaves=nothing -->
+<!-- gate: create-site:non-spa-1-confirm-environment | category=consent | cancel-leaves=nothing -->
 
-> 🚦 **Gate (consent · create-site:declarative-1-confirm-environment):** Confirm the exact target
-> environment before any declarative planning or provisioning.
+> 🚦 **Gate (consent · create-site:non-spa-1-confirm-environment):** Confirm the exact target
+> environment before any non-SPA planning or provisioning.
 
-<!-- gate: create-site:declarative-1-confirm-capability | category=progress | cancel-leaves=nothing -->
+<!-- gate: create-site:non-spa-1-confirm-capability | category=progress | cancel-leaves=nothing -->
 
-> 🚦 **Gate (progress · create-site:declarative-1-confirm-capability):** Require administrator
+> 🚦 **Gate (progress · create-site:non-spa-1-confirm-capability):** Require administrator
 > confirmation that the environment EDM toggle is enabled for Enhanced or disabled for Standard.
 
-<!-- gate: create-site:declarative-2-select-template | category=plan | cancel-leaves=nothing -->
+<!-- gate: create-site:non-spa-2-select-template | category=plan | cancel-leaves=nothing -->
 
-> 🚦 **Gate (plan · create-site:declarative-2-select-template):** Select one exact identifier from
-> the supported declarative template allowlist.
+> 🚦 **Gate (plan · create-site:non-spa-2-select-template):** Select one exact identifier from
+> the supported non-SPA template allowlist.
 
-<!-- gate: create-site:declarative-4-provision | category=final | cancel-leaves=nothing -->
+<!-- gate: create-site:non-spa-4-provision | category=final | cancel-leaves=nothing -->
 
-> 🚦 **Gate (final · create-site:declarative-4-provision):** Final consent immediately before the
+> 🚦 **Gate (final · create-site:non-spa-4-provision):** Final consent immediately before the
 > Create Website API call.
 
-<!-- gate: create-site:declarative-8-customize | category=plan | cancel-leaves=declarative-baseline -->
+<!-- gate: create-site:non-spa-8-customize | category=plan | cancel-leaves=non-spa-baseline -->
 
-> 🚦 **Gate (plan · create-site:declarative-8-customize):** Choose whether to customize the
-> verified downloaded template through `/customize-declarative-site`.
+> 🚦 **Gate (plan · create-site:non-spa-8-customize):** Choose whether to customize the
+> verified downloaded template through `/customize-non-spa-site`.
 
 ---
 
@@ -110,7 +111,7 @@ load-bearing declarative question paired with the repository gate catalog.
 
 The following server, preview, SPA asset, and scaffold instructions apply **only to SPA sites**.
 Only static SPA frameworks are supported here (React, Vue, Angular, Astro), not Next.js, Nuxt.js,
-Remix, SvelteKit, or Liquid. Classic Liquid sites use the declarative route above.
+Remix, SvelteKit, or Liquid. Non-SPA Liquid sites use the non-SPA route above.
 
 - **Scaffold early, design with intention**: Get the dev server running immediately after discovery, then plan the design and features while the scaffold is live.
 - **Live preview feedback loop**: The dev server MUST be running before any customization begins. Browse the site via Playwright (`browser_navigate` + `browser_snapshot`) to verify the structure of every significant change. Visual design review captures every page with one script call and opens the screenshots in one turn (see [5.7](#57-design-critique-pass)); use Playwright MCP screenshots only for brand extraction in Phase 3.

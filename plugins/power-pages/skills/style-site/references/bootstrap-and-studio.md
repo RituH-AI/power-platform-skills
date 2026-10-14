@@ -1,10 +1,10 @@
-# Bootstrap, Studio, and classic exports
+# Bootstrap, Studio, and non-SPA exports
 
 ## Resolve three independent axes
 
-Treat **classic versus SPA**, **standard versus enhanced data model**, and **disk serialization** as separate facts. Bootstrap version is another independent fact.
+Treat **non-SPA versus SPA**, **standard versus enhanced data model**, and **disk serialization** as separate facts. Bootstrap version is another independent fact.
 
-Use the read-only inspector to resolve one explicit classic site and its relationships. Supported adapters can cover direct PAC download roots and `.powerpages-site` layouts; neither a folder name nor `website.yml` alone proves that a project is classic. Do not create a code-site configuration tree to make discovery pass.
+Use the read-only inspector to resolve one explicit non-SPA site and its relationships. Supported adapters can cover direct PAC download roots and `.powerpages-site` layouts; neither a folder name nor `website.yml` alone proves that a project is non-SPA. Do not create a SPA configuration tree to make discovery pass.
 
 Public exports show `adx_`-prefixed and prefixless metadata, flat and nested Web File assets, and locale-in-filename versus locale-directory content pages. These are examples, not a promise that every export uses one shape. Unrecognized or conflicting relationships must stop edits with the unresolved files/records identified. See the [serialization sources](sources.md#public-format-evidence).
 

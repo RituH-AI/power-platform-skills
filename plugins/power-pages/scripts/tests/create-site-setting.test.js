@@ -6,7 +6,7 @@ const { spawnSync } = require('child_process');
 
 const {
   createTempProject,
-  createTempDeclarativeSite,
+  createTempNonSpaSite,
   writeProjectFile,
 } = require('./test-utils');
 
@@ -59,7 +59,7 @@ test('create-site-setting creates an environment-variable-backed site setting', 
 });
 
 test('create-site-setting appends aggregate PAC settings and retains source convention', (t) => {
-  const siteRoot = createTempDeclarativeSite(t);
+  const siteRoot = createTempNonSpaSite(t);
   const aggregatePath = writeProjectFile(
     siteRoot,
     'sitesetting.yml',
@@ -94,7 +94,7 @@ test('create-site-setting appends aggregate PAC settings and retains source conv
 });
 
 test('create-site-setting does not invent adx_source when aggregate metadata omits it', (t) => {
-  const siteRoot = createTempDeclarativeSite(t);
+  const siteRoot = createTempNonSpaSite(t);
   const aggregatePath = writeProjectFile(
     siteRoot,
     'sitesetting.yml',
@@ -120,7 +120,7 @@ test('create-site-setting does not invent adx_source when aggregate metadata omi
 });
 
 test('create-site-setting rejects mixed aggregate and per-record storage', (t) => {
-  const siteRoot = createTempDeclarativeSite(t);
+  const siteRoot = createTempNonSpaSite(t);
   writeProjectFile(
     siteRoot,
     'sitesetting.yml',

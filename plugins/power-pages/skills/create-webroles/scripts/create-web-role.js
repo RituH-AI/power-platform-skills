@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Creates a web role YAML file for Power Pages SPA or traditional sites.
+// Creates a web role YAML file for Power Pages SPA or non-SPA sites.
 // Generates UUID, validates inputs, writes correctly-formatted YAML.
 //
 // Usage:
@@ -35,7 +35,7 @@ const {
   '..',
   'scripts',
   'lib',
-  'declarative-metadata'
+  'non-spa-metadata'
 ));
 
 // --- CLI arg parsing ---

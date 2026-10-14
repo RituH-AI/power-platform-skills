@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-// Validates either a generated code site or a PAC-downloaded declarative site.
-// The PostToolUse hook uses structural checks; the declarative workflow also passes the
+// Validates either a generated SPA site or a PAC-downloaded non-SPA site.
+// The PostToolUse hook uses structural checks; the non-SPA workflow also passes the
 // expected website record ID and optional Bootstrap major before creating the Git baseline.
 
 const fs = require('fs');
@@ -13,7 +13,7 @@ const {
   findProjectRoot,
   UUID_REGEX,
 } = require('../../../scripts/lib/validation-helpers');
-const { inspectSite } = require('../../../scripts/lib/classic-site-style-context');
+const { inspectSite } = require('../../../scripts/lib/non-spa-site-style-context');
 const {
   normalizeBootstrapVersion,
   parseBootstrapVersionArgs,
@@ -137,7 +137,7 @@ function readWebsiteIdentity(websitePath) {
   return { raw, id: !duplicateKey && consistent ? ids[0] : null };
 }
 
-function listDeclarativeAssetFiles(siteDir) {
+function listNonSpaAssetFiles(siteDir) {
   const files = [];
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -159,13 +159,13 @@ function listDeclarativeAssetFiles(siteDir) {
   return files;
 }
 
-function validateDeclarativeProject(
+function validateNonSpaProject(
   projectRoot,
   { expectedWebsiteRecordId = null, expectedBootstrapMajor = null, skipGit = false } = {},
 ) {
   const errors = [];
   // Create-site stores its download under `.powerpages-site`, while users who download
-  // manually can open the PAC site root itself. Both layouts carry the same declarative
+  // manually can open the PAC site root itself. Both layouts carry the same non-SPA
   // markers, so validate the selected site rather than requiring one wrapper directory.
   const nestedSiteDir = path.join(projectRoot, '.powerpages-site');
   const siteDir = fs.existsSync(nestedSiteDir) ? nestedSiteDir : projectRoot;
@@ -174,7 +174,7 @@ function validateDeclarativeProject(
   const websitePath = path.join(siteDir, 'website.yml');
 
   if (!fs.existsSync(portalConfigDir) || !fs.statSync(portalConfigDir).isDirectory()) {
-    errors.push(`Missing declarative marker: ${displayPrefix}.portalconfig/`);
+    errors.push(`Missing non-SPA marker: ${displayPrefix}.portalconfig/`);
   }
   if (!fs.existsSync(websitePath) || fs.statSync(websitePath).size === 0) {
     errors.push(`Missing or empty identity file: ${displayPrefix}website.yml`);
@@ -194,11 +194,11 @@ function validateDeclarativeProject(
   }
 
   try {
-    if (fs.existsSync(siteDir) && listDeclarativeAssetFiles(siteDir).length === 0) {
-      errors.push('Downloaded declarative tree contains no site assets beyond identity metadata');
+    if (fs.existsSync(siteDir) && listNonSpaAssetFiles(siteDir).length === 0) {
+      errors.push('Downloaded non-SPA tree contains no site assets beyond identity metadata');
     }
   } catch (error) {
-    errors.push(`Could not inspect declarative site assets: ${error.message}`);
+    errors.push(`Could not inspect non-SPA site assets: ${error.message}`);
   }
 
   if (expectedBootstrapMajor !== null) {
@@ -232,15 +232,15 @@ function validateProject(projectRoot, options = {}) {
   const missingProject = () => ({
     siteType: null,
     errors: options.expectedBootstrapMajor == null
-      ? [] : ['Cannot verify Bootstrap without a declarative Power Pages project.'],
+      ? [] : ['Cannot verify Bootstrap without a non-SPA Power Pages project.'],
   });
   if (!projectRoot) return missingProject();
   if (fs.existsSync(path.join(projectRoot, 'powerpages.config.json'))) {
     const errors = validateCodeProject(projectRoot);
     if (options.expectedBootstrapMajor != null) {
-      errors.push('--bootstrapVersion is only supported for declarative sites, not code sites.');
+      errors.push('--bootstrapVersion is only supported for non-SPA sites, not SPA sites.');
     }
-    return { siteType: 'code', errors };
+    return { siteType: 'spa', errors };
   }
   if (
     fs.existsSync(path.join(projectRoot, '.powerpages-site')) ||
@@ -250,8 +250,8 @@ function validateProject(projectRoot, options = {}) {
     )
   ) {
     return {
-      siteType: 'declarative',
-      errors: validateDeclarativeProject(projectRoot, options),
+      siteType: 'non-spa',
+      errors: validateNonSpaProject(projectRoot, options),
     };
   }
   return missingProject();
@@ -273,8 +273,14 @@ function parseArgs(argv) {
   return args;
 }
 
+function siteTypeLabel(siteType) {
+  if (siteType === 'spa') return 'SPA site';
+  if (siteType === 'non-spa') return 'non-SPA site';
+  return 'site';
+}
+
 function validationMessage(result) {
-  return `Power Pages ${result.siteType || 'site'} validation failed:\n- ${result.errors.join('\n- ')}`;
+  return `Power Pages ${siteTypeLabel(result.siteType)} validation failed:\n- ${result.errors.join('\n- ')}`;
 }
 
 function runHook() {
@@ -307,7 +313,7 @@ function runDirect() {
       process.stderr.write(`${validationMessage(result)}\n`);
       process.exitCode = 2;
     } else {
-      process.stdout.write(`Power Pages ${result.siteType} site validation passed.\n`);
+      process.stdout.write(`Power Pages ${siteTypeLabel(result.siteType)} validation passed.\n`);
     }
   } catch (error) {
     process.stderr.write(`${validationMessage({ errors: [error.message] })}\n`);
@@ -325,9 +331,9 @@ module.exports = {
   findPlaceholdersInFile,
   findPlaceholders,
   readWebsiteIdentity,
-  listDeclarativeAssetFiles,
+  listNonSpaAssetFiles,
   validateCodeProject,
-  validateDeclarativeProject,
+  validateNonSpaProject,
   validateProject,
   parseArgs,
 };

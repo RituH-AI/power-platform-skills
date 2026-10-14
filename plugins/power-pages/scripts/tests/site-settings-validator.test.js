@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 const { validateSiteSettings } = require('../lib/site-settings-validator');
 const {
-  createTempDeclarativeSite,
+  createTempNonSpaSite,
   createTempProject,
   writeProjectFile,
   findingMessages,
@@ -130,7 +130,7 @@ test('validateSiteSettings rejects wildcard Web API fields when the setting name
 });
 
 test('validateSiteSettings rejects unexpected keys in aggregate PAC records', (t) => {
-  const siteRoot = createTempDeclarativeSite(t);
+  const siteRoot = createTempNonSpaSite(t);
   writeProjectFile(
     siteRoot,
     'sitesetting.yml',

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-const { readText, parseArgs } = require('../../../scripts/lib/classic-site-style-context');
+const { readText, parseArgs } = require('../../../scripts/lib/non-spa-site-style-context');
 const { preparePlan, saveJson } = require('../../../scripts/lib/style-site-plan');
 
 function main(argv) {

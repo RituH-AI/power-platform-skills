@@ -78,8 +78,8 @@ Every event carries a fixed allowlist enforced by `lib/events.js`. Field names m
 **Identity / context (on every event):**
 
 - `pluginName`, `pluginVersion` — read from the plugin's `.claude-plugin/plugin.json`
-- `sessionId` — host conversation ID when available, otherwise a random UUID generated once per Node process; classic creation retains the originating ID in its private resume receipt
-- `correlationId` — a per-start unique ID generated inline at emit time for default skill events; classic selection/outcome events explicitly share one creation UUID
+- `sessionId` — host conversation ID when available, otherwise a random UUID generated once per Node process; non-SPA creation retains the originating ID in its private resume receipt
+- `correlationId` — a per-start unique ID generated inline at emit time for default skill events; non-SPA selection/outcome events explicitly share one creation UUID
 - `osName`, `osVersion` — `process.platform` and OS release string
 - `nodeVersion` — major version only, e.g. `v22`
 
@@ -95,30 +95,30 @@ Every event carries a fixed allowlist enforced by `lib/events.js`. Field names m
 - `eventInfo` — caller-supplied JSON object (dynamic Kusto column). Power Pages populates it with:
 
   - `aadObjectId` — the signed-in user's stable Entra ID / AAD directory object ID, parsed from `pac auth who`, when available. Omitted when `pac auth who` does not surface an object ID.
-  - `framework` — the SPA framework of the Power Pages **code site** the skill is running against, drawn from the closed set `react`, `vue`, `angular`, `astro`. Omitted unless the working directory resolves to a site with a `powerpages.config.json`.
-  - `templateId` — on classic creation events only, the selected public samples catalog ID, validated against the already-cached traditional template manifest. It is not a site name, user-provided slug, display name, or provisioning API template name.
-  - `templateKind` — `non-spa` on those classic creation events. This normalizes the external catalog's `traditional` kind for telemetry only; catalog validation is unchanged.
+  - `framework` — the SPA framework of the Power Pages **SPA site** the skill is running against, drawn from the closed set `react`, `vue`, `angular`, `astro`. Omitted unless the working directory resolves to a site with a `powerpages.config.json`.
+  - `templateId` — on non-SPA creation events only, the selected public samples catalog ID, validated against the already-cached non-SPA template manifest. It is not a site name, user-provided slug, display name, or provisioning API template name.
+  - `templateKind` — `non-spa` on those non-SPA creation events. This normalizes the external catalog's `traditional` kind for telemetry only; catalog validation is unchanged.
   - `audience` — optional `internal` or `external` on those events, only when already known from requirements; no additional question, free text, or inference from catalog personas.
 
   Each key is omitted independently when its source is unavailable; `eventInfo` itself is omitted only when every key would be absent.
 
   On the wire it is sent as a JSON **string** (re-serialized by `emit-dispatcher.js`, not the local mirror) because the tenant-side field mapping flattens `data.<key>` to a single `data_<key>` leaf and does not recurse into nested objects. The Kusto side must `parse_json()` / `todynamic()` it back into a dynamic value.
 
-  `FIELD_TYPES` enforces only that `eventInfo` is a structured JSON value; it does **not** enforce nested keys. Callers **MUST** restrict it to the documented per-event schema above. Default Power Pages skill events use `aadObjectId` and `framework`; classic creation events use only `templateId`, `templateKind`, and optional `audience`. These template fields describe a public catalog offering, not a user's site. Callers **MUST NOT** add other personal data, prompts, project or site identifiers, paths, URLs, credentials, or arbitrary caller payloads. Any proposed expansion requires review and approval, plus updates to this privacy disclosure, the documented event schema, and tests before code emits the new field.
+  `FIELD_TYPES` enforces only that `eventInfo` is a structured JSON value; it does **not** enforce nested keys. Callers **MUST** restrict it to the documented per-event schema above. Default Power Pages skill events use `aadObjectId` and `framework`; non-SPA creation events use only `templateId`, `templateKind`, and optional `audience`. These template fields describe a public catalog offering, not a user's site. Callers **MUST NOT** add other personal data, prompts, project or site identifiers, paths, URLs, credentials, or arbitrary caller payloads. Any proposed expansion requires review and approval, plus updates to this privacy disclosure, the documented event schema, and tests before code emits the new field.
 
   `emitSkillStartedFromPrompt(promptText, opts)` accepts an optional `opts.eventInfo` so a plugin can contribute its own approved keys from the `UserPromptSubmit` hook. It takes either a plain object or a **thunk** returning one; the thunk is preferred, and is invoked only *after* the slash-command, `disabled`, and `isProvisioned` gates pass — that hook fires on every user prompt, so any real work (filesystem probing, shellouts) must not run on untracked prompts. A thunk that throws contributes nothing and never blocks the event. Non-object values (including arrays) are ignored.
 
-### Power Pages classic creation events
+### Power Pages non-SPA creation events
 
-`scripts/emit-classic-creation-telemetry.js` uses the Power Pages plugin's existing
+`scripts/emit-non-spa-creation-telemetry.js` uses the Power Pages plugin's existing
 `PagesAIPluginEvent` stream, dispatcher, routing and opt-outs. It does not change SPA
 workflows or default skill hooks.
 
 | `eventName` | Milestone | `outcome` |
 |---|---|---|
-| `template_used` | Validated traditional catalog selection | Omitted (selection is not completion) |
-| `classic_creation_success` | Verified website identity/model, download, Bootstrap/assets, Git baseline commit, and final validator all succeed | `success` |
-| `classic_creation_failure` | An observed creation error ends the attempt after retries/repair, before baseline success | `failure` |
+| `template_used` | Validated non-SPA catalog selection | Omitted (selection is not completion) |
+| `non_spa_creation_success` | Verified website identity/model, download, Bootstrap/assets, Git baseline commit, and final validator all succeed | `success` |
+| `non_spa_creation_failure` | An observed creation error ends the attempt after retries/repair, before baseline success | `failure` |
 
 Failure `errorClass` is restricted to `Configuration`, `Authentication`, `TemplateCatalog`,
 `Provisioning`, `ModelVerification`, `Download`, `Validation`, `GitBaseline`, or `Unknown`.
@@ -130,7 +130,7 @@ The funnel begins at template selection, not the initial request. Reuse the crea
 `correlationId` across an unfinished attempt's retries/resume; a different selection or a new
 attempt after a terminal outcome gets a new ID. Do not change the default skill-event IDs.
 Private receipts under
-`~/.power-platform-skills/telemetry/power-pages/classic-creations/<correlationId>/`
+`~/.power-platform-skills/telemetry/power-pages/non-spa-creations/<correlationId>/`
 hold the selected catalog ID/SHA, optional audience, originating session/common event context,
 cloud-routing stamp, and terminal event marker. The SHA and cloud stamp stay local.
 These files never belong in the site or its Git baseline. Old receipts are pruned best-effort

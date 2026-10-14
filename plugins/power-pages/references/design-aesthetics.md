@@ -1,6 +1,6 @@
 # Design Aesthetics Reference
 
-The design system for Power Pages code sites.
+The design system for Power Pages SPA sites.
 `create-site` uses it to write the experience brief and pick tokens (Phase 3), fill the plan (Phase 4), and build (Phase 5).
 `exceptional-web-design` uses it as the standard an existing site is reviewed against.
 Two sibling references complete it:

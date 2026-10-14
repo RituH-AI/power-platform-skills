@@ -1,9 +1,9 @@
 ---
 name: style-site
 description: >-
-  Styles classic Power Pages sites locally with CSS, branding, components,
+  Styles non-SPA/classic Power Pages sites locally with CSS, branding, components,
   Liquid/templates, and runtime inspection.
-  Preserves native structure. Not for SPA/code sites, PCF/third-party internals,
+  Preserves native structure. Not for SPA sites, PCF/third-party internals,
   migration, or deployment.
 user-invocable: true
 allowed-tools: Read, Write, Grep, Glob, Bash, AskUserQuestion, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch, mcp__plugin_power-pages_playwright__browser_navigate, mcp__plugin_power-pages_playwright__browser_evaluate, mcp__plugin_power-pages_playwright__browser_run_code_unsafe
@@ -13,18 +13,18 @@ model: opus
 > **Plugin check**: Run `node "${PLUGIN_ROOT}/scripts/check-version.js"` — if it outputs a message, show it to the user before proceeding.
 > Once per installed plugin version in the current conversation; otherwise reuse.
 
-# Style a Classic Power Pages Site
+# Style a Non-SPA Power Pages Site
 
 **Initial request:** $ARGUMENTS
 
 Before inspection, read [quick-start.md](references/quick-start.md) and
-`${PLUGIN_ROOT}/references/declarative-preview.md`; apply its **Customization notice** and handoff
+`${PLUGIN_ROOT}/references/non-spa-preview.md`; apply its **Customization notice** and handoff
 protocol. Show **Inspect/propose → Approve → Apply → Independently verify → Report**, not task
 bookkeeping. No final-completion confirmation, HTML preview, local server, or browser review.
 
 ## Inspect and select the route
 
-Resolve the classic export, locale, external workspace, sources, and Bootstrap; reject SPAs.
+Resolve the non-SPA export, locale, external workspace, sources, and Bootstrap; reject SPAs.
 Default to local authoring for listed/unlisted properties and general CSS, not
 property/gradient allowlists.
 

@@ -3,13 +3,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { renderCustomizationPlan } = require('../render-customize-declarative-site-plan');
+const { renderCustomizationPlan } = require('../render-customize-non-spa-site-plan');
 const { contrastRatio, parseColor } = require('../lib/style-site-contrast');
 const { renderDocument } = require('./customization-plan-test-helpers');
 
 function planFixture() {
   return JSON.parse(fs.readFileSync(
-    path.join(__dirname, 'fixtures', 'customize-declarative-site-plan.json'), 'utf8'
+    path.join(__dirname, 'fixtures', 'customize-non-spa-site-plan.json'), 'utf8'
   ));
 }
 
