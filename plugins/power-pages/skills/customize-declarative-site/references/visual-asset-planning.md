@@ -266,7 +266,7 @@ Verify that actual image references, after HTML attribute decoding, match that U
 download/cache/Web File was created. Do not treat a remote asset as a byte-hashed local artifact.
 
 For Web File delivery, create/import operations use the `author-web-file` reference workflow
-from `${PLUGIN_ROOT}/skills/classic-site-skills/author-web-file/references/design-studio-web-file-authoring.md`.
+from `${PLUGIN_ROOT}/skills/customize-declarative-site/references/web-file-authoring.md`.
 Their consumers depend on
 the import and bind the verified `publicUrl`; never guess a future Web File URL.
 

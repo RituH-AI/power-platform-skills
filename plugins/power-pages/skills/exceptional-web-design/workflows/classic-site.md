@@ -40,7 +40,7 @@ The classic critique adapter governs this route. Do not apply the SPA font rules
 
 Skip in source-only mode. If the view requires query-string or fragment state, the current capture cannot establish it: list it under **Not reviewed** rather than stripping the state and scoring another page. Keep other authorized path-addressable pages or source in scope. If none remain, report the limitation and stop.
 
-For local metadata, read `${PLUGIN_ROOT}/skills/classic-site-skills/author-webpage/references/design-studio-webpage-authoring.md`. Resolve existing root/localized page identities, parents, partial URLs, and language records into actual published paths; do not infer paths from filenames or fabricate unpublished routes.
+For local metadata, read `${PLUGIN_ROOT}/skills/customize-declarative-site/references/webpage-authoring.md`. Resolve existing root/localized page identities, parents, partial URLs, and language records into actual published paths; do not infer paths from filenames or fabricate unpublished routes.
 
 Review eight pages at most: user-named pages first, then the locale's home, primary tasks and representative page types. For explicit routes use the site's **origin (scheme, host, and port)** as `url`, with the complete locale/hierarchy in each route. For example, `https://contoso.example/fr-FR/` becomes base `https://contoso.example` plus `"/fr-FR/demandes"`, not a doubled prefix. Without local routes, `discover: 8` keeps the requested start-page URL. Report origin/path without query/fragment tokens.
 

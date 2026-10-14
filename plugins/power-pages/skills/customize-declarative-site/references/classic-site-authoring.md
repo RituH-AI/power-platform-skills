@@ -14,11 +14,11 @@ Select the primary workflow from the requested outcome:
 
 | Operation identifier | Requested outcome | Authoritative reference |
 |---|---|---|
-| `author-web-file` | Import, author, replace, rename, move, configure, or delete a site-served asset and its metadata | [Web files](../skills/classic-site-skills/author-web-file/references/design-studio-web-file-authoring.md) |
-| `author-content-snippet` | Create, translate, edit, rename, convert, or delete a localized or language-neutral reusable value | [Content snippets](../skills/classic-site-skills/author-content-snippet/references/design-studio-content-snippet-authoring.md) |
-| `author-web-template` | Create or modify Liquid/HTML source, fragments, inherited layouts, or header/footer source | [Web templates](../skills/classic-site-skills/author-web-template/references/design-studio-web-template-authoring.md) |
-| `author-page-template` | Create or modify rendering metadata, an end-to-end custom layout, or associated webpage assignments | [Page templates](../skills/classic-site-skills/author-page-template/references/design-studio-page-template-authoring.md) |
-| `author-webpage` | Create or modify root/localized records, routes, parents, template assignments, shells, or navigation | [Webpages](../skills/classic-site-skills/author-webpage/references/design-studio-webpage-authoring.md) |
+| `author-web-file` | Import, author, replace, rename, move, configure, or delete a site-served asset and its metadata | [Web files](web-file-authoring.md) |
+| `author-content-snippet` | Create, translate, edit, rename, convert, or delete a localized or language-neutral reusable value | [Content snippets](content-snippet-authoring.md) |
+| `author-web-template` | Create or modify Liquid/HTML source, fragments, inherited layouts, or header/footer source | [Web templates](web-template-authoring.md) |
+| `author-page-template` | Create or modify rendering metadata, an end-to-end custom layout, or associated webpage assignments | [Page templates](page-template-authoring.md) |
+| `author-webpage` | Create or modify root/localized records, routes, parents, template assignments, shells, or navigation | [Webpages](webpage-authoring.md) |
 
 `operation.skill` and `capabilities[].ownerSkill` use the identifiers in this table to
 select reference workflows. Execute them directly in the coordinator.

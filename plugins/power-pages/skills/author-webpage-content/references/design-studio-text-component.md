@@ -4,7 +4,7 @@ Canonical reference for skills that add or edit text on a Power Pages Design Stu
 a PAC CLI-downloaded declarative site. This reference applies to sites with a root-level
 `.portalconfig` directory and localized webpage content under `web-pages/`.
 
-First follow `${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/design-studio-component-authoring.md`: derive the
+First follow `${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-component-authoring.md`: derive the
 page, locale, target text or insertion point, content, style, formatting, and links from
 the user's prompt and existing markup; use engineering judgment for safe mechanical
 details; ask only about material ambiguity. This reference supplies text-specific markup,
@@ -57,7 +57,7 @@ section, container, or column.
 
 Design Studio provides five column layouts: one column, two equal columns, three equal
 columns, one-third left, and one-third right. Their shared PAC-observed HTML is defined in
-`${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/design-studio-section-layouts.md`.
+`${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-section-layouts.md`.
 
 Do not add empty sibling columns when inserting text into an existing multi-column
 section; add only the text element to the selected existing column. When creating a new

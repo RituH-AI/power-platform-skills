@@ -14,7 +14,7 @@ For example, `row-reverse` loses Studio drag-and-drop support; use another compo
 when retaining that capability is required. See
 [Studio page editing](https://learn.microsoft.com/power-pages/getting-started/customize-pages).
 
-First follow `${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/design-studio-component-authoring.md`: derive the
+First follow `${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-component-authoring.md`: derive the
 target section, requested layout, component placement, and preservation requirements from
 the user's prompt and existing markup; use engineering judgment for safe mechanical
 details; ask only when component-to-column mapping or another structural choice is
@@ -57,7 +57,7 @@ The `col-lg-*` values describe the large-screen width. Each observed column also
 `min-width: 250px`, so columns can wrap on narrower screens.
 
 The Design Studio menu also displays **Spacer**. It is not a column layout; use
-`${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/design-studio-spacer-component.md` for its PAC-observed
+`${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-spacer-component.md` for its PAC-observed
 component and full-width forms.
 
 ### Explicit native grid and responsive styling

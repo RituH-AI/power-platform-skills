@@ -14,7 +14,7 @@ HTML, Liquid, or a combination of HTML and Liquid. They are appropriate for
 maker-managed content such as labels, messages, logos, headings, and shared header or
 footer regions.
 
-Authoring callers first follow [shared routing and execution](../../../../references/design-studio-classic-site-authoring.md). Classify record/value
+Authoring callers first follow [shared routing and execution](classic-site-authoring.md). Classify record/value
 creation, localized edits, translations, logical/display-name changes, Text/HTML conversion,
 Liquid changes, neutral/localized scope migration, caller migration, or deletion.
 Resolve targets by logical name, language scope, and `adx_contentsnippetid`, not directory name.
@@ -23,8 +23,8 @@ conventions clearly establish it. Do not expand a one-language edit or invent tr
 
 This workflow owns metadata/value files, language variants, and exact name-based caller
 migrations. Creating a snippet does not create caller markup. For a small exact lookup change,
-follow [webpages](../../author-webpage/references/design-studio-webpage-authoring.md)
-or [web templates](../../author-web-template/references/design-studio-web-template-authoring.md); broader page/template
+follow [webpages](webpage-authoring.md)
+or [web templates](web-template-authoring.md); broader page/template
 composition uses that reference workflow instead. Re-read callers before verification.
 Stop on duplicate active-record ambiguity, missing requested translated values, unresolved
 scope/type/deletion effects, or unknown data permissions/output trust.

@@ -4,7 +4,7 @@ Canonical reference for skills that add or edit an Iframe component on a Power P
 Design Studio page in a PAC CLI-downloaded declarative site.
 
 First follow
-`${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/design-studio-component-authoring.md`:
+`${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-component-authoring.md`:
 derive the page, locale, target iframe or insertion point, URL, accessible title, sizing,
 and alignment from the user's prompt and existing markup. This reference supplies the
 iframe-specific serialization, safety, preservation, and verification rules.
@@ -28,7 +28,7 @@ and locale selection and approval of the exact insertion point.
 When the iframe needs a new section, use the approved layout from:
 
 ```text
-${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/design-studio-section-layouts.md
+${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-section-layouts.md
 ```
 
 Replace the selected layout's `<!-- COMPONENT_HTML -->` marker with only the approved

@@ -33,7 +33,7 @@ approval. Include `previewNoticeShown: true` and
 Read:
 
 - `${PLUGIN_ROOT}/references/design-studio-site-discovery.md`
-- `${PLUGIN_ROOT}/references/design-studio-classic-site-authoring.md`
+- `${PLUGIN_ROOT}/skills/customize-declarative-site/references/classic-site-authoring.md`
 
 Apply **Request routing** before creating coordination tasks or starting the phases below.
 For an individual page or component request, follow the shared authoring reference and
@@ -63,7 +63,7 @@ For coordinated work, this skill owns:
 - offering deployment after local verification.
 
 It authors webpage, snippet, web-file, web-template, and page-template records only through
-`${PLUGIN_ROOT}/references/design-studio-classic-site-authoring.md` and the selected component reference.
+`${PLUGIN_ROOT}/skills/customize-declarative-site/references/classic-site-authoring.md` and the selected component reference.
 The `author-webpage-content` skill owns localized body HTML; `style-site` owns guarded styling.
 It does not upload, activate, or modify Dataverse directly.
 No dev server, live preview, or generated styling mockup is required. The HTML below is an
@@ -121,7 +121,7 @@ For coordinated work, create these tasks before starting:
 Use the smallest route that fully satisfies the request:
 
 - one narrow component change: execute the corresponding reference workflow through
-  `${PLUGIN_ROOT}/references/design-studio-classic-site-authoring.md`;
+  `${PLUGIN_ROOT}/skills/customize-declarative-site/references/classic-site-authoring.md`;
 - one straightforward page: use the lightweight webpage-reference workflow with one resolved
   `author-webpage-content` composition;
 - multiple pages or cross-component dependencies: use the complete orchestration below;

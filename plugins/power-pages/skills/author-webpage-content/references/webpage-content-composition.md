@@ -7,7 +7,7 @@ This reference coordinates section and page-element contracts. It does not redef
 serialized markup owned by the references under:
 
 ```text
-${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/
+${PLUGIN_ROOT}/skills/author-webpage-content/references/
 ```
 
 ## Resolved composition contract
@@ -67,7 +67,7 @@ Visitor-facing body content belongs in the selected localized file:
 web-pages/<page-directory>/content-pages/<Page>.<locale>.webpage.copy.html
 ```
 
-The calling coordinator's [webpage reference workflow](../../author-webpage/references/design-studio-webpage-authoring.md)
+The calling coordinator's [webpage reference workflow](../../customize-declarative-site/references/webpage-authoring.md)
 owns the corresponding root/localized metadata and
 must create the target file before composition. This workflow does not inspect, create,
 or repair webpage YAML. The root-level copy file is not an interchangeable target.
@@ -93,7 +93,7 @@ serialize A before B. Within a section, columns follow the selected layout from 
 right. Within a column, elements appear in the exact supplied order.
 
 Use the recipes and **Explicit native grid and responsive styling** contract in
-`${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/design-studio-section-layouts.md`.
+`${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-section-layouts.md`.
 The recipes are defaults, not a closed list. Resolve the number/order/widths of native columns,
 using optional `columns[].span` for explicit large-screen Bootstrap spans or an approved
 CSS-driven description. Do not silently force an unfamiliar layout into the nearest preset.
@@ -170,7 +170,7 @@ Use this workflow for `create` and `replace`:
    destination, including dependent scripts, IDs and Liquid scope. If not established, stop
    and return the dependency to the caller/native owner rather than retaining the whole layout
    or dropping the component. Shared/rendering-template changes return to the coordinator's
-   [web-template reference workflow](../../author-web-template/references/design-studio-web-template-authoring.md).
+   [web-template reference workflow](../../customize-declarative-site/references/web-template-authoring.md).
 5. Load the section-layout reference and every component-specific reference needed by
    the plan.
 6. Generate new elements using their final resolved values and place verified reused source at

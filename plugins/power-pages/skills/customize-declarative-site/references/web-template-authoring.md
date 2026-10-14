@@ -10,7 +10,7 @@ Liquid, text, or another text-based response format. Web templates can serve as 
 fragments, inherited layouts, complete page layouts, or the site's global header and
 footer.
 
-Authoring callers first follow [shared routing and execution](../../../../references/design-studio-classic-site-authoring.md). Classify the request
+Authoring callers first follow [shared routing and execution](classic-site-authoring.md). Classify the request
 as create, source edit, rename, refactor, rebind, or delete, and resolve existing records by
 both `adx_name` and `adx_webtemplateid`, not directory name alone.
 
@@ -19,7 +19,7 @@ rendering, a base layout only when derived layouts need stable overridable block
 derived layout only when an existing base supplies those blocks. Preserve website header/footer
 bindings unless an explicit global rebind is in scope. A source-only request does not create
 page-template metadata. For end-to-end layout or page-template rebinding, execute
-[page templates](../../author-page-template/references/design-studio-page-template-authoring.md)
+[page templates](page-template-authoring.md)
 and inventory all dependent root/localized webpages.
 
 For an approved new-site layout operation, implement the custom composition in `designContext`
@@ -99,7 +99,7 @@ targets `adx_webpage`. Rebinding changes the layout of every webpage that refere
 that page template. Confirm its current dependencies, response boundary, default status,
 and intended layout role before reuse.
 
-Use `${PLUGIN_ROOT}/skills/classic-site-skills/author-page-template/references/design-studio-page-template-authoring.md` for the
+Use `${PLUGIN_ROOT}/skills/customize-declarative-site/references/page-template-authoring.md` for the
 page-template record and assignment sequence.
 
 ## PAC download structure

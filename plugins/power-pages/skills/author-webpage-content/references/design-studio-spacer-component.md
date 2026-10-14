@@ -4,7 +4,7 @@ Canonical reference for skills that add or edit a spacer on a Power Pages Design
 in a PAC CLI-downloaded declarative site. This reference applies to localized webpage
 content under `web-pages/`.
 
-First follow `${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/design-studio-component-authoring.md`: derive the
+First follow `${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-component-authoring.md`: derive the
 page, locale, target spacer or insertion point, placement form, height, and background
 theme from the user's prompt and existing markup; use engineering judgment for safe
 mechanical details; ask only about material ambiguity. This reference supplies

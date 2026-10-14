@@ -37,8 +37,8 @@ handoff, present the **Customization notice** before project inspection or task 
 
 Always read and follow:
 
-- `${PLUGIN_ROOT}/skills/classic-site-skills/author-webpage-content/references/webpage-content-composition.md`
-- `${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/design-studio-component-authoring.md`
+- `${PLUGIN_ROOT}/skills/author-webpage-content/references/webpage-content-composition.md`
+- `${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-component-authoring.md`
 
 Read only the page-element references used by the requested composition:
 
@@ -58,7 +58,7 @@ Read only the page-element references used by the requested composition:
 All page-element references are under:
 
 ```text
-${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/
+${PLUGIN_ROOT}/skills/author-webpage-content/references/
 ```
 
 These references own serialized section and component markup, editing
@@ -108,7 +108,7 @@ This skill does not create or modify:
 
 The calling orchestrator must create or confirm the file and resolve its webpage and locale
 identity before invoking this skill. `customize-declarative-site` uses
-`${PLUGIN_ROOT}/skills/classic-site-skills/author-webpage/references/design-studio-webpage-authoring.md`
+`${PLUGIN_ROOT}/skills/customize-declarative-site/references/webpage-authoring.md`
 for that metadata workflow.
 This skill does not search for or select a webpage record.
 

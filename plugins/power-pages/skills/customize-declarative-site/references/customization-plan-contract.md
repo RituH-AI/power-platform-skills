@@ -250,7 +250,7 @@ Capabilities describe readiness observed in the downloaded files:
 `status` is `ready`, `blocked`, or `not-requested`. A blocked capability must name the missing
 prerequisite and a local remediation; it is not a permanent template limitation.
 `ownerSkill` selects the operation workflow defined in
-`${PLUGIN_ROOT}/references/design-studio-classic-site-authoring.md`.
+`${PLUGIN_ROOT}/skills/customize-declarative-site/references/classic-site-authoring.md`.
 Component reference identifiers are not `Skill` tool names.
 
 ## Visual asset records

@@ -4,7 +4,7 @@ Canonical reference for skills that add or edit an image on a Power Pages Design
 in a PAC CLI-downloaded declarative site. This reference applies to localized webpage
 content under `web-pages/`.
 
-First follow `${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/design-studio-component-authoring.md`: derive the
+First follow `${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-component-authoring.md`: derive the
 page, locale, target image or insertion point, source, alternative text, sizing,
 alignment, and optional link from the user's prompt and existing markup; use engineering
 judgment for safe mechanical details; ask only about material ambiguity. This reference
@@ -31,7 +31,7 @@ insertion point.
 When the image needs a new section, use the approved layout from:
 
 ```text
-${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/design-studio-section-layouts.md
+${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-section-layouts.md
 ```
 
 Replace the selected layout's `<!-- COMPONENT_HTML -->` marker with only the approved

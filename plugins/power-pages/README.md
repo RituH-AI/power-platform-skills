@@ -163,13 +163,13 @@ and do not apply to React, Angular, Vue, or Astro code sites.
 
 | Capability | Reference |
 |---|---|
-| Root/localized webpages, routes, parents, template assignments, content shells, and navigation | [Webpages](skills/classic-site-skills/author-webpage/references/design-studio-webpage-authoring.md) |
-| Localized/neutral snippets, translations, Text/HTML values, Liquid, and exact caller migrations | [Content snippets](skills/classic-site-skills/author-content-snippet/references/design-studio-content-snippet-authoring.md) |
-| Site-served images, CSS, JavaScript, fonts, documents, and adjacent PAC metadata | [Web files](skills/classic-site-skills/author-web-file/references/design-studio-web-file-authoring.md) |
-| Liquid/HTML fragments, inherited layouts, and explicitly requested callers or bindings | [Web templates](skills/classic-site-skills/author-web-template/references/design-studio-web-template-authoring.md) |
-| Page-template metadata, web-template-backed layouts, rewrite templates, and requested page assignments | [Page templates](skills/classic-site-skills/author-page-template/references/design-studio-page-template-authoring.md) |
+| Root/localized webpages, routes, parents, template assignments, content shells, and navigation | [Webpages](skills/customize-declarative-site/references/webpage-authoring.md) |
+| Localized/neutral snippets, translations, Text/HTML values, Liquid, and exact caller migrations | [Content snippets](skills/customize-declarative-site/references/content-snippet-authoring.md) |
+| Site-served images, CSS, JavaScript, fonts, documents, and adjacent PAC metadata | [Web files](skills/customize-declarative-site/references/web-file-authoring.md) |
+| Liquid/HTML fragments, inherited layouts, and explicitly requested callers or bindings | [Web templates](skills/customize-declarative-site/references/web-template-authoring.md) |
+| Page-template metadata, web-template-backed layouts, rewrite templates, and requested page assignments | [Page templates](skills/customize-declarative-site/references/page-template-authoring.md) |
 
-The [shared authoring contract](references/design-studio-classic-site-authoring.md) owns routing,
+The [shared authoring contract](skills/customize-declarative-site/references/classic-site-authoring.md) owns routing,
 autonomy, dependency loading, local-only boundaries, and final verification. New pages update
 navigation by default unless you explicitly ask not to. Coordinated asset planning retains provenance, placement,
 accessibility, secure explicit Web File imports, and direct HTTPS imagery for new-site design.

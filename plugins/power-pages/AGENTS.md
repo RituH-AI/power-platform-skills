@@ -105,9 +105,9 @@ Keep this extension in the classic authoring path; SPA/shared design references 
 
 `customize-declarative-site` authors pages and components and coordinates broader site customization.
 Coordinated work uses seven phases and explicit approval gates. Individual page or component edits follow
-`references/design-studio-classic-site-authoring.md` and only relevant component references.
-Component instructions live in `design-studio-*-authoring.md` files under
-`skills/classic-site-skills/<component>/references/`.
+`skills/customize-declarative-site/references/classic-site-authoring.md` and only relevant component references.
+Component instructions live under `skills/customize-declarative-site/references/`.
+Page-element markup and composition instructions live under `skills/author-webpage-content/references/`.
 
 Use the shared authoring reference's dispatch table to select component workflows.
 Identifiers in that table select references, not `Skill` invocations. Preserve approved

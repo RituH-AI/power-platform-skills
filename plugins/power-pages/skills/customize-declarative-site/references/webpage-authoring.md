@@ -11,7 +11,7 @@ explicitly asks not to add the page to navigation. Apply
 the complete workflow below so the local files preserve the relationships expected by
 Power Pages and remain compatible with PAC CLI upload and download.
 
-Authoring callers first follow [shared routing and execution](../../../../references/design-studio-classic-site-authoring.md). Classify page creation,
+Authoring callers first follow [shared routing and execution](classic-site-authoring.md). Classify page creation,
 shared metadata, localized content, route/rename/move, template assignment, and navigation
 separately. Resolve the root identity first, then selected localized identities and content
 ownership. Use the uniquely established current/default language for an unspecified content
@@ -19,7 +19,7 @@ edit; do not expand it to every locale.
 
 Reuse an existing compatible page template. A request only to assign that template does not
 authorize changing its source or creating a new record. For an end-to-end custom layout,
-execute [page templates](../../author-page-template/references/design-studio-page-template-authoring.md)
+execute [page templates](page-template-authoring.md)
 first and re-read the result before assignment.
 An approved new-site handoff must carry custom composition, `designContext`, verified Bootstrap
 evidence, and preservation requirements unchanged; do not substitute the creation template's
@@ -317,7 +317,7 @@ Create the visitor-facing body file only at each localized
 The composition contract and page-element markup are owned by:
 
 ```text
-${PLUGIN_ROOT}/skills/classic-site-skills/author-webpage-content/references/webpage-content-composition.md
+${PLUGIN_ROOT}/skills/author-webpage-content/references/webpage-content-composition.md
 ```
 
 The webpage-reference workflow owns all directories, metadata, companion-file creation, localized

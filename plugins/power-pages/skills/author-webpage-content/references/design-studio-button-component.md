@@ -5,7 +5,7 @@ a PAC CLI-downloaded site. This reference applies to declarative Power Pages sit
 a root-level `.portalconfig` directory and `web-pages/` content. It does not apply to
 Power Pages code sites built with React, Angular, Vue, or Astro.
 
-First follow `${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/design-studio-component-authoring.md`: derive the
+First follow `${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-component-authoring.md`: derive the
 page, locale, target or insertion point, label, destination, style, and window behavior
 from the user's prompt and existing markup; use engineering judgment for safe mechanical
 details; ask only about material ambiguity. This reference supplies button-specific
@@ -58,13 +58,13 @@ matching the localized record to its root webpage and confirming the language.
 - Insert the button only at the exact section, column, and relative position approved by
   the user through the skill.
 - When the approved placement is a new section, use the selected layout from
-  `${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/design-studio-section-layouts.md`.
+  `${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-section-layouts.md`.
 
 ## OOB section layouts
 
 Design Studio provides five column layouts: one column, two equal columns, three equal
 columns, one-third left, and one-third right. Their shared PAC-observed HTML is defined in
-`${PLUGIN_ROOT}/skills/classic-site-skills/page-elements/references/design-studio-section-layouts.md`.
+`${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-section-layouts.md`.
 
 When adding a button to an existing section, add only the anchor inside the selected
 `.columnBlockLayout`; do not add another section or container. When creating a new

@@ -9,12 +9,12 @@ A web file represents a site-served asset such as an image, stylesheet, script, 
 or text file. The local PAC representation contains both the asset and an adjacent YAML
 record that describes the web file and its Dataverse note attachment.
 
-Authoring callers first follow [shared routing and execution](../../../../references/design-studio-classic-site-authoring.md). This reference owns
+Authoring callers first follow [shared routing and execution](classic-site-authoring.md). This reference owns
 the asset/YAML pair, attachment identity, metadata, and exact URL migrations. Importing or
 creating an asset does not authorize a page layout, template composition, or CSS redesign.
-For a small caller migration, read [webpages](../../author-webpage/references/design-studio-webpage-authoring.md),
-[web templates](../../author-web-template/references/design-studio-web-template-authoring.md),
-or [content snippets](../../author-content-snippet/references/design-studio-content-snippet-authoring.md)
+For a small caller migration, read [webpages](webpage-authoring.md),
+[web templates](web-template-authoring.md),
+or [content snippets](content-snippet-authoring.md)
 as applicable and change only the exact reference.
 Resolve broader composition through the corresponding workflow; invoke `style-site` for
 visual CSS changes, then re-read affected callers before verification.
