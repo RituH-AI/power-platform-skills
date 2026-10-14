@@ -106,6 +106,93 @@ test('create-web-role writes to nested SPA and direct traditional roots', (t) =>
   );
 });
 
+test('create-web-role initializes missing role storage as per-record metadata', (t) => {
+  const siteRoot = createTempDeclarativeSite(t);
+  fs.rmSync(path.join(siteRoot, 'web-roles'), { recursive: true });
+
+  const result = runNode(
+    path.join(
+      pluginRoot,
+      'skills',
+      'create-webroles',
+      'scripts',
+      'create-web-role.js'
+    ),
+    ['--projectRoot', siteRoot, '--name', 'Reviewers']
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.storage, 'per-record');
+  assert.ok(output.filePath.startsWith(path.join(siteRoot, 'web-roles')));
+  assert.equal(fs.existsSync(output.filePath), true);
+});
+
+test('create-web-role appends PAC aggregate webrole.yml without rewriting existing roles', (t) => {
+  const siteRoot = createTempDeclarativeSite(t);
+  const aggregatePath = writeProjectFile(
+    siteRoot,
+    'webrole.yml',
+    [
+      '- adx_anonymoususersrole: true',
+      '  adx_authenticatedusersrole: false',
+      '  adx_name: Anonymous Users',
+      '  adx_webroleid: 11111111-1111-4111-8111-111111111111',
+      '',
+    ].join('\n')
+  );
+  const before = fs.readFileSync(aggregatePath, 'utf8');
+  const result = runNode(
+    path.join(
+      pluginRoot,
+      'skills',
+      'create-webroles',
+      'scripts',
+      'create-web-role.js'
+    ),
+    ['--projectRoot', siteRoot, '--name', 'Reviewers']
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.filePath, aggregatePath);
+  assert.equal(output.storage, 'aggregate');
+  const after = fs.readFileSync(aggregatePath, 'utf8');
+  assert.ok(after.startsWith(before));
+  assert.match(after, /- adx_anonymoususersrole: false/);
+  assert.match(after, /  adx_authenticatedusersrole: false/);
+  assert.match(after, /  adx_name: Reviewers/);
+  assert.match(after, /  adx_webroleid: [0-9a-f-]{36}/);
+});
+
+test('create-web-role rejects mixed aggregate and per-record role storage', (t) => {
+  const siteRoot = createTempDeclarativeSite(t);
+  writeProjectFile(
+    siteRoot,
+    'webrole.yml',
+    '- adx_name: Existing\n  adx_webroleid: 11111111-1111-4111-8111-111111111111\n'
+  );
+  writeProjectFile(
+    siteRoot,
+    'web-roles/existing.webrole.yml',
+    'name: Existing Per Record\nid: 22222222-2222-4222-8222-222222222222\n'
+  );
+
+  const result = runNode(
+    path.join(
+      pluginRoot,
+      'skills',
+      'create-webroles',
+      'scripts',
+      'create-web-role.js'
+    ),
+    ['--projectRoot', siteRoot, '--name', 'Reviewers']
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Mixed web-role serialization/);
+});
+
 test('web role hook validator accepts valid direct-root metadata', (t) => {
   const siteRoot = createTempDeclarativeSite(t);
   writeProjectFile(
@@ -116,6 +203,35 @@ test('web role hook validator accepts valid direct-root metadata', (t) => {
       'authenticatedusersrole: true',
       'id: 778fa3d0-a2ef-4d2b-98b8-e6c7d8ce1444',
       'name: Members',
+      '',
+    ].join('\n')
+  );
+
+  const result = runNode(
+    path.join(
+      pluginRoot,
+      'skills',
+      'create-webroles',
+      'scripts',
+      'validate-webroles.js'
+    ),
+    [],
+    { input: JSON.stringify({ cwd: siteRoot }) }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('web role hook validator accepts aggregate traditional metadata', (t) => {
+  const siteRoot = createTempDeclarativeSite(t);
+  writeProjectFile(
+    siteRoot,
+    'webrole.yml',
+    [
+      '- adx_anonymoususersrole: false',
+      '  adx_authenticatedusersrole: true',
+      '  adx_name: Members',
+      '  adx_webroleid: 778fa3d0-a2ef-4d2b-98b8-e6c7d8ce1444',
       '',
     ].join('\n')
   );

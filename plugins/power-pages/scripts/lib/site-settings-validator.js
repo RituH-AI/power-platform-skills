@@ -1,5 +1,10 @@
 const path = require('path');
 const { SITE_SETTING_FILE_SUFFIX, loadYamlRecordsWithErrors, listYamlFiles } = require('./powerpages-config');
+const {
+  detectMetadataLayout,
+  loadAggregateRecords,
+  normalizeSiteSetting,
+} = require('./declarative-metadata');
 const { addFinding, findUnexpectedKeys, findMissingKeys, summarize } = require('./powerpages-validation-utils');
 const { resolvePowerPagesSiteRoot } = require('./validation-helpers');
 
@@ -14,6 +19,15 @@ const SITE_SETTING_ALLOWED_KEYS = new Set([
   'source',
   'value',
 ]);
+const SITE_SETTING_SOURCE_ALLOWED_KEYS = new Set([
+  ...SITE_SETTING_ALLOWED_KEYS,
+  'adx_description',
+  'adx_envvar_schema',
+  'adx_name',
+  'adx_sitesettingid',
+  'adx_source',
+  'adx_value',
+]);
 
 const SITE_SETTING_REQUIRED_KEYS = new Set([
   'id',
@@ -23,9 +37,18 @@ const SITE_SETTING_REQUIRED_KEYS = new Set([
 function validateSiteSettings(projectRoot) {
   const findings = [];
   const siteRoot = resolvePowerPagesSiteRoot(projectRoot);
-  const siteSettingsDir = siteRoot && path.join(siteRoot, 'site-settings');
+  let layout;
+  try {
+    layout = detectMetadataLayout(projectRoot);
+  } catch (error) {
+    addFinding(findings, 'error', `Failed to resolve site setting metadata: ${error.message}`, {
+      filePath: siteRoot,
+    });
+    return { projectRoot, findings, summary: summarize(findings) };
+  }
+  const siteSettingsDir = layout.settings.directory;
 
-  for (const filePath of listYamlFiles(siteSettingsDir)) {
+  for (const filePath of layout.settings.mode === 'per-record' ? listYamlFiles(siteSettingsDir) : []) {
     const fileName = path.basename(filePath);
     if (!fileName.endsWith(SITE_SETTING_FILE_SUFFIX)) {
       addFinding(findings, 'error', `Site setting file does not follow naming convention "*${SITE_SETTING_FILE_SUFFIX}".`, {
@@ -35,7 +58,33 @@ function validateSiteSettings(projectRoot) {
     }
   }
 
-  const { records: siteSettings, errors } = loadYamlRecordsWithErrors(siteSettingsDir, SITE_SETTING_FILE_SUFFIX);
+  let siteSettings = [];
+  let sourceRecords = [];
+  const errors = [];
+  try {
+    if (layout.settings.mode === 'mixed') {
+      throw new Error(
+        `Mixed site-setting serialization found at ${layout.siteRoot}; ` +
+        'sitesetting.yml and site-settings/*.sitesetting.yml cannot be validated as one source.'
+      );
+    }
+    if (layout.settings.mode === 'aggregate') {
+      sourceRecords = loadAggregateRecords(layout.settings.aggregateFile);
+      siteSettings = sourceRecords.map(normalizeSiteSetting);
+    } else {
+      const loaded = loadYamlRecordsWithErrors(siteSettingsDir, SITE_SETTING_FILE_SUFFIX);
+      sourceRecords = loaded.records;
+      siteSettings = loaded.records;
+      errors.push(...loaded.errors);
+    }
+  } catch (error) {
+    errors.push({
+      filePath: layout.settings.mode === 'aggregate'
+        ? layout.settings.aggregateFile
+        : siteSettingsDir,
+      message: error.message,
+    });
+  }
   for (const error of errors) {
     addFinding(findings, 'error', `Failed to parse site setting YAML: ${error.message}`, {
       filePath: error.filePath,
@@ -43,9 +92,16 @@ function validateSiteSettings(projectRoot) {
     });
   }
 
+  const sourceBySetting = new Map(
+    siteSettings.map((setting, index) => [setting, sourceRecords[index]])
+  );
+
   for (const setting of siteSettings) {
     const fileName = path.basename(setting.filePath);
-    const unexpectedKeys = findUnexpectedKeys(setting, SITE_SETTING_ALLOWED_KEYS);
+    const unexpectedKeys = findUnexpectedKeys(
+      sourceBySetting.get(setting),
+      SITE_SETTING_SOURCE_ALLOWED_KEYS
+    );
     if (unexpectedKeys.length > 0) {
       addFinding(findings, 'error', `Site setting contains unexpected schema keys: ${unexpectedKeys.join(', ')}.`, {
         filePath: setting.filePath,

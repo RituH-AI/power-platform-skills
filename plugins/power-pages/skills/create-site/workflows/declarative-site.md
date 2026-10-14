@@ -581,5 +581,26 @@ preserved regions remain exceptions within their stated scope; they do not freez
 The customization skill owns its own plan approval, authoring-skill coordination, local
 verification, commits, and deployment handoff. Do not duplicate those phases here.
 
-On **Keep the template unchanged**, finish after recommending only downstream skills whose
-declarative support has been verified.
+On **Keep the template unchanged**, do not require customization before evaluating downstream
+needs.
+
+After the customization skill returns, or immediately after **Keep the template unchanged**,
+evaluate the same downstream recommendations from the verified baseline plus any returned
+customization result. Customization success is not a prerequisite:
+
+- Suggest `/setup-datamodel` only when a known site requirement needs a specific table, column, or
+  relationship that is absent from the downloaded evidence and authoritative Dataverse metadata.
+  Name the exact missing schema; do not recommend a generic data-model pass.
+- Never suggest `/add-sample-data` for a traditional site. Sample records can affect shared live
+  Dataverse data and are not a creation default.
+- Suggest `/create-webroles` only when a known audience or access requirement needs a role that is
+  absent from the normalized aggregate/per-record role inventory.
+- Suggest `/integrate-webapi` only when a known interaction requires native data access or custom
+  client behavior and the returned customization did not already satisfy it through a Form,
+  Advanced Form, List, Liquid, settings, permissions, or existing Web API caller.
+- Suppress recommendations already completed by the customization result or disproved by current
+  evidence. Do not invent roles, tables, CRUD needs, or API integration merely because the
+  corresponding skill exists.
+
+Finish after presenting only the evidence-backed recommendations whose declarative support has
+been verified.

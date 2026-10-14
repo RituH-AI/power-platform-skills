@@ -9,14 +9,18 @@ Do not execute the SPA-specific source-code discovery or `.powerpages-site` depl
 A traditional site is already represented by downloaded PAC metadata. Its component root may be
 `<projectRoot>/.powerpages-site/` or the directly opened PAC export.
 
-Traditional exports can use either PAC serialization:
+Traditional data model and local serialization are separate facts:
 
-- **Enhanced:** per-record `web-roles/`, `site-settings/`, and `webpage-rules/` files with the
-  normalized field names used by code sites.
-- **Standard:** aggregate `webrole.yml`, `sitesetting.yml`, and `webpagerule.yml` files plus
-  `adx_`-prefixed component fields.
+- Determine the **Standard or Enhanced data model** from authoritative `pac pages list -v`
+  output for the resolved website. Do not infer it from filenames or field prefixes.
+- Detect **aggregate or per-record storage** independently. Both data models can use aggregate
+  `webrole.yml`, `sitesetting.yml`, and `webpagerule.yml`; downloaded records can also use
+  per-record directories.
+- Table permissions can use normalized or `adx_`-prefixed fields independently of the model.
 
-The audit must read both formats. Do not rewrite one format as the other.
+The audit must read every supported storage shape without converting one serialization into
+another. Treat mixed aggregate/per-record storage for the same component type as ambiguous and
+fail closed for deterministic validation or fixes.
 
 ## Phase 1: Verify the Traditional Site
 
@@ -39,9 +43,9 @@ Use the same seven task subjects as the SPA workflow with these descriptions:
 
 | Task subject | Description |
 |---|---|
-| Verify site deployment | Resolve the traditional project/site roots, identity, and PAC format |
+| Verify site deployment | Resolve the traditional project/site roots, identity, data model, and metadata storage |
 | Gather configuration | Inventory roles, table permissions, page rules, native components, settings, and active content |
-| Run local schema validation | Validate supported normalized metadata and retain standard-format/manual checks |
+| Run local schema validation | Validate supported aggregate or per-record metadata and block ambiguous mixed storage |
 | Discover relationships | Query Dataverse for exact lookup and relationship metadata |
 | Run audit checks | Audit every actively used or permission-bearing table and cross-check page/component access |
 | Generate audit report | Render the normal permissions audit report under the traditional project root |
@@ -58,10 +62,10 @@ node "${PLUGIN_ROOT}/skills/audit-permissions/scripts/collect-traditional-permis
 
 The collector normalizes:
 
-- enhanced `web-roles/*.webrole.yml` and standard `webrole.yml`;
+- per-record `web-roles/*.webrole.yml` and aggregate `webrole.yml`;
 - `table-permissions/*.tablepermission.yml` with normalized or `adx_`-prefixed fields;
-- enhanced `site-settings/*.sitesetting.yml` and standard `sitesetting.yml`;
-- enhanced `webpage-rules/*.webpagerule.yml` and standard `webpagerule.yml`;
+- per-record `site-settings/*.sitesetting.yml` and aggregate `sitesetting.yml`;
+- per-record `webpage-rules/*.webpagerule.yml` and aggregate `webpagerule.yml`;
 - Basic Forms, Advanced Forms and their steps, Lists, webpages, Liquid/FetchXML, Web API endpoints,
   and active component tags.
 
@@ -107,7 +111,7 @@ For every reachable data component, retain:
 - active Web API settings, including explicit fields;
 - webpage rule right, page ID, state/status, and role IDs;
 - page ancestry because a Restrict Read rule can apply to descendants;
-- standard or enhanced serialization format.
+- authoritative data model, metadata storage, and record field shape as separate evidence.
 
 `right: 2` is a Restrict Read page rule and is relevant to visitor access. `right: 1` is a Grant
 Change rule for content management; report it separately and do not infer table-data access from it.
@@ -116,26 +120,34 @@ evidence in the report.
 
 ### 2.3 Run local schema validation
 
-If every collected role, table permission, and site setting uses enhanced/normalized format, run:
+Read `metadataStorage` and `metadataStorageByComponent` from the collector. If the global mode is
+`aggregate`, `per-record`, or `hybrid`, run:
 
 ```bash
 node "${PLUGIN_ROOT}/scripts/validate-permissions-schema.js" --projectRoot "<projectRoot>"
 ```
 
-The shared validator is authoritative for enhanced/normalized table permissions, site settings,
-and web roles. Merge its findings using the SPA severity mapping.
+The shared validator is authoritative for supported aggregate and per-record table permissions,
+site settings, and web roles, including normalized and `adx_`-prefixed records. `hybrid` means
+different components use different valid conventions, such as aggregate roles with per-record
+settings; validate each component in its own detected convention. Merge findings using the SPA
+severity mapping. Validation never authorizes changing a component's storage convention.
 
-If any target record uses standard format, do not run or merge the enhanced schema validator for
-that inventory: it would interpret legitimate `adx_` fields as missing/unexpected enhanced fields.
-Use the collector's normalized output and source files instead. Independently verify required IDs,
-booleans, scopes, role references, parent chains, and duplicate IDs/names. The shared validator
-does not authorize rewriting `adx_`-prefixed or aggregate records into enhanced format. State in
-the report which checks used normalized local evidence instead of the enhanced schema validator.
+If `metadataStorage` is `mixed`, report a critical local-metadata finding and do not run
+deterministic fixes. `mixed` means at least one component contains both aggregate and per-record
+records; it does not mean that separate components use separate valid conventions. Use the
+collector's normalized output and source files for read-only analysis, and independently verify
+required IDs, booleans, scopes, role references, parent chains, and duplicate IDs/names. An empty
+or `unknown` inventory is not automatically invalid, but any proposed write must wait until the
+target component's storage convention is known.
 
 ## Phase 3: Resolve Dataverse Metadata
 
 Use `pac env who` to establish the exact target environment. Traditional exports do not contain a
-reliable environment URL, so display the resolved environment in the report.
+reliable environment URL, so display the resolved environment in the report. Run `pac pages list
+-v` and match the resolved website identity to determine its Standard or Enhanced data model.
+If the website cannot be matched unambiguously, report the model as unknown; never derive it from
+aggregate/per-record storage or `adx_` field names.
 
 Reuse the main workflow's deterministic scripts:
 
@@ -152,12 +164,12 @@ Contact, Account, Parent, `$expand`, FetchXML link-entity, and native-component 
 Resolve native Dataverse form and saved-view bindings when component YAML does not expose enough
 operation or field evidence.
 
-When Dataverse access is available and the collected inventory is entirely enhanced format, rerun
-the shared schema validator with live relationship verification exactly as the SPA workflow
-describes. For standard or mixed inventories, use the deterministic lookup/relationship scripts
-against the normalized records instead. If auth or metadata queries fail, continue with local
-evidence and identify the skipped checks. Never invent relationship names, entity-set names,
-component modes, or field access.
+When Dataverse access is available and metadata storage is unambiguous, rerun the shared schema
+validator with live relationship verification exactly as the SPA workflow describes. For mixed
+storage, keep validation read-only and use the deterministic lookup/relationship scripts against
+the normalized records instead. If auth or metadata queries fail, continue with local evidence
+and identify the skipped checks. Never invent relationship names, entity-set names, component
+modes, or field access.
 
 ## Phase 4: Run the Traditional Audit
 
@@ -221,7 +233,8 @@ After per-table checks, run the main cross-table validations plus:
 - every reachable component has a resolved table and permission-enforcement posture;
 - every page-rule role resolves to an existing normalized web role;
 - page ancestry and inherited Restrict Read coverage are internally consistent;
-- standard/enhanced format boundaries are retained in every proposed remediation.
+- data-model identity, metadata storage, and record field shape remain distinct in every proposed
+  remediation.
 
 ## Phase 5: Generate the Report
 
@@ -240,32 +253,33 @@ successful render and open the actual report path.
 
 Include in the report:
 
-- PAC format (`standard`, `enhanced`, `mixed`, or `unknown`);
+- authoritative PAC data model (`standard`, `enhanced`, or `unknown`);
+- metadata storage (`aggregate`, `per-record`, `mixed`, or `unknown`);
 - exact project root, site root, site identity, and target environment;
 - active versus ignored/unreachable evidence;
 - native component enforcement findings;
 - page-rule and table-role cross-checks;
 - skipped live checks and their reason;
-- whether each suggested fix is safe for deterministic enhanced-format tooling or requires a
-  maker/manual standard-format change.
+- whether each suggested fix is supported by deterministic storage-aware tooling, is blocked by
+  mixed/unknown storage, or requires a maker action because the owning record is not supported.
 
 ## Phase 6: Present Findings and Offer Fixes
 
 Record usage as `AuditPermissions` using the exact `projectRoot`; shared tracking resolves nested
-or direct enhanced site-settings roots. If a standard site has only aggregate `sitesetting.yml`,
-report that tracking was not written rather than changing its serialization.
+or direct site roots and preserves aggregate or per-record site-setting storage. If storage is
+mixed or cannot be determined safely, report that tracking was not written.
 
 Use the existing `audit-permissions:6.fix-offer` gate from the main skill. Do not add another
 approval question.
 
 When the user accepts fixes:
 
-- For enhanced-format table permissions, invoke `table-permissions-architect` with
+- For supported aggregate or per-record table permissions, invoke `table-permissions-architect` with
   `siteType: declarative`, exact `projectRoot`, exact `siteRoot`, tables, operations, role IDs,
-  page/component evidence, relationships, and current serialization format.
-- For standard `adx_`-prefixed permission records or aggregate role/page-rule/site-setting files,
-  do not invoke enhanced-only creation scripts. Explain the exact Design Studio or guarded
-  standard-format change required.
+  page/component evidence, relationships, authoritative data model, metadata storage, and current
+  record field shape. The architect must preserve the detected storage and field conventions.
+- Do not run deterministic fixes for mixed storage. Explain the conflicting paths and require the
+  maker to reconcile the export before retrying.
 - Native Form/List/Advanced Form permission-enforcement changes and webpage access-rule changes are
   not table-permission-file fixes. Identify the owning record and required maker action; do not
   silently edit unrelated metadata.
@@ -280,7 +294,8 @@ Before completing:
 
 1. Confirm every inventory table has a completed task.
 2. Confirm every finding cites a concrete file, component, page, rule, or Dataverse result.
-3. Confirm standard/enhanced fields were normalized only in memory and no source metadata changed.
+3. Confirm data model was not inferred from serialization, normalized evidence stayed in memory,
+   and no source metadata changed before an accepted fix.
 4. Confirm the rendered report has no placeholder tokens.
 5. Report live runtime behavior as unverified unless the user separately deploys and tests the
    site.

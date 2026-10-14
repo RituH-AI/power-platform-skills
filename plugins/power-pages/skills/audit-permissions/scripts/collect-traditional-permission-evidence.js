@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 // Collects read-only permission evidence from a traditional Power Pages PAC export.
-// Supports both enhanced per-record metadata and standard-model aggregate files.
+// Supports both per-record and aggregate PAC metadata without inferring the
+// Dataverse data model from the local serialization layout.
 //
 // Usage:
 //   node collect-traditional-permission-evidence.js --projectRoot <path>
@@ -15,6 +16,9 @@
 const fs = require('fs');
 const path = require('path');
 const { parseSimpleYaml } = require('../../../scripts/lib/powerpages-config');
+const {
+  parseTopLevelSequence,
+} = require('../../../scripts/lib/declarative-metadata');
 const {
   findProjectRoot,
   resolvePowerPagesSiteRoot,
@@ -53,44 +57,6 @@ function walkFiles(root, predicate) {
   }
 
   return files.sort((left, right) => left.localeCompare(right));
-}
-
-function parseTopLevelSequence(content, filePath) {
-  const records = [];
-  let block = [];
-
-  function flush() {
-    if (block.length === 0) {
-      return;
-    }
-    records.push(parseSimpleYaml(block.join('\n'), filePath));
-    block = [];
-  }
-
-  // Standard-model PAC files serialize records as a top-level YAML sequence:
-  //   - adx_name: Anonymous Users
-  //     adx_webroleid: <uuid>
-  //     adx_related_ids:
-  //     - <uuid>
-  // De-indent each record by two spaces while retaining deeper block-scalar
-  // indentation. This lets the repository's zero-dependency scalar parser handle
-  // each mapping without adding a second general-purpose YAML implementation.
-  for (const rawLine of content.split(/\r?\n/)) {
-    if (/^-\s+/.test(rawLine)) {
-      flush();
-      block.push(rawLine.replace(/^-\s+/, ''));
-      continue;
-    }
-    if (block.length === 0) {
-      if (rawLine.trim() !== '') {
-        throw new Error(`Expected a top-level YAML sequence in ${filePath}`);
-      }
-      continue;
-    }
-    block.push(rawLine.startsWith('  ') ? rawLine.slice(2) : rawLine);
-  }
-  flush();
-  return records;
 }
 
 function parseSingleFile(filePath, parseErrors) {
@@ -166,7 +132,7 @@ function normalizeRole(record, siteRoot, sourceFormat) {
 }
 
 function normalizePermission(record, siteRoot) {
-  const standard = Object.prototype.hasOwnProperty.call(record, 'adx_entitypermissionid')
+  const adxFields = Object.prototype.hasOwnProperty.call(record, 'adx_entitypermissionid')
     || Object.prototype.hasOwnProperty.call(record, 'adx_entitylogicalname');
   return {
     id: first(record, ['id', 'adx_entitypermissionid']),
@@ -184,7 +150,7 @@ function normalizePermission(record, siteRoot) {
     accountRelationship: first(record, ['accountrelationship', 'adx_accountrelationship']),
     parentPermissionId: first(record, ['parententitypermission', 'adx_parententitypermission']),
     parentRelationship: first(record, ['parentrelationship', 'adx_parentrelationship']),
-    sourceFormat: standard ? 'standard' : 'enhanced',
+    sourceFormat: adxFields ? 'adx-per-record' : 'normalized-per-record',
     filePath: toPosixRelative(siteRoot, record.filePath),
   };
 }
@@ -383,14 +349,14 @@ function collectEvidence(projectRootArg) {
 
   const parseErrors = [];
 
-  const enhancedRoleFiles = walkFiles(
+  const perRecordRoleFiles = walkFiles(
     path.join(siteRoot, 'web-roles'),
     filePath => /\.webrole\.ya?ml$/i.test(filePath)
   );
-  const enhancedRoles = parseFiles(enhancedRoleFiles, parseErrors)
-    .map(record => normalizeRole(record, siteRoot, 'enhanced'));
-  const standardRoles = parseSequenceFile(path.join(siteRoot, 'webrole.yml'), parseErrors)
-    .map(record => normalizeRole(record, siteRoot, 'standard'));
+  const perRecordRoles = parseFiles(perRecordRoleFiles, parseErrors)
+    .map(record => normalizeRole(record, siteRoot, 'per-record'));
+  const aggregateRoles = parseSequenceFile(path.join(siteRoot, 'webrole.yml'), parseErrors)
+    .map(record => normalizeRole(record, siteRoot, 'aggregate'));
 
   const permissionFiles = walkFiles(
     path.join(siteRoot, 'table-permissions'),
@@ -399,24 +365,24 @@ function collectEvidence(projectRootArg) {
   const permissions = parseFiles(permissionFiles, parseErrors)
     .map(record => normalizePermission(record, siteRoot));
 
-  const enhancedSettingFiles = walkFiles(
+  const perRecordSettingFiles = walkFiles(
     path.join(siteRoot, 'site-settings'),
     filePath => /\.sitesetting\.ya?ml$/i.test(filePath)
   );
-  const enhancedSettings = parseFiles(enhancedSettingFiles, parseErrors)
-    .map(record => normalizeSetting(record, siteRoot, 'enhanced'));
-  const standardSettings = parseSequenceFile(path.join(siteRoot, 'sitesetting.yml'), parseErrors)
-    .map(record => normalizeSetting(record, siteRoot, 'standard'));
-  const settings = [...enhancedSettings, ...standardSettings];
+  const perRecordSettings = parseFiles(perRecordSettingFiles, parseErrors)
+    .map(record => normalizeSetting(record, siteRoot, 'per-record'));
+  const aggregateSettings = parseSequenceFile(path.join(siteRoot, 'sitesetting.yml'), parseErrors)
+    .map(record => normalizeSetting(record, siteRoot, 'aggregate'));
+  const settings = [...perRecordSettings, ...aggregateSettings];
 
-  const enhancedPageRuleFiles = walkFiles(
+  const perRecordPageRuleFiles = walkFiles(
     path.join(siteRoot, 'webpage-rules'),
     filePath => /\.webpagerule\.ya?ml$/i.test(filePath)
   );
-  const enhancedPageRules = parseFiles(enhancedPageRuleFiles, parseErrors)
-    .map(record => normalizePageRule(record, siteRoot, 'enhanced'));
-  const standardPageRules = parseSequenceFile(path.join(siteRoot, 'webpagerule.yml'), parseErrors)
-    .map(record => normalizePageRule(record, siteRoot, 'standard'));
+  const perRecordPageRules = parseFiles(perRecordPageRuleFiles, parseErrors)
+    .map(record => normalizePageRule(record, siteRoot, 'per-record'));
+  const aggregatePageRules = parseSequenceFile(path.join(siteRoot, 'webpagerule.yml'), parseErrors)
+    .map(record => normalizePageRule(record, siteRoot, 'aggregate'));
 
   const basicForms = parseFiles(
     walkFiles(path.join(siteRoot, 'basic-forms'), filePath => /\.basicform\.ya?ml$/i.test(filePath)),
@@ -446,25 +412,41 @@ function collectEvidence(projectRootArg) {
   ).map(record => normalizePage(record, siteRoot));
 
   const contentEvidence = collectContentEvidence(siteRoot);
-  const roles = [...enhancedRoles, ...standardRoles];
-  const pageRules = [...enhancedPageRules, ...standardPageRules];
+  const roles = [...perRecordRoles, ...aggregateRoles];
+  const pageRules = [...perRecordPageRules, ...aggregatePageRules];
 
-  const observedFormats = new Set([
-    ...roles.map(record => record.sourceFormat),
-    ...permissions.map(record => record.sourceFormat),
-    ...settings.map(record => record.sourceFormat),
-    ...pageRules.map(record => record.sourceFormat),
-  ]);
-  const dataModelFormat = observedFormats.size === 0
-    ? 'unknown'
-    : observedFormats.size === 1
-      ? [...observedFormats][0]
-      : 'mixed';
+  function storageMode(records) {
+    const formats = new Set(records.map(record => record.sourceFormat));
+    return formats.size === 0
+      ? 'unknown'
+      : formats.size === 1
+        ? [...formats][0]
+        : 'mixed';
+  }
+
+  const metadataStorageByComponent = {
+    roles: storageMode(roles),
+    settings: storageMode(settings),
+    pageRules: storageMode(pageRules),
+  };
+  const componentModes = Object.values(metadataStorageByComponent);
+  const knownModes = new Set(componentModes.filter(mode => mode !== 'unknown'));
+  const metadataStorage = componentModes.includes('mixed')
+    ? 'mixed'
+    : knownModes.size === 0
+      ? 'unknown'
+      : knownModes.size === 1
+        ? [...knownModes][0]
+        : 'hybrid';
 
   return {
     projectRoot: discoveredProjectRoot,
     siteRoot,
-    dataModelFormat,
+    // Standard versus Enhanced is authoritative only from `pac pages list -v`.
+    // Both supplied PAC formats can use aggregate adx_* files locally.
+    dataModelFormat: 'unknown',
+    metadataStorage,
+    metadataStorageByComponent,
     parseErrors: parseErrors.map(error => ({
       filePath: toPosixRelative(siteRoot, error.filePath),
       message: error.message,

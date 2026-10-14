@@ -103,13 +103,21 @@ before Web API site settings can be configured.
 
 ## Step 2: Discover Existing Site Settings
 
-Read all Web API-related site settings in `.powerpages-site/site-settings/`:
+For a code site, read all Web API-related site settings in `.powerpages-site/site-settings/`:
 
 ```text
 **/.powerpages-site/site-settings/Webapi-*.sitesetting.yml
 ```
 
-For a traditional site, read `<siteRoot>/site-settings/Webapi-*.sitesetting.yml` instead.
+For a traditional site, detect storage before reading settings:
+
+- per-record: `<siteRoot>/site-settings/*.sitesetting.yml`;
+- aggregate: records in `<siteRoot>/sitesetting.yml`;
+- mixed: stop before preparing writes and report the conflicting paths.
+
+Use the shared declarative metadata parser or traditional permission-evidence collector so both
+shapes normalize to the same `name`, `value`, `description`, and `id` fields. Do not infer the
+Standard or Enhanced data model from this storage choice.
 
 Each site setting has this format:
 
@@ -467,7 +475,9 @@ node "${PLUGIN_ROOT}/scripts/create-site-setting.js" --projectRoot "<PROJECT_ROO
 node "${PLUGIN_ROOT}/scripts/create-site-setting.js" --projectRoot "<PROJECT_ROOT>" --name "Webapi/<table>/fields" --value "<validated-columns>" --description "Allowed fields for <table> Web API access"
 ```
 
-The script handles UUID generation, alphabetical field ordering, correct YAML formatting (unquoted booleans/strings/UUIDs), and file naming automatically.
+The script handles UUID generation and preserves the detected storage convention: it appends one
+record atomically to aggregate `sitesetting.yml` or creates a per-record YAML file. It rejects
+mixed storage and duplicate setting names.
 
 After creating all files, return a summary to the calling context:
 
@@ -483,6 +493,9 @@ After creating all files, return a summary to the calling context:
 - **No manual YAML writes**: Do NOT use `Write` or `Edit` to create YAML files in `.powerpages-site/`. Always use the `create-site-setting.js` script via `Bash`. The script handles all formatting (unquoted booleans, UUIDs, alphabetical fields) automatically.
 - **Traditional direct-root writes use the same script**: When `siteType: declarative` resolves
   directly to a PAC root, do not create site-setting YAML manually under `<siteRoot>/`.
+- **Preserve traditional storage**: Aggregate `sitesetting.yml` and per-record `site-settings/`
+  are both supported. Never convert between them or infer Standard/Enhanced from either shape.
+  Mixed storage is read-only until reconciled.
 - **OPERATION-SPECIFIC IDENTIFIERS**: Follow `${PLUGIN_ROOT}/references/webapi-field-allowlist.md`. Ordinary columns use LogicalName. Lookup reads use `_<LogicalName>_value`. Lookup writes add the exact case-sensitive Navigation Property used before `@odata.bind`.
 - **EXPLICIT FIELDS ONLY**: Wildcard field access is unsupported beginning September 14, 2026. Include each required File/Image column by LogicalName. For aggregate OData, include every column referenced by grouping, aggregation, filtering, or ordering.
 - **Dataverse is the authority**: Column names from code, type definitions, or manifests are NOT authoritative. Only the `LogicalName` returned by the Dataverse `EntityDefinitions/Attributes` API is authoritative. If Dataverse is unavailable, warn prominently that column names are unvalidated.

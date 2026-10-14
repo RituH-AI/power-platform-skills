@@ -160,6 +160,46 @@ upload, state that it creates the declarative website records in the selected en
 Unexpected component categories or unrelated dirty files must be resolved or explicitly excluded
 before approval.
 
+### 4.1 Audit permission-sensitive changes
+
+From the exact local diff, detect whether uploadable changes affect any of these surfaces:
+
+- Basic Forms, Advanced Forms or steps, or Lists;
+- reachable Liquid/FetchXML in webpage copies, Web Templates, or Content Snippets;
+- JavaScript Web Files containing `/_api/` or another Power Pages Web API caller;
+- site settings, web roles, table permissions, or webpage access-control rules.
+
+Do not trigger this gate for styling, static copy, images, navigation, or unrelated metadata when
+the changed content has no data-access or access-control evidence.
+
+When at least one permission-sensitive surface changed:
+
+<!-- gate: deploy-site:declarative-4.permissions-audit | category=plan | cancel-leaves=local-customization -->
+
+> 🚦 **Gate (plan · deploy-site:declarative-4.permissions-audit):** Run a read-only permissions
+> audit before uploading access-sensitive traditional-site changes.
+>
+> **Trigger:** The reviewed diff changes a Form, Advanced Form, List, reachable Liquid/FetchXML,
+> Web API JavaScript, site setting, web role, table permission, or webpage access rule.
+> **Why:** These changes can drift from table permissions, role coverage, field allowlists, or
+> inherited page access even when local schema validation passes.
+> **Cancel leaves:** All local customization unchanged; no upload has started.
+
+Use `AskUserQuestion`: **Run permissions audit (Recommended) / Continue without audit / Cancel**.
+
+- On **Run permissions audit**, invoke `/audit-permissions` for the exact `projectRoot` and wait
+  for it to complete. The audit owns its existing fix-offer gate.
+- If the audit or accepted fixes change any local file, rerun the declarative validator, recompute
+  the Git diff, and regenerate the complete Phase 4 component summary before Phase 5. If the new
+  diff introduces another permission-sensitive surface, include it in the refreshed summary; do
+  not ask this gate a second time in the same deployment attempt.
+- If validation fails after a fix, stop before upload.
+- On **Continue without audit**, record that the user explicitly skipped the read-only check and
+  continue to Phase 5.
+- On **Cancel**, stop without upload.
+
+When no permission-sensitive surface changed, skip this gate without mentioning it.
+
 ## Phase 5: Approve and upload
 
 <!-- gate: deploy-site:declarative-5.upload | category=final | cancel-leaves=local-customization -->

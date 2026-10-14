@@ -80,14 +80,17 @@ test('traditional audit keeps the report, checklist, gate, and read-only contrac
   assert.match(reference, /audit-permissions:6\.fix-offer/);
   assert.match(reference, /Native permission enforcement disabled/);
   assert.match(reference, /Page and table role mismatch/);
-  assert.match(reference, /\*\*Standard:\*\*/);
-  assert.match(reference, /\*\*Enhanced:\*\*/);
-  assert.match(reference, /do not run or merge the enhanced schema validator/);
+  assert.match(reference, /data model and local serialization are separate facts/);
+  assert.match(reference, /pac pages list -v/);
+  assert.match(reference, /If `metadataStorage` is `mixed`/);
+  assert.match(reference, /`aggregate`, `per-record`, or `hybrid`/);
+  assert.match(reference, /different components use different valid conventions/);
+  assert.match(reference, /authoritative for supported aggregate and per-record table permissions/);
   assert.match(reference, /No local or Dataverse mutation/);
   assert.match(reference, /Do\s+not run the hook directly/);
-  assert.match(architect, /Standard traditional metadata stays plan-only/);
-  assert.match(architect, /must not prepare or execute enhanced-format/);
-  assert.match(architect, /standard-format metadata, include\s+only the exact maker\/manual remediation/);
+  assert.match(architect, /Standard versus Enhanced comes only from authoritative/);
+  assert.match(architect, /Aggregate role storage and `adx_`-prefixed table\s+permissions are supported/);
+  assert.match(architect, /Mixed storage remains plan-only until\s+reconciled/);
   assert.match(architect, /For an SPA site, preserve the existing behavior/);
   assert.match(
     architect,
@@ -221,10 +224,16 @@ test('collector normalizes enhanced metadata from a nested traditional root', (t
   const evidence = JSON.parse(result.stdout);
 
   assert.equal(evidence.siteRoot, siteRoot);
-  assert.equal(evidence.dataModelFormat, 'enhanced');
+  assert.equal(evidence.dataModelFormat, 'unknown');
+  assert.equal(evidence.metadataStorage, 'per-record');
+  assert.deepEqual(evidence.metadataStorageByComponent, {
+    roles: 'per-record',
+    settings: 'per-record',
+    pageRules: 'per-record',
+  });
   assert.equal(evidence.roles[0].name, 'Members');
   assert.equal(evidence.tablePermissions[0].table, 'cr123_order');
-  assert.equal(evidence.tablePermissions[0].sourceFormat, 'enhanced');
+  assert.equal(evidence.tablePermissions[0].sourceFormat, 'normalized-per-record');
   assert.equal(evidence.basicForms[0].referencedBy.length, 1);
   assert.equal(evidence.advancedForms[0].referencedBy.length, 1);
   assert.equal(evidence.lists[0].actions.create, true);
@@ -317,10 +326,16 @@ test('collector normalizes standard aggregate and adx-prefixed metadata', (t) =>
   assert.equal(result.status, 0, result.stderr);
   const evidence = JSON.parse(result.stdout);
 
-  assert.equal(evidence.dataModelFormat, 'standard');
+  assert.equal(evidence.dataModelFormat, 'unknown');
+  assert.equal(evidence.metadataStorage, 'aggregate');
+  assert.deepEqual(evidence.metadataStorageByComponent, {
+    roles: 'aggregate',
+    settings: 'aggregate',
+    pageRules: 'aggregate',
+  });
   assert.equal(evidence.roles.length, 2);
   assert.equal(evidence.roles[1].authenticated, true);
-  assert.equal(evidence.tablePermissions[0].sourceFormat, 'standard');
+  assert.equal(evidence.tablePermissions[0].sourceFormat, 'adx-per-record');
   assert.equal(evidence.tablePermissions[0].table, 'incident');
   assert.equal(evidence.tablePermissions[0].read, true);
   assert.deepEqual(
@@ -337,6 +352,42 @@ test('collector normalizes standard aggregate and adx-prefixed metadata', (t) =>
   assert.equal(evidence.webApiSettings[0].name, 'Webapi/incident/enabled');
   assert.equal(evidence.basicForms[0].entityPermissionsEnabled, false);
   assert.equal(evidence.basicForms[0].referencedBy.length, 1);
+});
+
+test('collector treats component-specific aggregate and per-record storage as supported hybrid', (t) => {
+  const siteRoot = createTempDeclarativeSite(t);
+  writeProjectFile(
+    siteRoot,
+    'webrole.yml',
+    [
+      '- adx_anonymoususersrole: false',
+      '  adx_authenticatedusersrole: true',
+      '  adx_name: Members',
+      '  adx_webroleid: 14141414-1414-4414-8414-141414141414',
+      '',
+    ].join('\n')
+  );
+  writeProjectFile(
+    siteRoot,
+    'site-settings/api.sitesetting.yml',
+    [
+      'id: 15151515-1515-4515-8515-151515151515',
+      'name: Webapi/incident/enabled',
+      'value: true',
+      '',
+    ].join('\n')
+  );
+
+  const result = runNode(collectorPath, ['--projectRoot', siteRoot]);
+  assert.equal(result.status, 0, result.stderr);
+  const evidence = JSON.parse(result.stdout);
+
+  assert.equal(evidence.metadataStorage, 'hybrid');
+  assert.deepEqual(evidence.metadataStorageByComponent, {
+    roles: 'aggregate',
+    settings: 'per-record',
+    pageRules: 'unknown',
+  });
 });
 
 test('audit hook validates a report under a direct traditional root', (t) => {

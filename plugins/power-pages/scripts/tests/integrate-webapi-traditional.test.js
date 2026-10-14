@@ -7,9 +7,14 @@ const { spawnSync } = require('child_process');
 const { validateSiteSettings } = require('../lib/site-settings-validator');
 const { validateTablePermissions } = require('../lib/table-permissions-validator');
 const { validateWebRoles } = require('../lib/web-roles-validator');
-const { createTempDeclarativeSite, writeProjectFile } = require('./test-utils');
+const {
+  createTempProject,
+  createTempDeclarativeSite,
+  writeProjectFile,
+} = require('./test-utils');
 
 const pluginRoot = path.resolve(__dirname, '..', '..');
+const repositoryRoot = path.resolve(pluginRoot, '..', '..');
 
 function runNode(scriptPath, args, options = {}) {
   return spawnSync(process.execPath, [scriptPath, ...args], {
@@ -60,6 +65,30 @@ test('traditional workflow is native-first and approval-gated', () => {
   assert.match(reference, /No local\s+or Dataverse writes occur before approval/);
   assert.match(reference, /Do not create SPA files/);
   assert.match(reference, /author-web-file/);
+});
+
+test('traditional workflow supports a parent-owned commit and deployment contract', () => {
+  const skill = fs.readFileSync(
+    path.join(pluginRoot, 'skills', 'integrate-webapi', 'SKILL.md'),
+    'utf8'
+  );
+  const reference = fs.readFileSync(
+    path.join(
+      pluginRoot,
+      'skills',
+      'integrate-webapi',
+      'references',
+      'traditional-site-workflow.md'
+    ),
+    'utf8'
+  );
+
+  assert.match(skill, /\[CALLED-BY-PARENT-SKILL\]/);
+  assert.match(reference, /caller-suppress = true/);
+  assert.match(reference, /skips every commit and Phase 7 deployment prompt\/reminder/);
+  assert.match(reference, /does not skip the Phase 3 scope gate/);
+  assert.match(reference, /return the exact changed-file list instead/);
+  assert.match(reference, /Skip `integrate-webapi:7.3.deploy`/);
 });
 
 test('SPA workflow keeps its existing prompts, gates, and task contract', () => {
@@ -145,6 +174,83 @@ test('SPA workflow keeps its existing prompts, gates, and task contract', () => 
   assert.match(readme, /upload your own permissions diagram instead/);
 });
 
+test('table-permissions architect preserves the committed SPA deployment branch', () => {
+  const architectPath = path.join(pluginRoot, 'agents', 'table-permissions-architect.md');
+  const architect = fs.readFileSync(architectPath, 'utf8').replace(/\r\n/g, '\n');
+  const committed = spawnSync(
+    'git',
+    ['show', 'HEAD:plugins/power-pages/agents/table-permissions-architect.md'],
+    { cwd: repositoryRoot, encoding: 'utf8' }
+  );
+  assert.equal(committed.status, 0, committed.stderr);
+
+  function spaBranch(content) {
+    const start = content.indexOf('### SPA branch (`siteType: code`)');
+    const end = content.indexOf('### Traditional branch (`siteType: declarative`)');
+    assert.notEqual(start, -1);
+    assert.notEqual(end, -1);
+    return content.slice(start, end);
+  }
+
+  assert.equal(spaBranch(architect), spaBranch(committed.stdout.replace(/\r\n/g, '\n')));
+});
+
+test('table-permissions architect retains the complete SPA planning and safety contract', () => {
+  const architect = fs.readFileSync(
+    path.join(pluginRoot, 'agents', 'table-permissions-architect.md'),
+    'utf8'
+  );
+
+  for (const scope of ['Global', 'Contact', 'Account', 'Self', 'Parent']) {
+    assert.match(
+      architect,
+      new RegExp(`create-table-permission\\.js[^\\n]+--scope "${scope}"`)
+    );
+  }
+  assert.match(architect, /Parent permissions must be created before child permissions/);
+  assert.match(architect, /Generate Permissions Plan HTML/);
+  assert.match(architect, /Use `EnterPlanMode`[\s\S]+use `ExitPlanMode`/);
+  assert.match(architect, /No Administrators permissions by default/);
+  assert.match(architect, /No manual YAML writes/);
+  assert.match(architect, /LOOKUP COLUMNS REQUIRE APPENDTO\/APPEND/);
+  assert.match(architect, /No speculative scope rewrites/);
+  assert.match(architect, /Parent before child/);
+  assert.match(
+    architect,
+    /validate-permissions-schema\.js[\s\S]+--validate-dataverse-relationships/
+  );
+});
+
+test('table permission writer preserves normalized SPA metadata', (t) => {
+  const projectRoot = createTempProject(t);
+  writeProjectFile(projectRoot, 'powerpages.config.json', '{}\n');
+  const roleId = '997e7996-e241-4117-9c09-28e90a1fcdbc';
+  const result = runNode(
+    path.join(pluginRoot, 'scripts', 'create-table-permission.js'),
+    [
+      '--projectRoot', projectRoot,
+      '--permissionName', 'SPA Items - Authenticated Read',
+      '--tableName', 'cr123_item',
+      '--webRoleIds', roleId,
+      '--scope', 'Global',
+      '--read',
+    ]
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  const yaml = fs.readFileSync(output.filePath, 'utf8');
+
+  assert.equal(output.fieldFormat, 'normalized');
+  assert.ok(output.filePath.startsWith(path.join(projectRoot, '.powerpages-site')));
+  assert.match(yaml, /^entitylogicalname: cr123_item$/m);
+  assert.match(yaml, /^entityname: SPA Items - Authenticated Read$/m);
+  assert.match(yaml, /^id: [0-9a-f-]{36}$/m);
+  assert.match(yaml, /^read: true$/m);
+  assert.doesNotMatch(yaml, /^adx_entitylogicalname:/m);
+  assert.doesNotMatch(yaml, /^adx_entitypermissionid:/m);
+});
+
 test('metadata creation scripts support a direct traditional PAC root', (t) => {
   const siteRoot = createTempDeclarativeSite(t);
   const roleId = '997e7996-e241-4117-9c09-28e90a1fcdbc';
@@ -177,6 +283,12 @@ test('metadata creation scripts support a direct traditional PAC root', (t) => {
   assert.ok(
     JSON.parse(permissionResult.stdout).filePath.startsWith(path.join(siteRoot, 'table-permissions'))
   );
+  const permissionYaml = fs.readFileSync(JSON.parse(permissionResult.stdout).filePath, 'utf8');
+  assert.match(permissionYaml, /^adx_entitypermissionid: /m);
+  assert.match(permissionYaml, /^adx_entitylogicalname: cr123_item$/m);
+  assert.match(permissionYaml, /^adx_read: true$/m);
+  assert.doesNotMatch(permissionYaml, /^id: /m);
+  assert.doesNotMatch(permissionYaml, /^entitylogicalname: /m);
 
   const roleResult = runNode(
     path.join(pluginRoot, 'skills', 'create-webroles', 'scripts', 'create-web-role.js'),
