@@ -1,9 +1,9 @@
 # Design Studio Web Template Authoring
 
 Canonical reference for workflows that create or modify web templates in a PAC
-CLI-downloaded declarative Power Pages site. This reference applies to sites with a
+CLI-downloaded non-SPA Power Pages site. This reference applies to sites with a
 root-level `.portalconfig` directory, `website.yml`, and `web-templates/` content. It does
-not apply to Power Pages code sites built with React, Angular, Vue, or Astro.
+not apply to Power Pages SPA sites built with React, Angular, Vue, or Astro.
 
 A web template is a reusable Power Pages metadata record whose source can contain HTML,
 Liquid, text, or another text-based response format. Web templates can serve as reusable

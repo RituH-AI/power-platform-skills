@@ -1,13 +1,13 @@
 # Power Pages Plugin
 
-Create and deploy Power Pages sites using modern frontend frameworks or first-party declarative
+Create and deploy Power Pages sites using modern frontend frameworks or first-party non-SPA
 templates. This plugin provides a complete workflow—from site creation to deployment, data
 modeling, authentication, Web API integration, and ALM—through conversational AI skills.
 
-**Supported creation models**: Standard and Enhanced data model traditional sites; React, Angular,
+**Supported creation models**: Standard and Enhanced data model non-SPA sites; React, Angular,
 Vue, and Astro SPA sites
 
-For an existing **classic, server-rendered Power Pages site**, `/edit-site` provides a local Desktop styling workflow; it does not create a SPA or deploy changes.
+For an existing **non-SPA, server-rendered Power Pages site**, `/edit-site` provides a local Desktop styling workflow; it does not create a SPA or deploy changes.
 
 ## Installation
 
@@ -53,14 +53,14 @@ The `/practice-site-check` and `/add-button` descriptions below are retained for
 
 > "Create a Power Pages site with React for a job board"
 
-Creates either an SPA site from a framework template or a Standard/Enhanced data model traditional
+Creates either an SPA site from a framework template or a Standard/Enhanced data model non-SPA
 site from a template accepted by the documented Power Platform Create Website API.
 
-- **Code sites (SPAs):** choose React, Vue, Angular, or Astro; scaffold the complete SPA; apply a
+- **SPA sites (code sites):** choose React, Vue, Angular, or Astro; scaffold the complete SPA; apply a
   custom design with real imagery from an experience brief and page narratives; build pages,
   components, and routing; preview live and run a batched desktop/mobile visual critique; validate
   the result and commit implementation milestones.
-- **Classic/declarative sites (traditional sites):** recommend Enhanced with Bootstrap 5, confirm
+- **Non-SPA sites (classic sites):** recommend Enhanced with Bootstrap 5, confirm
   the selected model
   and environment toggle with an administrator, and choose a Bootstrap-compatible first-party
   template. Provision through the Power Platform API, verify the resulting model and downloaded
@@ -81,13 +81,13 @@ site from a template accepted by the documented Power Platform Create Website AP
 
 > "Deploy my site to Power Pages"
 
-Routes by project type and deploys either a code site or a PAC-downloaded declarative site.
+Routes by project type and deploys either a SPA site or a PAC-downloaded non-SPA site.
 
 - Verifies PAC CLI installation and authentication
 - Confirms target environment before deploying
-- Code sites retain the existing build, `pac pages upload-code-site`, blocked-JavaScript, and
+- SPA sites retain the existing build, `pac pages upload-code-site`, blocked-JavaScript, and
   activation workflow
-- Declarative sites validate website identity and model, or require an explicit Standard/Enhanced
+- Non-SPA sites validate website identity and model, or require an explicit Standard/Enhanced
   choice when the website is absent for a first upload; they summarize local component changes,
   obtain final upload approval, and use `pac pages upload` with an explicit model
 
@@ -95,7 +95,7 @@ Routes by project type and deploys either a code site or a PAC-downloaded declar
 
 > "Turn this downloaded Event Portal into our developer conference site"
 
-Authors pages and components and coordinates broader local customization of a PAC-downloaded declarative site,
+Authors pages and components and coordinates broader local customization of a PAC-downloaded non-SPA site,
 whether it was provisioned by `/create-site` or created manually in Design Studio.
 
 - Individual page or component edits load only the relevant references, then inspect, author, independently
@@ -108,7 +108,7 @@ whether it was provisioned by `/create-site` or created manually in Design Studi
   references, invoking a separate skill only for localized body composition
 - Styling-only requests use [the guarded styling workflow](skills/edit-site/references/style-site-workflow.md)
   without a broad customization plan, commits or deployment prompts
-- Reuses the same visual-quality guidance as code-site creation, adapted to native Bootstrap and
+- Reuses the same visual-quality guidance as SPA creation, adapted to native Bootstrap and
   Design Studio authoring rather than SPA theme replacement
 - New-site plans include an approved design brief and meaningful photographs or original
   hosted illustrations using approved direct HTTPS URLs, not new image Web Files; imagery can
@@ -155,13 +155,13 @@ Runtime-tests a deployed, activated site using a real browser (via the bundled P
 
 > "Show me how a simple Power Pages skill works"
 
-Provides a small, read-only example for learning skill development. It recognizes both code sites and PAC-downloaded declarative sites, reports their local identity, and checks framework and compiled output details when they apply.
+Provides a small, read-only example for learning skill development. It recognizes both SPA sites and PAC-downloaded non-SPA sites, reports their local identity, and checks framework and compiled output details when they apply.
 
-### Classic site authoring
+### Non-SPA site authoring
 
-Use `/edit-site` to customize local PAC CLI-downloaded declarative
+Use `/edit-site` to customize local PAC CLI-downloaded non-SPA
 Power Pages sites. The following capabilities are reference workflows, not separate slash commands,
-and do not apply to React, Angular, Vue, or Astro code sites.
+and do not apply to React, Angular, Vue, or Astro SPA sites.
 
 | Capability | Reference |
 |---|---|
@@ -190,9 +190,9 @@ Generative AI Search components, Flex Containers, and spacers.
 
 Analyzes your site's requirements and creates Dataverse tables, columns, and relationships via OData API calls.
 
-- Supports SPA/code sites and PAC-downloaded traditional sites
+- Supports SPA sites and PAC-downloaded non-SPA sites
 - Spawns a **Data Model Architect** agent that proposes tables from framework source or active
-  traditional components such as Forms, Advanced Forms, Lists, Liquid, permissions, Web API
+  non-SPA components such as Forms, Advanced Forms, Lists, Liquid, permissions, Web API
   settings, and page/template JavaScript
 - Alternatively, you can upload an ER diagram
 - Queries Dataverse to distinguish schema that can be reused, extended, or must be created
@@ -225,7 +225,7 @@ Router skill that analyzes your business problem and recommends the right backen
 
 > "Connect my site to the Dataverse tables"
 
-Orchestrates the full Dataverse integration lifecycle for SPA and traditional sites. Invoke it
+Orchestrates the full Dataverse integration lifecycle for SPA and non-SPA sites. Invoke it
 with a specific request, or with no arguments to discover and select integration opportunities.
 
 For SPA sites, the skill scans the codebase for components using mock data, placeholder fetch
@@ -236,7 +236,7 @@ with dedicated **Web API Integration** agents. After the tables are wired up, a
 proposes site settings with case-sensitive validated column names queried directly from
 Dataverse — or you can upload your own permissions diagram instead.
 
-For traditional sites, it inspects active Forms, Advanced Forms, Lists, Liquid, Web Templates,
+For non-SPA sites, it inspects active Forms, Advanced Forms, Lists, Liquid, Web Templates,
 webpages, JavaScript Web Files, settings, and permissions. It reuses native components when they
 already satisfy the requirement and adds Web API JavaScript only when custom client behavior is
 necessary.
@@ -251,14 +251,14 @@ permissions, scopes, roles, and explicit case-sensitive field allowlists.
 - TypeScript entity types and domain mappers per table
 - CRUD service layer per table using `/_api/` endpoints with dual token headers and `@odata.bind` for lookups
 - Framework-specific patterns: React hooks, Vue composables, Angular injectable services
-- Traditional-site Liquid, JavaScript Web Files, or caller updates when native components are not sufficient
+- Non-SPA site Liquid, JavaScript Web Files, or caller updates when native components are not sufficient
 - Table permission YAML files and site setting YAML files with explicit validated column lists
 
 **What gets updated:**
 
 - Existing components are refactored to use real API calls (mock data and placeholder fetches are replaced)
 - SPA `.powerpages-site/table-permissions/` and `.powerpages-site/site-settings/` metadata receives
-  the approved changes; traditional sites may use nested or directly opened PAC metadata
+  the approved changes; non-SPA sites may use nested or directly opened PAC metadata
 
 #### `/add-ai-webapi`
 
@@ -304,15 +304,15 @@ Integrates Power Automate cloud flows into a Power Pages site. Discovers flows a
 
 > "Create web roles for my site"
 
-Generates web role YAML files for SPA and traditional sites. SPA sites retain the existing
-`.powerpages-site/web-roles/` workflow; traditional sites can use nested or directly opened PAC
+Generates web role YAML files for SPA and non-SPA sites. SPA sites retain the existing
+`.powerpages-site/web-roles/` workflow; non-SPA sites can use nested or directly opened PAC
 metadata with aggregate `webrole.yml` or per-record `web-roles/` storage.
 
 - Discovers existing roles before creating new ones
 - Generates proper UUIDs for each role
 - Enforces uniqueness constraints (one anonymous role, one authenticated role)
 - Preserves existing SPA prompts and caller-suppress behavior
-- Deploys through the correct SPA or declarative `/deploy-site` route
+- Deploys through the correct SPA or non-SPA `/deploy-site` route
 
 #### `/setup-auth`
 
@@ -330,8 +330,8 @@ Adds login/logout functionality and role-based authorization to your site.
 
 > "Check my table permissions for security issues"
 
-Audits existing table permissions on a deployed or in-progress SPA or traditional site by
-analyzing them against active site behavior and live Dataverse metadata. Traditional audits keep
+Audits existing table permissions on a deployed or in-progress SPA or non-SPA site by
+analyzing them against active site behavior and live Dataverse metadata. Non-SPA audits keep
 the authoritative Standard/Enhanced model separate from aggregate/per-record PAC storage and cover
 native Forms/Lists, Liquid, Web API callers, web roles, and
 inherited webpage access rules. Produces a visual HTML audit report grouped by severity with
@@ -513,7 +513,7 @@ Surfaces PAC CLI upload errors and Dataverse async operation errors, pattern-mat
 
 > "Add a Register button to the applications page"
 
-Adds a Design Studio-compatible link button to one localized page in a PAC CLI-downloaded declarative site. Discovers the available pages, languages, sections, and columns; previews the exact placement and markup; and changes only the approved local `.webpage.copy.html` file.
+Adds a Design Studio-compatible link button to one localized page in a PAC CLI-downloaded non-SPA site. Discovers the available pages, languages, sections, and columns; previews the exact placement and markup; and changes only the approved local `.webpage.copy.html` file.
 
 - Supports internal pages, external URLs, email, telephone, and explicit placeholders
 - Uses any user-provided button label
@@ -521,9 +521,9 @@ Adds a Design Studio-compatible link button to one localized page in a PAC CLI-d
 
 #### Classic styling through `/edit-site`
 
-> "Style the new contact section and existing list on my classic Power Pages site; show me the proposed changes first"
+> "Style the new contact section and existing list on my non-SPA Power Pages site; show me the proposed changes first"
 
-Uses [the styling workflow](skills/edit-site/references/style-site-workflow.md) for **classic, server-rendered sites only**, from a local download in **VS Code Desktop**. Reviews the exact CSS/source diff, scope and Studio-support warnings, then applies only an explicitly approved local change set. No HTML preview, local server or browser review is required.
+Uses [the styling workflow](skills/edit-site/references/style-site-workflow.md) for **non-SPA, server-rendered sites only**, from a local download in **VS Code Desktop**. Reviews the exact CSS/source diff, scope and Studio-support warnings, then applies only an explicitly approved local change set. No HTML preview, local server or browser review is required.
 
 - Uses a lean **Inspect/propose → Approve → Apply → Independently verify → Report** workflow for broad declarations on one locale/section: at most 3 components/10 style groups, one existing stylesheet and guarded inline/class edits. Any raw `style.css`, global rules, nonempty `externalResources`/`importantReason`, new/shared files or broader scope uses expanded review
 - Reviews small-change scope together with the exact diff/hash; expanded work confirms scope first. Every revision needs host approval, with no final-completion confirmation or unattended approval
@@ -541,7 +541,7 @@ Uses [the styling workflow](skills/edit-site/references/style-site-workflow.md) 
 - Independently validates local files, retaining source-level readability guidance and optional supplied-color contrast checks; actual desktop/mobile rendering, accessibility and Studio editability remain pending separate live verification
 - Uses exact source/context/hash guards on real rendered tags, including input/textarea/SVG and outer local iframe/embedded elements: only class/style attributes change, never embedded contents. Static tags/CSS values may span lines; whitespace/newline matching remains exact. Entity spelling may normalize only in the style attribute; other source stays intact. Declarations retain authored order and shorthand protection. Unknown parser semantics yield warnings, not blanket Power Pages rejection; malformed/injected/executable CSS fails
 - Leaves inspection/proposal/recovery artifacts outside the uploadable site tree; **no upload, publishing, activation, remote writes, or cache clearing**
-- Not for SPA/code sites, PCF/third-party internals, Bootstrap migration, or VS Code for the Web remote saves
+- Not for SPA sites, PCF/third-party internals, Bootstrap migration, or VS Code for the Web remote saves
 
 #### `/exceptional-web-design`
 
@@ -549,14 +549,14 @@ Uses [the styling workflow](skills/edit-site/references/style-site-workflow.md) 
 >
 > "Why does my site look generic? What should I change?"
 
-Reviews the design of an existing classic/traditional or SPA site - an authorized live URL or a local project folder - and tells you what to change, without changing anything.
-With a running URL it captures up to eight key pages at desktop and mobile widths and runs an automated accessibility audit. Classic reviews interpret the shared ten-category rubric through native platform and approved-brand requirements, with source-only or incomplete findings explicitly provisional rather than verified totals out of 40. SPA reviews retain their existing workflow and scoring contract. Pages beyond the selected scope are listed in the report.
+Reviews the design of an existing non-SPA or SPA site - an authorized live URL or a local project folder - and tells you what to change, without changing anything.
+With a running URL it captures up to eight key pages at desktop and mobile widths and runs an automated accessibility audit. Non-SPA reviews interpret the shared ten-category rubric through native platform and approved-brand requirements, with source-only or incomplete findings explicitly provisional rather than verified totals out of 40. SPA reviews retain their existing workflow and scoring contract. Pages beyond the selected scope are listed in the report.
 The result is a scorecard plus prioritized recommendations, each naming the page and element, why it matters, and the exact change, with a redesign direction when the site needs more than fixes.
 
-- Reads classic PAC metadata, localized page copy, styles and Liquid/templates, or code-site routes and components. Classic sites need no SPA dev server or deployment for a source-only review
+- Reads non-SPA PAC metadata, localized page copy, styles and Liquid/templates, or SPA routes and components. Non-SPA sites need no SPA dev server or deployment for a source-only review
 - Runs nothing from your project and changes nothing in it; screenshots go to a private temporary folder. The plugin's pinned browser package may enter npm's cache, never the project
-- Lists sign-in-protected pages as not reviewed. The classic workflow also explicitly excludes query/fragment-dependent states the capture cannot establish
-- A deployed URL does not prove unpublished local changes. Recommendations retain native scope and fresh approval; no automatic fixes, Studio sync, deployment, or additional mandatory classic review stage
+- Lists sign-in-protected pages as not reviewed. The non-SPA workflow also explicitly excludes query/fragment-dependent states the capture cannot establish
+- A deployed URL does not prove unpublished local changes. Recommendations retain native scope and fresh approval; no automatic fixes, Studio sync, deployment, or additional mandatory non-SPA review stage
 
 #### `/add-seo`
 
@@ -574,7 +574,7 @@ Adds search engine optimization artifacts: `robots.txt`, `sitemap.xml`, and meta
 
 > "Upgrade my Power Pages site from Bootstrap 3 to Bootstrap 5"
 
-Migrates a traditional Power Pages site (Liquid web templates, not code sites) from Bootstrap 3 to Bootstrap 5. Runs the `pac pages bootstrap-migrate` engine for the bulk class renames, then assists with the residual hierarchy/CSS fixes the engine can only flag.
+Migrates a non-SPA Power Pages site (Liquid web templates, not SPA sites) from Bootstrap 3 to Bootstrap 5. Runs the `pac pages bootstrap-migrate` engine for the bulk class renames, then assists with the residual hierarchy/CSS fixes the engine can only flag.
 
 - Non-destructive: the engine writes a new `<folder>V5` copy and never edits the source
 - AI-assisted per-category fixes for grid, navbar, panel/card, and page-header changes
@@ -584,7 +584,7 @@ Migrates a traditional Power Pages site (Liquid web templates, not code sites) f
 
 > "Replace every wildcard Web API fields setting with the columns my site actually uses"
 
-Reviews every authored Power Pages Web API source call and response consumer, maps entity sets through Dataverse metadata, and replaces deprecated `Webapi/<table>/fields = *` values with evidence-backed explicit columns. Compiled and generated output is excluded. Works with both traditional/Liquid sites and React, Vue, Angular, or Astro SPA sites.
+Reviews every authored Power Pages Web API source call and response consumer, maps entity sets through Dataverse metadata, and replaces deprecated `Webapi/<table>/fields = *` values with evidence-backed explicit columns. Compiled and generated output is excluded. Works with both non-SPA/Liquid sites and React, Vue, Angular, or Astro SPA sites.
 
 - Reports every wildcard with its exact proposed fix and every already-explicit configuration
 - Adds missing `$select` projections where normal record reads relied on implicit selection
@@ -648,7 +648,7 @@ A common end-to-end workflow looks like this:
 ```
 SPA site:
 1.  /create-site            →  Scaffold + design + build pages
-2.  /deploy-site            →  Build and upload the code site
+2.  /deploy-site            →  Build and upload the SPA site
 3.  /activate-site          →  Provision a public URL when needed
 4.  /setup-datamodel        →  Create Dataverse tables
 5.  /add-sample-data        →  Populate tables with test records
@@ -661,10 +661,10 @@ SPA site:
 12. /deploy-site            →  Push final changes live
 13. /test-site              →  Runtime smoke test
 
-Traditional site:
+Non-SPA site:
 1.  /create-site            →  Provision, download, and verify Bootstrap 5 (Enhanced recommended)
 2.  /edit-site              →  Approve and author coordinated design, content, and imagery
-3.  /deploy-site            →  Verify identity/model and upload the declarative site
+3.  /deploy-site            →  Verify identity/model and upload the non-SPA site
 
 ALM and release:
 1.  /security-review        →  Review security before release
@@ -701,7 +701,7 @@ Several skills now ask about solution identity, orphan components, and pre-expor
 ## Documentation
 
 - [Power Pages AI Plugin Documentation](https://learn.microsoft.com/power-pages/configure/create-code-site-using-claude-code)
-- [Power Pages Code Sites](https://learn.microsoft.com/power-pages/configure/create-code-sites)
+- [Power Pages SPA Sites](https://learn.microsoft.com/power-pages/configure/create-code-sites)
 - [PAC CLI Reference](https://learn.microsoft.com/power-platform/developer/cli/reference/pages)
 - [Power Pages REST API](https://learn.microsoft.com/rest/api/power-platform/powerpages/websites)
 - [Dataverse Web API](https://learn.microsoft.com/power-apps/developer/data-platform/webapi/overview)
@@ -728,9 +728,9 @@ This Dataverse relationship check is intended for local validation only and shou
 This plugin sends usage telemetry by default to help Microsoft improve it.
 Events include skill name, plugin/PAC/agent versions, OS/Node versions, session and correlation IDs, and, when PAC is signed in, the Dataverse organization GUID and Entra tenant GUID.
 When PAC exposes the signed-in user's Entra object ID, Power Pages stores it under `eventInfo.aadObjectId`; otherwise that field is omitted.
-When you are working in a Power Pages code site, the site's SPA framework (`react`, `vue`, `angular`, or `astro`) is recorded under `eventInfo.framework`; that field is omitted otherwise. It names the scaffold only, never your site or its location.
-Non-SPA site creation additionally records `template_used`, `classic_creation_success`, or
-`classic_creation_failure` using one creation `correlationId`. These events include only the
+When you are working in a Power Pages SPA site, the site's SPA framework (`react`, `vue`, `angular`, or `astro`) is recorded under `eventInfo.framework`; that field is omitted otherwise. It names the scaffold only, never your site or its location.
+Non-SPA site creation additionally records `template_used`, `non_spa_creation_success`, or
+`non_spa_creation_failure` using one creation `correlationId`. These events include only the
 public catalog `templateId`, `templateKind: "non-spa"`, and optional already-known audience
 (`internal` or `external`) beyond the existing common context. A failure adds a fixed error
 category, never the error text. Success means the downloaded identity/model, Bootstrap/assets,
@@ -755,8 +755,8 @@ so you can see exactly what would have been sent; delete it anytime. Run
 session file. The setting is stored at `~/.power-platform-skills/config.json`
 (`{ "telemetry": { "power-pages": "off" } }`).
 
-Classic creation also keeps a private correlation receipt under
-`~/.power-platform-skills/telemetry/power-pages/classic-creations/<correlationId>/`
+Non-SPA creation also keeps a private correlation receipt under
+`~/.power-platform-skills/telemetry/power-pages/non-spa-creations/<correlationId>/`
 to join selection and outcome across retries/resume and suppress duplicate calls. It holds the
 selected public catalog ID/revision, audience when known, originating session/common event context,
 cloud-routing stamp, and terminal event marker; it never goes into the site or Git baseline.

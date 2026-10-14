@@ -20,11 +20,11 @@ The first impression is the initial viewport before scrolling. It should make th
 
 Use [page blueprints](page-blueprints.md) for role-appropriate first screens, narrative beats, section rhythm, copy, and honest proof. Map these concepts through the platform adapter, not literal framework markup. The **point of doubt** is where a visitor hesitates; place reassurance there. A **template look** is interchangeable composition, copy, or decoration that says nothing about this organization.
 
-Keep this brief in the calling workflow's existing approved plan and carry it through authoring handoffs. Do not restart discovery, ask for every design choice, or run a full critique at each component. For classic work, use the [classic critique adapter](../skills/edit-site/references/styling/design-critique.md) to interpret the shared categories without loading the SPA capture/fix loop. Code sites retain their existing design references and completion contract; classic exceptions do not change those rules.
+Keep this brief in the calling workflow's existing approved plan and carry it through authoring handoffs. Do not restart discovery, ask for every design choice, or run a full critique at each component. For non-SPA work, use the [non-SPA critique adapter](../skills/edit-site/references/styling/design-critique.md) to interpret the shared categories without loading the SPA capture/fix loop. SPA sites retain their existing design references and completion contract; non-SPA exceptions do not change those rules.
 
-## Classic creation templates: reference, not a design constraint
+## Non-SPA creation templates: reference, not a design constraint
 
-Use the selected classic creation template for data-model/domain context and requirements
+Use the selected non-SPA creation template for data-model/domain context and requirements
 interpretation only, not as a visual specification. Although it provisions the native baseline,
 its appearance, page composition, layout, branding, and presentation do not constrain the new
 site's approved design. Derive the modern experience from the user's purpose and the experience
@@ -107,7 +107,7 @@ Inspect effective child foregrounds, inline declarations, inherited values, and 
 - For a new-site visual treatment, include purposeful real photographs or illustrations that communicate the offering, people, place, product, or process. Plan a relevant hero image/illustration and supporting imagery where it explains content. Logos, icons, decorative patterns, and gradient blobs alone do not satisfy content imagery.
 - Honor an explicit request for a bare baseline or a user decision to decline images. Do not force existing-site narrow edits to acquire photographs. Otherwise, unavailable source material is a dependency to resolve, not permission to silently omit meaningful imagery.
 - Reuse suitable approved assets first. If no suitable approved photo is available, an original safe SVG illustration that explains the subject is a legitimate alternative; arbitrary decoration is not. Do not copy an illustration or manufacture misleading photographic evidence.
-- Honor the platform workflow's delivery policy. Classic site creation uses approved direct HTTPS image URLs rather than new image Web Files; an illustration must already have an approved hosted URL on that route. Do not publish a new asset, invent its URL, or fall back to file import implicitly.
+- Honor the platform workflow's delivery policy. Non-SPA site creation uses approved direct HTTPS image URLs rather than new image Web Files; an illustration must already have an approved hosted URL on that route. Do not publish a new asset, invent its URL, or fall back to file import implicitly.
 - Choose the subject and visual role before the source. Coordinate lighting, color temperature, style, and visual density across hero and supporting images. Specify aspect ratio, crop, focal point, and desktop/mobile treatment; avoid cutting off key people, products, or diagram labels.
 - Reserve quiet space for text or place it beside the image. When text overlaps imagery, design the backing/overlay and all text/action states for readability over the actual crop, not an assumed average color. A crop change must not expose text to a newly unreadable area.
 - Use actual approved assets with verified provenance, not placeholder data, placeholder-image services, guessed photo IDs, or unresolved image slots. Follow the existing asset workflow for source selection, legal/privacy review, user approval, safe preparation, and delivery; this reference does not replace or relax those checks.

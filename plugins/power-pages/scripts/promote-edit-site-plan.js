@@ -23,7 +23,7 @@ const {
 const {
   renderCustomizationPlan,
 } = require('./render-edit-site-plan');
-const { externalImageUrls, validateImageChecks } = require('./lib/declarative-image-verification');
+const { externalImageUrls, validateImageChecks } = require('./lib/non-spa-image-verification');
 
 function main() {
   const args = parseArgs(process.argv);

@@ -2,8 +2,8 @@
 name: deploy-site
 description: >-
   Deploys an existing Power Pages site to a Power Pages environment using PAC CLI. Routes SPA
-  sites to the existing build and upload-code-site workflow, and PAC-downloaded traditional sites
-  to an isolated upload workflow with explicit data-model and website-identity checks. Handles
+  sites to the existing build and upload-code-site workflow, and PAC-downloaded non-SPA (classic)
+  sites to an isolated upload workflow with explicit data-model and website-identity checks. Handles
   tooling verification, authentication, environment confirmation, upload approval, and
   verification. Use when the user wants to deploy, upload, publish, or push either site type.
 user-invocable: true
@@ -15,7 +15,7 @@ model: sonnet
 
 # Deploy Power Pages Site
 
-Route to the correct deployment workflow before running code-site build, attachment, or activation
+Route to the correct deployment workflow before running SPA build, attachment, or activation
 logic.
 
 ## Core Principles
@@ -33,13 +33,13 @@ logic.
 Classify explicit request signals first:
 
 - React, Vue, Angular, Astro, SPA, code site, or `powerpages.config.json` → **SPA site**
-- declarative, Enhanced, EDM, Standard data model, `.portalconfig`, or `website.yml`
-  → **Traditional site**
+- non-SPA, classic, traditional, declarative, Enhanced, EDM, Standard data model, `.portalconfig`,
+  or `website.yml` → **Non-SPA site**
 
 When the request is not explicit, search the current workspace for:
 
-- code-site roots containing `powerpages.config.json`;
-- declarative roots containing both `.portalconfig/` and `website.yml`, including a nested
+- SPA roots containing `powerpages.config.json`;
+- non-SPA roots containing both `.portalconfig/` and `website.yml`, including a nested
   `.powerpages-site/`.
 
 Exclude dependency, build-output, temporary, generated-output, and version-control directories.
@@ -49,7 +49,7 @@ arbitrarily.
 <!-- gate: deploy-site:0.project-type | category=plan | cancel-leaves=nothing -->
 
 > 🚦 **Gate (plan · deploy-site:0.project-type):** Select the exact project when SPA and
-> traditional sites, or multiple valid roots, remain possible.
+> non-SPA sites, or multiple valid roots, remain possible.
 >
 > **Trigger:** Project type or root is ambiguous after discovery.
 > **Why:** The two site types require incompatible PAC upload commands.
@@ -57,30 +57,30 @@ arbitrarily.
 
 If ambiguous, use `AskUserQuestion` to select the exact project root and detected type.
 
-- **Traditional site:** Read and follow
-  `${PLUGIN_ROOT}/skills/deploy-site/workflows/declarative-site.md`. Do not continue into the
-  code-site phases below.
+- **Non-SPA site:** Read and follow
+  `${PLUGIN_ROOT}/skills/deploy-site/workflows/non-spa-site.md`. Do not continue into the
+  SPA phases below.
 - **SPA site:** Continue with the existing workflow below.
 
-### Declarative upload approval
+### Non-SPA upload approval
 
-The declarative workflow contains the detailed call sites below. These markers keep its
+The non-SPA workflow contains the detailed call sites below. These markers keep its
 pre-upload permissions review and cloud-mutation gates visible to the repository gate catalog.
 
-<!-- gate: deploy-site:declarative-4.permissions-audit | category=plan | cancel-leaves=local-customization -->
+<!-- gate: deploy-site:non-spa-4.permissions-audit | category=plan | cancel-leaves=local-customization -->
 
-> 🚦 **Gate (plan · deploy-site:declarative-4.permissions-audit):** Permission-sensitive
-> declarative metadata changed — run `/audit-permissions` before upload, explicitly continue
+> 🚦 **Gate (plan · deploy-site:non-spa-4.permissions-audit):** Permission-sensitive
+> non-SPA metadata changed — run `/audit-permissions` before upload, explicitly continue
 > without it, or cancel.
 
-<!-- gate: deploy-site:declarative-5.upload | category=final | cancel-leaves=local-customization -->
+<!-- gate: deploy-site:non-spa-5.upload | category=final | cancel-leaves=local-customization -->
 
-> 🚦 **Gate (final · deploy-site:declarative-5.upload):** Approve the exact declarative root,
+> 🚦 **Gate (final · deploy-site:non-spa-5.upload):** Approve the exact non-SPA root,
 > environment, website identity, model, and local change summary immediately before upload.
 
 ## SPA-Site Deployment Workflow
 
-The following phases retain the existing SPA/code-site behavior.
+The following phases retain the existing SPA behavior.
 
 ---
 
@@ -215,7 +215,7 @@ The following phases retain the existing SPA/code-site behavior.
 
 ---
 
-## Phase 4: Deploy the Code Site
+## Phase 4: Deploy the SPA Site
 
 **Goal**: Locate the project, build it, and upload to Power Pages
 
@@ -405,7 +405,7 @@ Evaluate the result:
 ### 6.1 Explain the Issue
 
 Tell the user:
-> "The upload failed because JavaScript (.js) file attachments are blocked in your Power Pages environment. This is a security setting that prevents uploading .js files. To deploy a code site, this restriction needs to be relaxed for .js files."
+> "The upload failed because JavaScript (.js) file attachments are blocked in your Power Pages environment. This is a security setting that prevents uploading .js files. To deploy a SPA site, this restriction needs to be relaxed for .js files."
 
 ### 6.2 Ask for Permission
 
@@ -421,7 +421,7 @@ Use `AskUserQuestion`:
 
 | Question | Header | Options |
 |----------|--------|---------|
-| Would you like to remove the JavaScript (.js) block from the environment's blocked attachments list? This is required to deploy code sites. | Unblock JS | Yes, remove the .js block (Recommended), No, do not change environment settings |
+| Would you like to remove the JavaScript (.js) block from the environment's blocked attachments list? This is required to deploy SPA sites. | Unblock JS | Yes, remove the .js block (Recommended), No, do not change environment settings |
 
 **If "No"**: Stop and inform the user that the deployment cannot proceed without unblocking `.js` attachments.
 
@@ -507,7 +507,7 @@ If the user skips activation (or after activation completes), suggest:
 
 ### NEVER Use `pac pages upload`
 
-Always use `pac pages upload-code-site` — **never** use `pac pages upload`. The `pac pages upload` command is designed for portal-studio-style sites and will corrupt code site metadata if used on a code site project. This applies to every upload step in this skill (Phase 4.4, Phase 6.4, and troubleshooting retries).
+Always use `pac pages upload-code-site` — **never** use `pac pages upload`. The `pac pages upload` command is designed for portal-studio-style sites and will corrupt SPA site metadata if used on a SPA site project. This applies to every upload step in this skill (Phase 4.4, Phase 6.4, and troubleshooting retries).
 
 ### Throughout All Phases
 
@@ -533,7 +533,7 @@ Before starting Phase 1, create a task list with all phases using `TaskCreate`:
 | Verify PAC CLI installation | Verifying PAC CLI | Check if PAC CLI is installed, install if missing |
 | Verify authentication | Verifying authentication | Check current auth status, authenticate if needed |
 | Confirm target environment | Confirming environment | Show current environment, let user confirm or switch |
-| Deploy the code site | Deploying site | Locate project root, build, and upload via pac pages upload-code-site |
+| Deploy the SPA site | Deploying site | Locate project root, build, and upload via pac pages upload-code-site |
 | Verify deployment | Verifying deployment | Confirm .powerpages-site folder exists, review upload output, commit changes, offer activation |
 | Handle blocked JavaScript | Resolving JS block | If upload fails due to blocked JS, offer to unblock and retry |
 

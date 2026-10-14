@@ -1,7 +1,7 @@
 ---
 name: edit-site
 description: >-
-  Plans, coordinates and customizes PAC CLI-downloaded traditional Power Pages sites, including Enhanced data model
+  Plans, coordinates and customizes PAC CLI-downloaded non-SPA Power Pages sites, including Enhanced data model
   sites created from Microsoft templates or manually in Design Studio. Use for
   requests involving pages, localized content, navigation, assets, snippets,
   Liquid/web templates, page layouts, or styling. Coordinated work produces an approved
@@ -15,7 +15,7 @@ model: opus
 > **Plugin check**: Run `node "${PLUGIN_ROOT}/scripts/check-version.js"` — if it outputs a message, show it to the user before proceeding.
 > For styling-only requests, reuse the result once per installed plugin version in the current conversation.
 
-# Customize a Traditional Power Pages Site
+# Customize a Non-SPA Power Pages Site
 
 Coordinate local customization using the component authoring references.
 Do not duplicate their PAC metadata, identity, serialization, or validation rules.
@@ -24,7 +24,7 @@ Do not duplicate their PAC metadata, identity, serialization, or validation rule
 
 ## Preview disclosure
 
-Read `${PLUGIN_ROOT}/references/declarative-preview.md` and apply its **Entry and handoff
+Read `${PLUGIN_ROOT}/references/non-spa-preview.md` and apply its **Entry and handoff
 protocol**. Unless the initial request contains the explicit marker from an actual covered-skill
 handoff, present the **Customization notice** before site discovery, task creation, or any other
 project inspection. This notice is informational and does not replace plan or deployment
@@ -57,7 +57,7 @@ For coordinated new-site design or requested styling, also read:
 
 For coordinated work, this skill owns:
 
-- selecting one downloaded declarative site;
+- selecting one downloaded non-SPA site;
 - understanding the complete customization intent;
 - resolving cross-operation dependencies;
 - generating and obtaining approval for one customization plan;
@@ -80,20 +80,20 @@ For coordinated work, create these tasks before starting:
 
 | Task subject | Active form | Description |
 |---|---|---|
-| Discover traditional site | Discovering traditional site | Select and validate one PAC-downloaded traditional site |
+| Discover non-SPA site | Discovering non-SPA site | Select and validate one PAC-downloaded non-SPA site |
 | Gather customization intent | Gathering customization intent | Resolve pages, content, assets, languages, preservation, and visual direction |
 | Prepare customization plan | Preparing customization plan | Build persistent JSON and browser-viewable HTML plan artifacts |
 | Approve customization plan | Reviewing customization plan | Review and approve the complete coordinated local plan |
-| Execute customization | Customizing traditional site | Author components, compose content, and apply styling in dependency order |
+| Execute customization | Customizing non-SPA site | Author components, compose content, and apply styling in dependency order |
 | Verify customization | Verifying customization | Validate component results, combined references, diff, and Git state |
 | Complete customization | Completing customization | Commit coherent changes, report local/live state, and offer deployment |
 
 ## Phase 1: Discover and validate the site
 
-1. Follow the shared declarative discovery contract. Accept a site root that is the current
+1. Follow the shared non-SPA discovery contract. Accept a site root that is the current
    directory or a nested directory such as `.powerpages-site/`.
-2. Require `.portalconfig/`, non-empty `website.yml`, and at least one declarative component
-   directory. Reject `powerpages.config.json`-only code sites.
+2. Require `.portalconfig/`, non-empty `website.yml`, and at least one non-SPA component
+   directory. Reject `powerpages.config.json`-only SPA sites.
 3. If several valid sites remain and request/workspace evidence does not identify one, ask the
    user to choose. Never select the first filesystem result.
 4. Read the site identity, configured languages, existing pages, navigation,
@@ -110,7 +110,7 @@ For coordinated work, create these tasks before starting:
 6. Establish the local comparison baseline before creating plan artifacts:
    - when no Git repository exists, initialize one at the narrowest project root containing the
      selected site and commit only the verified downloaded baseline as
-     `Initial declarative site baseline`;
+     `Initial non-SPA site baseline`;
    - when Git exists, record the starting commit and pre-existing dirty paths;
    - never absorb unrelated or pre-existing dirty files into customization commits.
 7. Define `<PROJECT_ROOT>` as the repository root that owns the selected site. For the normal
@@ -141,7 +141,7 @@ Use the smallest route that fully satisfies the request:
   not a file timestamp or the mere presence of template metadata;
 - a current approved execution to resume or additional approval needed by a component operation:
   use the complete orchestration and its existing gates before writing;
-- SPA/code site: stop and explain that this skill is declarative-only.
+- SPA/code site: stop and explain that this skill is non-SPA-only.
 
 Do not generate a broad plan or execute every owner merely because they are available.
 
@@ -239,7 +239,7 @@ site-derived defaults and do not repeat known information.
 
 Generate context-aware feature choices from the selected template and current site. Do not offer
 a capability whose required local structure is absent without presenting the missing prerequisite
-and remediation. Do not promise declarative form/list or data-model authoring unless a verified
+and remediation. Do not promise non-SPA form/list or data-model authoring unless a verified
 owning skill supports the requested operation. When the missing prerequisite is a basic form,
 list, multistep form (advanced form/step), or its backing Dataverse table/view/table-permission,
 never offer, as a selectable choice, to run PAC/Dataverse commands, create Dataverse tables, or
@@ -263,9 +263,9 @@ modifying Dataverse.
    The renderer labels unchecked external images as unverified. Network source checks are
    opt-in, not an additional prerequisite for the normal planning flow.
    Only assets intentionally delivered as new Web Files are prepared through
-   `scripts/prepare-declarative-asset.js`. Keep approved bytes in the project-local ignored asset
+   `scripts/prepare-non-spa-asset.js`. Keep approved bytes in the project-local ignored asset
    cache and record the returned hash, MIME type, dimensions, filename, and cache path. Do not
-   write staged bytes directly into the declarative site.
+   write staged bytes directly into the non-SPA site.
 2. Divide the request into the smallest coherent operations identified by:
    `author-web-file`, `author-content-snippet`, `author-web-template`,
    `author-page-template`, `author-webpage`, `author-webpage-content`, and `style-site`.
@@ -301,7 +301,7 @@ modifying Dataverse.
    New-site styling operations must depend on all structural operations, directly or transitively.
    Plan page/section/site placement through `style-site`; do not replace Bootstrap, `theme.css`,
    or `portalbasictheme.css`, flatten native markup, or install a second CSS framework to achieve
-   code-site visual quality.
+   SPA visual quality.
 5. Never write free-form unresolved values such as `TBD`, `heroImage`, `appropriate page`, or
    `choose a snippet`. Use typed `outputBindings` for values produced by earlier operations;
    otherwise resolve the value or stop with the exact missing input.
@@ -346,7 +346,7 @@ which remains the execution source of truth and is persisted after approval.
 >
 > **Trigger:** JSON and HTML plan artifacts are complete, with external images explicitly
 > unverified or supported by successful requested checks for this exact plan.
-> **Why:** The next phase can create or modify several related declarative records.
+> **Why:** The next phase can create or modify several related non-SPA records.
 > **Cancel leaves:** External review artifacts only; the downloaded site and current approved plan
 > remain unchanged.
 
@@ -354,7 +354,7 @@ Use `AskUserQuestion`:
 
 | Question | Header | Options |
 |---|---|---|
-| Does this traditional-site customization plan look good? | Customization plan | Approve and customize, Revise plan, Cancel |
+| Does this non-SPA site customization plan look good? | Customization plan | Approve and customize, Revise plan, Cancel |
 
 On revision, create a fresh review directory, render and open it, and repeat approval. Never edit
 the rendered HTML as the source of truth.
@@ -448,7 +448,7 @@ Do not execute an empty operation, and do not invoke deployment from this phase.
 ## Phase 6: Verify the combined result
 
 1. Require every component workflow's and child skill's own verification to succeed.
-2. Re-run declarative site discovery and confirm the selected root and website identity are
+2. Re-run non-SPA site discovery and confirm the selected root and website identity are
    unchanged.
 3. Verify planned files and records exist, generated identities are unique, locale scope matches
    the plan, dependencies resolve, and unrequested callers/content remain unchanged. For Web File assets,
@@ -462,7 +462,7 @@ Do not execute an empty operation, and do not invoke deployment from this phase.
 4. Review the complete Git diff against the approved plan. Unexpected component categories or
    unrelated changes block completion. Classify `docs/edit-site/**` separately as
    orchestration evidence; it is not a PAC component category and is not uploaded.
-5. Run the create-site declarative validator when a website record ID is available:
+5. Run the create-site non-SPA validator when a website record ID is available:
 
    ```bash
    node "${PLUGIN_ROOT}/skills/create-site/scripts/validate-site.js" \
@@ -519,13 +519,13 @@ Report:
 <!-- gate: edit-site:7.deploy | category=plan | cancel-leaves=local-customization -->
 
 > 🚦 **Gate (plan · edit-site:7.deploy):** Choose whether to dispatch the
-> verified local declarative project to `/deploy-site`.
+> verified local non-SPA project to `/deploy-site`.
 >
 > **Trigger:** Local customization and combined verification succeeded.
 > **Why:** Deployment has its own environment and final-upload consent gates.
 > **Cancel leaves:** Verified local customization and commits.
 
-Ask: **Deploy these declarative-site changes now?** Options: **Deploy now**, **Keep changes
+Ask: **Deploy these non-SPA site changes now?** Options: **Deploy now**, **Keep changes
 local**. On deploy, invoke `/deploy-site` with the exact project root. Otherwise finish with the
 local/live distinction.
 

@@ -4,8 +4,8 @@ description: >-
   Audits existing table permissions on a Power Pages site by analyzing them against site code
   and Dataverse metadata. Generates an HTML audit report with findings grouped by severity
   (critical, warning, info, pass) and suggests fixes for issues found. Use when the user wants
-  to review, verify, or check table permissions for security issues. Supports code sites and
-  PAC-downloaded traditional sites.
+  to review, verify, or check table permissions for security issues. Supports SPA sites and
+  PAC-downloaded non-SPA sites.
 user-invocable: true
 argument-hint: "[optional: specific table or concern]"
 allowed-tools: Read, Write, Bash, Glob, Grep, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Agent
@@ -16,9 +16,9 @@ model: opus
 
 # Audit Permissions
 
-Audit existing table permissions on a Power Pages code site. Analyze permissions against the site code and Dataverse metadata, then generate a visual HTML audit report with findings, reasoning, and suggested fixes.
+Audit existing table permissions on a Power Pages SPA site. Analyze permissions against the site code and Dataverse metadata, then generate a visual HTML audit report with findings, reasoning, and suggested fixes.
 
-Traditional sites use native Forms, Advanced Forms, Lists, Liquid, webpage access rules, and
+Non-SPA sites use native Forms, Advanced Forms, Lists, Liquid, webpage access rules, and
 standard or enhanced PAC metadata as additional permission evidence.
 
 ## Site Type Routing
@@ -35,8 +35,8 @@ Before reading or executing the workflow below, perform the existing SPA project
   node "${PLUGIN_ROOT}/scripts/lib/detect-project-context.js"
   ```
 
-- If it returns `siteType: "declarative"`, read and follow
-  `${PLUGIN_ROOT}/skills/audit-permissions/references/traditional-site-workflow.md`. Do not execute
+- If it returns `siteType: "non-spa"`, read and follow
+  `${PLUGIN_ROOT}/skills/audit-permissions/references/non-spa-site-workflow.md`. Do not execute
   the SPA workflow below.
 - Otherwise, continue to Step 1 and preserve its existing not-found behavior.
 

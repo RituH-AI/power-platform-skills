@@ -1,7 +1,7 @@
 # Webpage Content Composition
 
 Canonical composition rules for turning a resolved webpage design into one localized
-`.webpage.copy.html` file in a PAC CLI-downloaded declarative Power Pages site.
+`.webpage.copy.html` file in a PAC CLI-downloaded non-SPA Power Pages site.
 
 This reference coordinates section and page-element contracts. It does not redefine the
 serialized markup owned by the references under:

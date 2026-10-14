@@ -96,7 +96,7 @@ test('tampered managed CSS cannot pass by recalculating only the plan hash', (t)
   const f = fixture(t);
   const plan = preparePlan(f.root, f.request);
   plan.writes[0].after += '\nbody { display: none; }';
-  plan.writes[0].afterHash = require('../lib/classic-site-style-context').hash(plan.writes[0].after);
+  plan.writes[0].afterHash = require('../lib/non-spa-site-style-context').hash(plan.writes[0].after);
   plan.planHash = planHash(plan);
   assert.throws(() => validatePlan(plan), /outside its declared/);
 });

@@ -83,7 +83,7 @@ function heroFixture(t, { major = 3, readable = false, studioText = false } = {}
     '<section class="pp-card"><h2>A place to get started</h2>' +
     '<p>Find useful information and take your next step.</p>' +
     '<button class="btn btn-primary">Explore services</button></section></div></div>');
-  // Keep a conventional installed font: classic styling must preserve the site's
+  // Keep a conventional installed font: non-SPA styling must preserve the site's
   // typography, not inherit the SPA workflow's font-download/replacement advice.
   f.put(f.assets['theme.css'].path, 'body{font-family:Arial,sans-serif;font-size:16px;color:#222222}' +
     '.pp-card{background-color:#f1f5f9;padding:24px}' +

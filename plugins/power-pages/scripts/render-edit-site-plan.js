@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Render a browser-viewable declarative-site customization plan from its persisted JSON source.
+ * Render a browser-viewable non-SPA site customization plan from its persisted JSON source.
  */
 
 const fs = require('fs');
@@ -9,8 +9,8 @@ const { parseArgs, renderTemplate } = require('./lib/render-template');
 const {
   validateCustomizationPlan,
 } = require('./lib/edit-site-plan');
-const { externalImageUrls, validateImageChecks, verifyPlanImages } = require('./lib/declarative-image-verification');
-const { compositionLayouts } = require('./lib/classic-native-layout');
+const { externalImageUrls, validateImageChecks, verifyPlanImages } = require('./lib/non-spa-image-verification');
+const { compositionLayouts } = require('./lib/non-spa-native-layout');
 
 const templatePath = path.join(
   __dirname,

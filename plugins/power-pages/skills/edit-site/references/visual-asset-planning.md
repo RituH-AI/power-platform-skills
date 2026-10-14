@@ -1,6 +1,6 @@
-# Declarative Visual Asset Planning
+# Non-SPA Visual Asset Planning
 
-Use this reference when a declarative-site customization may benefit from photography, logos,
+Use this reference when a non-SPA site customization may benefit from photography, logos,
 favicons, icons, illustrations, patterns, fonts, or other visual assets.
 
 ## Resolve delivery first
@@ -136,14 +136,14 @@ This is the Web File delivery path only, not the new-site URL image path. Treat 
 file as untrusted. Stage it with:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/prepare-declarative-asset.js" \
+node "${PLUGIN_ROOT}/scripts/prepare-non-spa-asset.js" \
   --projectRoot "<PROJECT_ROOT>" \
   --sourcePath "<SOURCE_FILE>"
 ```
 
 The helper validates supported signatures, dimensions, MIME agreement, size, and SVG safety,
 writes approved bytes under `.powerpages-customization/assets/`, adds that cache to `.gitignore`,
-and returns the project-relative path and SHA-256. The cache is outside the declarative site root
+and returns the project-relative path and SHA-256. The cache is outside the non-SPA site root
 and must never be passed to `pac pages upload`.
 
 ### Original SVG assets
@@ -195,7 +195,7 @@ For an explicitly selected Web File delivery outside that creation path, retain 
 photo page, photographer, license and `source.downloadUrl`, then stage the selected image:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/prepare-declarative-asset.js" \
+node "${PLUGIN_ROOT}/scripts/prepare-non-spa-asset.js" \
   --projectRoot "<PROJECT_ROOT>" \
   --downloadUrl "<HTTPS_IMAGES_UNSPLASH_URL>" \
   --sourcePage "<HTTPS_UNSPLASH_PHOTO_PAGE>" \

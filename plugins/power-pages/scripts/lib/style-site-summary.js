@@ -1,6 +1,6 @@
 'use strict';
 
-const { snapshotText } = require('./classic-site-style-context');
+const { snapshotText } = require('./non-spa-site-style-context');
 const { sourceTags, reachableTemplates, applicableCss } = require('./style-site-plan');
 const { requestSupport } = require('./studio-style-capabilities');
 

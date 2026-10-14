@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Validates that new web role YAML files were created for an SPA or traditional site.
+// Validates that new web role YAML files were created for an SPA or non-SPA site.
 // Runs as a PostToolUse(Skill) hook to verify the skill produced output.
 
 const fs = require('fs');

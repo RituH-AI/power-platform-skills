@@ -1,4 +1,4 @@
-# Declarative Site Customization Plan Contract
+# Non-SPA Site Customization Plan Contract
 
 The customization plan is the durable coordination artifact for
 `edit-site`. It describes user intent and cross-skill dependencies without
@@ -83,14 +83,14 @@ must not be described as verified. Changed plans require new review and approval
 checks only when requested. Keep the same evidence state from review through publication;
 never drop a checked review's report or invent one for an unchecked review.
 
-Render each proposed plan in a fresh external review directory outside the declarative site root.
+Render each proposed plan in a fresh external review directory outside the non-SPA site root.
 After approval, publish the JSON with
 `scripts/promote-edit-site-plan.js`; the publisher validates it and renders the
 canonical HTML itself. It does not accept an independently supplied HTML file. For the normal
 `.powerpages-site/` layout,
 `docs/` is its sibling under the project root. When a manually downloaded site root is also the
 project root, `docs/` remains outside the known PAC component directories; `pac pages upload` must
-still receive the exact declarative root rather than the documentation directory.
+still receive the exact non-SPA root rather than the documentation directory.
 
 ## Top-level shape
 
@@ -325,7 +325,7 @@ Rules:
 - For `web-file` delivery, `existing-site` sources use `preparation.status: "existing"` and new
   sources use `staged`.
 - Agent-authored assets are safe original SVGs, not raster images.
-- New files on the explicit Web File path are staged outside the declarative root with
+- New files on the explicit Web File path are staged outside the non-SPA root with
   `cachePath`, lowercase SHA-256, MIME type, filename and available dimensions. This is not the
   new-site image URL path.
 - A staged asset references one `author-web-file` operation whose inputs contain the exact
@@ -406,7 +406,7 @@ A named preset must agree with supplied spans; use a descriptive non-preset name
 Missing/malformed spans in a partially specified list block validation rather than silently
 changing the design. Legacy sections without this optional descriptor remain valid.
 
-The classic-only layout helper validates and derives the diagram without mutating the plan.
+The non-SPA-only layout helper validates and derives the diagram without mutating the plan.
 Explicit spans are hash-bound inputs and display **Studio editing compatibility unverified**;
 valid grid syntax is not evidence of canvas controls or save/reopen behavior. Keep this warning
 in the plan's existing `warnings`/`verification` and final owner report; safe local authoring

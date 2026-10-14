@@ -126,7 +126,7 @@ remain explicit in the execution receipt.
 ## Entry-point behavior
 
 The entry skill owns its version check and
-`${PLUGIN_ROOT}/references/declarative-preview.md` disclosure. When invoking a
+`${PLUGIN_ROOT}/references/non-spa-preview.md` disclosure. When invoking a
 covered skill, forward `previewNoticeShown: true` and
 `invocationSource: edit-site` only after the notice was displayed.
 Reading another reference is not another preview entry or skill invocation.

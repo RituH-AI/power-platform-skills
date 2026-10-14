@@ -473,19 +473,19 @@ When **removing** a gate, also remove its catalog row in the same PR.
 
 | ID | Kind | Category | Phase | Trigger / question | Cancel leaves |
 |---|---|---|---|---|---|
-| `create-site:0.site-type` | gate | plan | 0 | Ambiguous request — choose SPA site or platform-provisioned traditional site | nothing |
+| `create-site:0.site-type` | gate | plan | 0 | Ambiguous request — choose SPA site or platform-provisioned non-SPA site | nothing |
 | `create-site:1.purpose` | gate | plan | 1 | Site purpose unclear — multi-question prompt (site name, framework, purpose, audience, location) | nothing |
-| `create-site:3.requirements` | gate | plan | 3 | *"Which features? / Aesthetic / Mood / Brand"* — shared code-site planning prompt, with a brand URL/colors/logo follow-up only when missing; shapes the rendered Phase 4 plan | nothing |
+| `create-site:3.requirements` | gate | plan | 3 | *"Which features? / Aesthetic / Mood / Brand"* — shared SPA planning prompt, with a brand URL/colors/logo follow-up only when missing; shapes the rendered Phase 4 plan | nothing |
 | `create-site:4.7.plan-approval` | gate | plan | 4.7 | HTML plan rendered — *"Approve and start building / I'd like to make changes"* | nothing |
 | `create-site:5.7.critique-blocked` | gate | progress | 5.7 | A critical design gate still fails after three critique rounds - *"Keep fixing / Continue and record it as a known issue / Stop here"* | nothing |
 | `create-site:7.review` | gate | plan | 7 | Live site ready — *"Would you like any changes?"* | nothing |
 | `create-site:8.deploy` | gate | plan | 8 | *"Deploy now (Recommended) / Skip for now"* — invokes `/deploy-site` on Yes; remaining `SAMPLE CONTENT` is listed and counted first, with Skip recommended | nothing |
-| `create-site:declarative-1-select-model` | gate | plan | Declarative 1 | Declarative model unspecified — select Enhanced or Standard with no default | nothing |
-| `create-site:declarative-1-confirm-environment` | gate | consent | Declarative 1 | Confirm the exact Dataverse environment before declarative planning or provisioning | nothing |
-| `create-site:declarative-1-confirm-capability` | gate | progress | Declarative 1 | Administrator confirms **Switch to enhanced data model** is enabled for Enhanced or disabled for Standard because no public read API exists | nothing |
-| `create-site:declarative-2-select-template` | gate | plan | Declarative 2 | Select an exact supported declarative template identifier | nothing |
-| `create-site:declarative-4-provision` | gate | final | Declarative 4 | Final consent immediately before Create Website creates the cloud resource | nothing |
-| `create-site:declarative-8-customize` | gate | plan | Declarative 8 | Verified explicit-model baseline — *"Customize now / Keep the template unchanged"* | declarative-baseline |
+| `create-site:non-spa-1-select-model` | gate | plan | Non-SPA 1 | Non-SPA model unspecified — select Enhanced or Standard with no default | nothing |
+| `create-site:non-spa-1-confirm-environment` | gate | consent | Non-SPA 1 | Confirm the exact Dataverse environment before non-SPA planning or provisioning | nothing |
+| `create-site:non-spa-1-confirm-capability` | gate | progress | Non-SPA 1 | Administrator confirms **Switch to enhanced data model** is enabled for Enhanced or disabled for Standard because no public read API exists | nothing |
+| `create-site:non-spa-2-select-template` | gate | plan | Non-SPA 2 | Select an exact supported non-SPA template identifier | nothing |
+| `create-site:non-spa-4-provision` | gate | final | Non-SPA 4 | Final consent immediately before Create Website creates the cloud resource | nothing |
+| `create-site:non-spa-8-customize` | gate | plan | Non-SPA 8 | Verified explicit-model baseline — *"Customize now / Keep the template unchanged"* | non-spa-baseline |
 
 ---
 
@@ -503,16 +503,16 @@ When **removing** a gate, also remove its catalog row in the same PR.
 | ID | Kind | Category | Phase | Trigger / question | Cancel leaves |
 |---|---|---|---|---|---|
 | `deploy-site:2.auth-url` | not-a-gate | — | 2 | Free-text env URL when PAC CLI not authenticated — data-gathering | — |
-| `deploy-site:0.project-type` | gate | plan | 0 | Multiple/mixed code and declarative candidates — select the exact project and type | nothing |
+| `deploy-site:0.project-type` | gate | plan | 0 | Multiple/mixed SPA and non-SPA candidates — select the exact project and type | nothing |
 | `deploy-site:3.confirm-env` | gate | consent | 3 | Echoes current env — *"Deploy to this environment? Yes / No, choose different"*. Covers the follow-up "pick different env" sub-prompt at the same step (single section, paired by marker proximity). Wrong-env deploy is destructive — confirmation is mandatory. | nothing |
 | `deploy-site:4.1.multi-project` | gate | plan | 4.1 | Multiple `powerpages.config.json` candidates found — *"Which project to deploy?"* | nothing |
 | `deploy-site:4.2.audit-permissions` | gate | plan | 4.2 | Re-deployment detected (`.powerpages-site` exists) — *"Run permissions audit first / Skip"* | nothing |
 | `deploy-site:5.5.1.activate` | gate | plan | 5.5.1 | Site not yet activated — *"Activate now / Skip"* | nothing |
 | `deploy-site:5.6.restart-cache` | gate | plan | 5.6 | Site activated — *"Restart site to flush cache? (brief downtime) / Skip"* | nothing |
 | `deploy-site:6.2.unblock-js` | gate | consent | 6.2 | Upload failed because `.js` is blocked — *"Remove .js block from `blockedattachments`? / No"*. Modifies tenant-wide env setting — destructive shared state. | `attachment-block-modified` |
-| Declarative Phase 3 model selection | not-a-gate | — | Declarative 3 | Exact website ID is absent in the target environment — select Enhanced or Standard for the first upload, with no default; Phase 5 separately approves creation | — |
-| `deploy-site:declarative-4.permissions-audit` | gate | plan | Declarative 4 | Permission-sensitive Form/List/Liquid/Web API/settings/role/permission/page-rule diff — *"Run permissions audit / Continue without audit / Cancel"* | local-customization |
-| `deploy-site:declarative-5.upload` | gate | final | Declarative 5 | Exact root/environment/deployment mode/website/model/diff confirmed — *"Upload changes" or "Create and upload" / Review again / Cancel* | local-customization |
+| Non-SPA Phase 3 model selection | not-a-gate | — | Non-SPA 3 | Exact website ID is absent in the target environment — select Enhanced or Standard for the first upload, with no default; Phase 5 separately approves creation | — |
+| `deploy-site:non-spa-4.permissions-audit` | gate | plan | Non-SPA 4 | Permission-sensitive Form/List/Liquid/Web API/settings/role/permission/page-rule diff — *"Run permissions audit / Continue without audit / Cancel"* | local-customization |
+| `deploy-site:non-spa-5.upload` | gate | final | Non-SPA 5 | Exact root/environment/deployment mode/website/model/diff confirmed — *"Upload changes" or "Create and upload" / Review again / Cancel* | local-customization |
 
 ---
 
@@ -567,7 +567,7 @@ When **removing** a gate, also remove its catalog row in the same PR.
 
 | ID | Kind | Category | Phase | Trigger / question | Cancel leaves |
 |---|---|---|---|---|---|
-| `integrate-webapi:3.2.confirm-tables` | gate | plan | 3.2 | SPA: *"Which tables to integrate? All / Let me select / Add more"*; Traditional: approve the focused plan or select discovered native/Web API opportunities | nothing |
+| `integrate-webapi:3.2.confirm-tables` | gate | plan | 3.2 | SPA: *"Which tables to integrate? All / Let me select / Add more"*; Non-SPA: approve the focused plan or select discovered native/Web API opportunities | nothing |
 | `integrate-webapi:6.1.deploy-first` | gate | plan | 6.1 | `.powerpages-site` missing — *"Deploy now (Recommended) / Skip permissions setup"* | nothing |
 | `integrate-webapi:6.2.permissions-source` | gate | plan | 6.2 | *"Upload existing diagram / Let architects figure it out"* | nothing |
 | `integrate-webapi:6.2.permissions-approval` | gate | plan | 6.2 (Path A) | Parsed permissions plan rendered — *"Approve and create files / Request changes / Cancel"* | nothing |
@@ -709,7 +709,7 @@ New skill (Power Pages source & dependency security scan). Runs local static ana
 
 ### 6.31 `migrate-bootstrap` (6 calls / 5 gates + 1 sub-prompt)
 
-New skill (migrates a traditional Power Pages site from Bootstrap 3 to Bootstrap 5). The engine does the bulk class renames; the skill assists with residual hierarchy/CSS fixes, then uploads (which auto-flips the runtime flag).
+New skill (migrates a non-SPA Power Pages site from Bootstrap 3 to Bootstrap 5). The engine does the bulk class renames; the skill assists with residual hierarchy/CSS fixes, then uploads (which auto-flips the runtime flag).
 
 | ID | Kind | Category | Phase | Trigger / question | Cancel leaves |
 |---|---|---|---|---|---|
@@ -723,7 +723,7 @@ New skill (migrates a traditional Power Pages site from Bootstrap 3 to Bootstrap
 
 ### 6.32 `migrate-webapi-selectall` (6 calls / 5 gates + 1 sub-prompt)
 
-Reviews traditional and SPA sites for deprecated Web API wildcard fields settings, derives least-privilege columns from every call chain, and applies only a complete approved migration.
+Reviews non-SPA and SPA sites for deprecated Web API wildcard fields settings, derives least-privilege columns from every call chain, and applies only a complete approved migration.
 
 | ID | Kind | Category | Phase | Trigger / question | Cancel leaves |
 |---|---|---|---|---|---|
@@ -738,7 +738,7 @@ Reviews traditional and SPA sites for deprecated Web API wildcard fields setting
 
 ### 6.33 Classic styling workflow (4 gate IDs + 1 data-gathering prompt)
 
-Classic-site styling through `edit-site` and `skills/edit-site/references/style-site-workflow.md`, in a local VS Code Desktop workspace. Visible progress is Inspect/propose → Approve → Apply → Independently verify → Report, without mandatory phase tasks or final-completion confirmation. The small-change route reviews scope with exact-hash approval; only expanded/ambiguous work asks initial scope confirmation. Review the exact diff/instructions/warnings without HTML generation or browser review; only the host question tool can approve the exact proposal hash. Runtime consent is separate. Repeated revisions do not inherit approval, including unattended runs.
+Non-SPA site styling through `edit-site` and `skills/edit-site/references/style-site-workflow.md`, in a local VS Code Desktop workspace. Visible progress is Inspect/propose → Approve → Apply → Independently verify → Report, without mandatory phase tasks or final-completion confirmation. The small-change route reviews scope with exact-hash approval; only expanded/ambiguous work asks initial scope confirmation. Review the exact diff/instructions/warnings without HTML generation or browser review; only the host question tool can approve the exact proposal hash. Runtime consent is separate. Repeated revisions do not inherit approval, including unattended runs.
 
 Local authoring is the default for listed and unlisted Studio properties; the Design-panel map describes availability, not exclusive ownership. Small changes may be inline-only, stylesheet-only or inline+CSS on the selected locale, with the existing 3-component/10-group limits and at most one existing stylesheet. Shared-template inline changes require site scope, potentially every page, and expanded review. Preserve unlisted/unknown/conditional support warnings at review, approval and final report. Reserve `owner: "studio"` for explicitly requested instructions-only work with `handoffReason: "user-requested"` and `studioAction`; native support alone is not a reason. Ambiguous/unrepresentable/generated-source local work is blocked with a specific local next step, not a successful zero-write handoff. Legacy zero-write requests without the reason require regeneration and new approval; never hand-edit plans or inherit consent.
 
@@ -756,16 +756,16 @@ On the first pass, cancellation before application leaves at most inspection/pro
 
 ---
 
-### 6.34 `exceptional-web-design` (2 SPA / 2 classic sub-prompts; routes are exclusive)
+### 6.34 `exceptional-web-design` (2 SPA / 2 non-SPA sub-prompts; routes are exclusive)
 
-Separately requested read-only design review. The existing SPA/unspecified-URL workflow remains unchanged; identified classic sites use `workflows/classic-site.md` instead, not in addition. It runs no project code, changes no site files, and grants no write consent. The prompts only resolve the target and evidence mode; they are not gates. URL navigation still runs normal site scripts/requests. The classic route is not `style-site:2.runtime` structural discovery or permission to deploy.
+Separately requested read-only design review. The existing SPA/unspecified-URL workflow remains unchanged; identified non-SPA sites use `workflows/non-spa-site.md` instead, not in addition. It runs no project code, changes no site files, and grants no write consent. The prompts only resolve the target and evidence mode; they are not gates. URL navigation still runs normal site scripts/requests. The non-SPA route is not `style-site:2.runtime` structural discovery or permission to deploy.
 
 | ID | Kind | Category | Phase | Trigger / question | Cancel leaves |
 |---|---|---|---|---|---|
 | SPA step 1 site prompt | sub-prompt | — | 1 | *"Which site should I review?"* - asked when no URL/folder or code config is found; existing data-gathering behavior. | nothing |
 | SPA step 2 URL prompt | sub-prompt | — | 2 | Folder without a URL - *"I'll paste a URL (Recommended) / Review the code only"*. The user may supply a dev-server URL; the skill starts nothing. | nothing |
-| Classic step 1 target prompt | sub-prompt | — | 1 | Resolves the selected native site/locale only when missing or ambiguous; reuses known `.portalconfig`/`website.yml` identity. | nothing |
-| Classic step 2 evidence prompt | sub-prompt | — | 2 | *"I'll paste a URL / Review the source only"*. Skipped for an already supplied URL or explicit source-only request; no server, authentication, deployment, or Studio action starts. | nothing |
+| Non-SPA step 1 target prompt | sub-prompt | — | 1 | Resolves the selected native site/locale only when missing or ambiguous; reuses known `.portalconfig`/`website.yml` identity. | nothing |
+| Non-SPA step 2 evidence prompt | sub-prompt | — | 2 | *"I'll paste a URL / Review the source only"*. Skipped for an already supplied URL or explicit source-only request; no server, authentication, deployment, or Studio action starts. | nothing |
 
 ---
 ### Cross-plugin shared skills — out of catalog scope

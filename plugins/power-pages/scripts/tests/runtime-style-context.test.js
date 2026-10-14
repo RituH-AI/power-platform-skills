@@ -7,7 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 const { fixture, ids } = require('./style-site-fixtures');
-const { inspectSite } = require('../lib/classic-site-style-context');
+const { inspectSite } = require('../lib/non-spa-site-style-context');
 const {
   STYLE_PROPERTIES, normalizeRuntimeUrl, buildRuntimeInspection, validateRuntimeSnapshot, attachRuntimeEvidence,
 } = require('../lib/runtime-style-context');

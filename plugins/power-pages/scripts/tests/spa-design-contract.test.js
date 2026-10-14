@@ -11,13 +11,16 @@ const read = (file) => fs.readFileSync(path.join(pluginRoot, ...file.split('/'))
 const digest = (text) => createHash('sha256').update(text).digest('hex');
 
 // These contracts come from PR #691, merge 4d90f8783c4a08043b86fbcff8d3aded3c1b0038.
-// Classic adapters may reuse them, not change SPA behavior. Update these fingerprints
+// Non-SPA adapters may reuse them, not change SPA behavior. Update these fingerprints
 // only for an intentional SPA change. Normalize checkout line endings for Windows.
+// The design-aesthetics.md and page-blueprints.md fingerprints were re-pinned for the
+// "code site" -> "SPA site" terminology rename, which changed only each file's opening
+// sentence; SPA design behavior is unchanged.
 // https://github.com/microsoft/power-platform-skills/pull/691
-test('classic adoption leaves upstream SPA references, capture and plan rendering unchanged', () => {
+test('non-SPA adoption leaves upstream SPA references, capture and plan rendering unchanged', () => {
   const contracts = {
-    'references/design-aesthetics.md': '9360c9c282012ff5edfea01a00fe82c9e1a5d649b8c29c5fa57ea3297f5885a4',
-    'references/page-blueprints.md': '69f27e3328862be7ebe1908be028388a60b7378080b32c91a5142d3c2a5fbb7c',
+    'references/design-aesthetics.md': '82771d79759367a7858a9515f23839040efcc42bf98f5bb47775a477d69df250',
+    'references/page-blueprints.md': 'd27616da7c9eb1f54cd1861f13f51084045c26458e01f64a8fc85193f841e55e',
     'references/design-critique.md': 'c28ed5b1952b4b627c43775b94eb7f76b234100fa45510358be5fd2def0212be',
     'scripts/capture-design-review.js': '8e42cb9161baa6e67ba0fc4c191cf95291afd7f34743100c83dcf105d00df023',
     'scripts/axe-audit.js': '6c02337e05f5b636fb25b68381b9158c08d6a16a1c92424cd4a8de324a67d5ba',
@@ -29,14 +32,14 @@ test('classic adoption leaves upstream SPA references, capture and plan renderin
   }
 });
 
-test('classic dispatch does not rewrite the SPA standalone review workflow', () => {
+test('non-SPA dispatch does not rewrite the SPA standalone review workflow', () => {
   const source = read('skills/exceptional-web-design/SKILL.md');
   const bodyStart = source.indexOf('# Exceptional Web Design');
   assert.ok(bodyStart > 0);
   const dispatch = source.slice(0, bodyStart);
-  assert.match(dispatch, /workflows\/classic-site\.md/);
+  assert.match(dispatch, /workflows\/non-spa-site\.md/);
   assert.match(dispatch, /do not continue into the workflow below/);
-  assert.match(dispatch, /Do not add native discovery or questions to an already identified code site/);
+  assert.match(dispatch, /Do not add native discovery or questions to an already identified SPA site/);
   assert.equal(digest(source.slice(bodyStart)), 'efcd3ea21ab8524063222b95e7a39400da0aca34f0173b802e7fee2582b5381b');
 });
 
@@ -44,7 +47,7 @@ test('SPA typography, implementation and critique completion retain the upstream
   const source = read('skills/create-site/SKILL.md');
   const routed = source.split('## SPA-Site Workflow');
   assert.equal(routed.length, 2);
-  assert.match(routed[0], /classic exceptions never alter SPA fonts/i);
+  assert.match(routed[0], /non-SPA exceptions never alter SPA fonts/i);
   assert.doesNotMatch(routed[1], /edit-site\/references\/styling\/design-critique|workflows\/classic-site/);
   const start = source.indexOf('### 5.7 Design Critique Pass');
   const end = source.indexOf('## Phase 6: Accessibility Verification');

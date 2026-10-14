@@ -1,9 +1,9 @@
 # Design Studio Web File Authoring
 
 Canonical reference for workflows that create or modify web files in a PAC CLI-downloaded
-declarative Power Pages site. This reference applies to sites with a root-level
+non-SPA Power Pages site. This reference applies to sites with a root-level
 `.portalconfig` directory, `website.yml`, `web-pages/`, and `web-files/` content. It does
-not apply to Power Pages code sites built with React, Angular, Vue, or Astro.
+not apply to Power Pages SPA sites built with React, Angular, Vue, or Astro.
 
 A web file represents a site-served asset such as an image, stylesheet, script, document,
 or text file. The local PAC representation contains both the asset and an adjacent YAML
@@ -160,7 +160,7 @@ attachment that stores the file content in Dataverse.
 - `adx_name` and `adx_partialurl` normally match that filename for a new asset.
 - Never copy IDs from another web file.
 - Preserve all IDs when replacing the bytes of an existing asset.
-- The declarative site root supplies website context; do not add `adx_websiteid` merely
+- The non-SPA site root supplies website context; do not add `adx_websiteid` merely
   because the Dataverse record has a Website relationship.
 
 Do not add `documentbody` to the YAML. PAC stores the file bytes in the adjacent asset

@@ -1,4 +1,4 @@
-# Declarative Content and Page Planning
+# Non-SPA Content and Page Planning
 
 Use this reference when `edit-site` must turn an outcome such as “add an FAQs
 page” into resolved visitor-facing content and a supported page composition.

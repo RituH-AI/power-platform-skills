@@ -1,9 +1,9 @@
 # Design Studio Content Snippet Authoring
 
 Canonical reference for workflows that create or modify content snippets in a PAC
-CLI-downloaded declarative Power Pages site. This reference applies to sites with a
+CLI-downloaded non-SPA Power Pages site. This reference applies to sites with a
 root-level `.portalconfig` directory, `website.yml`, `websitelanguage.yml`, and
-`content-snippets/` content. It does not apply to Power Pages code sites built with
+`content-snippets/` content. It does not apply to Power Pages SPA sites built with
 React, Angular, Vue, or Astro.
 
 A content snippet is a small, reusable value that can be rendered from a webpage or web

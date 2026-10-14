@@ -4,7 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { preparePlan, validatePlan, saveJson } = require('../lib/style-site-plan');
-const { resolveSiteRoot, assertOutsideSite, parseArgs, readText } = require('../lib/classic-site-style-context');
+const { resolveSiteRoot, assertOutsideSite, parseArgs, readText } = require('../lib/non-spa-site-style-context');
 const { compactSummary, reviewPlan } = require('../lib/style-site-summary');
 const { applyPlan } = require('./apply-style-plan');
 const { verify } = require('./validate-style-site');

@@ -19,7 +19,7 @@ Prepare **only the exact plan and JSON diff review**; do not generate HTML, samp
 
 ## Request schema
 
-The request is the editable input to the coordinator's `prepare` operation (or diagnostic `prepare-style-plan.js`), not the compiled plan. The request validator is in `${PLUGIN_ROOT}/scripts/lib/style-site-plan.js`; site relationships and paths come from `inspect-style-context.js`, backed by `${PLUGIN_ROOT}/scripts/lib/classic-site-style-context.js`. Unknown request fields are rejected. CSS uses pinned bundled **css-tree** structural parsing, not a skill-specific property/value enum or selector-part allowlist. Read [General CSS](#general-css-authoring) for syntax, semantic warnings and safety boundaries.
+The request is the editable input to the coordinator's `prepare` operation (or diagnostic `prepare-style-plan.js`), not the compiled plan. The request validator is in `${PLUGIN_ROOT}/scripts/lib/style-site-plan.js`; site relationships and paths come from `inspect-style-context.js`, backed by `${PLUGIN_ROOT}/scripts/lib/non-spa-site-style-context.js`. Unknown request fields are rejected. CSS uses pinned bundled **css-tree** structural parsing, not a skill-specific property/value enum or selector-part allowlist. Read [General CSS](#general-css-authoring) for syntax, semantic warnings and safety boundaries.
 
 Optionally use an approved runtime URL to discover IDs/classes and reconcile them with local source as described in [runtime-dom-discovery.md](runtime-dom-discovery.md). Runtime evidence is separate discovery input, not a new request field or permission to use generated DOM IDs. Never capture runtime HTML or values, or treat observation of the deployed page as verification of unuploaded changes.
 

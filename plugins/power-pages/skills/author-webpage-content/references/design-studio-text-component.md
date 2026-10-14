@@ -1,7 +1,7 @@
 # Design Studio Text Component
 
 Canonical reference for skills that add or edit text on a Power Pages Design Studio page in
-a PAC CLI-downloaded declarative site. This reference applies to sites with a root-level
+a PAC CLI-downloaded non-SPA site. This reference applies to sites with a root-level
 `.portalconfig` directory and localized webpage content under `web-pages/`.
 
 First follow `${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-component-authoring.md`: derive the

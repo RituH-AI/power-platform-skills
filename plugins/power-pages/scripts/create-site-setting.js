@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Creates a site setting YAML file for Power Pages SPA or traditional sites.
+// Creates a site setting YAML file for Power Pages SPA or non-SPA sites.
 // Generates UUID, validates inputs, writes correctly-formatted YAML.
 //
 // Usage:
@@ -21,7 +21,7 @@ const {
   detectMetadataLayout,
   loadAggregateRecords,
   normalizeSiteSetting,
-} = require('./lib/declarative-metadata');
+} = require('./lib/non-spa-metadata');
 
 // --- CLI arg parsing (same pattern as update-skill-tracking.js) ---
 

@@ -5,7 +5,7 @@ const {
   detectMetadataLayout,
   loadAggregateRecords,
   normalizeWebRole,
-} = require('./declarative-metadata');
+} = require('./non-spa-metadata');
 const { addFinding, findUnexpectedKeys, findMissingKeys, summarize } = require('./powerpages-validation-utils');
 const { resolvePowerPagesSiteRoot } = require('./validation-helpers');
 

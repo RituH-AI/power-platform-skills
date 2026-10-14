@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Updates skill usage tracking site settings for Power Pages SPA or traditional sites.
+// Updates skill usage tracking site settings for Power Pages SPA or non-SPA sites.
 // Creates/increments a per-skill counter and records the authoring tool.
 // Self-contained — no external dependencies required.
 //

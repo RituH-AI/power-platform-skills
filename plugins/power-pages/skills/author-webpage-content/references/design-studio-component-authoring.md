@@ -1,7 +1,7 @@
 # Design Studio Component Authoring
 
 Canonical decision rules for skills that add or edit Design Studio page elements in
-PAC CLI-downloaded declarative Power Pages sites.
+PAC CLI-downloaded non-SPA Power Pages sites.
 
 ## Start with the user's prompt
 
@@ -27,7 +27,7 @@ components to distinguish candidates.
 
 Before introducing version-specific markup, use the caller's verified Bootstrap evidence or
 inspect the site's actual assets. Follow **Bootstrap version** in `design-studio-section-layouts.md`:
-the examples using `text-start` target Bootstrap 5, not every classic site. Preserve existing
+the examples using `text-start` target Bootstrap 5, not every non-SPA site. Preserve existing
 Bootstrap 3 and RTL conventions; a narrow content edit is not permission to migrate the framework.
 
 If the prompt uniquely identifies one component or insertion point, use it. If several

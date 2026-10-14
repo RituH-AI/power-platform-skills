@@ -58,7 +58,7 @@ function parseBootstrapVersionArgs(argv) {
   return selected;
 }
 
-function normalizeDeclarativeModelVersion(value) {
+function normalizeNonSpaModelVersion(value) {
   if (typeof value !== 'string') {
     throw new Error('--modelVersion must be Enhanced or Standard');
   }
@@ -75,5 +75,5 @@ module.exports = {
   CREATE_WEBSITE_TEMPLATE_NAMES,
   normalizeBootstrapVersion,
   parseBootstrapVersionArgs,
-  normalizeDeclarativeModelVersion,
+  normalizeNonSpaModelVersion,
 };

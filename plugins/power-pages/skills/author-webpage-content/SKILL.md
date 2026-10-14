@@ -2,7 +2,7 @@
 name: author-webpage-content
 description: >-
   Generates and fills the localized HTML body of an existing webpage in a PAC
-  CLI-downloaded declarative Power Pages site from a resolved page-content
+  CLI-downloaded non-SPA Power Pages site from a resolved page-content
   specification. Use whenever a caller has resolved the existing webpage metadata
   and asks to compose, replace, append, or modify
   the exact localized `.webpage.copy.html` file with Design Studio-compatible
@@ -12,7 +12,7 @@ description: >-
   only HTML generation and the supplied target file; the coordinator's webpage
   reference workflow owns discovery, records, metadata, languages, routes, templates,
   navigation, and companion-file creation. Do not use for React, Angular, Vue,
-  or Astro code sites.
+  or Astro SPA sites.
 user-invocable: true
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash, TaskCreate, TaskUpdate, TaskList
 model: sonnet
@@ -29,7 +29,7 @@ Generate and fill one supplied localized Design Studio-compatible webpage body.
 
 ## Preview disclosure
 
-Read `${PLUGIN_ROOT}/references/declarative-preview.md` and apply its **Entry and handoff
+Read `${PLUGIN_ROOT}/references/non-spa-preview.md` and apply its **Entry and handoff
 protocol**. Unless the initial request contains the explicit marker from an actual covered-skill
 handoff, present the **Customization notice** before project inspection or task creation.
 

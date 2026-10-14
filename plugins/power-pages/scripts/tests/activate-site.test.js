@@ -47,7 +47,7 @@ test('normalizeOptions accepts the Blank page template identifier', () => {
   assert.equal(result.templateName, 'BlankPage');
 });
 
-test('normalizeOptions keeps the legacy documented default for code-site activation', () => {
+test('normalizeOptions keeps the legacy documented default for SPA activation', () => {
   const result = normalizeOptions(validOptions({ templateName: undefined }));
   assert.equal(result.templateName, 'DefaultPortalTemplate');
 });
@@ -133,13 +133,13 @@ test('provisionWebsite submits the selected template and returns the created ide
   assert.equal(Object.hasOwn(body, 'websiteRecordId'), false);
 });
 
-test('provisionWebsite preserves the legacy code-site activation payload', async () => {
+test('provisionWebsite preserves the legacy SPA activation payload', async () => {
   const requests = [];
   const responses = [
     {
       statusCode: 202,
       body: '',
-      headers: { 'operation-location': '/operations/code-site' },
+      headers: { 'operation-location': '/operations/SPA' },
     },
     {
       statusCode: 200,

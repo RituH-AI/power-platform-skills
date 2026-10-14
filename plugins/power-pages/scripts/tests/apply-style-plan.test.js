@@ -48,7 +48,7 @@ test('modified metadata cannot pass request reconstruction with a recomputed has
   const plan = preparePlan(f.root, f.request);
   const write = plan.writes.find((entry) => entry.kind === 'webfile');
   write.after += 'adx_hiddenfromsitemap: false\n';
-  write.afterHash = require('../lib/classic-site-style-context').hash(write.after);
+  write.afterHash = require('../lib/non-spa-site-style-context').hash(write.after);
   plan.planHash = planHash(plan);
   assert.throws(() => applyPlan(plan), /does not match/);
 });

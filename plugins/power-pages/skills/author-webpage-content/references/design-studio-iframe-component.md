@@ -1,7 +1,7 @@
 # Design Studio Iframe Component
 
 Canonical reference for skills that add or edit an Iframe component on a Power Pages
-Design Studio page in a PAC CLI-downloaded declarative site.
+Design Studio page in a PAC CLI-downloaded non-SPA site.
 
 First follow
 `${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-component-authoring.md`:

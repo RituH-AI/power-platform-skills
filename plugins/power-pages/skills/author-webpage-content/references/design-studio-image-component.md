@@ -1,7 +1,7 @@
 # Design Studio Image Component
 
 Canonical reference for skills that add or edit an image on a Power Pages Design Studio page
-in a PAC CLI-downloaded declarative site. This reference applies to localized webpage
+in a PAC CLI-downloaded non-SPA site. This reference applies to localized webpage
 content under `web-pages/`.
 
 First follow `${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-component-authoring.md`: derive the

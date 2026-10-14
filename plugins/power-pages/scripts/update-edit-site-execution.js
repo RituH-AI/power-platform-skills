@@ -13,7 +13,7 @@ const {
   validateCustomizationPlan,
   writeJsonAtomic,
 } = require('./lib/edit-site-plan');
-const { validateImageChecks } = require('./lib/declarative-image-verification');
+const { validateImageChecks } = require('./lib/non-spa-image-verification');
 
 function main() {
   const args = parseArgs(process.argv);
@@ -151,10 +151,10 @@ function validateExpectedIdentity(plan, { expectedWebsiteRecordId, expectedSiteR
     expectedWebsiteRecordId &&
     plan.site.websiteRecordId.toLowerCase() !== expectedWebsiteRecordId.toLowerCase()
   ) {
-    throw new Error('current plan websiteRecordId does not match the selected declarative site');
+    throw new Error('current plan websiteRecordId does not match the selected non-SPA site');
   }
   if (expectedSiteRoot && plan.site.siteRoot !== expectedSiteRoot) {
-    throw new Error('current plan siteRoot does not match the selected declarative site');
+    throw new Error('current plan siteRoot does not match the selected non-SPA site');
   }
 }
 

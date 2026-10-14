@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-const { captureSite, parseArgs, assertOutsideSite, readText } = require('../lib/classic-site-style-context');
+const { captureSite, parseArgs, assertOutsideSite, readText } = require('../lib/non-spa-site-style-context');
 const { attachRuntimeEvidence } = require('../lib/runtime-style-context');
 const { saveJson } = require('../lib/style-site-plan');
 const { selectContext, inspectionSummary } = require('../lib/style-site-summary');

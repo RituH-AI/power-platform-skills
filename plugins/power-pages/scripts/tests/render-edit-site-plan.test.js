@@ -21,7 +21,7 @@ function writePlan(tempDir, plan = SAMPLE_PLAN) {
   return dataPath;
 }
 
-test('renders a declarative customization plan and copies the shared icon', () => {
+test('renders a non-SPA customization plan and copies the shared icon', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'declarative-plan-'));
   const dataPath = writePlan(tempDir);
   const outputPath = path.join(tempDir, 'plan.html');
@@ -47,7 +47,7 @@ test('renders a declarative customization plan and copies the shared icon', () =
   assert.match(html, /role="note" aria-label="Preview experience"/);
   assert.match(
     html,
-    /This traditional site creation and customization experience is in preview/,
+    /This non-SPA site creation and customization experience is in preview/,
   );
   assert.match(html, /Approval authorizes local customization only/);
   assert.doesNotMatch(html, /Technical implementation trace|technicalDetails|technicalOperations/);

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-// Creates a table permission YAML file for Power Pages SPA or traditional sites.
-// Generates UUID, validates inputs, writes correctly-formatted YAML in code site git format.
+// Creates a table permission YAML file for Power Pages SPA or non-SPA sites.
+// Generates UUID, validates inputs, writes correctly-formatted YAML in SPA site git format.
 //
 // Usage:
 //   node create-table-permission.js --projectRoot <path> --permissionName <string> --tableName <string>
@@ -23,7 +23,7 @@ const { loadTablePermissions, TABLE_PERMISSION_FILE_SUFFIX } = require('./lib/po
 const {
   detectMetadataLayout,
   normalizeTablePermission,
-} = require('./lib/declarative-metadata');
+} = require('./lib/non-spa-metadata');
 
 // --- CLI arg parsing ---
 
@@ -205,7 +205,7 @@ if (scopeCode === 756150003) {
 const uuid = generateUuid();
 
 // PAC declarative downloads use adx-prefixed fields even when the site uses
-// the enhanced Dataverse data model. Code sites retain the established
+// the enhanced Dataverse data model. SPA sites retain the established
 // normalized git schema.
 const prefix = layout.tablePermissions.fieldFormat === 'adx' ? 'adx_' : '';
 const field = name => `${prefix}${name}`;

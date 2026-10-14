@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Validates Web API integration for Power Pages SPA and traditional sites.
+// Validates Web API integration for Power Pages SPA and non-SPA sites.
 // Runs as a PostToolUse(Skill) hook to verify the skill produced output.
 
 const fs = require('fs');
@@ -19,7 +19,7 @@ runValidation((cwd) => {
   if (!projectRoot) approve(); // Not a Power Pages project, skip
 
   if (!fs.existsSync(path.join(projectRoot, 'powerpages.config.json'))) {
-    validateTraditionalIntegration(projectRoot);
+    validateNonSpaIntegration(projectRoot);
     approve();
   }
 
@@ -63,11 +63,11 @@ function validateSpaIntegration(projectRoot) {
   }
 }
 
-function validateTraditionalIntegration(projectRoot) {
+function validateNonSpaIntegration(projectRoot) {
   const siteRoot = resolvePowerPagesSiteRoot(projectRoot);
   if (!siteRoot) return;
 
-  const apiFiles = findTraditionalApiFiles(siteRoot);
+  const apiFiles = findNonSpaApiFiles(siteRoot);
   if (apiFiles.length === 0) return;
 
   const errors = [];
@@ -83,7 +83,7 @@ function validateTraditionalIntegration(projectRoot) {
 
   addSchemaErrors(projectRoot, errors);
   if (errors.length > 0) {
-    block('Traditional Web API integration validation failed:\n- ' + errors.join('\n- '));
+    block('Non-SPA Web API integration validation failed:\n- ' + errors.join('\n- '));
   }
 }
 
@@ -98,7 +98,7 @@ function addSchemaErrors(projectRoot, errors) {
   }
 }
 
-function findTraditionalApiFiles(siteRoot) {
+function findNonSpaApiFiles(siteRoot) {
   const roots = ['web-files', 'web-pages', 'web-templates']
     .map(relativePath => path.join(siteRoot, relativePath))
     .filter(candidate => fs.existsSync(candidate));

@@ -197,7 +197,7 @@ test('findProjectRoot recognizes a direct PAC declarative-site root', (t) => {
   assert.equal(resolvePowerPagesSiteRoot(root), path.resolve(root));
 });
 
-test('findProjectRoot: still recognizes powerpages.config.json (code sites)', (t) => {
+test('findProjectRoot: still recognizes powerpages.config.json (SPA sites)', (t) => {
   const fs = require('fs');
   const os = require('os');
   const { findProjectRoot } = require(helpersPath);

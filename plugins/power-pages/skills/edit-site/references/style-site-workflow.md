@@ -1,4 +1,4 @@
-# Style a Classic Power Pages Site
+# Style a Non-SPA Power Pages Site
 
 Execute through `edit-site` for styling-only requests or approved `style-site`
 operations. Preserve identifiers, approved inputs, scope, locales, design context, hashes and
@@ -13,7 +13,7 @@ commit, deployment prompt, final-completion confirmation, HTML preview, local se
 
 ## Inspect and select the route
 
-Resolve the classic export, locale, external workspace, sources, and Bootstrap; reject SPAs.
+Resolve the non-SPA export, locale, external workspace, sources, and Bootstrap; reject SPAs.
 Default to local authoring for listed/unlisted properties and general CSS, not
 property/gradient allowlists.
 

@@ -1,9 +1,9 @@
 # Design Studio Page Template Authoring
 
 Canonical reference for workflows that create or modify page templates in a PAC
-CLI-downloaded declarative Power Pages site. This reference applies to sites with a
+CLI-downloaded non-SPA Power Pages site. This reference applies to sites with a
 root-level `.portalconfig` directory, `website.yml`, `page-templates/`, and
-`web-templates/` content. It does not apply to Power Pages code sites built with React,
+`web-templates/` content. It does not apply to Power Pages SPA sites built with React,
 Angular, Vue, or Astro.
 
 A page template is the rendering contract selected by a webpage. It determines whether
@@ -147,7 +147,7 @@ Choose one intended rendering type before writing the record.
 ### Web Template
 
 Use this type for a custom layout rendered by a Power Pages web template. This is the
-standard choice for new declarative layouts.
+standard choice for new non-SPA layouts.
 
 ```yaml
 adx_description: <optional-description>

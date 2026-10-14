@@ -13,7 +13,7 @@ const DEFAULT_REPO = 'power-pages-samples';
 const DEFAULT_REF = 'latest-release';
 const DEFAULT_CATALOG_PATH = 'templates/manifest.json';
 const FRAMEWORKS = new Set(['react', 'vue', 'angular', 'astro', 'none', 'other']);
-const TEMPLATE_KINDS = new Set(['spa', 'traditional']);
+const TEMPLATE_KINDS = new Set(['spa', 'non-spa']);
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CACHE_MARKER_FILE = '.powerpages-template-cache.json';
 const CACHE_MARKER_VERSION = 1;
@@ -198,7 +198,7 @@ function isSpaTemplate(template) {
 }
 
 function isCreateWebsiteApiTemplate(template) {
-  return template?.kind === 'traditional' &&
+  return template?.kind === 'non-spa' &&
     template?.provisioning?.type === 'create-website-api';
 }
 
@@ -659,8 +659,8 @@ async function fetchCatalog(options = {}, deps = {}) {
     const catalogError = validateCatalogShape(rawCatalog);
     if (catalogError) throw new Error(`Template catalog is malformed: ${catalogError}`);
     const catalog = materializeCatalogArtifactPaths(rawCatalog, catalogPath);
-    // Keep the normalized selectable view SPA-only for code-site consumers.
-    // Traditional Create Website API consumers read the validated full catalog
+    // Keep the normalized selectable view SPA-only for SPA consumers.
+    // Non-SPA Create Website API consumers read the validated full catalog
     // below because they do not download website code or solution artifacts.
     const selectableCatalog = {
       ...catalog,
@@ -782,11 +782,11 @@ function validateWebsiteCodeDirectory(localPath, options = {}, deps = {}) {
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
     return 'Website code directory must be a regular directory';
   }
-  // Both traditional and code sites keep PAC website source under
-  // `.powerpages-site/website.yml`. Code sites also carry the package metadata
+  // Both non-SPA and SPA sites keep PAC website source under
+  // `.powerpages-site/website.yml`. SPA sites also carry the package metadata
   // and project-local npm configuration needed to build and upload the SPA.
   // See: https://learn.microsoft.com/power-platform/developer/cli/reference/pages#pac-pages-download
-  const requiredFiles = options.kind === 'traditional'
+  const requiredFiles = options.kind === 'non-spa'
     ? []
     : ['powerpages.config.json', 'package.json', '.npmrc'];
   for (const requiredFile of requiredFiles) {
@@ -1024,7 +1024,7 @@ function inspectTemplateSolutions(localSolutionsPath, kind, deps = {}) {
     const solutionError = validateUnpackedSolutionDirectory(solutionPath, {
       ...deps,
       fs: fsImpl,
-      allowWebsiteComponents: kind === 'traditional',
+      allowWebsiteComponents: kind === 'non-spa',
     });
     if (solutionError) return { ok: false, error: `${entry.name}: ${solutionError}` };
 

@@ -3,7 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { parseArgs, resolveSiteRoot, assertOutsideSite } = require('../lib/classic-site-style-context');
+const { parseArgs, resolveSiteRoot, assertOutsideSite } = require('../lib/non-spa-site-style-context');
 const { buildRuntimeInspection } = require('../lib/runtime-style-context');
 
 function main(argv) {

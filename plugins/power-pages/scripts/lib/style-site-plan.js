@@ -10,7 +10,7 @@ const { decodeHTMLAttribute, escapeAttribute } = require('../vendor/css-tools/cs
 const { sourceContext, resolveSourceTarget } = require('./style-site-source-target');
 const {
   captureSite, assertSnapshot, snapshotText, safePath, readText, hash, DEFAULT_CSS, assertOutsideSite,
-} = require('./classic-site-style-context');
+} = require('./non-spa-site-style-context');
 
 const ID = /^[a-z][a-z0-9-]{0,63}$/;
 const CLASS = /^pp-[a-z][a-z0-9-]{0,60}$/;

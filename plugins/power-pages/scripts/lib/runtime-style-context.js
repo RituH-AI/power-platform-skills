@@ -1,7 +1,7 @@
 'use strict';
 
 const { serializeJson } = require('./render-template');
-const { safePath, readText } = require('./classic-site-style-context');
+const { safePath, readText } = require('./non-spa-site-style-context');
 const { assertKeys, sourceTags, reachableTemplates } = require('./style-site-plan');
 
 // Imported runtime evidence accepts only collector-coded categories. Descriptive

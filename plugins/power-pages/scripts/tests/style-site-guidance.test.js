@@ -495,7 +495,7 @@ test('visual changes require paired resolved colors without importing the SPA re
   const design = fs.readFileSync(path.join(referencesRoot, 'design-quality.md'), 'utf8');
   assert.match(workflow, /new treatments, palette\/background, typography or redesign/);
   assert.match(workflow, /Resolve failures and local declaration dependencies before approval/);
-  assert.match(design, /\[code-site adapter\]\(\.\.\/\.\.\/\.\.\/\.\.\/references\/design-aesthetics\.md\)/);
+  assert.match(design, /\[SPA adapter\]\(\.\.\/\.\.\/\.\.\/\.\.\/references\/design-aesthetics\.md\)/);
   assert.match(design, /does not override a child's explicit dark color/);
   assert.match(design, /do not execute that SPA workflow/);
   assert.match(design, /theme\.css rewrite/);

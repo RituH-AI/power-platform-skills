@@ -1,7 +1,7 @@
 # Design Studio Site Discovery
 
 Shared site-location contract for workflows that create or modify components in a PAC
-CLI-downloaded declarative Power Pages site.
+CLI-downloaded non-SPA Power Pages site.
 
 Use this reference before reading or writing webpages, web templates, page templates,
 web files, content snippets, or other Design Studio metadata. Component-specific
@@ -10,14 +10,14 @@ is found.
 
 ## Supported site type
 
-A declarative site is identified by a `.portalconfig` directory and PAC-downloaded
+A non-SPA site is identified by a `.portalconfig` directory and PAC-downloaded
 metadata such as `website.yml`.
 
-Do not treat `powerpages.config.json` by itself as a declarative-site marker. That file
-identifies a Power Pages code site built with React, Angular, Vue, or Astro, which uses a
+Do not treat `powerpages.config.json` by itself as a non-SPA site marker. That file
+identifies a Power Pages SPA site built with React, Angular, Vue, or Astro, which uses a
 different authoring model.
 
-The declarative site root is always the parent of `.portalconfig`:
+The non-SPA site root is always the parent of `.portalconfig`:
 
 ```text
 <site-root>/
@@ -40,8 +40,8 @@ The site root can be the current directory or a nested downloaded directory such
 3. For every match, treat the parent directory as a candidate `<SITE_ROOT>`.
 4. Require `<SITE_ROOT>/website.yml`.
 5. Require every component-specific path named by the calling workflow.
-6. Reject candidates that have only code-site markers or are missing required
-   declarative metadata.
+6. Reject candidates that have only SPA markers or are missing required
+   non-SPA metadata.
 7. Resolve exactly one site before reading or writing component records.
 
 Use file-search tools rather than shell-specific directory parsing so the workflow works
@@ -110,14 +110,14 @@ Before component authoring begins, confirm:
 5. the selected root is not inside a dependency, build, generated, temporary, or
    version-control directory;
 6. no path used for component writes escapes `<SITE_ROOT>`;
-7. the selected project is a declarative site, not a code site.
+7. the selected project is a non-SPA site, not a SPA site.
 
 ## Prohibited shortcuts
 
 - Do not use the process working directory as the site root without checking
   `.portalconfig`.
-- Do not identify a declarative site from `website.yml` alone.
-- Do not treat `powerpages.config.json` as a declarative-site marker.
+- Do not identify a non-SPA site from `website.yml` alone.
+- Do not treat `powerpages.config.json` as a non-SPA site marker.
 - Do not select the first of multiple valid candidates without supporting evidence.
 - Do not search broadly outside the current workspace to find a convenient site.
 - Do not create missing metadata directories during discovery unless the component

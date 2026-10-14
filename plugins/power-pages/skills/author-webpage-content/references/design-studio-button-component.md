@@ -1,9 +1,9 @@
 # Design Studio Button Component
 
 Canonical reference for skills that add or edit a Power Pages Design Studio-style button in
-a PAC CLI-downloaded site. This reference applies to declarative Power Pages sites with
+a PAC CLI-downloaded site. This reference applies to non-SPA Power Pages sites with
 a root-level `.portalconfig` directory and `web-pages/` content. It does not apply to
-Power Pages code sites built with React, Angular, Vue, or Astro.
+Power Pages SPA sites built with React, Angular, Vue, or Astro.
 
 First follow `${PLUGIN_ROOT}/skills/author-webpage-content/references/design-studio-component-authoring.md`: derive the
 page, locale, target or insertion point, label, destination, style, and window behavior

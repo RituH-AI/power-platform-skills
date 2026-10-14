@@ -9,13 +9,13 @@ const { checkColorPair } = require('../lib/style-site-contrast');
 const pluginRoot = path.resolve(__dirname, '..', '..');
 const sharedPath = path.join(pluginRoot, 'references', 'site-design-quality.md');
 const codePath = path.join(pluginRoot, 'skills', 'create-site', 'references', 'design-aesthetics.md');
-const classicPath = path.join(pluginRoot, 'skills', 'edit-site', 'references', 'styling', 'design-quality.md');
+const nonSpaPath = path.join(pluginRoot, 'skills', 'edit-site', 'references', 'styling', 'design-quality.md');
 const currentCodePath = path.join(pluginRoot, 'references', 'design-aesthetics.md');
 const blueprintsPath = path.join(pluginRoot, 'references', 'page-blueprints.md');
 const critiquePath = path.join(pluginRoot, 'references', 'design-critique.md');
 const classicCritiquePath = path.join(pluginRoot, 'skills', 'edit-site', 'references', 'styling', 'design-critique.md');
 const compositionPath = path.join(pluginRoot, 'skills', 'edit-site', 'references', 'content-and-page-compositions.md');
-const documents = new Map([sharedPath, codePath, classicPath, currentCodePath, blueprintsPath, critiquePath, classicCritiquePath, compositionPath]
+const documents = new Map([sharedPath, codePath, nonSpaPath, currentCodePath, blueprintsPath, critiquePath, classicCritiquePath, compositionPath]
   .map((file) => [file, fs.readFileSync(file, 'utf8')]));
 const shared = documents.get(sharedPath);
 
@@ -27,7 +27,7 @@ function localLinks(file, content) {
 }
 
 test('both platform adapters load the same bundled design source before execution guidance', () => {
-  for (const file of [codePath, classicPath]) {
+  for (const file of [codePath, nonSpaPath]) {
     const introduction = documents.get(file).split(/^## /m)[0];
     assert.ok(localLinks(file, introduction).includes(sharedPath), file);
     assert.match(introduction, /\bread\b/i);
@@ -35,7 +35,7 @@ test('both platform adapters load the same bundled design source before executio
   }
 });
 
-test('classic and code design share experience and narrative principles without a second brief', () => {
+test('non-SPA and code design share experience and narrative principles without a second brief', () => {
   for (const field of ['Audience and job', 'Primary and secondary action', 'Principal doubt',
     'Proof strategy', 'Design thesis', 'First-screen concept', 'Signature moment']) {
     assert.ok(shared.includes(field), field);
@@ -47,33 +47,33 @@ test('classic and code design share experience and narrative principles without 
   assert.match(documents.get(compositionPath), /not required component types or serialized layouts/);
   assert.match(documents.get(compositionPath), /Do not invent testimonials, service levels, metrics/);
   assert.match(documents.get(compositionPath), /label it visibly as sample content/);
-  assert.match(documents.get(currentCodePath), /design system for Power Pages code sites/);
+  assert.match(documents.get(currentCodePath), /design system for Power Pages SPA sites/);
   assert.match(documents.get(classicCritiquePath), /Preserve approved brand\/system\/self-hosted fonts/);
 });
 
-test('classic final design review preserves local approval, evidence, and native-source contracts', () => {
-  const classic = documents.get(classicPath);
+test('non-SPA final design review preserves local approval, evidence, and native-source contracts', () => {
+  const nonSpa = documents.get(nonSpaPath);
   const critique = documents.get(classicCritiquePath);
   const customization = fs.readFileSync(path.join(pluginRoot, 'skills', 'edit-site', 'SKILL.md'), 'utf8');
   const style = fs.readFileSync(path.join(pluginRoot, 'skills', 'edit-site',
     'references', 'style-site-workflow.md'), 'utf8');
   const create = fs.readFileSync(path.join(pluginRoot, 'skills', 'create-site', 'SKILL.md'), 'utf8');
-  const declarative = fs.readFileSync(path.join(pluginRoot, 'skills', 'create-site', 'workflows', 'declarative-site.md'), 'utf8');
+  const nonSpaCreation = fs.readFileSync(path.join(pluginRoot, 'skills', 'create-site', 'workflows', 'non-spa-site.md'), 'utf8');
   const common = create.split('## SPA-Site Workflow')[0].replace(/^---\r?\n[\s\S]*?\r?\n---/, '');
 
-  assert.match(common, /Classic sites need no dev server or live preview/);
+  assert.match(common, /Non-SPA sites need no dev server or live preview/);
   assert.doesNotMatch(common, /capture-design-review\.js|browser_snapshot|dev server MUST/);
-  assert.doesNotMatch(declarative, /capture-design-review\.js|axe-audit\.js|npm run dev/);
+  assert.doesNotMatch(nonSpaCreation, /capture-design-review\.js|axe-audit\.js|npm run dev/);
   assert.match(customization, /newSiteDesign\.composition/);
   assert.match(customization, /Do not add mandatory schema fields/);
   assert.match(customization, /approved image-check receipt/);
   assert.match(customization, /do not repeat unchanged network\s+probes/);
   assert.match(customization, /--imageChecks "<APPROVED_REVIEW_DIR>\/plan.html.image-checks.json"/);
-  assert.match(classic, /not a second score-to-pass gate/);
-  assert.match(classic, /exact-diff\/hash approval for every revision/);
-  assert.match(classic, /protected defaults/);
-  assert.match(classic, /externalResources/);
-  assert.match(classic, /style-site:2.runtime/);
+  assert.match(nonSpa, /not a second score-to-pass gate/);
+  assert.match(nonSpa, /exact-diff\/hash approval for every revision/);
+  assert.match(nonSpa, /protected defaults/);
+  assert.match(nonSpa, /externalResources/);
+  assert.match(nonSpa, /style-site:2.runtime/);
   assert.doesNotMatch(style, /capture-design-review\.js|axe-audit\.js|TaskCreate|critique-blocked/);
   assert.deepEqual([...style.matchAll(/<!-- gate: ([^ |]+)/g)].map((match) => match[1]),
     ['style-site:2.runtime', 'style-site:3.scope', 'style-site:5.approve', 'style-site:6.reapprove']);
@@ -86,19 +86,19 @@ test('classic final design review preserves local approval, evidence, and native
   assert.doesNotMatch(critique, /^\| \d+ \|/m, 'the shared rubric is referenced, not copied');
 });
 
-test('read-only critique routes classic metadata without executing project code or assuming pixels', () => {
+test('read-only critique routes non-SPA metadata without executing project code or assuming pixels', () => {
   const entry = fs.readFileSync(path.join(pluginRoot, 'skills', 'exceptional-web-design', 'SKILL.md'), 'utf8');
-  const review = fs.readFileSync(path.join(pluginRoot, 'skills', 'exceptional-web-design', 'workflows', 'classic-site.md'), 'utf8');
+  const review = fs.readFileSync(path.join(pluginRoot, 'skills', 'exceptional-web-design', 'workflows', 'non-spa-site.md'), 'utf8');
   const tools = entry.match(/^allowed-tools: (.+)$/m)[1].split(',').map((tool) => tool.trim());
   assert.match(entry, /do not continue into the workflow below/);
-  assert.match(entry, /Without positive classic evidence, retain the existing workflow below unchanged/);
+  assert.match(entry, /Without positive non-SPA evidence, retain the existing workflow below unchanged/);
   for (const tool of ['Write', 'Edit', 'Skill', 'Task']) assert.ok(!tools.includes(tool), tool);
   for (const reference of ['design-studio-site-discovery.md', 'webpage-authoring.md',
     'site-design-quality.md', 'design-critique.md', 'page-blueprints.md']) {
     assert.ok(review.includes(reference), reference);
   }
   assert.match(review, /`\.portalconfig` plus `website\.yml`/);
-  assert.match(review, /`website\.yml` alone is not a classic marker/);
+  assert.match(review, /`website\.yml` alone is not a non-SPA marker/);
   assert.match(review, /existing root\/localized page identities, parents, partial URLs, and language records/);
   assert.match(review, /Do not authenticate, submit forms, change records, deploy/);
   assert.match(review, /Source only means no screenshots/);
@@ -177,19 +177,19 @@ test('near-threshold examples never turn rounded ratios into passes', () => {
   }
 });
 
-test('classic imagery reuses its asset workflow and SPA execution remains in the code adapter', () => {
-  const classic = documents.get(classicPath);
-  const links = localLinks(classicPath, classic);
+test('non-SPA imagery reuses its asset workflow and SPA execution remains in the code adapter', () => {
+  const nonSpa = documents.get(nonSpaPath);
+  const links = localLinks(nonSpaPath, nonSpa);
   for (const target of [
     ['skills', 'edit-site', 'references', 'visual-asset-planning.md'],
     ['skills', 'edit-site', 'references', 'web-file-authoring.md'],
   ]) {
     assert.ok(links.includes(path.join(pluginRoot, ...target)), target.join('/'));
   }
-  assert.match(classic, /\$\{PLUGIN_ROOT\}\/scripts\/prepare-declarative-asset\.js/);
+  assert.match(nonSpa, /\$\{PLUGIN_ROOT\}\/scripts\/prepare-non-spa-asset\.js/);
   assert.match(documents.get(codePath), /index\.html/);
   assert.match(documents.get(codePath), /browser_snapshot/);
-  for (const content of [shared, classic]) {
+  for (const content of [shared, nonSpa]) {
     assert.doesNotMatch(content, /browser_snapshot|npm run dev|python -m http\.server/);
     assert.doesNotMatch(content, /<link\b[^>]*fonts\.googleapis/);
   }

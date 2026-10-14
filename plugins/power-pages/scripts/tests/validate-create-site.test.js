@@ -6,7 +6,7 @@ const { spawnSync } = require('node:child_process');
 
 const {
   validateProject,
-  validateDeclarativeProject,
+  validateNonSpaProject,
   readWebsiteIdentity,
   parseArgs,
 } = require('../../skills/create-site/scripts/validate-site');
@@ -70,7 +70,7 @@ function runCli(root, args, input = '') {
   });
 }
 
-test('validates a declarative project with matching identity and assets', () =>
+test('validates a non-SPA project with matching identity and assets', () =>
   withTempDir((root) => {
     fs.mkdirSync(path.join(root, '.git'));
     fs.mkdirSync(path.join(root, '.powerpages-site', '.portalconfig'), { recursive: true });
@@ -86,11 +86,11 @@ test('validates a declarative project with matching identity and assets', () =>
     );
 
     const result = validateProject(root, { expectedWebsiteRecordId: WEBSITE_ID });
-    assert.equal(result.siteType, 'declarative');
+    assert.equal(result.siteType, 'non-spa');
     assert.deepEqual(result.errors, []);
   }));
 
-test('blocks a declarative project whose website identity differs from creation', () =>
+test('blocks a non-SPA project whose website identity differs from creation', () =>
   withTempDir((root) => {
     fs.mkdirSync(path.join(root, '.git'));
     fs.mkdirSync(path.join(root, '.powerpages-site', '.portalconfig'), { recursive: true });
@@ -105,7 +105,7 @@ test('blocks a declarative project whose website identity differs from creation'
     assert.match(result.errors.join('\n'), /does not match created website/);
   }));
 
-test('requires the portalconfig marker, declarative assets, and Git', () =>
+test('requires the portalconfig marker, non-SPA assets, and Git', () =>
   withTempDir((root) => {
     writeFile(
       root,
@@ -137,7 +137,7 @@ test('can validate downloaded identity and assets before Git initialization', ()
     assert.deepEqual(result.errors, []);
   }));
 
-test('validates a manually downloaded declarative site opened at its site root', () =>
+test('validates a manually downloaded non-SPA site opened at its site root', () =>
   withTempDir((root) => {
     fs.mkdirSync(path.join(root, '.git'));
     fs.mkdirSync(path.join(root, '.portalconfig'), { recursive: true });
@@ -145,11 +145,11 @@ test('validates a manually downloaded declarative site opened at its site root',
     writeFile(root, path.join('web-pages', 'home.webpage.yml'), 'name: Home\n');
 
     const result = validateProject(root, { expectedWebsiteRecordId: WEBSITE_ID });
-    assert.equal(result.siteType, 'declarative');
+    assert.equal(result.siteType, 'non-spa');
     assert.deepEqual(result.errors, []);
   }));
 
-test('does not count customization documentation as a declarative site asset', () =>
+test('does not count customization documentation as a non-SPA site asset', () =>
   withTempDir((root) => {
     fs.mkdirSync(path.join(root, '.git'));
     fs.mkdirSync(path.join(root, '.portalconfig'), { recursive: true });
@@ -232,7 +232,7 @@ test('readWebsiteIdentity supports Standard model adx_websiteid', () =>
     assert.equal(readWebsiteIdentity(filePath).id, WEBSITE_ID);
   }));
 
-test('preserves the existing code-site validation path', () =>
+test('preserves the existing SPA validation path', () =>
   withTempDir((root) => {
     fs.mkdirSync(path.join(root, '.git'));
     fs.mkdirSync(path.join(root, 'src'));
@@ -243,7 +243,7 @@ test('preserves the existing code-site validation path', () =>
       JSON.stringify({
         $schema: 'https://example.invalid/schema.json',
         compiledPath: 'dist',
-        siteName: 'Code Site',
+        siteName: 'SPA Site',
         defaultLandingPage: 'index.html',
       }),
     );
@@ -255,15 +255,15 @@ test('preserves the existing code-site validation path', () =>
     writeFile(root, path.join('src', 'main.ts'), 'export const ready = true;\n');
 
     const result = validateProject(root);
-    assert.equal(result.siteType, 'code');
+    assert.equal(result.siteType, 'spa');
     assert.deepEqual(result.errors, []);
     for (const expectedBootstrapMajor of [3, 5]) {
       const explicit = validateProject(root, { expectedBootstrapMajor });
-      assert.equal(explicit.siteType, 'code');
-      assert.match(explicit.errors.join('\n'), /only supported for declarative sites, not code sites/);
+      assert.equal(explicit.siteType, 'spa');
+      assert.match(explicit.errors.join('\n'), /only supported for non-SPA sites, not SPA sites/);
       const cli = runCli(root, ['--projectRoot', root, '--bootstrapVersion', String(expectedBootstrapMajor)]);
       assert.equal(cli.status, 2);
-      assert.match(cli.stderr, /only supported for declarative sites, not code sites/);
+      assert.match(cli.stderr, /only supported for non-SPA sites, not SPA sites/);
     }
   }));
 
@@ -274,14 +274,14 @@ test('verifies actual Bootstrap 3 and 5 assets for both direct and nested downlo
         const root = path.join(work, `${nested}-${expectedBootstrapMajor}`);
         bootstrapFixture(root, { nested, version });
         const options = { expectedWebsiteRecordId: WEBSITE_ID, expectedBootstrapMajor };
-        assert.deepEqual(validateProject(root, options), { siteType: 'declarative', errors: [] });
-        assert.deepEqual(validateDeclarativeProject(root, options), []);
+        assert.deepEqual(validateProject(root, options), { siteType: 'non-spa', errors: [] });
+        assert.deepEqual(validateNonSpaProject(root, options), []);
         const cli = runCli(root, [
           '--projectRoot', root, '--websiteRecordId', WEBSITE_ID,
           '--bootstrapVersion', String(expectedBootstrapMajor),
         ]);
         assert.equal(cli.status, 0, cli.stderr);
-        assert.match(cli.stdout, /declarative site validation passed/);
+        assert.match(cli.stdout, /non-SPA site validation passed/);
         assert.equal(cli.stderr, '');
       }
     }
@@ -299,7 +299,7 @@ test('rejects a downloaded Bootstrap major that differs from the explicit creati
       );
       const cli = runCli(root, ['--projectRoot', root, '--bootstrapVersion', String(expectedBootstrapMajor)]);
       assert.equal(cli.status, 2);
-      assert.match(cli.stderr, /declarative validation failed/);
+      assert.match(cli.stderr, /non-SPA site validation failed/);
       assert.equal(cli.stdout, '');
     }
   }));
@@ -452,7 +452,7 @@ test('Bootstrap CLI selects direct validation even without --projectRoot', () =>
       bootstrapFixture(root, { nested });
       const cli = runCli(root, ['--bootstrapVersion', '5']);
       assert.equal(cli.status, 0, cli.stderr);
-      assert.match(cli.stdout, /declarative site validation passed/);
+      assert.match(cli.stdout, /non-SPA site validation passed/);
       const missing = runCli(root, ['--bootstrapVersion']);
       assert.equal(missing.status, 2);
       assert.match(missing.stderr, /--bootstrapVersion must be/);
@@ -480,7 +480,7 @@ test('does not silently approve explicit Bootstrap verification without a projec
     for (const projectRoot of [null, root]) {
       assert.match(
         validateProject(projectRoot, { expectedBootstrapMajor: 5 }).errors.join('\n'),
-        /Cannot verify Bootstrap without a declarative Power Pages project/,
+        /Cannot verify Bootstrap without a non-SPA Power Pages project/,
       );
     }
     const cli = runCli(root, ['--projectRoot', root, '--bootstrapVersion', '5']);

@@ -4,7 +4,7 @@ Canonical reference for skills that add a page element in a new Power Pages Desi
 section or edit an existing section layout. The five column structures below were
 observed in PAC CLI-downloaded webpage HTML. Microsoft documentation describes adding
 components to sections but does not specify this serialized HTML contract.
-These are default recipes, not a limit on classic section design. Broader approved local
+These are default recipes, not a limit on non-SPA section design. Broader approved local
 geometry must preserve native editing boundaries, identities, locale and required behavior.
 Report **Studio editing compatibility unverified** when canvas selection, control mapping,
 drag/reorder or save/reopen behavior has not been established. Missing editing evidence alone
