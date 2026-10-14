@@ -33,7 +33,7 @@ plugin's MCP configuration or the install steps in `README.md`.
 - `references/*.md` — shared reference docs (CLI commands, definition rules,
   connection patterns, error troubleshooting)
 - `plugin.json` + `mcp.json` — portable Agent Plugins 1.0 metadata and MCP wiring
-- `.plugin/plugin.json` + `.claude-plugin/plugin.json` — compatibility metadata mirrors
+- `.claude-plugin/plugin.json` — Claude Code compatibility metadata mirror
 - `.mcp.json` — legacy MCP wiring (FlowAgent + Microsoft Learn)
 
 The flow-definition rules, auth model, error reference, and known issues live in

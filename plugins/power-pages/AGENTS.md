@@ -43,7 +43,6 @@ Read `PLUGIN_DEVELOPMENT_GUIDE.md` for UX and reliability standards when creatin
 ```
 plugin.json                    ← Agent Plugins 1.0 metadata
 mcp.json                       ← Portable Playwright and Microsoft Learn MCP config
-.plugin/plugin.json            ← Compatibility metadata mirror
 .claude-plugin/plugin.json     ← Claude Code metadata mirror
 .mcp.json                      ← Legacy MCP config
 agents/

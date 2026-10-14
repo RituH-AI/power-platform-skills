@@ -1,10 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Validates the Agent Plugins manifests and their legacy compatibility mirrors.
- * Existing marketplace subscriptions still resolve .plugin and .claude-plugin
- * paths during auto-update, so those committed files must stay semantically in
- * sync with the portable root manifest whenever plugin metadata changes.
+ * Validates the Agent Plugins manifests and the Claude Code marketplace mirror.
  *
  * The one intentional difference is the `source` of a plugin hosted in another
  * repository, which each host spells differently. See REMOTE PLUGIN SOURCES below.
@@ -38,17 +35,13 @@ function normalizeRelative(relativePath) {
   return relativePath.replace(/\\/g, '/').replace(/\/+$/, '');
 }
 
-function pluginDirectoryFromOpenEntry(root, openMarketplace, plugin) {
-  const pluginRoot = openMarketplace.metadata?.pluginRoot || '.';
+function pluginDirectoryFromMarketplaceEntry(root, marketplace, plugin) {
+  const pluginRoot = marketplace.metadata?.pluginRoot || '.';
   return path.resolve(root, pluginRoot, plugin.source);
 }
 
 function expectedLegacySource(root, pluginDirectory) {
   return `./${normalizeRelative(path.relative(root, pluginDirectory))}`;
-}
-
-function assertJsonMirror(legacyPath, sourcePath) {
-  assert.deepEqual(readJson(legacyPath), readJson(sourcePath));
 }
 
 function portableMetadata(manifest) {
@@ -200,7 +193,7 @@ function assertPortableManifest(pluginName, manifest) {
 }
 
 function validate(root = ROOT) {
-  const openMarketplacePath = path.join(root, 'marketplace.json');
+  const marketplacePath = path.join(root, 'marketplace.json');
   const legacyMarketplacePath = path.join(root, '.claude-plugin', 'marketplace.json');
   const errors = [];
 
@@ -217,11 +210,11 @@ function validate(root = ROOT) {
   });
   if (errors.length > 0) return errors;
 
-  const openMarketplace = readJson(openMarketplacePath);
+  const marketplace = readJson(marketplacePath);
   const legacyMarketplace = readJson(legacyMarketplacePath);
 
   check('marketplace shape', () => {
-    assertMinimalMarketplace(openMarketplace);
+    assertMinimalMarketplace(marketplace);
     assertMinimalMarketplace(legacyMarketplace);
   });
   if (errors.length > 0) return errors;
@@ -230,8 +223,8 @@ function validate(root = ROOT) {
   // so compare the files with those sources swapped for their expected legacy form.
   check('legacy marketplace manifest', () => {
     const expectedLegacy = {
-      ...openMarketplace,
-      plugins: openMarketplace.plugins.map((plugin) =>
+      ...marketplace,
+      plugins: marketplace.plugins.map((plugin) =>
         isRemoteSource(plugin.source) ? { ...plugin, source: expectedLegacyRemoteSource(plugin.source) } : plugin
       ),
     };
@@ -239,10 +232,10 @@ function validate(root = ROOT) {
   });
 
   const legacyPlugins = new Map(legacyMarketplace.plugins.map((plugin) => [plugin.name, plugin]));
-  const openPluginNames = new Set();
+  const marketplacePluginNames = new Set();
 
-  for (const plugin of openMarketplace.plugins) {
-    openPluginNames.add(plugin.name);
+  for (const plugin of marketplace.plugins) {
+    marketplacePluginNames.add(plugin.name);
 
     if (isRemoteSource(plugin.source)) {
       // The plugin's manifests live in its own repository, which owns their metadata
@@ -258,14 +251,11 @@ function validate(root = ROOT) {
       continue;
     }
 
-    const pluginDirectory = pluginDirectoryFromOpenEntry(root, openMarketplace, plugin);
+    const pluginDirectory = pluginDirectoryFromMarketplaceEntry(root, marketplace, plugin);
     const portableManifestPath = path.join(pluginDirectory, 'plugin.json');
-    const openManifestPath = path.join(pluginDirectory, '.plugin', 'plugin.json');
     const legacyManifestPath = path.join(pluginDirectory, '.claude-plugin', 'plugin.json');
     const portableMcpPath = path.join(pluginDirectory, 'mcp.json');
     const legacyMcpPath = path.join(pluginDirectory, '.mcp.json');
-    const relativeLegacyManifestPath = normalizeRelative(path.relative(root, legacyManifestPath));
-
     check(`${plugin.name} legacy marketplace entry`, () => {
       const legacyPlugin = legacyPlugins.get(plugin.name);
       assert.ok(legacyPlugin, 'missing from .claude-plugin/marketplace.json');
@@ -278,12 +268,8 @@ function validate(root = ROOT) {
       assert.ok(fs.existsSync(portableManifestPath), 'missing root plugin.json');
       const portableManifest = readJson(portableManifestPath);
       assertPortableManifest(plugin.name, portableManifest);
-      assert.deepEqual(readJson(openManifestPath), portableMetadata(portableManifest));
-    });
-
-    check(relativeLegacyManifestPath, () => {
-      assert.ok(fs.existsSync(legacyManifestPath), 'missing legacy plugin manifest');
-      assertJsonMirror(legacyManifestPath, openManifestPath);
+      assert.ok(fs.existsSync(legacyManifestPath), 'missing .claude-plugin/plugin.json');
+      assert.deepEqual(readJson(legacyManifestPath), portableMetadata(portableManifest));
     });
 
     check(`${plugin.name} MCP configuration`, () => {
@@ -298,7 +284,7 @@ function validate(root = ROOT) {
 
   for (const legacyPluginName of legacyPlugins.keys()) {
     check(`${legacyPluginName} legacy marketplace entry`, () => {
-      assert.ok(openPluginNames.has(legacyPluginName), 'not present in marketplace.json');
+      assert.ok(marketplacePluginNames.has(legacyPluginName), 'not present in marketplace.json');
     });
   }
 

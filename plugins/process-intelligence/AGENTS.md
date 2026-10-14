@@ -85,8 +85,8 @@ credential storage; the bridge has no disk token cache. Keep dependencies locked
   and schema-aware formula search. Preserve every other tool/schema field and all result payloads;
   do not grow these exceptions into a catalog allowlist.
 - Cancellation has an uncertain remote outcome. Do not infer business cancellation or replay.
-- Keep root `plugin.json` authoritative. Keep `.plugin/plugin.json` and
-  `.claude-plugin/plugin.json` identical to its metadata without `$schema`.
+- Keep root `plugin.json` authoritative. Keep `.claude-plugin/plugin.json`
+  identical to its metadata without `$schema`.
   Keep root `mcp.json` on the matching schema with explicit `type: "stdio"` and the same
   launcher as `.mcp.json`. Both formats share `skills/` and `server/mcp.mjs`; do not merge
   or register both configurations. Recognized portable manifests take precedence; an

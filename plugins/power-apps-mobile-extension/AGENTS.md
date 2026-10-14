@@ -29,8 +29,8 @@ summary is necessary, keep it synchronized with the owning reference.
 
 - Do not add internal hosts, repository names, source paths, documents, environment identifiers,
   tenant identifiers, or organization-specific authentication instructions.
-- Keep root `plugin.json` authoritative and keep `.plugin/plugin.json` and
-  `.claude-plugin/plugin.json` byte-for-byte equivalent to its metadata without `$schema`.
+- Keep root `plugin.json` authoritative and keep `.claude-plugin/plugin.json`
+  byte-for-byte equivalent to its metadata without `$schema`.
 - Keep all skill links inside this plugin directory so marketplace installs remain portable.
 - Use placeholders such as `<env-url>`, `<publisher-prefix>`, and `contoso` in examples.
 - Keep skill frontmatter descriptions below the GitHub Copilot 1,024-character limit.

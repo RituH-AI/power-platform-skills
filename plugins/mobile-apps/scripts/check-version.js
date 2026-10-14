@@ -17,7 +17,6 @@ const REMOTE_PLUGIN_MANIFEST_URL =
   'https://raw.githubusercontent.com/microsoft/power-platform-skills/main/plugins/mobile-apps/plugin.json';
 const PLUGIN_MANIFEST_PATHS = [
   'plugin.json',
-  '.plugin/plugin.json',
   '.claude-plugin/plugin.json',
 ];
 const STABLE_SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;

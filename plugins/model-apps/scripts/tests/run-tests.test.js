@@ -203,7 +203,7 @@ test('the model-apps CI workflow runs the suite once with pinned TypeScript and 
   // the lexer with the wrong one. (A shallow clone, which is what CI has, does not have it; the job fetches it.)
   let release = null;
   try {
-    release = execFileSync('git', ['show', `${commit[1]}:plugins/model-apps/.plugin/plugin.json`], { cwd: path.dirname(WORKFLOW), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    release = execFileSync('git', ['show', `${commit[1]}:plugins/model-apps/plugin.json`], { cwd: path.dirname(WORKFLOW), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   } catch {
     release = null;
   }

@@ -70,7 +70,6 @@ function fixture(openRemote, legacyRemote) {
   writeJson(path.join(root, 'marketplace.json'), marketplace(openRemote));
   writeJson(path.join(root, '.claude-plugin', 'marketplace.json'), marketplace(legacyRemote));
   writeJson(path.join(root, 'plugins', 'local-plugin', 'plugin.json'), PORTABLE_MANIFEST);
-  writeJson(path.join(root, 'plugins', 'local-plugin', '.plugin', 'plugin.json'), LOCAL_MANIFEST);
   writeJson(path.join(root, 'plugins', 'local-plugin', '.claude-plugin', 'plugin.json'), LOCAL_MANIFEST);
   writeJson(path.join(root, 'plugins', 'local-plugin', '.mcp.json'), LEGACY_MCP);
   writeJson(
@@ -135,7 +134,7 @@ test('a missing or unsupported portable manifest is rejected', () => {
   assert.ok(validate(unsupportedSchema).some((error) => /unsupported or missing/.test(error)));
 });
 
-test('portable metadata must match both legacy manifests', () => {
+test('portable metadata must match the Claude Code manifest', () => {
   const root = fixture(OPEN_REMOTE, LEGACY_REMOTE);
   writeJson(path.join(root, 'plugins', 'local-plugin', 'plugin.json'), {
     ...PORTABLE_MANIFEST,

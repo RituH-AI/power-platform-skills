@@ -21,7 +21,6 @@ claude --plugin-dir /path/to/power-platform-skills/plugins/mobile-apps
 ```
 plugin.json                    ← Agent Plugins 1.0 metadata
 mcp.json                       ← Portable Microsoft Learn MCP config
-.plugin/plugin.json            ← Compatibility metadata mirror
 .claude-plugin/plugin.json     ← Claude Code metadata mirror
 .mcp.json                      ← Legacy MCP config
 AGENTS.md                      ← This file

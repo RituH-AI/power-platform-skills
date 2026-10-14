@@ -1689,7 +1689,7 @@ let cachedPluginVersion;
 function pluginVersion() {
   if (cachedPluginVersion !== undefined) return cachedPluginVersion;
   cachedPluginVersion = null;
-  for (const rel of [['..', '..', 'plugin.json'], ['..', '..', '.plugin', 'plugin.json'], ['..', '..', '.claude-plugin', 'plugin.json']]) {
+  for (const rel of [['..', '..', 'plugin.json'], ['..', '..', '.claude-plugin', 'plugin.json']]) {
     try {
       const manifest = JSON.parse(require('node:fs').readFileSync(path.join(__dirname, ...rel), 'utf8'));
       if (manifest && typeof manifest.version === 'string') { cachedPluginVersion = manifest.version; break; }

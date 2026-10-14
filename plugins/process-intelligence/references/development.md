@@ -6,8 +6,7 @@
 process-intelligence/
   plugin.json               # Agent Plugins 1.0.0 metadata
   mcp.json                  # Agent Plugins 1.0.0 stdio configuration
-  .plugin/plugin.json
-  .claude-plugin/plugin.json
+  .claude-plugin/plugin.json # Claude Code compatibility manifest
   .mcp.json
   AGENTS.md
   CLAUDE.md

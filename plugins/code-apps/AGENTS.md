@@ -18,7 +18,6 @@ claude --plugin-dir /path/to/plugins/power-apps
 
 ```
 plugin.json                       <- Agent Plugins 1.0 metadata
-.plugin/plugin.json               <- Compatibility metadata mirror
 .claude-plugin/plugin.json        <- Claude Code metadata mirror
 AGENTS.md                         <- Plugin guidance for AI agents (this file)
 agents/

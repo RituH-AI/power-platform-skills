@@ -291,7 +291,7 @@ test('plugin README introduces guided canvas apps and the admin feature', () => 
 });
 
 test('plugin metadata advertises guided canvas apps and the canvas-apps keyword', () => {
-  for (const file of ['plugin.json', '.plugin/plugin.json', '.claude-plugin/plugin.json']) {
+  for (const file of ['plugin.json', '.claude-plugin/plugin.json']) {
     const manifest = JSON.parse(readPluginFile(file));
     assert.match(manifest.description, /guided[^.\n]*canvas apps/i, `${file} must describe guided canvas support`);
     assert.ok(manifest.keywords.includes('canvas-apps'), `${file} must include the canvas-apps keyword`);

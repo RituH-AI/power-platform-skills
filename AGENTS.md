@@ -63,8 +63,6 @@ power-platform-skills/
 │   └── <plugin-name>/        # Individual plugin (e.g., power-pages)
 │       ├── plugin.json       # Agent Plugins 1.0 manifest
 │       ├── mcp.json          # Portable MCP configuration (optional)
-│       ├── .plugin/
-│       │   └── plugin.json   # Compatibility manifest
 │       ├── .claude-plugin/
 │       │   └── plugin.json   # Legacy manifest mirror
 │       ├── .mcp.json         # Legacy MCP configuration (optional)
@@ -122,7 +120,6 @@ Each plugin follows this structure:
 
 - `plugin.json` — canonical Agent Plugins 1.0.0 metadata with the published `$schema`
 - `mcp.json` — portable Agent Plugins MCP configuration with explicit transport types (optional)
-- `.plugin/plugin.json` — schema-free compatibility mirror of root `plugin.json`
 - `.claude-plugin/plugin.json` — legacy mirror kept for existing Claude Code subscriptions
 - `.mcp.json` — legacy MCP configuration kept when the plugin has MCP servers
 - `agents/` — Agent definitions (`.md` files with YAML frontmatter)
@@ -180,7 +177,7 @@ Current adopters: `power-pages`, `mobile-apps`, `model-apps`, and `pcf` (all tra
 ## Legacy Marketplace Compatibility
 
 Keep the root `.claude-plugin/marketplace.json` and each plugin's
-`.plugin/plugin.json` and `.claude-plugin/plugin.json` as compatibility mirrors.
+`.claude-plugin/plugin.json` as a compatibility mirror.
 The shared root marketplace must stay dual-compatible while keeping per-plugin
 entries minimal: each plugin entry should include only the required `name` and
 repository-root-relative `source` fields. Keep marketplace-level `owner` and
