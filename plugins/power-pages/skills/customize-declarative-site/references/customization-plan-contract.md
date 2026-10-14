@@ -249,6 +249,9 @@ Capabilities describe readiness observed in the downloaded files:
 
 `status` is `ready`, `blocked`, or `not-requested`. A blocked capability must name the missing
 prerequisite and a local remediation; it is not a permanent template limitation.
+`ownerSkill` selects the operation workflow defined in
+`${PLUGIN_ROOT}/references/design-studio-classic-site-authoring.md`.
+Component reference identifiers are not `Skill` tool names.
 
 ## Visual asset records
 
@@ -356,10 +359,13 @@ Rules:
 Rules:
 
 - `id` is unique kebab-case.
-- `skill` is one owning declarative authoring skill.
-- `action` uses the owning skill's terminology.
+- `skill` is one supported authoring operation identifier. `author-web-file`,
+  `author-content-snippet`, `author-web-template`, `author-page-template`, and `author-webpage`
+  execute the corresponding classic-authoring reference workflow in the coordinator.
+  Only `author-webpage-content` and `style-site` are skill invocations.
+- `action` uses the owning workflow's terminology.
 - Existing targets include stable IDs and exact paths when available.
-- New targets use names/routes and let the owning skill generate record IDs.
+- New targets use names/routes and let the owning workflow generate record IDs.
 - `locales` lists only affected languages.
 - `inputs` contains final visitor-facing values, files, URLs, and behavior.
 - `dependsOn` references operation IDs.
@@ -477,8 +483,9 @@ author-web-file creates /speaker-hero.jpg
   -> pass /speaker-hero.jpg to author-webpage-content
 ```
 
-Never predict UUIDs for new records. The owning skill generates them, and the orchestrator
-re-reads the result before invoking a dependent operation.
+Never predict UUIDs for new records. The owning workflow generates them, and the orchestrator
+re-reads the result before executing a dependent operation. Track each operation with the
+`resolve`, `start`, `complete`, `fail`, and `finish` receipt actions.
 
 ## Execution receipt
 

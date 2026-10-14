@@ -11,14 +11,12 @@ Apply this disclosure contract to:
 - the declarative route in `create-site`;
 - `customize-declarative-site`;
 - `style-site`;
-- `author-webpage`;
-- `author-webpage-content`;
-- `author-content-snippet`;
-- `author-web-file`;
-- `author-web-template`;
-- `author-page-template`.
+- `author-webpage-content`.
 
-Supporting page-element references are not separate entry points. Do not extend this disclosure
+Classic component authoring references and supporting page-element references are not separate
+entry points. The coordinator discloses preview status once for classic authoring;
+reading another reference does not create a covered-skill handoff.
+Do not extend this disclosure
 to code-site workflows or `deploy-site` unless declarative deployment is separately designated as
 preview.
 
@@ -72,8 +70,9 @@ prerequisite or environment discovery. For an ambiguous site-type request, also 
 > live website unless deployment is separately requested and approved. Keep the site under source
 > control and review proposed changes before applying them.
 
-Use this notice for direct invocation of the coordinator, styling skill, or any focused authoring
-skill, including sites created in Design Studio or downloaded independently with PAC CLI.
+Use this notice for direct invocation of `customize-declarative-site`, `style-site`, or
+`author-webpage-content`, including sites created in Design Studio or downloaded independently
+with PAC CLI.
 
 ## Creation-to-customization continuation
 

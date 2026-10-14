@@ -3,14 +3,14 @@ name: author-webpage-content
 description: >-
   Generates and fills the localized HTML body of an existing webpage in a PAC
   CLI-downloaded declarative Power Pages site from a resolved page-content
-  specification. Use whenever an orchestrator or author-webpage has already
-  created the webpage metadata and asks to compose, replace, append, or modify
+  specification. Use whenever a caller has resolved the existing webpage metadata
+  and asks to compose, replace, append, or modify
   the exact localized `.webpage.copy.html` file with Design Studio-compatible
   sections, columns, flex containers, text, images, buttons, videos, iframes,
   Generative AI Search components, basic forms, lists, multistep forms, or
   spacers. This skill owns
-  only HTML generation and the supplied target file; author-webpage owns all
-  webpage discovery, records, metadata, languages, routes, templates,
+  only HTML generation and the supplied target file; the coordinator's webpage
+  reference workflow owns discovery, records, metadata, languages, routes, templates,
   navigation, and companion-file creation. Do not use for React, Angular, Vue,
   or Astro code sites.
 user-invocable: true
@@ -106,9 +106,11 @@ This skill does not create or modify:
 - another locale unless the request supplies a separately resolved composition
   for that locale.
 
-`author-webpage` or the calling orchestrator must create the file and resolve
-its webpage and locale identity before invoking this skill. This skill does not
-search for or select a webpage record.
+The calling orchestrator must create or confirm the file and resolve its webpage and locale
+identity before invoking this skill. `customize-declarative-site` uses
+`${PLUGIN_ROOT}/skills/classic-site-skills/author-webpage/references/design-studio-webpage-authoring.md`
+for that metadata workflow.
+This skill does not search for or select a webpage record.
 
 If the target file or any required content, URL, snippet name, or other rendered
 value is unresolved, stop before writing and return the exact missing input.

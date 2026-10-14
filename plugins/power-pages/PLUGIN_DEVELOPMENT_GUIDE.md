@@ -52,7 +52,7 @@ When a skill deploys a site or audits permissions across many tables, the termin
 
 ### The Solution
 
-Every skill must implement **task-based progress tracking** using `TaskCreate` and `TaskUpdate`. Tasks are created upfront at Phase 1, one per phase, and marked `in_progress` / `completed` as the skill progresses. **Local styling exception:** `style-site` shows **Inspect/propose → Approve → Apply → Independently verify → Report** status without mandatory task-tool calls; expanded work may use tasks when useful. Do not add seven task creates/updates to routine CSS changes.
+Every skill must implement **task-based progress tracking** using `TaskCreate` and `TaskUpdate`. Tasks are created upfront at Phase 1, one per phase, and marked `in_progress` / `completed` as the skill progresses. **Local exceptions:** `style-site` shows **Inspect/propose → Approve → Apply → Independently verify → Report**; `customize-declarative-site` shows **Inspect → Author → Independently verify → Report** for individual page or component edits. Neither local route requires phase-task calls, broad plan artifacts, or deployment prompts. Expanded work may use tasks when useful; coordinated customization uses seven phase tasks.
 
 ### Implementation Pattern
 
@@ -83,7 +83,7 @@ For skills that process multiple entities (e.g., audit-permissions auditing many
 | `/audit-permissions` | 7 phases (prereqs → discover → analyze → audit → cross-check → report → present) | Per-table tasks in Phase 4 (checklist A-K) |
 | `/create-site` | 8 phases (prereqs → gather → plan → scaffold → implement → validate → deploy → summarize) | None |
 
-> **Acceptance criterion:** Every skill except the documented `style-site` local workflow must create all phase tasks upfront at Phase 1 start. Each task must have `subject`, `activeForm`, and `description`. Tasks must be marked `in_progress` when starting and `completed` when done. `style-site` must expose equivalent visible status, not mandatory task bookkeeping.
+> **Acceptance criterion:** Every skill must create all phase tasks upfront at Phase 1 start, except when following the documented local workflows for `style-site` or individual page or component edits in `customize-declarative-site`. Each task must have `subject`, `activeForm`, and `description`. Tasks must be marked `in_progress` when starting and `completed` when done. The local exceptions must expose equivalent visible status, not mandatory task bookkeeping.
 
 ---
 
@@ -121,6 +121,12 @@ After implementation, always run a standalone verification phase that:
 > **Acceptance criterion:** No skill that creates, modifies, or deletes files may ship without a dedicated verification phase. Verification must use a different code path than creation (e.g., run validators, glob for files, build the project — don't just trust the write succeeded).
 
 For `style-site`, keep the **independent verification step** even though its coordinator invokes the separate validator in the apply command. Require that result and independently re-read changed files/diffs, including reconstructed inline/class markup. Report desktop/mobile rendering, effective computed values, accessibility and Studio save/reopen as pending separately authorized live checks. Do not generate HTML previews, start a server, require browser review or deploy to manufacture evidence. Static validation and supplied-color math do not establish runtime behavior or Studio editability.
+
+For individual page or component edits, independently re-read records, callers, identities and locale scope,
+complete every affected component reference's verification checklist, and review the final diff.
+Handle version checks, preview disclosure, and usage recording in the entry skill. Use the
+coordinated workflow for additional approval or a resumable execution. These local edits
+do not create plan artifacts, Git commits, or live-rendering evidence.
 
 ---
 

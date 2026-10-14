@@ -11,6 +11,34 @@ Power Pages renders through a web template or a supported ASP.NET rewrite target
 content table the layout supports, and whether the website header and footer wrap the
 rendered output.
 
+Authoring callers first follow [shared routing and execution](../../../../references/design-studio-classic-site-authoring.md). Distinguish a
+metadata-only create/edit/rename/rebind/type migration from an end-to-end custom layout,
+requested webpage assignment, or deletion. This workflow owns the complete custom-layout
+sequence; execute [web templates](../../author-web-template/references/design-studio-web-template-authoring.md)
+for new source and re-read its verified
+metadata before binding. A task limited to changing a webpage to an existing page template
+uses [webpages](../../author-webpage/references/design-studio-webpage-authoring.md) instead.
+
+For an approved new-site handoff, carry `designContext` and the resolved custom composition
+into source authoring. Reuse metadata only when its rendering source can deliver that layout;
+table compatibility alone does not justify retaining the starter design. Forms, lists and
+snippets are reusable components, not consent to copy their surrounding page shell.
+Keep identities and safe binding reuse; do not create new records merely for visual novelty.
+Stop on ambiguous rendering targets or reuse/rebind/default/response-boundary changes whose
+effect on dependent webpages cannot be established.
+
+## Contents
+
+- [Create and end-to-end layout](#page-template-creation-workflow)
+- [PAC files and naming](#pac-download-structure)
+- [Rendering types and fields](#rendering-types)
+- [Web-template binding](#web-template-binding)
+- [Header/footer and defaults](#website-header-and-footer-behavior)
+- [Requested webpage assignments](#assigning-a-page-template-to-webpages)
+- [Modify, rebind, or migrate](#modifying-an-existing-page-template)
+- [Delete](#deletion-rules)
+- [Verify](#verification-checklist) and [prohibited shortcuts](#prohibited-shortcuts)
+
 ## Page template creation workflow
 
 Create a page template in this order:
@@ -366,6 +394,10 @@ After creating or modifying a page template:
 14. If the web-template binding changed, confirm the new source's dependencies and
     editable regions are valid.
 15. Review the final diff for unrelated page-template, webpage, or web-template changes.
+
+Report changed files, the page-template name and stable ID, rendering type and target,
+header/footer and default behavior, and affected webpages/locales. State that the changes
+are local and were not uploaded or deployed.
 
 ## Microsoft documentation
 

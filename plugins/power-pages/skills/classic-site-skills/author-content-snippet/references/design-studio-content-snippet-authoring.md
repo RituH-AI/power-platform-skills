@@ -14,6 +14,34 @@ HTML, Liquid, or a combination of HTML and Liquid. They are appropriate for
 maker-managed content such as labels, messages, logos, headings, and shared header or
 footer regions.
 
+Authoring callers first follow [shared routing and execution](../../../../references/design-studio-classic-site-authoring.md). Classify record/value
+creation, localized edits, translations, logical/display-name changes, Text/HTML conversion,
+Liquid changes, neutral/localized scope migration, caller migration, or deletion.
+Resolve targets by logical name, language scope, and `adx_contentsnippetid`, not directory name.
+Infer Text/HTML or language-neutral scope only when the value, caller context, and site
+conventions clearly establish it. Do not expand a one-language edit or invent translations.
+
+This workflow owns metadata/value files, language variants, and exact name-based caller
+migrations. Creating a snippet does not create caller markup. For a small exact lookup change,
+follow [webpages](../../author-webpage/references/design-studio-webpage-authoring.md)
+or [web templates](../../author-web-template/references/design-studio-web-template-authoring.md); broader page/template
+composition uses that reference workflow instead. Re-read callers before verification.
+Stop on duplicate active-record ambiguity, missing requested translated values, unresolved
+scope/type/deletion effects, or unknown data permissions/output trust.
+
+## Contents
+
+- [Create and localize](#content-snippet-creation-workflow)
+- [PAC files and language mapping](#pac-download-structure)
+- [Names, collisions, and metadata](#naming-convention)
+- [Values and Text/HTML](#value-file)
+- [Liquid rendering](#rendering-snippets-with-liquid)
+- [Output safety and data access](#output-context-safety)
+- [Caching and duplicate names](#header-and-footer-caching)
+- [Modify, rename, or convert](#modifying-an-existing-content-snippet)
+- [Add a translation](#adding-a-translation) or [delete](#deletion-rules)
+- [Verify](#verification-checklist) and [prohibited shortcuts](#prohibited-shortcuts)
+
 ## Content snippet creation workflow
 
 Create a content snippet in this order:
@@ -663,6 +691,11 @@ After creating or modifying a content snippet:
 21. Confirm every renamed or deleted lookup was migrated in all callers and record
     scopes.
 22. Review the final diff for unrelated snippet, translation, template, or page changes.
+
+Apply caller-reference verification for every changed webpage or web template. Report changed
+files, logical name, Text/HTML type, stable IDs, localized/neutral scope, affected languages,
+trusted Liquid behavior, migrated callers, and any intentionally preserved legacy or missing
+translation behavior.
 
 ## Microsoft documentation
 

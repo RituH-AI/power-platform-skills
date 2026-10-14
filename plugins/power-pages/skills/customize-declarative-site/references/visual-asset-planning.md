@@ -7,7 +7,7 @@ favicons, icons, illustrations, patterns, fonts, or other visual assets.
 
 During site creation, use **direct HTTPS URLs for added images**, recorded as
 `newSiteDesign.imageDelivery: "external-url"`. Do not download/stage images, create image Web Files
-or attachment metadata, or invoke `author-web-file` for these additions. Reuse suitable existing
+or attachment metadata, or execute an `author-web-file` operation for these additions. Reuse suitable existing
 template images without reimporting them. Existing-site customization and explicit file imports
 retain the Web File path below; this policy does not remove Web Files for CSS, fonts or documents.
 
@@ -58,8 +58,8 @@ fall back to unchecked HTML.
 Successful checks are stored in `plan.html.image-checks.json`, bound to the complete plan hash
 and exact URLs, and displayed in the review. If the approved review included checks, publish with
 `--imageChecks` pointing to that report; otherwise omit the argument. Supplied reports must
-validate and are preserved in `current-execution.json`; `--action resolve` passes them to child
-skills without more requests. Missing, stale or failed supplied reports never silently become
+validate and are preserved in `current-execution.json`; `--action resolve` supplies them
+to the executing workflow without more requests. Missing, stale or failed supplied reports never silently become
 unchecked publication. Reuse valid evidence within that approved run. A revised plan requires
 fresh review and approval, with fresh checks only when requested. The timestamps describe
 observed availability, not a promise that remote content cannot change. Receipts without reports,
@@ -265,8 +265,10 @@ External images require no import: consumers use their approved static HTTPS URL
 Verify that actual image references, after HTML attribute decoding, match that URL and that no
 download/cache/Web File was created. Do not treat a remote asset as a byte-hashed local artifact.
 
-For Web File delivery, create/import operations belong to `author-web-file`. Their consumers
-depend on the import and bind the verified `publicUrl`; never guess a future Web File URL.
+For Web File delivery, create/import operations use the `author-web-file` reference workflow
+from `${PLUGIN_ROOT}/skills/classic-site-skills/author-web-file/references/design-studio-web-file-authoring.md`.
+Their consumers depend on
+the import and bind the verified `publicUrl`; never guess a future Web File URL.
 
 For Web File assets, after execution verify:
 

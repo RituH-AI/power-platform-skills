@@ -10,6 +10,37 @@ Liquid, text, or another text-based response format. Web templates can serve as 
 fragments, inherited layouts, complete page layouts, or the site's global header and
 footer.
 
+Authoring callers first follow [shared routing and execution](../../../../references/design-studio-classic-site-authoring.md). Classify the request
+as create, source edit, rename, refactor, rebind, or delete, and resolve existing records by
+both `adx_name` and `adx_webtemplateid`, not directory name alone.
+
+Default to a reusable fragment for shared markup/logic, a page-layout source for webpage
+rendering, a base layout only when derived layouts need stable overridable blocks, and a
+derived layout only when an existing base supplies those blocks. Preserve website header/footer
+bindings unless an explicit global rebind is in scope. A source-only request does not create
+page-template metadata. For end-to-end layout or page-template rebinding, execute
+[page templates](../../author-page-template/references/design-studio-page-template-authoring.md)
+and inventory all dependent root/localized webpages.
+
+For an approved new-site layout operation, implement the custom composition in `designContext`
+and the resolved inputs, not the creation template's arrangement. Reuse required native forms,
+lists, snippets and Liquid dependencies while preserving their bindings, editable regions and
+runtime behavior. Apply explicit header/footer source scope without dropping
+authentication/navigation branches or changing the website binding implicitly.
+Remove unneeded starter sections and component placements only when their removal and
+dependencies are accounted for; do not delete backing records or unrelated callers.
+
+## Contents
+
+- [Create and serialize](#web-template-creation-workflow)
+- [End-to-end custom layout](#end-to-end-custom-page-layout)
+- [Composition and Liquid](#composition-patterns)
+- [Dependencies](#dependency-types)
+- [Page-layout and global bindings](#using-a-web-template-as-a-page-layout)
+- [Modify or rename](#modifying-an-existing-web-template)
+- [Delete](#deletion-rules)
+- [Verify](#verification-checklist) and [prohibited shortcuts](#prohibited-shortcuts)
+
 ## Web template creation workflow
 
 Create a web template in this order:
@@ -438,6 +469,10 @@ After creating or modifying a web template:
 15. Confirm request- or user-specific header/footer output uses a narrowly scoped
     substitution block when caching can apply.
 16. Review the final diff for unrelated source, metadata, or binding changes.
+
+Report changed files, the template name and stable ID, its composition role, migrated callers
+or bindings, and intentionally preserved legacy behavior. State that the changes are local
+and were not uploaded or deployed.
 
 ## Microsoft documentation
 

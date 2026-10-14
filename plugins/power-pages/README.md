@@ -43,7 +43,7 @@ This keeps hook behavior in one place and avoids relying on skill-frontmatter ho
 
 ## Skills
 
-The plugin provides 43 skills that cover the full lifecycle of a Power Pages site — scaffolding, deployment, declarative-site customization, classic-site authoring and styling, data modeling, backend integration, authentication, ALM and CI/CD, security review, testing, auditing, and platform migrations. Each skill is invoked conversationally — just describe what you want to do.
+The plugin provides 38 skills that cover the full lifecycle of a Power Pages site — scaffolding, deployment, declarative-site customization, classic-site authoring and styling, data modeling, backend integration, authentication, ALM and CI/CD, security review, testing, auditing, and platform migrations. Each skill is invoked conversationally — just describe what you want to do.
 
 The `/practice-site-check` and `/add-button` descriptions below are retained for reference, but these skills are not bundled with the plugin and are excluded from this count.
 
@@ -95,15 +95,17 @@ Routes by project type and deploys either a code site or a PAC-downloaded declar
 
 > "Turn this downloaded Event Portal into our developer conference site"
 
-Plans and coordinates broad local customization of an existing PAC-downloaded declarative site,
+Authors pages and components and coordinates broader local customization of a PAC-downloaded declarative site,
 whether it was provisioned by `/create-site` or created manually in Design Studio.
 
-- Keeps one current approved JSON/HTML plan plus a resumable execution receipt under
+- Individual page or component edits load only the relevant references, then inspect, author, independently
+  verify, and report
+- Broad and new-site customization keeps one current approved JSON/HTML plan plus a resumable execution receipt under
   `docs/customize-declarative-site/`, and archives earlier approved runs in timestamped history
 - Derives a safe content outline and supported section/column/element composition before asking
   one compact set of questions for genuinely missing business facts
-- Coordinates assets, snippets, Liquid/web templates, page layouts, webpages, localized content,
-  and styling through their owning skills
+- Executes and coordinates asset, snippet, Liquid/web-template, page-layout, and webpage authoring through component
+  references, invoking separate skills only for localized body composition and guarded styling
 - Reuses the same visual-quality guidance as code-site creation, adapted to native Bootstrap and
   Design Studio authoring rather than SPA theme replacement
 - New-site plans include an approved design brief and meaningful photographs or original
@@ -122,8 +124,9 @@ whether it was provisioned by `/create-site` or created manually in Design Studi
   responsive styling retain their intended geometry and disclose unverified Studio editing behavior
 - Preserves platform behavior and explicit visual preferences, resolves dependencies before
   consumers run, and applies guarded styling after structural authoring
-- Verifies and commits the combined local result, then optionally hands off to `/deploy-site`
-- Leaves narrow changes directly available through the individual authoring skills
+- Verifies the combined coordinated result, honors user commit restrictions, and optionally
+  hands off to `/deploy-site` through separate approval
+- Preserves existing approved-plan operation identifiers and resumable receipts
 
 #### `/activate-site`
 
@@ -154,44 +157,28 @@ Provides a small, read-only example for learning skill development. It recognize
 
 ### Classic site authoring
 
-These skills edit local PAC CLI-downloaded declarative Power Pages sites. They do not
-apply to React, Angular, Vue, or Astro code sites.
+Use `/customize-declarative-site` to customize local PAC CLI-downloaded declarative
+Power Pages sites. The following capabilities are reference workflows, not separate slash commands,
+and do not apply to React, Angular, Vue, or Astro code sites.
 
-#### `/author-webpage`
+| Capability | Reference |
+|---|---|
+| Root/localized webpages, routes, parents, template assignments, content shells, and navigation | [Webpages](skills/classic-site-skills/author-webpage/references/design-studio-webpage-authoring.md) |
+| Localized/neutral snippets, translations, Text/HTML values, Liquid, and exact caller migrations | [Content snippets](skills/classic-site-skills/author-content-snippet/references/design-studio-content-snippet-authoring.md) |
+| Site-served images, CSS, JavaScript, fonts, documents, and adjacent PAC metadata | [Web files](skills/classic-site-skills/author-web-file/references/design-studio-web-file-authoring.md) |
+| Liquid/HTML fragments, inherited layouts, and explicitly requested callers or bindings | [Web templates](skills/classic-site-skills/author-web-template/references/design-studio-web-template-authoring.md) |
+| Page-template metadata, web-template-backed layouts, rewrite templates, and requested page assignments | [Page templates](skills/classic-site-skills/author-page-template/references/design-studio-page-template-authoring.md) |
 
-Creates or modifies root and localized webpage records, routes, parent relationships,
-page-template assignments, localized content shells, and requested navigation links.
+The [shared authoring contract](references/design-studio-classic-site-authoring.md) owns routing,
+autonomy, dependency loading, local-only boundaries, and final verification. New pages update
+navigation by default unless you explicitly ask not to. Coordinated asset planning retains provenance, placement,
+accessibility, secure explicit Web File imports, and direct HTTPS imagery for new-site design.
 
 #### `/author-webpage-content`
 
 Composes or modifies one localized `.webpage.copy.html` file from a resolved page design,
 using Design Studio-compatible sections, columns, text, images, buttons, videos, iframes,
 Generative AI Search components, Flex Containers, and spacers.
-
-#### `/author-content-snippet`
-
-Creates or modifies localized and language-neutral content snippets, translations,
-Text/HTML values, Liquid usage, and required caller migrations.
-
-#### `/author-web-file`
-
-Creates or modifies images, CSS, JavaScript, fonts, documents, and other site-served
-assets together with their PAC metadata.
-
-Broad declarative customization can also plan visual assets before invoking this skill. It reuses
-existing or user-provided assets, can author safe original SVGs, and can curate Unsplash
-photography that is validated and imported as a local Web File. The approved customization plan
-shows asset purpose, placement, source, crop intent, and accessibility before page composition.
-
-#### `/author-web-template`
-
-Creates or modifies reusable Liquid/HTML templates, inherited layouts, fragments, and
-explicitly requested callers or bindings.
-
-#### `/author-page-template`
-
-Creates or modifies page-template metadata, web-template-backed page layouts, rewrite
-templates, and explicitly requested webpage assignments.
 
 ### Data modeling
 

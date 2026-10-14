@@ -58,7 +58,8 @@ content imagery unless explicitly declined. Existing-site plans remain preservat
 backward-compatible. New creation sets `newSiteDesign.imageDelivery: "external-url"` and passes
 approved HTTPS image URLs directly to native content owners, without image downloads, staging,
 Web File imports or fake output bindings. Reuse template images only when they fit the approved design. Explicit
-file delivery outside that route still reuses `prepare-declarative-asset.js` and `author-web-file`.
+file delivery outside that route uses `prepare-declarative-asset.js` and the
+web-file authoring reference.
 Keep final `style-site` guards and the plan's visual context hash-bound and visible in approval
 HTML. Review external-host availability, license, privacy and CSP; do not silently relax policies.
 Align external Unsplash sourcing with SPA's WebSearch-to-CDN flow: no mandatory photo-page fetch
@@ -99,6 +100,30 @@ Classic section recipes are defaults, not an exhaustive layout catalogue. Resolv
 reference, retaining native boundaries and explicit Studio-editing-unverified warnings.
 Do not add a live-check gate or imply that a valid grid proves Studio control mapping.
 Keep this extension in the classic authoring path; SPA/shared design references stay unchanged.
+
+## Classic component authoring
+
+`customize-declarative-site` authors pages and components and coordinates broader site customization.
+Coordinated work uses seven phases and explicit approval gates. Individual page or component edits follow
+`references/design-studio-classic-site-authoring.md` and only relevant component references.
+Component instructions live in `design-studio-*-authoring.md` files under
+`skills/classic-site-skills/<component>/references/`.
+
+Use the shared authoring reference's dispatch table to select component workflows.
+Identifiers in that table select references, not `Skill` invocations. Preserve approved
+`operation.skill`, `ownerSkill`, hashes, receipts, and actual output bindings.
+`author-webpage-content` owns localized body HTML; `style-site` owns guarded styling.
+Reference workflows own PAC serialization, stable identities, locale/dependency scope, and
+verification; callers must not duplicate those rules.
+
+New pages update navigation by default unless the user explicitly asks not to.
+Resolve placement before writing and include it in new customization plans; preserve approved execution scope.
+
+Individual page or component edits show **Inspect → Author → Independently verify → Report** without mandatory
+phase tasks, plan HTML/receipts, Git initialization, commits, or deployment prompts.
+Additional unresolved approval needs and current approved executions use the coordinated route.
+Preview/version handling and
+usage tracking belong to the entry skill, not reference reads. Preserve existing tracking records.
 
 ## Classic styling — local-only exception
 
@@ -318,14 +343,14 @@ User-invocable via `/power-pages:<skill-name>`:
 - `customize-declarative-site`: Declarative-only orchestrator for broad customization of PAC
   downloads created by `create-site` or manually in Design Studio. Keeps one canonical approved
   JSON/HTML plan plus `current-execution.json` under `docs/customize-declarative-site/`, archives
-  its predecessor in timestamped history, resolves typed cross-skill output bindings, and resumes
+  its predecessor in timestamped history, resolves typed cross-operation output bindings, and resumes
   pending work without mutating the approved plan. It derives safe content and supported
   `section -> columns -> elements` structures, represents card-like layouts with columns rather
   than an unsupported native card type. New-site imagery uses approved external HTTPS URLs with
   optional source checks and explicit unverified status when unchecked; exact-plan reports remain
   validated when supplied. Explicit file delivery outside
-  that route retains secure staging and verified Web File bindings. It invokes the owning classic authoring
-  skills, runs
+  that route uses secure staging and verified Web File bindings. It follows the component
+  authoring references, invokes `author-webpage-content`, and runs
   `style-site` last when requested, verifies the combined local diff, commits coherent changes,
   and optionally hands off to `deploy-site`.
 - `deploy-site`: Routes by project type. Code sites retain the 6-step build,
@@ -552,11 +577,11 @@ All skills in this plugin follow a consistent set of patterns. When creating a n
 
 ### Phase-Wise Workflow
 
-Every skill is a sequence of phases (typically 5-8): Prerequisites, Discover/Gather, Plan/Review, Implement, **Verify** (mandatory standalone phase), Deploy/Summarize. Never skip or reorder phases. `style-site` uses the compact local-only sequence above, with dedicated independent verification retained.
+Every skill is a sequence of phases (typically 5-8): Prerequisites, Discover/Gather, Plan/Review, Implement, **Verify** (mandatory standalone phase), Deploy/Summarize. Never skip or reorder phases. `style-site` and the individual page or component workflow in `customize-declarative-site` use their compact local-only sequences above, with dedicated independent verification. Coordinated customization uses seven phases.
 
 ### Task Tracking
 
-Create all tasks upfront at Phase 1 start using `TaskCreate` (one per phase). Each task needs `subject` (imperative), `activeForm` (present continuous for spinner), and `description`. Mark `in_progress` when starting, `completed` when done. Include a progress tracking table at the end of the SKILL.md. **Exception:** `style-site` uses visible workflow status without mandatory task-tool calls or a phase-task table; expanded work may use tasks when useful.
+Create all tasks upfront at Phase 1 start using `TaskCreate` (one per phase). Each task needs `subject` (imperative), `activeForm` (present continuous for spinner), and `description`. Mark `in_progress` when starting, `completed` when done. Include a progress tracking table at the end of the SKILL.md. **Exceptions:** `style-site` and the individual page or component workflow in `customize-declarative-site` use visible workflow status without mandatory task-tool calls or a phase-task table; expanded work may use tasks when useful.
 
 ### SKILL.md Frontmatter
 
@@ -593,7 +618,7 @@ For `style-site`, retain the same script and notice but check only once per inst
 - **Lifecycle hooks** — Hook registration is centralized in `hooks/hooks.json`; `scripts/lib/powerpages-hook-utils.js` derives tracked skills from `skills/*/SKILL.md` and discovers optional `scripts/validate*.js` validators. Do not define hook registration in individual `SKILL.md` files.
 - **Graceful failure** — Track API call results, never auto-rollback, report failures clearly, continue with remaining items.
 - **Token refresh** — Refresh Azure CLI token every ~20 records / 3-4 tables / ~60 seconds.
-- **Git commits** — Commit after every significant milestone (each page/component, design foundations, phase completion).
+- **Git commits** — Commit after every significant milestone (each page/component, design foundations, phase completion), respecting user restrictions.
 - **Agent spawning** — Process sequentially (not parallel), wait for completion, present output for approval.
 - **Skill tracking** — Every skill must record usage in its final phase via `> Reference: ${PLUGIN_ROOT}/references/skill-tracking-reference.md` (pointer pattern, not hardcoded command). When adding a new skill, also add its entry to the skill name mapping table in `references/skill-tracking-reference.md`.
 - **Shell-agnostic docs** — SKILL.md, agent, and reference files must not embed shell-specific syntax inside shell commands or code blocks. Use ` ```bash ` fences (or plain ` ``` `) only for cross-platform commands like `pac`, `az`, `dotnet`, and `node`. Do not use PowerShell cmdlets (`Get-ChildItem`, `Test-Path`, `New-Item`, `Get-Content`, `Remove-Item`, `ConvertFrom-Json`, `Invoke-RestMethod`, etc.) or PowerShell-only variable syntax inside shell commands/code blocks (e.g., `$var = command`, `$env:...`) — prefer `<placeholder>` angle-bracket style there (e.g., `<envUrl>`). Repo runtime placeholders used in prose/templates (such as `**Initial request:** $ARGUMENTS`) are allowed. For filesystem and JSON operations the agent already has first-class tools (`Glob`, `Read`, `Write`, `Edit`) — describe the intent in prose rather than prescribing a shell command.

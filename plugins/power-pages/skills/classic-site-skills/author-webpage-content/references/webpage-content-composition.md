@@ -67,13 +67,14 @@ Visitor-facing body content belongs in the selected localized file:
 web-pages/<page-directory>/content-pages/<Page>.<locale>.webpage.copy.html
 ```
 
-The calling `author-webpage` workflow owns the corresponding root/localized metadata and
+The calling coordinator's [webpage reference workflow](../../author-webpage/references/design-studio-webpage-authoring.md)
+owns the corresponding root/localized metadata and
 must create the target file before composition. This workflow does not inspect, create,
 or repair webpage YAML. The root-level copy file is not an interchangeable target.
 
 Compose only HTML in this workflow. Page metadata, summaries, custom CSS, custom
-JavaScript, navigation, assets, snippets, and templates remain owned by their respective
-authoring skills.
+JavaScript, navigation, assets, snippets, and templates are owned by their respective
+authoring workflows.
 
 ## Composition model
 
@@ -168,7 +169,8 @@ Use this workflow for `create` and `replace`:
    as a new element type or wrap it in a text component. Confirm the whole block is safe in its
    destination, including dependent scripts, IDs and Liquid scope. If not established, stop
    and return the dependency to the caller/native owner rather than retaining the whole layout
-   or dropping the component. Shared/rendering-template changes belong to `author-web-template`.
+   or dropping the component. Shared/rendering-template changes return to the coordinator's
+   [web-template reference workflow](../../author-web-template/references/design-studio-web-template-authoring.md).
 5. Load the section-layout reference and every component-specific reference needed by
    the plan.
 6. Generate new elements using their final resolved values and place verified reused source at

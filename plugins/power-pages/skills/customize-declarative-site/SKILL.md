@@ -1,16 +1,14 @@
 ---
 name: customize-declarative-site
 description: >-
-  Plans and coordinates broad customization of a newly created or existing PAC CLI-downloaded traditional
-  Power Pages site, including Enhanced data model sites created from Microsoft templates and
-  sites created manually in Design Studio. Use for multi-part requests that combine pages,
-  localized content, navigation, assets, snippets, Liquid/web templates, page layouts, or
-  styling. Produces an approved browser-viewable plan, invokes the specialized declarative
-  authoring skills in dependency order, verifies the combined local result, and optionally
-  hands off to deployment. For one narrow component change, use the owning authoring skill
-  directly. Not for React, Angular, Vue, or Astro SPA sites.
+  Plans, coordinates and customizes PAC CLI-downloaded traditional Power Pages sites, including Enhanced data model
+  sites created from Microsoft templates or manually in Design Studio. Use for
+  requests involving pages, localized content, navigation, assets, snippets,
+  Liquid/web templates, page layouts, or styling. Coordinated work produces an approved
+  browser-viewable plan, executes changes in dependency order, verifies the local result,
+  and optionally hands off to deployment. Not for React, Angular, Vue, or Astro SPA sites.
 user-invocable: true
-allowed-tools: Read, Write, Grep, Glob, Bash, WebSearch, AskUserQuestion, Skill, TaskCreate, TaskUpdate, TaskList
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash, WebSearch, AskUserQuestion, Skill, TaskCreate, TaskUpdate, TaskList
 model: opus
 ---
 
@@ -18,7 +16,7 @@ model: opus
 
 # Customize a Traditional Power Pages Site
 
-Coordinate a coherent local customization across the specialized declarative authoring skills.
+Coordinate local customization using the component authoring references.
 Do not duplicate their PAC metadata, identity, serialization, or validation rules.
 
 **Initial request:** $ARGUMENTS
@@ -35,6 +33,13 @@ approval. Include `previewNoticeShown: true` and
 Read:
 
 - `${PLUGIN_ROOT}/references/design-studio-site-discovery.md`
+- `${PLUGIN_ROOT}/references/design-studio-classic-site-authoring.md`
+
+Apply **Request routing** before creating coordination tasks or starting the phases below.
+For an individual page or component request, follow the shared authoring reference and
+finish after its verification/report.
+For coordinated work, also read:
+
 - `${PLUGIN_ROOT}/references/site-design-quality.md`
 - `${PLUGIN_ROOT}/skills/customize-declarative-site/references/customization-plan-contract.md`
 - `${PLUGIN_ROOT}/skills/customize-declarative-site/references/content-and-page-compositions.md`
@@ -46,25 +51,27 @@ For new-site design or requested styling, also read:
 
 ## Ownership
 
-This skill owns:
+For coordinated work, this skill owns:
 
 - selecting one downloaded declarative site;
 - understanding the complete customization intent;
-- resolving cross-skill dependencies;
+- resolving cross-operation dependencies;
 - generating and obtaining approval for one customization plan;
-- invoking the owning skills in dependency order;
+- executing component workflows in dependency order;
 - independently checking the combined local result;
 - committing coherent customization units;
 - offering deployment after local verification.
 
-It does not directly author webpage, snippet, web-file, web-template, page-template, or styling
-records when an owning skill exists. It does not upload, activate, or modify Dataverse directly.
+It authors webpage, snippet, web-file, web-template, and page-template records only through
+`${PLUGIN_ROOT}/references/design-studio-classic-site-authoring.md` and the selected component reference.
+The `author-webpage-content` skill owns localized body HTML; `style-site` owns guarded styling.
+It does not upload, activate, or modify Dataverse directly.
 No dev server, live preview, or generated styling mockup is required. The HTML below is an
 approval document, not a rendering of the site; local checks cannot prove Studio/runtime appearance.
 
 ## Progress tracking
 
-Create these tasks before starting:
+For coordinated work, create these tasks before starting:
 
 | Task subject | Active form | Description |
 |---|---|---|
@@ -72,7 +79,7 @@ Create these tasks before starting:
 | Gather customization intent | Gathering customization intent | Resolve pages, content, assets, languages, preservation, and visual direction |
 | Prepare customization plan | Preparing customization plan | Build persistent JSON and browser-viewable HTML plan artifacts |
 | Approve customization plan | Reviewing customization plan | Review and approve the complete coordinated local plan |
-| Execute customization | Customizing traditional site | Invoke owning authoring skills in dependency order |
+| Execute customization | Customizing traditional site | Author components, compose content, and apply styling in dependency order |
 | Verify customization | Verifying customization | Validate component results, combined references, diff, and Git state |
 | Complete customization | Completing customization | Commit coherent changes, report local/live state, and offer deployment |
 
@@ -113,18 +120,21 @@ Create these tasks before starting:
 
 Use the smallest route that fully satisfies the request:
 
-- one narrow component change: invoke the owning authoring skill directly;
-- one straightforward page: use the lightweight path, normally `author-webpage` with one resolved
-  page-content composition;
+- one narrow component change: execute the corresponding reference workflow through
+  `${PLUGIN_ROOT}/references/design-studio-classic-site-authoring.md`;
+- one straightforward page: use the lightweight webpage-reference workflow with one resolved
+  `author-webpage-content` composition;
 - multiple pages or cross-component dependencies: use the complete orchestration below;
 - explicit new-site design handoff: use the complete orchestration, even for a one-page site,
   so visual direction, image delivery, structure, and final styling remain coordinated;
 - an unambiguous continuation of creating a new site: use that same new-site route even if the
   caller omitted the literal `creationIntent` field. Establish it from the request/session intent,
   not a file timestamp or the mere presence of template metadata;
+- a current approved execution to resume or additional approval needed by a component operation:
+  use the complete orchestration and its existing gates before writing;
 - SPA/code site: stop and explain that this skill is declarative-only.
 
-Do not generate a broad plan or invoke every owner merely because they are available.
+Do not generate a broad plan or execute every owner merely because they are available.
 
 ## Phase 2: Gather customization intent
 
@@ -247,9 +257,14 @@ modifying Dataverse.
    `scripts/prepare-declarative-asset.js`. Keep approved bytes in the project-local ignored asset
    cache and record the returned hash, MIME type, dimensions, filename, and cache path. Do not
    write staged bytes directly into the declarative site.
-2. Divide the request into the smallest coherent operations owned by:
+2. Divide the request into the smallest coherent operations identified by:
    `author-web-file`, `author-content-snippet`, `author-web-template`,
    `author-page-template`, `author-webpage`, `author-webpage-content`, and `style-site`.
+   Use the classic-authoring index's dispatch for component reference workflows.
+   Invoke `author-webpage-content` and `style-site` through the `Skill` tool.
+   New pages update navigation by default unless the user explicitly asks not to. Resolve
+   placement through the webpage reference and include it or the explicit opt-out in the
+   page operation's existing inputs and summary before approval.
    For new-site design, map the proposed layout to actual native composition operations on Home
    and the primary journey. Include web-template/page-template or shared-shell work when that
    source owns the layout; reusing a form/list/snippet does not require retaining its whole page.
@@ -317,7 +332,7 @@ which remains the execution source of truth and is persisted after approval.
 <!-- gate: customize-declarative-site:4.approve | category=plan | cancel-leaves=plan-artifacts -->
 
 > 🚦 **Gate (plan · customize-declarative-site:4.approve):** Approve the coordinated
-> customization plan before invoking any authoring skill.
+> customization plan before executing any authoring operation.
 >
 > **Trigger:** JSON and HTML plan artifacts are complete, with external images explicitly
 > unverified or supported by successful requested checks for this exact plan.
@@ -348,7 +363,7 @@ If the approved review included source checks, append
 The publisher validates the approved JSON, renders canonical HTML from that exact data, creates
 `current-execution.json`, and records hashes plus a run ID. When a current approved run exists, it
 archives the plan, HTML, execution receipt, and icon together before replacement. Use only the
-published current plan and execution receipt for child-skill coordination.
+published current plan and execution receipt for authoring coordination.
 The publisher makes no image-network requests. Unchecked images remain explicitly unverified
 in the canonical HTML and command result. A supplied report must match the exact plan and contain
 successful checks; it is copied into the execution receipt. Missing, malformed, stale or failed
@@ -356,15 +371,17 @@ supplied reports block publication, never silently downgrade it. Preserve the re
 state; do not drop a checked review's report or invent one for unchecked images. Changed plans
 need fresh review and approval, and fresh checks if requested.
 
-## Phase 5: Execute through owning skills
+## Phase 5: Execute through owning workflows
 
 For each ready operation:
 
 1. Run the execution helper with `--action resolve`; it blocks until dependencies are complete and
    returns the operation plus effective `resolvedInputs` combining approved static inputs with
    actual bound outputs.
-2. Mark the operation `start`, then pass that resolved operation and, when returned, its approved
-   `designContext` to its owning skill. Carry its new-site composition and explicit preservation
+2. Mark the operation `start`, then use the classic-authoring index to dispatch that resolved
+   operation. Execute reference workflows directly; invoke only
+   `author-webpage-content` or `style-site` as skills. Supply the approved `designContext` when
+   returned. Carry its new-site composition and explicit preservation
    decisions, not an implicit instruction to retain the creation template's layout or branding.
    The shared brief supplies Bootstrap and visual direction, not permission to change unrelated
    records, discard required capabilities/content, or bypass the owner's approval.
@@ -373,12 +390,14 @@ For each ready operation:
    handling. Previously approved receipts without this optional field remain resumable, but do
    not claim their image sources were checked. An unchecked new plan has the same resumable
    behavior. A source change needs a new approved plan, with fresh checks if requested.
-3. Include the exact selected site root, action, target identity, locales, final values, callers,
-   preservation requirements, `previewNoticeShown: true`, and
-   `invocationSource: customize-declarative-site`. The operation may be expressed as structured
+3. Retain the exact selected site root, action, target identity, locales, final values, callers,
+   and preservation requirements. For a covered-skill handoff, include
+   `previewNoticeShown: true` and `invocationSource: customize-declarative-site`.
+   The operation may be expressed as structured
    YAML/JSON or unambiguous natural language; it must resolve the same decisions as the plan
    contract.
-4. Tell the child skill to revalidate every supplied path and existing ID before writing.
+4. Revalidate every supplied path and existing ID before writing; require
+   the same check in child-skill handoffs.
 5. After completion, re-read the changed files, write actual stable outputs to a temporary JSON
    object, and mark the operation `complete --outputs <path>`. Remove that temporary file after the
    receipt is updated.
@@ -387,15 +406,15 @@ For each ready operation:
    partial files before restarting that failed operation; never blindly replay it.
 7. After all operations complete, run the execution helper with `--action finish`.
 
-Use `author-webpage` for page records, routes, parents, template assignment, localized shells, and
-requested navigation. Let it invoke `author-webpage-content` when it owns the resolved page
-handoff. Invoke `author-webpage-content` directly only when one exact existing localized target
+Execute the `author-webpage` reference workflow for page records, routes, parents, template
+assignment, localized shells, and navigation within the approved scope. Invoke `author-webpage-content` after
+that workflow resolves the page handoff. Invoke it directly only when one exact existing localized target
 file and its composition are already resolved.
 Carry the verified Bootstrap major through the page-owner handoff into section/element authoring.
 Use Bootstrap 5 serialization for the verified new-site default and the inspected site-local
 Bootstrap 3 patterns only for the explicit compatibility path.
 
-For every staged visual asset, invoke `author-web-file` before its consumers and record the
+For every staged visual asset, execute the `author-web-file` reference workflow before its consumers and record the
 verified `publicUrl`. Dependent page, snippet, template, or styling operations must consume that
 URL through an approved `outputBindings` entry; never predict a Web File URL. For a global logo or
 favicon, update only the exact verified snippet, template, or setting callers. Resolve all approved
@@ -414,11 +433,11 @@ For styling, invoke `style-site` last. Its exact-diff/hash approval is a separat
 the user-reviewed CSS proposal and the bytes applied; the customization-plan approval does not
 replace that safety gate.
 
-Do not invoke a child skill for an empty operation, and do not invoke deployment from this phase.
+Do not execute an empty operation, and do not invoke deployment from this phase.
 
 ## Phase 6: Verify the combined result
 
-1. Require every child skill's own verification to succeed.
+1. Require every component workflow's and child skill's own verification to succeed.
 2. Re-run declarative site discovery and confirm the selected root and website identity are
    unchanged.
 3. Verify planned files and records exist, generated identities are unique, locale scope matches
@@ -481,7 +500,7 @@ Report:
 
 - site identity and local root;
 - current approved plan, HTML, and execution paths, plus any archived predecessor;
-- created and modified components grouped by owning skill;
+- created and modified components grouped by authoring operation;
 - languages and routes affected;
 - validation and commit results;
 - warnings and pending runtime checks;

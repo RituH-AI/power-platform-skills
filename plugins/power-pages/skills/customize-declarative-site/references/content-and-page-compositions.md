@@ -220,18 +220,21 @@ Component and behavior contracts are unchanged by the section-layout extension. 
 requires unsupported component markup or behavior, disclose that separate boundary and propose
 a supported alternative rather than inventing a serialization.
 
-## Minimal skill selection
+## Minimal operation selection
 
-Invoke only owners required by the resolved structure:
+Use the dispatch in `${PLUGIN_ROOT}/references/design-studio-classic-site-authoring.md`.
+Execute only reference workflows required by the resolved structure:
 
 - page metadata, route, template, localized shells, navigation: `author-webpage`;
-- localized section/column/element composition: `author-webpage-content`;
-- uploaded assets: `author-web-file`;
+- imported local assets: `author-web-file`;
 - reusable text or Liquid values: `author-content-snippet`;
 - Liquid source or reusable layout logic: `author-web-template`;
-- a new page-template binding: `author-page-template`;
-- local visual treatment: `style-site`.
+- a new page-template binding: `author-page-template`.
 
-A straightforward page normally needs only `author-webpage`, which can invoke
-`author-webpage-content` with the resolved composition. Do not add assets, snippets, templates, or
-styling operations merely because those skills are available.
+Invoke `author-webpage-content` for localized section/column/element composition and
+`style-site` for local visual treatment.
+
+A straightforward new page normally needs the webpage reference workflow, including default
+navigation or its explicit opt-out, followed by `author-webpage-content` with the resolved
+composition. Do not add assets, snippets, templates, extra navigation placements, or styling
+merely because those capabilities are available.

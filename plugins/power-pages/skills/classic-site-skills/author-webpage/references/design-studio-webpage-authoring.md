@@ -6,9 +6,43 @@ declarative Power Pages site. This reference applies to sites with a root-level
 sites built with React, Angular, Vue, or Astro.
 
 Creating a webpage requires one root webpage record, one localized webpage record per
-configured site language, localized content files, and optional navigation records. Apply
+configured site language, localized content files, and navigation records unless the user
+explicitly asks not to add the page to navigation. Apply
 the complete workflow below so the local files preserve the relationships expected by
 Power Pages and remain compatible with PAC CLI upload and download.
+
+Authoring callers first follow [shared routing and execution](../../../../references/design-studio-classic-site-authoring.md). Classify page creation,
+shared metadata, localized content, route/rename/move, template assignment, and navigation
+separately. Resolve the root identity first, then selected localized identities and content
+ownership. Use the uniquely established current/default language for an unspecified content
+edit; do not expand it to every locale.
+
+Reuse an existing compatible page template. A request only to assign that template does not
+authorize changing its source or creating a new record. For an end-to-end custom layout,
+execute [page templates](../../author-page-template/references/design-studio-page-template-authoring.md)
+first and re-read the result before assignment.
+An approved new-site handoff must carry custom composition, `designContext`, verified Bootstrap
+evidence, and preservation requirements unchanged; do not substitute the creation template's
+layout or branding. Compatibility includes the approved layout, not just the correct table
+or a working route. Resolve a blocking rendering-source change through its native reference
+instead of reducing the design to text/image swaps.
+
+This workflow creates metadata and companion files. Invoke `author-webpage-content` for
+localized body HTML; do not independently generate that HTML in the metadata workflow.
+For an existing body-only request, resolve its exact root/locale/file and hand off directly.
+New pages update navigation by default unless the user explicitly asks not to.
+Resolve the target web link set and label before writing; body-only edits leave navigation unchanged.
+For an approved operation, apply only its approved navigation scope.
+
+## Contents
+
+- [Create and model records](#webpage-creation-workflow)
+- [PAC files and naming](#pac-download-structure)
+- [Inputs and metadata](#creation-inputs-and-dependencies)
+- [Initial localized content](#initial-page-content)
+- [Navigation links](#navigation-links)
+- [Modify and synchronize](#modifying-an-existing-webpage)
+- [Verify](#verification-checklist) and [prohibited shortcuts](#prohibited-shortcuts)
 
 ## Webpage creation workflow
 
@@ -286,7 +320,7 @@ The composition contract and page-element markup are owned by:
 ${PLUGIN_ROOT}/skills/classic-site-skills/author-webpage-content/references/webpage-content-composition.md
 ```
 
-`author-webpage` owns all directories, metadata, companion-file creation, localized
+The webpage-reference workflow owns all directories, metadata, companion-file creation, localized
 identity, and the resolved handoff. `author-webpage-content` only generates and fills
 the visitor-facing HTML in the exact existing localized copy file it receives.
 
@@ -408,6 +442,10 @@ After creating or modifying a webpage:
     requested web link sets changed.
 14. Review the final diff for unrelated metadata, formatting, or content changes.
 
+Include the content skill's verification when it was invoked. Report changed files, page name,
+route, parent, page-template binding, affected languages, navigation changes or opt-out, and any migrated
+dependencies. State that the changes are local and were not uploaded or deployed.
+
 ## Microsoft documentation
 
 - [Manage web pages](https://learn.microsoft.com/power-pages/configure/web-page)
@@ -422,6 +460,7 @@ After creating or modifying a webpage:
 - Do not use filename matching alone to establish root/localized relationships.
 - Do not edit the page-level copy when localized visitor content was requested.
 - Do not update all locales for a content-only request unless the request includes them.
-- Do not create navigation links merely because a webpage was created.
+- Do not silently skip default new-page navigation or ignore an explicit navigation opt-out.
+- Do not duplicate navigation links, guess placement, or expand approved navigation scope.
 - Do not rename existing folders and files as incidental cleanup.
 - Do not regenerate stable IDs during an ordinary metadata or content edit.

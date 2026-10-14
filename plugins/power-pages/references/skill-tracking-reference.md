@@ -24,6 +24,13 @@ For the classic-site `style-site` workflow, preserve this existing contract: nev
 
 The styling inspector excludes only the known `site-settings/Site-AI-Skills-*.sitesetting.yml` and `site-settings/Site-AI-Tools-*.sitesetting.yml` files from styling input hashes/inventory. This keeps final usage recording from invalidating a successfully verified proposal/receipt; other site settings and styling inputs remain subject to drift checks. It does not change tracking behavior or grant authority to edit unrelated files.
 
+For classic authoring through `customize-declarative-site`, record
+`CustomizeDeclarativeSite` once after successful completion. Reference workflows are not
+skill invocations; do not record reference reads as skill runs.
+`author-webpage-content` and `style-site` record their own successful usage.
+Preserve existing tracking records.
+Do not create a tracking directory or invent classic tracking records.
+
 If the tracking script creates or updates site setting YAML files, include those tracking changes in the next git commit for the current phase or final summary commit.
 
 ## Skill Name Mapping
@@ -31,6 +38,7 @@ If the tracking script creates or updates site setting YAML files, include those
 | Skill | PascalCase (`--skillName`) | Setting Name |
 |-------|---------------------------|--------------|
 | create-site | CreateSite | Site/AI/Skills/CreateSite |
+| customize-declarative-site | CustomizeDeclarativeSite | Site/AI/Skills/CustomizeDeclarativeSite |
 | deploy-site | DeploySite | Site/AI/Skills/DeploySite |
 | setup-datamodel | SetupDatamodel | Site/AI/Skills/SetupDatamodel |
 | add-sample-data | AddSampleData | Site/AI/Skills/AddSampleData |
@@ -63,12 +71,7 @@ If the tracking script creates or updates site setting YAML files, include those
 | force-link-environment | ForceLinkEnvironment | Site/AI/Skills/ForceLinkEnvironment |
 | migrate-bootstrap | MigrateBootstrap | Site/AI/Skills/MigrateBootstrap |
 | migrate-webapi-selectall | MigrateWebapiSelectall | Site/AI/Skills/MigrateWebapiSelectall |
-| author-webpage | AuthorWebpage | Site/AI/Skills/AuthorWebpage |
 | author-webpage-content | AuthorWebpageContent | Site/AI/Skills/AuthorWebpageContent |
-| author-content-snippet | AuthorContentSnippet | Site/AI/Skills/AuthorContentSnippet |
-| author-web-file | AuthorWebFile | Site/AI/Skills/AuthorWebFile |
-| author-page-template | AuthorPageTemplate | Site/AI/Skills/AuthorPageTemplate |
-| author-web-template | AuthorWebTemplate | Site/AI/Skills/AuthorWebTemplate |
 
 ## YAML Format
 

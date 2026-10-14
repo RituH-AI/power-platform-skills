@@ -9,6 +9,34 @@ A web file represents a site-served asset such as an image, stylesheet, script, 
 or text file. The local PAC representation contains both the asset and an adjacent YAML
 record that describes the web file and its Dataverse note attachment.
 
+Authoring callers first follow [shared routing and execution](../../../../references/design-studio-classic-site-authoring.md). This reference owns
+the asset/YAML pair, attachment identity, metadata, and exact URL migrations. Importing or
+creating an asset does not authorize a page layout, template composition, or CSS redesign.
+For a small caller migration, read [webpages](../../author-webpage/references/design-studio-webpage-authoring.md),
+[web templates](../../author-web-template/references/design-studio-web-template-authoring.md),
+or [content snippets](../../author-content-snippet/references/design-studio-content-snippet-authoring.md)
+as applicable and change only the exact reference.
+Resolve broader composition through the corresponding workflow; invoke `style-site` for
+visual CSS changes, then re-read affected callers before verification.
+
+For a new ordinary site-wide asset with no requested parent, use the structurally verified
+Home root page. Infer MIME type only when extension, signature, and local convention agree.
+Prefer inline delivery for browser-rendered assets and attachment delivery only when the
+request establishes a download. Preserve optional ordering and visibility fields rather
+than inferring new behavior. Stop on an unresolved source, parent, caller, MIME conflict,
+unsafe active content, or ambiguous visibility/scope.
+
+## Contents
+
+- [Create, import, and serialize](#web-file-creation-workflow)
+- [Parent, URL, and permissions](#parent-page-url-and-permissions)
+- [MIME type and delivery](#mime-type)
+- [CSS and callers](#css-web-files)
+- [File validation and security](#file-validation-and-security)
+- [Modify, replace, rename, or move](#modifying-an-existing-web-file)
+- [Delete](#deletion-rules)
+- [Verify](#verification-checklist) and [prohibited shortcuts](#prohibited-shortcuts)
+
 ## Web file creation workflow
 
 Create a web file in this order:
@@ -444,6 +472,11 @@ After creating or modifying a web file:
     and verify the approved placement and source changes without a numeric-order gate.
 16. Confirm existing IDs were preserved during replacement, rename, or move operations.
 17. Review the final diff for unrelated binary, metadata, or caller changes.
+
+Report the operation, changed files, public URL, parent, MIME/delivery behavior, stable
+web-file and annotation IDs, and migrated callers. Include any scheduling/scope change,
+advisory CSS priority, preserved legacy behavior, and unverified environment constraints.
+State that the changes are local and were not uploaded or deployed.
 
 ## Microsoft documentation
 
