@@ -1088,6 +1088,12 @@ function renderRefsMigrationCard(state) {
   const totalCompleted = (r.runs || []).reduce((a, run) => a + (Number.isFinite(run.completed) ? run.completed : 0), 0);
   const totalFailed = totalCompleted - totalSucceeded;
   const duration = formatDuration(r.createdAt, r.modifiedAt);
+  // Determinate progress bar from succeeded / total chunks. Only meaningful once the
+  // tracker reports at least one run with a chunkTotal; before that it stays hidden.
+  const chunkPct = totalChunks > 0 ? Math.round((totalSucceeded / totalChunks) * 100) : 0;
+  const progressBar = totalChunks > 0
+    ? `\n  <div class="refs-progress" title="${totalSucceeded} of ${totalChunks} chunks succeeded"><div class="refs-progress-fill${totalFailed > 0 ? ' has-fail' : ''}" style="width:${chunkPct}%"></div></div>`
+    : '';
 
   const stepHistoryRows = (r.stepHistory || []).map((s) => {
     const stepName = escapeHtml(s.step || '');
@@ -1139,7 +1145,7 @@ function renderRefsMigrationCard(state) {
       ${totalChunks > 0 ? `<div class="refs-kv"><div class="refs-kv-label">Chunks</div><div class="refs-kv-value"><span class="refs-chunks-ok">${totalSucceeded}</span> / ${totalChunks}${totalFailed > 0 ? ` <span class="refs-chunks-fail">(${totalFailed} failed)</span>` : ''}</div></div>` : ''}
       ${duration ? `<div class="refs-kv"><div class="refs-kv-label">Duration</div><div class="refs-kv-value">${escapeHtml(duration)}</div></div>` : ''}
     </div>
-  </div>${errorBlock}
+  </div>${progressBar}${errorBlock}
 
   ${stepHistoryRows ? `<details class="refs-steps">
     <summary>Step history (${(r.stepHistory || []).length})</summary>
@@ -1355,6 +1361,29 @@ const CSS = `:root {
 * { margin:0; padding:0; box-sizing:border-box; }
 html { scroll-behavior:smooth; }
 body { font-family:var(--sans); background:var(--bg); color:var(--text); font-size:14px; line-height:1.6; }
+
+/* Now running banner — always-visible pointer for the active long-running step.
+   Elapsed clock + estimate bar are advanced client-side every second so they keep
+   moving between the 3s auto-refreshes, even while a blocking pac call stops the
+   agent from writing new state. */
+.now-running { background:var(--accent-bg); border-bottom:1px solid var(--accent-border); padding:12px 28px; display:flex; flex-direction:column; gap:8px; }
+.now-running-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.now-running-spinner { width:14px; height:14px; border-radius:50%; border:2px solid var(--accent-border); border-top-color:var(--accent); animation:now-running-spin 0.9s linear infinite; flex-shrink:0; }
+@keyframes now-running-spin { to { transform:rotate(360deg); } }
+.now-running-label { font-weight:700; color:var(--text-bright); font-size:13.5px; }
+.now-running-poll { font-family:var(--mono); font-size:11px; color:var(--accent); background:var(--surface); border:1px solid var(--accent-border); border-radius:10px; padding:1px 8px; }
+.now-running-time { margin-left:auto; font-size:12px; color:var(--text-dim); font-variant-numeric:tabular-nums; }
+.now-running-time [data-now-running-elapsed] { font-weight:700; color:var(--text-bright); font-family:var(--mono); }
+.now-running-est { color:var(--text-dim); }
+.now-running-detail { font-size:12px; color:var(--text-dim); font-family:var(--mono); }
+.now-running-bar { height:6px; background:var(--surface3); border-radius:3px; overflow:hidden; }
+.now-running-bar-fill { height:100%; width:0; background:var(--accent); border-radius:3px; transition:width 0.9s linear; }
+.now-running-bar-indeterminate { width:35% !important; background:linear-gradient(90deg,var(--accent-border),var(--accent),var(--accent-border)); animation:now-running-indet 1.4s ease-in-out infinite; }
+@keyframes now-running-indet { 0% { margin-left:-35%; } 100% { margin-left:100%; } }
+/* Chunk progress bar on the Transactional References card. */
+.refs-progress { height:6px; background:var(--surface3); border-radius:3px; overflow:hidden; margin-top:4px; }
+.refs-progress-fill { height:100%; background:var(--pass); border-radius:3px; transition:width 0.4s ease; }
+.refs-progress-fill.has-fail { background:linear-gradient(90deg,var(--pass),var(--warning)); }
 
 /* Topbar */
 .topbar { z-index:100; background:var(--surface); box-shadow:var(--shadow-4); padding:14px 28px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; position:sticky; top:0; }
@@ -1852,6 +1881,45 @@ function renderTopbar(state) {
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
 
+// Now-running banner: always-visible pointer for the active long-running step
+// (package install, metadata / refs migration polling). Rendered only when
+// state.currentOperation is set. The elapsed figure and estimate-bar width are
+// seeded here from server time but then advanced every second by the inline
+// now-running ticker script — so the clock keeps moving between the 3s
+// auto-refreshes, even while a blocking `pac` call stops the agent from writing new
+// state. data-op-expected-sec, when present, drives a determinate bar that eases
+// toward the estimate; without it the bar is indeterminate.
+function renderNowRunningBanner(state) {
+  const op = state.currentOperation;
+  if (!op || !op.label) return '';
+  const startedAt = op.startedAt || state.lastUpdatedAt;
+  const expected = Number.isFinite(op.expectedDurationSec) && op.expectedDurationSec > 0
+    ? Math.floor(op.expectedDurationSec)
+    : null;
+  const pollHtml = op.poll && Number.isFinite(op.poll.attempt) && Number.isFinite(op.poll.max)
+    ? `<span class="now-running-poll">attempt ${escapeHtml(String(op.poll.attempt))}/${escapeHtml(String(op.poll.max))}</span>`
+    : '';
+  const detailHtml = op.detail
+    ? `<div class="now-running-detail">${escapeHtmlAllowingInline(op.detail)}</div>`
+    : '';
+  const estHtml = expected
+    ? ` · <span class="now-running-est">est ~${Math.max(1, Math.round(expected / 60))} min</span>`
+    : '';
+  const barClass = expected
+    ? 'now-running-bar-fill'
+    : 'now-running-bar-fill now-running-bar-indeterminate';
+  return `<div class="now-running" data-now-running data-op-started-at="${escapeHtml(startedAt)}"${expected ? ` data-op-expected-sec="${expected}"` : ''}>
+  <div class="now-running-row">
+    <span class="now-running-spinner" aria-hidden="true"></span>
+    <span class="now-running-label">Now running: ${escapeHtml(op.label)}</span>
+    ${pollHtml}
+    <span class="now-running-time"><span data-now-running-elapsed>${escapeHtml(formatElapsed(startedAt, state.lastUpdatedAt))}</span> elapsed${estHtml}</span>
+  </div>
+  ${detailHtml}
+  <div class="now-running-bar"><div class="${barClass}" data-now-running-bar></div></div>
+</div>`;
+}
+
 function renderSidebar() {
   return `<div class="sidebar">
   <div class="nav-group-label">Report</div>
@@ -1894,6 +1962,7 @@ ${CSS}
 <body>
 
 ${renderTopbar(state)}
+${renderNowRunningBanner(state)}
 
 <div class="layout">
   ${renderSidebar()}
@@ -1919,6 +1988,40 @@ ${renderMigrationReviewSection(state, snapshots)}
 
 <script>
 ${TAB_JS}
+</script>
+<script>
+// Now-running live ticker: advance the elapsed clock and estimate bar every second
+// from data attributes on the banner, independent of the 3s auto-refresh — so
+// progress stays visibly moving even while a blocking pac call prevents the agent
+// from writing new state.
+(function () {
+  var el = document.querySelector('[data-now-running]');
+  if (!el) return;
+  var startedAt = Date.parse(el.getAttribute('data-op-started-at'));
+  if (isNaN(startedAt)) return;
+  var expectedSec = parseInt(el.getAttribute('data-op-expected-sec'), 10);
+  var hasExpected = !isNaN(expectedSec) && expectedSec > 0;
+  var elapsedEl = el.querySelector('[data-now-running-elapsed]');
+  var barEl = el.querySelector('[data-now-running-bar]');
+  function fmt(sec) {
+    var m = Math.floor(sec / 60);
+    var s = sec % 60;
+    return m + 'm ' + (s < 10 ? '0' : '') + s + 's';
+  }
+  function tick() {
+    var sec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    if (elapsedEl) elapsedEl.textContent = fmt(sec);
+    // Determinate bar only when an estimate was provided. Ease toward the estimate
+    // but cap below 100% — the operation clears (banner removed) only when the agent
+    // writes --clear-operation, so a full bar must never show while still running.
+    if (hasExpected && barEl) {
+      var pct = Math.min(97, (sec / expectedSec) * 100);
+      barEl.style.width = pct.toFixed(1) + '%';
+    }
+  }
+  tick();
+  setInterval(tick, 1000);
+})();
 </script>
 <script>
 // ── Copy-to-clipboard for per-file "code --diff" buttons ─────────────────────

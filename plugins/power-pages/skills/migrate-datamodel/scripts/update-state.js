@@ -57,9 +57,14 @@
  *   node update-state.js --output-dir <DIR> --set-refs-migration \
  *       '{"status":"Failed","currentStep":"ConfigurationDataReferencesStarted","error":"pac pages migrate-datamodel exited 1: migration could not be started ..."}'
  *
- *   # free-text current-activity pointer (used during long-running steps)
- *   node update-state.js --output-dir <DIR> --set-activity "Polling migration status (attempt 3/30)"
- *   node update-state.js --output-dir <DIR> --clear-activity
+ *   # structured "now running" operation card (used during long-running steps:
+ *   # package installs, metadata/refs migration polling). Drives the always-visible
+ *   # banner + client-side live elapsed ticker + estimate bar in the report. Re-issue
+ *   # each poll iteration with a bumped poll.attempt; startedAt is preserved across
+ *   # updates that keep the same label so the elapsed clock stays monotonic.
+ *   node update-state.js --output-dir <DIR> --set-operation \
+ *       '{"label":"Migrating configuration metadata to EDM","detail":"mode=configurationData","expectedDurationSec":600,"poll":{"attempt":3,"max":30}}'
+ *   node update-state.js --output-dir <DIR> --clear-operation
  *
  *   # set migration track (called at end of step 1.7 once env type + mode known)
  *   # A = Authoring Track  (mode configurationData|all — Dev/Test/UAT/Single env)
@@ -478,24 +483,53 @@ function cmdSetRefsMigration(args) {
   console.log(`✓ Refs migration → status=${r.status} · step=${r.currentStep || '?'} · chunks ${totalSucceeded}/${totalChunks}${r.error ? ` · error: ${r.error.slice(0, 120)}` : ''}`);
 }
 
-function cmdSetActivity(args) {
+function cmdSetOperation(args) {
   const outputDir = args['output-dir'];
-  if (!outputDir) throw new Error('--set-activity requires --output-dir');
-  const text = args['set-activity'];
-  if (typeof text !== 'string') throw new Error('--set-activity requires a string value');
+  if (!outputDir) throw new Error('--set-operation requires --output-dir');
+  const raw = args['set-operation'];
+  if (typeof raw !== 'string') throw new Error('--set-operation requires a JSON string value');
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`--set-operation requires valid JSON: ${e.message}`);
+  }
+  if (!payload || typeof payload.label !== 'string' || payload.label.trim() === '') {
+    throw new Error('--set-operation JSON must include a non-empty "label" string');
+  }
   const state = loadState(outputDir);
-  state.currentActivity = text;
+  // Preserve startedAt across repeated updates for the SAME operation label so the
+  // live elapsed ticker stays monotonic across poll iterations — each poll re-issues
+  // --set-operation with a bumped attempt count, not a brand-new operation.
+  const prev = state.currentOperation;
+  const startedAt = (prev && prev.label === payload.label && prev.startedAt)
+    ? prev.startedAt
+    : new Date().toISOString();
+  const expectedDurationSec = Number.isFinite(payload.expectedDurationSec) && payload.expectedDurationSec > 0
+    ? Math.floor(payload.expectedDurationSec)
+    : null;
+  let poll = null;
+  if (payload.poll && Number.isFinite(payload.poll.attempt) && Number.isFinite(payload.poll.max)) {
+    poll = { attempt: Math.floor(payload.poll.attempt), max: Math.floor(payload.poll.max) };
+  }
+  state.currentOperation = {
+    label: payload.label,
+    detail: typeof payload.detail === 'string' ? payload.detail : null,
+    startedAt,
+    expectedDurationSec,
+    poll,
+  };
   persist(state, outputDir);
-  console.log(`✓ Activity: ${text}`);
+  console.log(`✓ Operation: ${payload.label}${poll ? ` (attempt ${poll.attempt}/${poll.max})` : ''}`);
 }
 
-function cmdClearActivity(args) {
+function cmdClearOperation(args) {
   const outputDir = args['output-dir'];
-  if (!outputDir) throw new Error('--clear-activity requires --output-dir');
+  if (!outputDir) throw new Error('--clear-operation requires --output-dir');
   const state = loadState(outputDir);
-  state.currentActivity = null;
+  state.currentOperation = null;
   persist(state, outputDir);
-  console.log('✓ Activity cleared');
+  console.log('✓ Operation cleared');
 }
 
 function cmdSetTrack(args) {
@@ -536,8 +570,8 @@ function main() {
     if (args['set-prompt'] !== undefined) return cmdSetPrompt(args);
     if (args['set-customization-report'] !== undefined) return cmdSetCustomizationReport(args);
     if (args['set-refs-migration'] !== undefined) return cmdSetRefsMigration(args);
-    if (args['set-activity'] !== undefined) return cmdSetActivity(args);
-    if (args['clear-activity']) return cmdClearActivity(args);
+    if (args['set-operation'] !== undefined) return cmdSetOperation(args);
+    if (args['clear-operation']) return cmdClearOperation(args);
     if (args['set-track'] !== undefined) return cmdSetTrack(args);
     if (args['render-only']) return cmdRenderOnly(args);
     console.error('No command given. Run with --help-ish docs at top of update-state.js');

@@ -194,7 +194,13 @@ function buildInitialState({ webSiteId, outputDir, track = DEFAULT_TRACK, starte
     },
     customizationReport: null,
     refsMigration: null,
-    currentActivity: null,
+    // Structured "now running" pointer for long-running steps (package installs,
+    // metadata/refs migration polling). null when idle. When set:
+    //   { label, detail, startedAt, expectedDurationSec, poll: { attempt, max } }
+    // The report renders this as an always-visible banner whose elapsed clock and
+    // estimate bar are advanced client-side every second — so progress stays visible
+    // even while a blocking `pac` call prevents the agent from writing new state.
+    currentOperation: null,
   };
 }
 

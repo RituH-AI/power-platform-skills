@@ -63,7 +63,7 @@ After init, each sub-step below ends with a **→ Update report** callout. Execu
 | `--clear-approval` | Hide approval banner once user has approved (use only for in-phase gates that don't advance to a new phase) |
 | `--approve-and-start <phaseId>` | Atomic: clear approval gate + mark phase in-progress in one render. Use this whenever the user answers a `phase-start` AskUserQuestion approval — avoids the transient "Awaiting Approval" pill that would otherwise flash between `--clear-approval` and `--set-phase`. |
 | `--set-prompt <plugin\|dme> --status ready --path "<file>" --summary "<text>"` | Show augmented-prompt card |
-| `--set-activity "<text>"` / `--clear-activity` | "Currently doing" text for long-running ops |
+| `--set-operation '<json>'` / `--clear-operation` | Structured "now running" card (`label`, `detail`, `expectedDurationSec`, `poll`) for long-running ops — drives the always-visible banner + live elapsed ticker + estimate bar |
 | `--render-only` | Re-render HTML from existing state (rare) |
 
 > **Best-effort:** if any `update-state.js` call fails (e.g., node missing), log a warning and continue — the live report is informational, never a blocker for migration work.
@@ -738,13 +738,14 @@ This phase has **two completely different shapes** depending on the migration tr
     Write-Host "Step outcome: $stepOutcome"
    ```
 
-   Between iterations, update the live report:
+   Between iterations, refresh the "now running" banner (run inside the poll loop so `$i` / `$mode` are in scope):
 
    ```powershell
-   node update-state.js --output-dir "<OUTPUT_DIR>" --set-activity "Polling migration status (attempt <N>/30)"
+   $op = @{ label = 'Migrating configuration metadata to EDM'; detail = "mode=$mode"; poll = @{ attempt = $i; max = 30 } } | ConvertTo-Json -Compress
+   node update-state.js --output-dir "<OUTPUT_DIR>" --set-operation $op
    ```
 
-   - **`$stepOutcome` is `ConfigurationDataCompleted` or `Completed`**: automatically clear activity, mark step 2.2 completed, and immediately execute step 2.3. **This transition has no approval gate: do not ask the user whether to proceed and do not describe the migration as stuck.**
+   - **`$stepOutcome` is `ConfigurationDataCompleted` or `Completed`**: automatically clear the now-running banner (`--clear-operation`), mark step 2.2 completed, and immediately execute step 2.3. **This transition has no approval gate: do not ask the user whether to proceed and do not describe the migration as stuck.**
    - **Still `Running` (loop exited at i=30 without status change)**: this usually just means the migration is still working — large sites process in 5K-record batches and can take a long time. **Recommend the user wait and keep polling** rather than resetting. Re-enter the poll loop and show elapsed time (from the tracker's `Created On` / `Modified On`). Only if it stays `Running` with **no forward progress for an extended period** (`Modified On` not advancing, no newly completed chunks in the verbose output) treat it as genuinely stuck — see **"Unblocking a stuck `Running` tracker"** below.
    - **Failed / Reverted**: surface error, ask user (retry / reset / exit).
 
@@ -759,7 +760,7 @@ This phase has **two completely different shapes** depending on the migration tr
 
 **Output**: Metadata moved to EDM tables; site activation still SDM until step 3.3 flips it. Newer PAC builds auto-emit `SiteCustomization*.csv` here; **older builds do not** — step 2.3 will fall back to running the explicit `--siteCustomizationReportPath` command. Don't assume the CSV exists yet.
 
-> **→ Update report:** `--clear-activity` and `--set-step 2.2 --status completed --output "Metadata migration <COMPLETED|FAILED> · mode=<MODE>"`
+> **→ Update report:** `--clear-operation` and `--set-step 2.2 --status completed --output "Metadata migration <COMPLETED|FAILED> · mode=<MODE>"`
 
 ---
 
@@ -1318,7 +1319,8 @@ Phase 3 has **two different shapes** depending on the migration track. The Autho
      $finalPayload = $refsPayload
 
      node update-state.js --output-dir $outputDir --set-refs-migration $refsPayload
-     node update-state.js --output-dir $outputDir --set-activity "Polling migration status (attempt $i/30)"
+     $op = @{ label = 'Migrating transactional references'; detail = 'mode=configurationDataReferences'; poll = @{ attempt = $i; max = 30 } } | ConvertTo-Json -Compress
+     node update-state.js --output-dir $outputDir --set-operation $op
 
      if ($verboseOutput -match "Current migration status is\s*:\s*Completed") { $finalStatus = 'Completed'; Write-Host 'Status: Completed'; break }
      if ($verboseOutput -match "Current migration status is\s*:\s*Failed")    { $finalStatus = 'Failed';    Write-Host 'Status: Failed';    break }
@@ -1335,7 +1337,7 @@ Phase 3 has **two different shapes** depending on the migration track. The Autho
    }
    ```
 
-   - **Completed**: clear activity, proceed to step 3.3. The card now shows status=Completed.
+   - **Completed**: clear the now-running banner (`--clear-operation`), proceed to step 3.3. The card now shows status=Completed.
    - **Still `Running` (loop exited at i=30 without status change)**: recommend the user **wait and keep polling** (refs migration on large sites can take a long time). Only if genuinely stuck for an extended period (`Modified On` not advancing, no newly completed chunks), unblock per **"Unblocking a stuck `Running` tracker"** in step 2.2 — `--resetMigration`, then a manual `adx_migrationstatus` = Failed (`746610003`) reset on the `adx_websitemigrationtracker` record — then re-run. The card shows the last captured running state.
    - **Failed / Reverted**: surface error, ask user (retry / reset / exit). Add the top-level failure message to the `--set-refs-migration` payload's `error` field so the card logs it as an error banner (the card also shows chunk-level error details from the last poll).
 
@@ -1348,7 +1350,7 @@ Phase 3 has **two different shapes** depending on the migration track. The Autho
 > **→ Update report:**
 >
 > ```
-> --clear-activity
+> --clear-operation
 > --set-step 3.2 --status completed --output "<Refs migrated · status=<STATUS> | Skipped — already covered by mode=all in Phase 2.2>"
 > ```
 >
@@ -1586,7 +1588,8 @@ Phase 3 has **two different shapes** depending on the migration track. The Autho
      $finalPayload = $refsPayload
 
      node update-state.js --output-dir $outputDir --set-refs-migration $refsPayload
-     node update-state.js --output-dir $outputDir --set-activity "Polling migration status (attempt $i/30)"
+     $op = @{ label = 'Migrating transactional references'; detail = 'mode=configurationDataReferences'; poll = @{ attempt = $i; max = 30 } } | ConvertTo-Json -Compress
+     node update-state.js --output-dir $outputDir --set-operation $op
      if ($verboseOutput -match "Current migration status is\s*:\s*Completed") { break }
      if ($verboseOutput -match "Current migration status is\s*:\s*Failed")    { break }
      if ($verboseOutput -match "Current migration status is\s*:\s*Reverted")  { break }
@@ -1599,7 +1602,7 @@ Phase 3 has **two different shapes** depending on the migration track. The Autho
    }
    ```
 
-   - **Completed**: clear activity, proceed to step 3.3. The card now shows status=Completed.
+   - **Completed**: clear the now-running banner (`--clear-operation`), proceed to step 3.3. The card now shows status=Completed.
    - **Still `Running` (30-min poll elapsed, no status change)**: recommend the user **wait and keep polling** (refs migration on large sites can take a long time). Only if genuinely stuck for an extended period (`Modified On` not advancing, no newly completed chunks), unblock per **"Unblocking a stuck `Running` tracker"** in step 2.2 — `--resetMigration`, then a manual `adx_migrationstatus` = Failed (`746610003`) reset on the `adx_websitemigrationtracker` record — then re-run. The card shows the last captured running state.
    - **Failed / Reverted**: surface error, ask user; card shows the failed status and chunk-level errors from the last poll.
 
@@ -1612,7 +1615,7 @@ Phase 3 has **two different shapes** depending on the migration track. The Autho
 > **→ Update report:**
 >
 > ```
-> --clear-activity
+> --clear-operation
 > --set-step 3.2 --status completed --output "Refs migrated · status=<STATUS>"
 > ```
 >
