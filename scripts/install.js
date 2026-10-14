@@ -3,7 +3,7 @@
  * Power Platform Skills — Installation Script
  *
  * Clones the marketplace repository and uses CLI commands to register
- * the Open Plugins marketplace and install plugins for Claude Code and GitHub Copilot.
+ * the plugin marketplace and install plugins for Claude Code and GitHub Copilot.
  *
  * Usage:
  *   node scripts/install.js [--include-dataverse]                        (from local clone)

@@ -17,7 +17,9 @@ claude --plugin-dir /path/to/plugins/power-apps
 ## Architecture
 
 ```
-.plugin/plugin.json               <- Open Plugins metadata (name, version, keywords)
+plugin.json                       <- Agent Plugins 1.0 metadata
+.plugin/plugin.json               <- Compatibility metadata mirror
+.claude-plugin/plugin.json        <- Claude Code metadata mirror
 AGENTS.md                         <- Plugin guidance for AI agents (this file)
 agents/
   code-app-architect.md           <- Agent persona for architecture decisions

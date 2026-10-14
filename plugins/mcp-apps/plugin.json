@@ -1,0 +1,25 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "mcp-apps",
+  "version": "1.2.0",
+  "description": "Generate JavaScript server runtimes and CDN-free or CDN-enabled MCP App widgets.",
+  "author": {
+    "name": "Microsoft",
+    "url": "https://www.microsoft.com"
+  },
+  "homepage": "https://github.com/microsoft/power-platform-skills/",
+  "repository": "https://github.com/microsoft/power-platform-skills/",
+  "license": "MIT",
+  "keywords": [
+    "mcp-apps",
+    "mcp",
+    "codeful-tool",
+    "dataverse",
+    "javascript",
+    "widget",
+    "ext-apps",
+    "fluent-ui",
+    "html",
+    "tool-visualization"
+  ]
+}

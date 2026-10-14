@@ -141,8 +141,8 @@ reports the effective settings instead of promising a picker in those cases.
 ## Step 4: Check the FlowAgent tools are wired
 
 The plugin talks to Power Automate through the **FlowAgent MCP server**, which is
-registered as `flowagent` in the plugin's `.mcp.json` and started automatically.
-`.mcp.json` loads the bundled `server/mcp.mjs` through a small Node bootstrap
+registered as `flowagent` in the plugin's MCP configuration and started automatically.
+Both `mcp.json` and legacy `.mcp.json` load the bundled `server/mcp.mjs` through a small Node bootstrap
 that resolves the plugin's installation directory (`PLUGIN_ROOT`, else
 `CLAUDE_PLUGIN_ROOT`, else the current directory) and prints an actionable error
 if the bundle can't be found.
@@ -183,7 +183,7 @@ Verify everything works end-to-end by listing the user's environments:
 - **Preferred**: call the `list_environments` tool.
 - **If MCP tools aren't available**: run `node <path-to-plugin>/server/mcp.mjs`
   to confirm the bundled MCP server starts cleanly, then fix the plugin install
-  or `.mcp.json` wiring before retrying.
+  or MCP wiring before retrying.
 
 - **If it returns environments**: Success! Tell them:
   - "Everything is working! Here are your Power Automate environments:"

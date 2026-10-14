@@ -528,7 +528,7 @@ The Data Model Architect, Table Permissions, and Web API Settings agents are **r
 
 ## Bundled MCP servers
 
-The plugin ships with two MCP servers configured in `.mcp.json` — they start automatically when the plugin loads:
+The plugin ships with two MCP servers configured in portable `mcp.json` and legacy `.mcp.json`; the host selects one configuration when the plugin loads:
 
 | Server | Purpose
 |---|---|

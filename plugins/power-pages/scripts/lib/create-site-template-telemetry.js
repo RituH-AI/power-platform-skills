@@ -72,7 +72,7 @@ function osFriendlyName(platform) {
 
 function readPluginVersion(deps = {}) {
   if (deps.pluginVersion) return deps.pluginVersion;
-  const pluginJsonPath = deps.pluginJsonPath || path.join(__dirname, '..', '..', '.plugin', 'plugin.json');
+  const pluginJsonPath = deps.pluginJsonPath || path.join(__dirname, '..', '..', 'plugin.json');
   try {
     const parsed = JSON.parse((deps.fs || fs).readFileSync(pluginJsonPath, 'utf8'));
     return typeof parsed.version === 'string' ? parsed.version : 'unknown';

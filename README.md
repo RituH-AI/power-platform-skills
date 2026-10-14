@@ -270,42 +270,50 @@ See the [Claude Code permissions docs](https://code.claude.com/docs/en/permissio
 
 ```text
 power-platform-skills/
-├── marketplace.json          # Open Plugins marketplace manifest (lists all plugins)
+├── marketplace.json          # Plugin marketplace manifest (lists all plugins)
 ├── .claude-plugin/           # Legacy marketplace shim for existing subscriptions
 │   └── marketplace.json
 ├── .claude/
 │   └── settings.json         # Auto-allowed tools (pac, node, dotnet, etc.)
 ├── plugins/
 │   ├── power-pages/          # Power Pages plugin
+│   │   ├── plugin.json       # Agent Plugins 1.0 manifest
+│   │   ├── mcp.json          # Portable MCP configuration
 │   │   ├── .plugin/
-│   │   │   └── plugin.json
+│   │   │   └── plugin.json   # Compatibility manifest
 │   │   ├── .claude-plugin/   # Legacy manifest mirror
 │   │   │   └── plugin.json
 │   │   ├── commands/
 │   │   ├── shared/
 │   │   └── skills/
 │   ├── model-apps/           # Model Apps plugin
+│   |   ├── plugin.json       # Agent Plugins 1.0 manifest
+│   |   ├── mcp.json          # Portable MCP configuration
 │   |   ├── .plugin/
-│   │   └── plugin.json
+│   │   │   └── plugin.json   # Compatibility manifest
 │   |   ├── commands/
 │   |   ├── skills/
 │   |   ├── shared/           # Shared references + samples
 │   |   └── github/           # GitHub Copilot instructions
 │   ├── mcp-apps/             # MCP codeful tool + widget generator plugin
+│   │   ├── plugin.json       # Agent Plugins 1.0 manifest
 │   │   ├── .plugin/
-│   │   │   └── plugin.json
+│   │   │   └── plugin.json   # Compatibility manifest
 │   │   ├── references/
 │   │   ├── samples/
 │   │   └── skills/
 │   ├── code-apps/            # Code Apps plugin
+│   │   ├── plugin.json       # Agent Plugins 1.0 manifest
 │   │   ├── .plugin/
-│   │   │   └── plugin.json
+│   │   │   └── plugin.json   # Compatibility manifest
 │   │   ├── agents/
 │   │   ├── skills/
 │   │   └── shared/           # Shared instructions + references
 │   ├── mobile-apps/          # Mobile Apps plugin
+│   │   ├── plugin.json       # Agent Plugins 1.0 manifest
+│   │   ├── mcp.json          # Portable MCP configuration
 │   │   ├── .plugin/
-│   │   │   └── plugin.json
+│   │   │   └── plugin.json   # Compatibility manifest
 │   │   ├── .claude-plugin/   # Legacy manifest mirror
 │   │   │   └── plugin.json
 │   │   ├── agents/
@@ -313,20 +321,25 @@ power-platform-skills/
 │   │   ├── shared/           # Shared instructions + references
 │   │   └── template/         # Bundled Expo app template
 │   ├── power-apps-mobile-extension/ # Native controls for wrapped Canvas apps
+│   │   ├── plugin.json       # Agent Plugins 1.0 manifest
 │   │   ├── .plugin/
-│   │   │   └── plugin.json
+│   │   │   └── plugin.json   # Compatibility manifest
 │   │   ├── .claude-plugin/   # Legacy manifest mirror
 │   │   │   └── plugin.json
 │   │   ├── shared/
 │   │   └── skills/
 │   ├── canvas-apps/          # Canvas Apps plugin
+│   │   ├── plugin.json       # Agent Plugins 1.0 manifest
+│   │   ├── mcp.json          # Portable MCP configuration
 │   │   ├── .plugin/
-│   │   │   └── plugin.json
+│   │   │   └── plugin.json   # Compatibility manifest
 │   │   ├── references/       # Technical + design guides
 │   │   └── skills/
 │   └── process-intelligence/ # Process Mining analytics plugin
+│       ├── plugin.json       # Agent Plugins 1.0 manifest
+│       ├── mcp.json          # Portable MCP configuration
 │       ├── .plugin/
-│       │   └── plugin.json
+│       │   └── plugin.json   # Compatibility manifest
 │       ├── server/           # Self-contained MCP bundle
 │       ├── references/
 │       └── skills/
@@ -334,13 +347,16 @@ power-platform-skills/
 └── README.md
 ```
 
-The `.claude-plugin` files are compatibility mirrors for users who subscribed
-before the Open Plugins migration. The root legacy marketplace mirrors
-`marketplace.json`, and per-plugin legacy manifests mirror `.plugin/plugin.json`.
+Every local plugin has a root `plugin.json` using the published Agent Plugins 1.0
+schema. Plugins with MCP servers also have a root `mcp.json` with explicit
+transport types. The `.plugin` and `.claude-plugin` files remain as compatibility
+mirrors for existing installations. The root legacy marketplace mirrors
+`marketplace.json`, and both per-plugin compatibility manifests mirror the metadata
+from root `plugin.json` without `$schema`.
 The shared marketplace keeps marketplace-level `owner` and `metadata`, while each
 plugin entry is intentionally just `name` plus repository-root-relative `source`.
 Plugin descriptions, versions, licenses, and keywords are controlled from each
-plugin's `.plugin/plugin.json`. This keeps existing subscriptions updating without
+plugin's root `plugin.json`. This keeps existing subscriptions updating without
 duplicating display/update metadata.
 
 Plugins maintained in other repositories, such as `dataverse`, use a remote `source` object instead of a path.

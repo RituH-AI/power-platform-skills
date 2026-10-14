@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "canvas-authoring": {
+      "type": "stdio",
+      "command": "dnx",
+      "args": ["Microsoft.PowerApps.CanvasAuthoring.McpServer", "--yes"]
+    }
+  }
+}

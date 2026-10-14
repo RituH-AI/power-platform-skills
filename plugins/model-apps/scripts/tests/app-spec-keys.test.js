@@ -821,7 +821,7 @@ test('form layout: a non-array fields inside columns[] is caught, not thrown on'
 // none of them. No marker can make an already-released consumer reject a spec. What this buys is a
 // machine-checkable requirement from here on, inherited by every future consumer.
 test('minimumPluginVersion refuses a spec that needs a newer plugin than the one running', () => {
-  const { version } = require('../../.plugin/plugin.json');
+  const { version } = require('../../plugin.json');
   const bump = (v, by) => { const p = String(v).split('.').map((n) => parseInt(n, 10) || 0); p[0] += by; return p.join('.'); };
   const spec = (v) => Object.assign(base(), v === undefined ? {} : { minimumPluginVersion: v });
   const gateErrors = (s) => validateAppSpec(s, { profile: 'plan' }).errors.filter((e) => /requires model-apps|minimumPluginVersion/.test(e));

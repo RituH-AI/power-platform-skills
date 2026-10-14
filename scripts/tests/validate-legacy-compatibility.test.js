@@ -10,7 +10,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { validate, expectedLegacyRemoteSource } = require('../validate-legacy-compatibility.js');
+const {
+  validate,
+  expectedLegacyRemoteSource,
+  expectedPortableMcp,
+} = require('../validate-legacy-compatibility.js');
+
+const PLUGIN_SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json';
+const MCP_SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json';
 
 const OPEN_REMOTE = { source: 'github', repo: 'contoso/plugins', path: 'plugins/widget' };
 const LEGACY_REMOTE = { source: 'git-subdir', url: 'contoso/plugins', path: 'plugins/widget' };
@@ -24,6 +31,15 @@ const LOCAL_MANIFEST = {
   repository: 'https://example.com/repo',
   license: 'MIT',
   keywords: ['local'],
+};
+const PORTABLE_MANIFEST = { $schema: PLUGIN_SCHEMA, ...LOCAL_MANIFEST };
+const LEGACY_MCP = {
+  mcpServers: {
+    local: {
+      command: 'node',
+      args: ['./server.js'],
+    },
+  },
 };
 
 function marketplace(remoteSource) {
@@ -53,8 +69,14 @@ function fixture(openRemote, legacyRemote) {
   fixtureRoots.push(root);
   writeJson(path.join(root, 'marketplace.json'), marketplace(openRemote));
   writeJson(path.join(root, '.claude-plugin', 'marketplace.json'), marketplace(legacyRemote));
+  writeJson(path.join(root, 'plugins', 'local-plugin', 'plugin.json'), PORTABLE_MANIFEST);
   writeJson(path.join(root, 'plugins', 'local-plugin', '.plugin', 'plugin.json'), LOCAL_MANIFEST);
   writeJson(path.join(root, 'plugins', 'local-plugin', '.claude-plugin', 'plugin.json'), LOCAL_MANIFEST);
+  writeJson(path.join(root, 'plugins', 'local-plugin', '.mcp.json'), LEGACY_MCP);
+  writeJson(
+    path.join(root, 'plugins', 'local-plugin', 'mcp.json'),
+    expectedPortableMcp(LEGACY_MCP)
+  );
   return root;
 }
 
@@ -98,6 +120,45 @@ test('malformed remote sources are rejected', () => {
     const errors = validate(fixture(open, expectedLegacyRemoteSource(open)));
     assert.ok(errors.length > 0, `expected ${JSON.stringify(open)} to be rejected`);
   }
+});
+
+test('a missing or unsupported portable manifest is rejected', () => {
+  const missingRoot = fixture(OPEN_REMOTE, LEGACY_REMOTE);
+  fs.rmSync(path.join(missingRoot, 'plugins', 'local-plugin', 'plugin.json'));
+  assert.ok(validate(missingRoot).some((error) => /missing root plugin\.json/.test(error)));
+
+  const unsupportedSchema = fixture(OPEN_REMOTE, LEGACY_REMOTE);
+  writeJson(path.join(unsupportedSchema, 'plugins', 'local-plugin', 'plugin.json'), {
+    ...PORTABLE_MANIFEST,
+    $schema: 'https://agent-plugins.org/schemas/1.1.0/plugin.schema.json',
+  });
+  assert.ok(validate(unsupportedSchema).some((error) => /unsupported or missing/.test(error)));
+});
+
+test('portable metadata must match both legacy manifests', () => {
+  const root = fixture(OPEN_REMOTE, LEGACY_REMOTE);
+  writeJson(path.join(root, 'plugins', 'local-plugin', 'plugin.json'), {
+    ...PORTABLE_MANIFEST,
+    version: '2.0.0',
+  });
+  assert.ok(validate(root).some((error) => /Agent Plugins manifest/.test(error)));
+});
+
+test('portable MCP configuration adds the schema and explicit transport type', () => {
+  assert.deepEqual(expectedPortableMcp(LEGACY_MCP), {
+    $schema: MCP_SCHEMA,
+    mcpServers: {
+      local: {
+        type: 'stdio',
+        command: 'node',
+        args: ['./server.js'],
+      },
+    },
+  });
+
+  const root = fixture(OPEN_REMOTE, LEGACY_REMOTE);
+  fs.rmSync(path.join(root, 'plugins', 'local-plugin', 'mcp.json'));
+  assert.ok(validate(root).some((error) => /missing root mcp\.json/.test(error)));
 });
 
 test('the committed marketplace files pass', () => {

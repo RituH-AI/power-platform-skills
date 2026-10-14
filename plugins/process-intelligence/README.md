@@ -103,7 +103,7 @@ The package includes **Agent Plugins 1.0.0** and legacy metadata side by side:
 | Format | Manifest | MCP configuration |
 |---|---|---|
 | Agent Plugins 1.0.0 | `plugin.json` at the plugin root | `mcp.json`, with explicit `type: "stdio"` |
-| Legacy Open Plugins | `.plugin/plugin.json` | `.mcp.json` |
+| Compatibility layout | `.plugin/plugin.json` | `.mcp.json` |
 | Claude Code legacy format | `.claude-plugin/plugin.json` | `.mcp.json` |
 
 All formats use shared `skills/` and `server/mcp.mjs`, with the same plugin name, version and

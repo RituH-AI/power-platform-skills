@@ -19,9 +19,11 @@ claude --plugin-dir /path/to/plugins/canvas-apps
 ## Architecture
 
 ```
-.claude-plugin/plugin.json     ← Claude Code metadata (mirrors .plugin/plugin.json)
-.plugin/plugin.json            ← Open Plugins metadata (name, version, keywords)
-.mcp.json                      ← MCP server config (canvas-authoring, auto-registered)
+plugin.json                    ← Agent Plugins 1.0 metadata
+mcp.json                       ← Portable canvas-authoring MCP config
+.plugin/plugin.json            ← Compatibility metadata mirror
+.claude-plugin/plugin.json     ← Claude Code metadata mirror
+.mcp.json                      ← Legacy MCP config
 AGENTS.md                      ← Plugin guidance for AI agents (this file)
 CLAUDE.md                      ← Symlink → AGENTS.md
 hooks.json                     ← Copilot-format hooks: userPromptTransformed

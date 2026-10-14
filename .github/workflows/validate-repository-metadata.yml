@@ -21,7 +21,7 @@ jobs:
               with:
                   node-version: 20
 
-            - name: validate-open-plugin-names
+            - name: validate-agent-plugin-names
               run: node scripts/validate-plugin-names.js
 
             - name: test-legacy-compatibility-validator

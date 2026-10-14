@@ -17,7 +17,7 @@ cat ~/.claude/.code-apps-preview-last-version-check 2>/dev/null
 
 ### Step 2: Read the local version
 
-Read `${PLUGIN_ROOT}/.plugin/plugin.json` and extract the `name` and `version` fields.
+Read `${PLUGIN_ROOT}/plugin.json` and extract the `name` and `version` fields.
 
 ### Step 3: Fetch the latest version from the marketplace
 

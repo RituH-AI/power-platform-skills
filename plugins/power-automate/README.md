@@ -17,7 +17,7 @@ From a GitHub Copilot CLI or Claude Code session:
 
 > [!NOTE]
 > **Runs offline — no npm install or remote host required.** The plugin ships a
-> self-contained MCP engine at `server/mcp.mjs`, and `.mcp.json` loads it through
+> self-contained MCP engine at `server/mcp.mjs`, and both MCP configurations load it through
 > a small Node bootstrap that resolves the plugin's installation directory. Auth
 > still uses your local `az login` — see **MCP server** below.
 
@@ -49,7 +49,7 @@ From a GitHub Copilot CLI or Claude Code session:
 
 ## MCP server
 
-`.mcp.json` registers the FlowAgent MCP server under the name `flowagent` and
+`mcp.json` and legacy `.mcp.json` register the FlowAgent MCP server under the name `flowagent` and
 loads it from the bundled engine at `server/mcp.mjs` via a small Node bootstrap
 that resolves the plugin's installation directory and reports an actionable
 error if the bundle is missing. That file is a single self-contained ESM bundle

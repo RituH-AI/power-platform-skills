@@ -14,8 +14,9 @@ const path = require('node:path');
 
 const DEFAULT_MARKETPLACE_NAME = 'power-platform-skills';
 const REMOTE_PLUGIN_MANIFEST_URL =
-  'https://raw.githubusercontent.com/microsoft/power-platform-skills/main/plugins/mobile-apps/.plugin/plugin.json';
+  'https://raw.githubusercontent.com/microsoft/power-platform-skills/main/plugins/mobile-apps/plugin.json';
 const PLUGIN_MANIFEST_PATHS = [
+  'plugin.json',
   '.plugin/plugin.json',
   '.claude-plugin/plugin.json',
 ];

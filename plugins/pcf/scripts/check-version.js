@@ -15,6 +15,7 @@ const path = require('path');
 const fs = require('fs');
 
 const PLUGIN_MANIFEST_PATHS = [
+  'plugin.json',
   '.plugin/plugin.json',
   '.claude-plugin/plugin.json',
 ];
@@ -73,7 +74,7 @@ function readJsonFromGit(ref, relativePaths, cwd) {
       });
       return JSON.parse(content);
     } catch {
-      // Open Plugins and legacy installs use different manifest paths.
+      // Portable and legacy installs use different manifest paths.
     }
   }
   return null;

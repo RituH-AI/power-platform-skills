@@ -15,11 +15,12 @@ the tool-routing rule.
   `debug-flow`, `diagnose-flow`, `manage-flows`, `browse-flows`,
   `manage-desktop-flows`, `route-environments`, `setup`)
 - `references/` — shared docs referenced by skills via `../../references/…`
-- `.mcp.json` — launches the FlowAgent MCP server (registered as `flowagent`)
+- `mcp.json` — portable Agent Plugins configuration for FlowAgent
+- `.mcp.json` — legacy configuration for the same server
 
 ## Engine vs plugin
 
 This folder is the **plugin**: skills, references, MCP wiring, and a
-self-contained MCP engine bundled at `server/mcp.mjs`. `.mcp.json` loads that
+self-contained MCP engine bundled at `server/mcp.mjs`. Both MCP configurations load that
 bundle through a small Node bootstrap that resolves the plugin's installation
 directory and reports an actionable error if the bundle is missing.

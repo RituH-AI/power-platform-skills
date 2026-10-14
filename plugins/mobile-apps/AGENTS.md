@@ -19,8 +19,11 @@ claude --plugin-dir /path/to/power-platform-skills/plugins/mobile-apps
 ## Architecture
 
 ```
-.plugin/plugin.json            ← Open Plugins metadata
-.claude-plugin/plugin.json     ← Legacy metadata mirror
+plugin.json                    ← Agent Plugins 1.0 metadata
+mcp.json                       ← Portable Microsoft Learn MCP config
+.plugin/plugin.json            ← Compatibility metadata mirror
+.claude-plugin/plugin.json     ← Claude Code metadata mirror
+.mcp.json                      ← Legacy MCP config
 AGENTS.md                      ← This file
 README.md                      ← Plugin overview
 agents/                        ← native-app-planner, data-model-architect, screen-planner, screen-builder

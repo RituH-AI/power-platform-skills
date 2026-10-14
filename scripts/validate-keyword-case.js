@@ -9,9 +9,8 @@
  * Scope of "marketplace files":
  *   - marketplace.json + the legacy .claude-plugin/marketplace.json mirror
  *     (top-level and per-plugin `keywords`/`tags`, if ever added there)
- *   - every plugin manifest under plugins/<plugin>/.plugin/plugin.json and its
- *     legacy plugins/<plugin>/.claude-plugin/plugin.json mirror, where the
- *     per-plugin `keywords`/`tags` actually live today.
+ *   - every portable plugins/<plugin>/plugin.json manifest and its compatibility
+ *     mirrors under .plugin and .claude-plugin.
  */
 
 const fs = require('fs');
@@ -42,7 +41,7 @@ function getPluginManifestPaths() {
   const manifestPaths = [];
   for (const entry of fs.readdirSync(pluginsDirectory, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    for (const manifestDir of ['.plugin', '.claude-plugin']) {
+    for (const manifestDir of ['', '.plugin', '.claude-plugin']) {
       const manifestPath = path.join(pluginsDirectory, entry.name, manifestDir, 'plugin.json');
       if (fs.existsSync(manifestPath)) manifestPaths.push(manifestPath);
     }

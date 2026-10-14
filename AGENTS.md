@@ -4,7 +4,7 @@ This file provides guidance to AI Agents when working with code in this reposito
 
 ## What This Repo Is
 
-A **plugin marketplace** for Power Platform development by Microsoft. The Open Plugins marketplace manifest (`marketplace.json`) references individual plugins in `plugins/`. Each plugin has its own `AGENTS.md` with plugin-specific guidance.
+A **plugin marketplace** for Power Platform development by Microsoft. The marketplace manifest (`marketplace.json`) references individual plugins in `plugins/`. Each plugin has its own `AGENTS.md` with plugin-specific guidance.
 
 ## This Repo Is PUBLIC — keep internal detail out of it
 
@@ -56,15 +56,18 @@ prefer an **equal-length** placeholder so the fixed-width table stays aligned.
 
 ```
 power-platform-skills/
-├── marketplace.json          # Open Plugins marketplace manifest (lists all available plugins)
+├── marketplace.json          # Plugin marketplace manifest (lists all available plugins)
 ├── .claude-plugin/           # Legacy manifest mirrors for existing subscriptions
 │   └── marketplace.json
 ├── plugins/                  # Directory containing individual plugins
 │   └── <plugin-name>/        # Individual plugin (e.g., power-pages)
+│       ├── plugin.json       # Agent Plugins 1.0 manifest
+│       ├── mcp.json          # Portable MCP configuration (optional)
 │       ├── .plugin/
-│       │   └── plugin.json   # Plugin manifest
+│       │   └── plugin.json   # Compatibility manifest
 │       ├── .claude-plugin/
 │       │   └── plugin.json   # Legacy manifest mirror
+│       ├── .mcp.json         # Legacy MCP configuration (optional)
 │       ├── AGENTS.md         # Plugin-specific development guidelines
 │       ├── agents/           # Agent persona files
 │       ├── commands/         # Command entry points
@@ -117,11 +120,11 @@ When a plugin copies code from another plugin, add it to the `COPY_SETS` in `scr
 
 Each plugin follows this structure:
 
-- `.plugin/plugin.json` — Open Plugins metadata (name, version, keywords)
-- `.claude-plugin/plugin.json` — legacy mirror of `.plugin/plugin.json` kept for existing subscriptions
-- `.mcp.json` — MCP server configuration (optional)
-- `plugin.json` and `mcp.json` — optional additive Agent Plugins 1.0.0 files at the
-  individual plugin root (currently `process-intelligence`); retain the legacy files above
+- `plugin.json` — canonical Agent Plugins 1.0.0 metadata with the published `$schema`
+- `mcp.json` — portable Agent Plugins MCP configuration with explicit transport types (optional)
+- `.plugin/plugin.json` — schema-free compatibility mirror of root `plugin.json`
+- `.claude-plugin/plugin.json` — legacy mirror kept for existing Claude Code subscriptions
+- `.mcp.json` — legacy MCP configuration kept when the plugin has MCP servers
 - `agents/` — Agent definitions (`.md` files with YAML frontmatter)
 - `skills/` — Skill definitions, each in its own subdirectory with a `SKILL.md`
 - `scripts/` — Shared utility scripts referenced by skills and agents
@@ -177,24 +180,24 @@ Current adopters: `power-pages`, `mobile-apps`, `model-apps`, and `pcf` (all tra
 ## Legacy Marketplace Compatibility
 
 Keep the root `.claude-plugin/marketplace.json` and each plugin's
-`.claude-plugin/plugin.json` as JSON mirrors of their Open Plugins counterparts.
+`.plugin/plugin.json` and `.claude-plugin/plugin.json` as compatibility mirrors.
 The shared root marketplace must stay dual-compatible while keeping per-plugin
 entries minimal: each plugin entry should include only the required `name` and
 repository-root-relative `source` fields. Keep marketplace-level `owner` and
 `metadata` because they describe the collection, but store per-plugin display/update
-metadata (description, version, license, keywords, etc.) in each `.plugin/plugin.json`
+metadata (description, version, license, keywords, etc.) in each root `plugin.json`
 instead of duplicating or overriding it in the marketplace index. Existing marketplace
 subscriptions may still resolve the legacy paths during auto-update, so removing or
-drifting these files can force users to reinstall. Because mirrors are committed
-files (not symlinks), update both source and legacy copies together, then run
+drifting these files can force users to reinstall. Root `plugin.json` includes the
+Agent Plugins `$schema`; compatibility mirrors contain the same metadata without
+`$schema`. Because mirrors are committed files (not symlinks), update all three
+together, then run
 `node scripts/validate-legacy-compatibility.js` after metadata changes.
 
-Plugins adopting Agent Plugins 1.0.0 also keep root `plugin.json` metadata synchronized with
-the legacy manifests' common fields, excluding `$schema`. Their root `mcp.json` uses the matching
-canonical schema and explicit transport type while preserving the legacy launcher. Both formats
-share skills/runtime files. A recognized portable root manifest takes precedence; clients do not
-merge the two component sets. Do not migrate siblings or remove legacy mirrors merely because
-one plugin adopts the portable format.
+Plugins with MCP servers keep root `mcp.json` on the matching canonical schema with explicit
+transport types while preserving `.mcp.json` for legacy clients. Both formats share skills and
+runtime files. A recognized portable root manifest takes precedence; clients do not merge the
+portable and legacy component sets.
 
 ### External plugins
 

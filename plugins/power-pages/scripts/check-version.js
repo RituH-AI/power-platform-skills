@@ -19,6 +19,7 @@ const MARKETPLACE_PATHS = [
   '.claude-plugin/marketplace.json',
 ];
 const PLUGIN_MANIFEST_PATHS = [
+  'plugin.json',
   '.plugin/plugin.json',
   '.claude-plugin/plugin.json',
 ];

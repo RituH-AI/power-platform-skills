@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * Validates that the legacy .claude-plugin manifests mirror their Open Plugins
- * counterparts. Existing marketplace subscriptions still resolve the legacy paths
- * during auto-update, so these committed mirror files must stay semantically in
- * sync whenever marketplace/plugin metadata changes.
+ * Validates the Agent Plugins manifests and their legacy compatibility mirrors.
+ * Existing marketplace subscriptions still resolve .plugin and .claude-plugin
+ * paths during auto-update, so those committed files must stay semantically in
+ * sync with the portable root manifest whenever plugin metadata changes.
  *
  * The one intentional difference is the `source` of a plugin hosted in another
  * repository, which each host spells differently. See REMOTE PLUGIN SOURCES below.
@@ -15,6 +15,20 @@ const path = require('path');
 const assert = require('assert/strict');
 
 const ROOT = path.resolve(__dirname, '..');
+const AGENT_PLUGIN_SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json';
+const AGENT_MCP_SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json';
+const AGENT_PLUGIN_FIELDS = [
+  '$schema',
+  'author',
+  'description',
+  'extensions',
+  'homepage',
+  'keywords',
+  'license',
+  'name',
+  'repository',
+  'version',
+];
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -35,6 +49,22 @@ function expectedLegacySource(root, pluginDirectory) {
 
 function assertJsonMirror(legacyPath, sourcePath) {
   assert.deepEqual(readJson(legacyPath), readJson(sourcePath));
+}
+
+function portableMetadata(manifest) {
+  const { $schema, ...metadata } = manifest;
+  return metadata;
+}
+
+function expectedPortableMcp(legacyMcp) {
+  const servers = Object.fromEntries(
+    Object.entries(legacyMcp.mcpServers || {}).map(([name, server]) => {
+      const type = server.type || (server.url ? 'http' : 'stdio');
+      const { type: ignoredType, ...configuration } = server;
+      return [name, { type, ...configuration }];
+    })
+  );
+  return { $schema: AGENT_MCP_SCHEMA, mcpServers: servers };
 }
 
 // ── REMOTE PLUGIN SOURCES ─────────────────────────────────────
@@ -99,9 +129,9 @@ function expectedLegacyRemoteSource(openSource) {
 }
 
 function assertMinimalMarketplaceEntry(plugin) {
-  // Open Plugins marketplace entries only require `name` and `source`. Optional
+  // Marketplace entries only require `name` and `source`. Optional
   // fields like description/version/license/keywords are override fields, so keep
-  // the marketplace as an index and let each plugin's `.plugin/plugin.json` remain
+  // the marketplace as an index and let each plugin's root `plugin.json` remain
   // the single source of truth for display and update metadata.
   // See: https://open-plugins.com/plugin-builders/marketplace
   assert.deepEqual(Object.keys(plugin).sort(), ['name', 'source']);
@@ -115,7 +145,7 @@ function assertMinimalMarketplaceEntry(plugin) {
 function assertMinimalMarketplace(marketplace) {
   // Keep marketplace-level metadata here because it describes the collection, not
   // any individual plugin. Per-plugin optional fields still stay out of `plugins`
-  // entries to avoid overriding the corresponding `.plugin/plugin.json` metadata.
+  // entries to avoid overriding the corresponding root `plugin.json` metadata.
   assert.deepEqual(Object.keys(marketplace).sort(), ['metadata', 'name', 'owner', 'plugins']);
   assert.equal(typeof marketplace.name, 'string', 'name must be a string');
   assert.notEqual(marketplace.name.trim(), '', 'name must not be empty');
@@ -151,6 +181,14 @@ function assertPluginMetadata(pluginName, manifest) {
     assert.equal(typeof keyword, 'string', `keywords[${index}] must be a string`);
     assert.notEqual(keyword.trim(), '', `keywords[${index}] must not be empty`);
   }
+}
+
+function assertPortableManifest(pluginName, manifest) {
+  assert.equal(manifest.$schema, AGENT_PLUGIN_SCHEMA, 'unsupported or missing Agent Plugins schema');
+  for (const field of Object.keys(manifest)) {
+    assert.ok(AGENT_PLUGIN_FIELDS.includes(field), `unsupported Agent Plugins field "${field}"`);
+  }
+  assertPluginMetadata(pluginName, manifest);
 }
 
 function validate(root = ROOT) {
@@ -213,8 +251,11 @@ function validate(root = ROOT) {
     }
 
     const pluginDirectory = pluginDirectoryFromOpenEntry(root, openMarketplace, plugin);
+    const portableManifestPath = path.join(pluginDirectory, 'plugin.json');
     const openManifestPath = path.join(pluginDirectory, '.plugin', 'plugin.json');
     const legacyManifestPath = path.join(pluginDirectory, '.claude-plugin', 'plugin.json');
+    const portableMcpPath = path.join(pluginDirectory, 'mcp.json');
+    const legacyMcpPath = path.join(pluginDirectory, '.mcp.json');
     const relativeLegacyManifestPath = normalizeRelative(path.relative(root, legacyManifestPath));
 
     check(`${plugin.name} legacy marketplace entry`, () => {
@@ -225,14 +266,25 @@ function validate(root = ROOT) {
       assertMinimalMarketplaceEntry(legacyPlugin);
     });
 
-    check(`${plugin.name} plugin manifest`, () => {
-      const pluginManifest = readJson(openManifestPath);
-      assertPluginMetadata(plugin.name, pluginManifest);
+    check(`${plugin.name} Agent Plugins manifest`, () => {
+      assert.ok(fs.existsSync(portableManifestPath), 'missing root plugin.json');
+      const portableManifest = readJson(portableManifestPath);
+      assertPortableManifest(plugin.name, portableManifest);
+      assert.deepEqual(readJson(openManifestPath), portableMetadata(portableManifest));
     });
 
     check(relativeLegacyManifestPath, () => {
       assert.ok(fs.existsSync(legacyManifestPath), 'missing legacy plugin manifest');
       assertJsonMirror(legacyManifestPath, openManifestPath);
+    });
+
+    check(`${plugin.name} MCP configuration`, () => {
+      if (!fs.existsSync(legacyMcpPath)) {
+        assert.ok(!fs.existsSync(portableMcpPath), 'root mcp.json has no legacy .mcp.json counterpart');
+        return;
+      }
+      assert.ok(fs.existsSync(portableMcpPath), 'missing root mcp.json');
+      assert.deepEqual(readJson(portableMcpPath), expectedPortableMcp(readJson(legacyMcpPath)));
     });
   }
 
@@ -248,13 +300,18 @@ function validate(root = ROOT) {
 if (require.main === module) {
   const errors = validate();
   if (errors.length > 0) {
-    console.log('Found legacy compatibility metadata issues:');
+    console.log('Found Agent Plugins or legacy compatibility issues:');
     for (const error of errors) {
       console.log(`- ${error}`);
     }
     process.exit(1);
   }
-  console.log('Legacy .claude-plugin compatibility metadata is in sync.');
+  console.log('Agent Plugins manifests and legacy compatibility files are in sync.');
 }
 
-module.exports = { validate, expectedLegacyRemoteSource, assertRemoteOpenSource };
+module.exports = {
+  validate,
+  expectedLegacyRemoteSource,
+  expectedPortableMcp,
+  assertRemoteOpenSource,
+};

@@ -41,8 +41,11 @@ Read `PLUGIN_DEVELOPMENT_GUIDE.md` for UX and reliability standards when creatin
 ## Skill Development Conventions
 
 ```
-.plugin/plugin.json            ← Open Plugins metadata (name, version, keywords)
-.mcp.json                      ← MCP server config (Playwright for browser automation)
+plugin.json                    ← Agent Plugins 1.0 metadata
+mcp.json                       ← Portable Playwright and Microsoft Learn MCP config
+.plugin/plugin.json            ← Compatibility metadata mirror
+.claude-plugin/plugin.json     ← Claude Code metadata mirror
+.mcp.json                      ← Legacy MCP config
 agents/
   data-model-architect.md      ← Agent: proposes Dataverse data models (read-only)
   webapi-integration.md        ← Agent: implements Web API integration in frontend code

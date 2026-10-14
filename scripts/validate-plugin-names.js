@@ -1,24 +1,24 @@
 #!/usr/bin/env node
 
 /**
- * Validates that plugin names follow the Open Plugins name constraints.
+ * Validates that plugin names follow the Agent Plugins name constraints.
  */
 
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-const OPEN_PLUGIN_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9.-]{0,62}[a-z0-9])?$/;
+const AGENT_PLUGIN_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9.-]{0,62}[a-z0-9])?$/;
 
 function validateName(name, source) {
   if (typeof name !== 'string') {
     return `${source}: plugin name must be a string`;
   }
 
-  if (OPEN_PLUGIN_NAME_PATTERN.test(name) && !name.includes('--') && !name.includes('..')) {
+  if (AGENT_PLUGIN_NAME_PATTERN.test(name) && !name.includes('--') && !name.includes('..')) {
     return null;
   }
-  return `${source}: '${name}' does not follow Open Plugins name constraints`;
+  return `${source}: '${name}' does not follow Agent Plugins name constraints`;
 }
 
 function readJson(filePath) {
@@ -32,7 +32,7 @@ function getPluginManifestPaths() {
   return fs
     .readdirSync(pluginsDirectory, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(pluginsDirectory, entry.name, '.plugin', 'plugin.json'))
+    .map((entry) => path.join(pluginsDirectory, entry.name, 'plugin.json'))
     .filter((filePath) => fs.existsSync(filePath))
     .sort();
 }
@@ -59,11 +59,11 @@ for (const pluginManifestPath of getPluginManifestPaths()) {
 }
 
 if (errors.length > 0) {
-  console.log('Found plugin names that do not follow Open Plugins name constraints:');
+  console.log('Found plugin names that do not follow Agent Plugins name constraints:');
   for (const error of errors) {
     console.log(`- ${error}`);
   }
   process.exit(1);
 }
 
-console.log('All plugin names follow Open Plugins name constraints.');
+console.log('All plugin names follow Agent Plugins name constraints.');
