@@ -10,10 +10,9 @@ Apply this disclosure contract to:
 
 - the declarative route in `create-site`;
 - `customize-declarative-site`;
-- `style-site`;
 - `author-webpage-content`.
 
-Classic component authoring references and supporting page-element references are not separate
+Classic component authoring, styling and supporting page-element references are not separate
 entry points. The coordinator discloses preview status once for classic authoring;
 reading another reference does not create a covered-skill handoff.
 Do not extend this disclosure
@@ -70,8 +69,8 @@ prerequisite or environment discovery. For an ambiguous site-type request, also 
 > live website unless deployment is separately requested and approved. Keep the site under source
 > control and review proposed changes before applying them.
 
-Use this notice for direct invocation of `customize-declarative-site`, `style-site`, or
-`author-webpage-content`, including sites created in Design Studio or downloaded independently
+Use this notice for direct invocation of `customize-declarative-site` or
+`author-webpage-content`, including styling requests and sites created in Design Studio or downloaded independently
 with PAC CLI.
 
 ## Creation-to-customization continuation

@@ -1,26 +1,15 @@
----
-name: style-site
-description: >-
-  Styles classic Power Pages sites locally with CSS, branding, components,
-  Liquid/templates, and runtime inspection.
-  Preserves native structure. Not for SPA/code sites, PCF/third-party internals,
-  migration, or deployment.
-user-invocable: true
-allowed-tools: Read, Write, Grep, Glob, Bash, AskUserQuestion, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch, mcp__plugin_power-pages_playwright__browser_navigate, mcp__plugin_power-pages_playwright__browser_evaluate, mcp__plugin_power-pages_playwright__browser_run_code_unsafe
-model: opus
----
-
-> **Plugin check**: Run `node "${PLUGIN_ROOT}/scripts/check-version.js"` — if it outputs a message, show it to the user before proceeding.
-> Once per installed plugin version in the current conversation; otherwise reuse.
-
 # Style a Classic Power Pages Site
 
-**Initial request:** $ARGUMENTS
+Execute through `customize-declarative-site` for styling-only requests or approved `style-site`
+operations. Preserve identifiers, approved inputs, scope, locales, design context, hashes and
+receipts. Coordinated approval does not approve the exact CSS/source diff.
 
-Before inspection, read [quick-start.md](references/quick-start.md) and
-`${PLUGIN_ROOT}/references/declarative-preview.md`; apply its **Customization notice** and handoff
-protocol. Show **Inspect/propose → Approve → Apply → Independently verify → Report**, not task
-bookkeeping. No final-completion confirmation, HTML preview, local server, or browser review.
+Reuse the entry skill's version check and preview disclosure; reference reads are not
+skill invocations. Read
+[quick-start.md](../../style-site/references/quick-start.md).
+Show **Inspect/propose → Approve → Apply → Independently verify → Report** without mandatory tasks.
+Styling-only requests finish here: no broad customization plan, Git initialization,
+commit, deployment prompt, final-completion confirmation, HTML preview, local server or browser review.
 
 ## Inspect and select the route
 
@@ -31,7 +20,8 @@ property/gradient allowlists.
 <!-- not-a-gate: missing inputs; no navigation/write authority -->
 Use `AskUserQuestion` only for missing/ambiguous inputs.
 
-Runtime URL only: read [runtime-dom-discovery.md](references/runtime-dom-discovery.md).
+Runtime URL only: read
+[runtime-dom-discovery.md](../../style-site/references/runtime-dom-discovery.md).
 
 <!-- gate: style-site:2.runtime | category=progress | cancel-leaves=local-style-state -->
 > 🚦 **Gate (progress · style-site:2.runtime):** Before exact-URL inspection, disclose normal page scripts/requests and bounded collection.
@@ -49,7 +39,9 @@ Use `AskUserQuestion`: **Confirm scope and prepare / Revise scope / Cancel**; no
 
 ## Prepare and approve
 
-For new treatments, palette/background, typography or redesign, read [design-quality.md](references/design-quality.md). Resolve failures and local declaration dependencies before approval; rendering remains pending.
+For new treatments, palette/background, typography or redesign, read
+[design-quality.md](../../style-site/references/design-quality.md).
+Resolve failures and local declaration dependencies before approval; rendering remains pending.
 
 Prepare in a **fresh external directory** per revision; edit requests, never plans. No reviewable proposal means stop.
 
@@ -63,7 +55,8 @@ Use `AskUserQuestion`: **Approve this revision locally / Revise proposal / Cance
 
 ## Apply
 
-Run coordinator apply with approved hash/new receipt; no direct writes.
+Run `${PLUGIN_ROOT}/skills/style-site/scripts/style-site-workflow.js` apply with approved hash/new receipt;
+no direct writes. The quick start supplies the exact command.
 
 <!-- gate: style-site:6.reapprove | category=progress | cancel-leaves=local-style-state -->
 > 🚦 **Gate (progress · style-site:6.reapprove):** Stop on drift, revised selections/targets, or partial-write failure, **per occurrence**.
@@ -73,18 +66,25 @@ Use `AskUserQuestion`: **Regenerate and review / Keep current local state and st
 
 ## Independently verify
 
-Require independent validator success; re-read files/diffs against targets/receipt. Follow quick-start verification; requested Studio-only skips apply.
+Require independent validator success from coordinator apply; re-read files/diffs against
+targets/receipt. Follow quick-start verification. Requested Studio-only work skips apply;
+independently validate its proposal with
+`node "${PLUGIN_ROOT}/skills/style-site/scripts/validate-style-site.js" --plan "<plan>"` and verify no styling edits.
 
 ## Report
 
-Report local evidence, pending checks and all warnings, including Web File priority. Blocked local work needs a local next step, not Studio-only success. Record `StyleSite` only after verified local or requested handoff completion; preserve no-op/separate tracking diffs.
+Report local evidence, pending checks and all warnings, including Web File priority. Blocked
+local work needs a local next step, not Studio-only success. Return verified results to the
+entry skill; it records `CustomizeDeclarativeSite` once after successful completion, not per
+reference read or styling operation. Preserve existing tracking records and disclose tracking
+diffs separately.
 
 > Reference: ${PLUGIN_ROOT}/references/skill-tracking-reference.md
 
 ## Conditional references
 
-- [Studio panel availability, not ownership](references/studio-component-capabilities.md).
-- [Expanded scope/source/cascade](references/styling-policy.md).
-- [Bootstrap/locale uncertainty](references/bootstrap-and-studio.md).
-- [CSS/source schema](references/proposal-and-verification.md): raw/global CSS, resources/priority and **inline contract/example**; read before inline edits or repeated tags.
-- [sources.md](references/sources.md): unknown/conflicting/stale guidance or explicit requests. Routine CSS uses bundled verified guidance.
+- [Studio panel availability, not ownership](../../style-site/references/studio-component-capabilities.md).
+- [Expanded scope/source/cascade](../../style-site/references/styling-policy.md).
+- [Bootstrap/locale uncertainty](../../style-site/references/bootstrap-and-studio.md).
+- [CSS/source schema](../../style-site/references/proposal-and-verification.md): raw/global CSS, resources/priority and **inline contract/example**; read before inline edits or repeated tags.
+- [sources.md](../../style-site/references/sources.md): unknown/conflicting/stale guidance or explicit requests. Routine CSS uses bundled verified guidance.

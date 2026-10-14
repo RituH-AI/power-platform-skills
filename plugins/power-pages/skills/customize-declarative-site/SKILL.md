@@ -8,11 +8,12 @@ description: >-
   browser-viewable plan, executes changes in dependency order, verifies the local result,
   and optionally hands off to deployment. Not for React, Angular, Vue, or Astro SPA sites.
 user-invocable: true
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash, WebSearch, AskUserQuestion, Skill, TaskCreate, TaskUpdate, TaskList
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash, WebSearch, AskUserQuestion, Skill, TaskCreate, TaskUpdate, TaskList, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch, mcp__plugin_power-pages_playwright__browser_navigate, mcp__plugin_power-pages_playwright__browser_evaluate, mcp__plugin_power-pages_playwright__browser_run_code_unsafe
 model: opus
 ---
 
 > **Plugin check**: Run `node "${PLUGIN_ROOT}/scripts/check-version.js"` — if it outputs a message, show it to the user before proceeding.
+> For styling-only requests, reuse the result once per installed plugin version in the current conversation.
 
 # Customize a Traditional Power Pages Site
 
@@ -36,6 +37,9 @@ Read:
 - `${PLUGIN_ROOT}/skills/customize-declarative-site/references/classic-site-authoring.md`
 
 Apply **Request routing** before creating coordination tasks or starting the phases below.
+For styling-only requests outside a current approved coordinated execution, follow
+`${PLUGIN_ROOT}/skills/customize-declarative-site/references/style-site-workflow.md`
+and finish after its local verification/report, without the phases below.
 For an individual page or component request, follow the shared authoring reference and
 finish after its verification/report.
 For coordinated work, also read:
@@ -45,7 +49,7 @@ For coordinated work, also read:
 - `${PLUGIN_ROOT}/skills/customize-declarative-site/references/content-and-page-compositions.md`
 - `${PLUGIN_ROOT}/skills/customize-declarative-site/references/visual-asset-planning.md`
 
-For new-site design or requested styling, also read:
+For coordinated new-site design or requested styling, also read:
 
 - `${PLUGIN_ROOT}/skills/style-site/references/design-quality.md`
 
@@ -64,7 +68,8 @@ For coordinated work, this skill owns:
 
 It authors webpage, snippet, web-file, web-template, and page-template records only through
 `${PLUGIN_ROOT}/skills/customize-declarative-site/references/classic-site-authoring.md` and the selected component reference.
-The `author-webpage-content` skill owns localized body HTML; `style-site` owns guarded styling.
+The `author-webpage-content` skill owns localized body HTML; the
+`style-site` reference workflow owns guarded styling.
 It does not upload, activate, or modify Dataverse directly.
 No dev server, live preview, or generated styling mockup is required. The HTML below is an
 approval document, not a rendering of the site; local checks cannot prove Studio/runtime appearance.
@@ -120,6 +125,10 @@ For coordinated work, create these tasks before starting:
 
 Use the smallest route that fully satisfies the request:
 
+- styling-only work outside a current approved coordinated execution: follow
+  `${PLUGIN_ROOT}/skills/customize-declarative-site/references/style-site-workflow.md`,
+  including its conditional scope and exact-diff/hash approvals, then report locally.
+  Do not create coordination tasks, a broad plan, Git baseline, commits or deployment prompts;
 - one narrow component change: execute the corresponding reference workflow through
   `${PLUGIN_ROOT}/skills/customize-declarative-site/references/classic-site-authoring.md`;
 - one straightforward page: use the lightweight webpage-reference workflow with one resolved
@@ -261,7 +270,8 @@ modifying Dataverse.
    `author-web-file`, `author-content-snippet`, `author-web-template`,
    `author-page-template`, `author-webpage`, `author-webpage-content`, and `style-site`.
    Use the classic-authoring index's dispatch for component reference workflows.
-   Invoke `author-webpage-content` and `style-site` through the `Skill` tool.
+   Invoke only `author-webpage-content` through the `Skill` tool.
+   Execute `style-site` through its reference workflow.
    New pages update navigation by default unless the user explicitly asks not to. Resolve
    placement through the webpage reference and include it or the explicit opt-out in the
    page operation's existing inputs and summary before approval.
@@ -380,7 +390,7 @@ For each ready operation:
    actual bound outputs.
 2. Mark the operation `start`, then use the classic-authoring index to dispatch that resolved
    operation. Execute reference workflows directly; invoke only
-   `author-webpage-content` or `style-site` as skills. Supply the approved `designContext` when
+   `author-webpage-content` as a skill. Supply the approved `designContext` when
    returned. Carry its new-site composition and explicit preservation
    decisions, not an implicit instruction to retain the creation template's layout or branding.
    The shared brief supplies Bootstrap and visual direction, not permission to change unrelated
@@ -429,7 +439,7 @@ alt text, and do not invent local filenames or Web File `name` attributes. Exter
 URLs also belong in `style-site`'s exact `externalResources` review. `style-site` does not fetch
 them or replace the image component.
 
-For styling, invoke `style-site` last. Its exact-diff/hash approval is a separate binding between
+For styling, execute the `style-site` reference workflow last. Its exact-diff/hash approval is a separate binding between
 the user-reviewed CSS proposal and the bytes applied; the customization-plan approval does not
 replace that safety gate.
 

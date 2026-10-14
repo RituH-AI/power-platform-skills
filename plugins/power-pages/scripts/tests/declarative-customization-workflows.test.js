@@ -4,10 +4,170 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const pluginRoot = path.join(__dirname, '..', '..');
+const classicReferences = new Map([
+  ['author-web-file', 'web-file-authoring.md'],
+  ['author-content-snippet', 'content-snippet-authoring.md'],
+  ['author-web-template', 'web-template-authoring.md'],
+  ['author-page-template', 'page-template-authoring.md'],
+  ['author-webpage', 'webpage-authoring.md'],
+]);
 
 function read(relativePath) {
   return fs.readFileSync(path.join(pluginRoot, relativePath), 'utf8');
 }
+
+function readClassicReference(owner) {
+  return read(path.join('skills', 'customize-declarative-site', 'references',
+    classicReferences.get(owner)));
+}
+
+function assertBundledFile(target, label) {
+  const relative = path.relative(pluginRoot, target);
+  assert.ok(!path.isAbsolute(relative) && relative !== '..' &&
+    !relative.startsWith(`..${path.sep}`), `${label} escapes the plugin`);
+  assert.ok(fs.statSync(target).isFile(), label);
+}
+
+test('classic component authoring uses references without extra skill registrations', () => {
+  const skillsRoot = path.join(pluginRoot, 'skills');
+  const registered = fs.readdirSync(skillsRoot, { recursive: true })
+    .filter((file) => path.basename(file) === 'SKILL.md');
+  const names = registered.map((file) =>
+    fs.readFileSync(path.join(skillsRoot, file), 'utf8').match(/^name: (.+)$/m)[1]);
+  const advertisedCount = read('README.md').match(/The plugin provides (\d+) skills/);
+  assert.ok(advertisedCount, 'README must advertise the bundled skill count');
+  assert.equal(Number(advertisedCount[1]), registered.length);
+  assert.ok(names.includes('customize-declarative-site'));
+  assert.ok(names.includes('author-webpage-content'));
+  assert.ok(!names.includes('style-site'));
+  assert.ok(!fs.existsSync(path.join(skillsRoot, 'style-site', 'SKILL.md')));
+
+  for (const [owner, filename] of classicReferences) {
+    assert.ok(!names.includes(owner), owner);
+    assert.ok(!fs.existsSync(path.join(skillsRoot, owner, 'SKILL.md')), owner);
+    assert.match(filename, /-authoring\.md$/);
+    const reference = readClassicReference(owner);
+    assert.match(reference, /^# Design Studio /, owner);
+    assert.match(reference, /^## Contents$/m, owner);
+    assert.match(reference, /^## Verification checklist$/m, owner);
+    assert.match(reference, /^## Prohibited shortcuts$/m, owner);
+    assert.doesNotMatch(reference, /\$ARGUMENTS|user-invocable:/, owner);
+  }
+});
+
+test('reference dispatch preserves the coordinator phases and local authoring boundaries', () => {
+  const skill = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
+  const shared = read(path.join('skills', 'customize-declarative-site', 'references', 'classic-site-authoring.md'));
+  assert.match(skill, /Apply \*\*Request routing\*\* before creating coordination tasks/);
+  assert.match(skill, /For an individual page or component request, follow the shared authoring reference and\s+finish/);
+  assert.match(skill, /For coordinated work, create these tasks before starting/);
+  assert.match(shared, /Execute its reference directly for styling-only requests/);
+  assert.match(shared, /\| `style-site` \|.*\[Styling\]\(style-site-workflow\.md\)/);
+  assert.deepEqual([...skill.matchAll(/^## Phase (\d+):/gm)].map((match) => Number(match[1])),
+    [1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual([...skill.matchAll(/<!-- gate: ([^ |]+)/g)].map((match) => match[1]),
+    ['customize-declarative-site:4.approve', 'customize-declarative-site:7.deploy']);
+  assert.match(shared, /Do not invoke these operation identifiers through the `Skill` tool/);
+  assert.match(shared, /Do not rewrite an approved plan, its identifiers, or its hash/);
+  assert.match(shared, /Load another component reference only when its records or callers are affected/);
+  assert.match(shared, /Do not create or replace a customization plan\/receipt, initialize Git, commit/);
+  assert.match(shared, /current\s+approved execution exists, inspect its scope/);
+  assert.match(shared, /preserve existing IDs and unknown PAC fields/);
+  assert.match(shared, /Do not upload, deploy, activate,\s+modify Dataverse directly/);
+  assert.match(shared, /Complete an operation only after its reference verification succeeds/);
+  assert.match(shared, /^## Entry-point behavior$/m);
+  assert.match(shared, /Record only skill invocations, not reference reads/);
+  assert.match(shared, /never create a tracking directory/);
+
+  const snippet = readClassicReference('author-content-snippet');
+  assert.match(snippet, /Do not expand a one-language edit or invent translations/);
+  assert.match(snippet, /^## Output-context safety$/m);
+  assert.match(readClassicReference('author-web-file'), /^## File validation and security$/m);
+});
+
+test('styling-only requests use local reference execution without coordinated planning', () => {
+  const skill = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
+  const workflow = read(path.join('skills', 'customize-declarative-site',
+    'references', 'style-site-workflow.md'));
+  const contract = read(path.join('skills', 'customize-declarative-site',
+    'references', 'customization-plan-contract.md'));
+  assert.match(skill, /For styling-only requests outside a current approved coordinated execution, follow/);
+  assert.match(skill, /references\/style-site-workflow\.md/);
+  assert.match(skill, /finish after its local verification\/report, without the phases below/);
+  assert.match(workflow, /Styling-only requests finish here: no broad customization plan, Git initialization,/);
+  assert.match(workflow, /commit, deployment prompt, final-completion confirmation, HTML preview, local server or browser review/);
+  assert.match(workflow, /Preserve identifiers, approved inputs, scope, locales, design context, hashes and\s+receipts/);
+  assert.match(workflow, /Coordinated approval does not approve the exact CSS\/source diff/);
+  assert.match(workflow, /records `CustomizeDeclarativeSite` once after successful completion, not per/);
+  assert.match(contract, /Only `author-webpage-content` is a skill invocation/);
+  assert.match(contract, /Keep `style-site` as the operation identifier/);
+  assert.doesNotMatch(skill + contract, /invoke `style-site`|`style-site` are skill invocations/);
+});
+
+test('new classic pages default to navigation with explicit opt-out and resolved placement', () => {
+  const page = readClassicReference('author-webpage');
+  assert.match(page, /default: yes, unless the request\s+excludes navigation/);
+  assert.match(page, /New pages update navigation by default unless the user explicitly asks not to/);
+  assert.match(page, /Resolve the target web link set and label before writing/);
+  assert.match(page, /By default, add a web link for the root webpage/);
+  assert.match(page, /`adx_pageid` set to the root webpage ID/);
+  assert.match(page, /with an active state/);
+  assert.match(page, /do not add the page to every\s+web link set/);
+  assert.match(page, /do not remove or reorder unrelated links/);
+  assert.match(page, /For an approved operation, apply only its approved navigation scope/);
+  assert.match(page, /body-only edits leave navigation unchanged/);
+  assert.match(page, /request explicitly excludes navigation/);
+  assert.doesNotMatch(page, /default: no|page creation alone leaves navigation unchanged|Do not create navigation links merely/);
+
+  for (const relativePath of [
+    'AGENTS.md',
+    'README.md',
+    path.join('skills', 'customize-declarative-site', 'references', 'classic-site-authoring.md'),
+  ]) {
+    assert.match(read(relativePath), /[Nn]ew pages update\s+navigation by default unless (?:the user|you) explicitly asks? not to/,
+      relativePath);
+  }
+  const compositions = read(path.join('skills', 'customize-declarative-site',
+    'references', 'content-and-page-compositions.md'));
+  assert.match(compositions, /including default\s+navigation or its explicit opt-out/);
+});
+
+test('classic authoring links and contents resolve within the installed plugin', () => {
+  const skills = ['customize-declarative-site', 'author-webpage-content'];
+  const documents = [
+    ...skills.map((skill) => path.join('skills', skill, 'SKILL.md')),
+    ...skills.flatMap((skill) => {
+      const directory = path.join('skills', skill, 'references');
+      return fs.readdirSync(path.join(pluginRoot, directory))
+        .filter((filename) => filename.endsWith('.md'))
+        .map((filename) => path.join(directory, filename));
+    }),
+  ];
+  for (const relativePath of documents) {
+    const file = path.join(pluginRoot, relativePath);
+    const content = read(relativePath);
+    const links = [...content.matchAll(/\[[^\]]+\]\(([^)\s]+)\)/g)].map((match) => match[1]);
+    const pluginLinks = [...content.matchAll(/\$\{PLUGIN_ROOT\}\/([^`"\s]+\.(?:md|js))/g)]
+      .map((match) => path.join(pluginRoot, ...match[1].split('/')));
+    for (const target of pluginLinks) {
+      assertBundledFile(target, `${relativePath}: ${target}`);
+    }
+    for (const href of links.filter((link) => !/^https?:/i.test(link))) {
+      const [relativeTarget, fragment] = href.split('#');
+      const target = relativeTarget
+        ? path.resolve(path.dirname(file), ...relativeTarget.split('/'))
+        : file;
+      assertBundledFile(target, `${relativePath}: ${href}`);
+      if (fragment) {
+        const targetContent = fs.readFileSync(target, 'utf8');
+        const anchors = [...targetContent.matchAll(/^#{1,6} (.+)$/gm)]
+          .map((match) => match[1].trim().toLowerCase()
+            .replace(/[^a-z0-9 _-]/g, '').replace(/ /g, '-'));
+        assert.ok(anchors.includes(fragment), `${relativePath}: missing heading ${href}`);
+      }
+    }
+  }
+});
 
 test('all declarative preview entry points disclose once and propagate the handoff marker', () => {
   const policy = read(path.join('references', 'declarative-preview.md'));
@@ -17,13 +177,7 @@ test('all declarative preview entry points disclose once and propagate the hando
   );
   const coveredSkills = [
     path.join('skills', 'customize-declarative-site', 'SKILL.md'),
-    path.join('skills', 'style-site', 'SKILL.md'),
-    path.join('skills', 'classic-site-skills', 'author-webpage', 'SKILL.md'),
-    path.join('skills', 'classic-site-skills', 'author-webpage-content', 'SKILL.md'),
-    path.join('skills', 'classic-site-skills', 'author-content-snippet', 'SKILL.md'),
-    path.join('skills', 'classic-site-skills', 'author-web-file', 'SKILL.md'),
-    path.join('skills', 'classic-site-skills', 'author-web-template', 'SKILL.md'),
-    path.join('skills', 'classic-site-skills', 'author-page-template', 'SKILL.md'),
+    path.join('skills', 'author-webpage-content', 'SKILL.md'),
   ];
 
   assert.match(
@@ -175,7 +329,7 @@ test('create-site can hand a Standard or Enhanced baseline to declarative custom
   assert.match(workflow, /validated, committed baseline/);
 });
 
-test('customize-declarative-site coordinates owning skills without authoring records directly', () => {
+test('customize-declarative-site executes authoring references without changing approved-plan contracts', () => {
   const skill = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
   const contract = read(path.join(
     'skills',
@@ -190,8 +344,10 @@ test('customize-declarative-site coordinates owning skills without authoring rec
   assert.match(skill, /author-web-template/);
   assert.match(skill, /author-page-template/);
   assert.match(skill, /author-webpage-content/);
-  assert.match(skill, /invoke `style-site` last/);
-  assert.match(skill, /does not directly author webpage, snippet, web-file, web-template, page-template/);
+  assert.match(skill, /execute the `style-site` reference workflow last/);
+  assert.match(skill, /authors webpage, snippet, web-file, web-template, and page-template records only through/);
+  assert.match(skill, /references\/classic-site-authoring\.md/);
+  assert.match(skill, /Execute reference workflows directly; invoke only/);
   assert.match(skill, /current-plan\.json/);
   assert.match(skill, /current-execution\.json/);
   assert.match(skill, /promote-customize-declarative-site-plan\.js/);
@@ -299,17 +455,16 @@ test('classic creation uses verified Bootstrap 5 and image-rich design without S
   assert.match(customization, /newSiteDesign\.imageDelivery: "external-url"/);
   assert.match(customization, /exact URL in the consumer's static/);
   assert.match(customization, /at least one relevant content photograph or original illustration/);
-  assert.match(customization, /`designContext` to its owning skill/);
+  assert.match(customization, /Supply the approved `designContext`/);
   assert.match(customization, /exact-diff\/hash approval is a separate binding/);
   assert.match(customization, /No dev server, live preview/);
 });
 
 test('classic authors preserve Bootstrap conventions and do not gate CSS on display order', () => {
-  const webFile = read(path.join('skills', 'classic-site-skills', 'author-web-file',
-    'references', 'design-studio-web-file-authoring.md'));
-  const sections = read(path.join('skills', 'classic-site-skills', 'page-elements',
+  const webFile = readClassicReference('author-web-file');
+  const sections = read(path.join('skills', 'author-webpage-content',
     'references', 'design-studio-section-layouts.md'));
-  const content = read(path.join('skills', 'classic-site-skills', 'author-webpage-content', 'SKILL.md'));
+  const content = read(path.join('skills', 'author-webpage-content', 'SKILL.md'));
   assert.match(webFile, /higher priority than `theme\.css` and lower priority than `portalbasictheme\.css`/);
   assert.match(webFile, /advisory, not an `adx_displayorder`\/`displayorder` constraint/);
   assert.match(webFile, /Omit `displayorder` on new CSS Web Files/);
@@ -387,9 +542,9 @@ test('classic planning defaults allow recomposition but preserve explicit prefer
 });
 
 test('native authors and final styling carry the approved composition without sacrificing native integrity', () => {
-  const page = read(path.join('skills', 'classic-site-skills', 'author-webpage', 'SKILL.md'));
-  const content = read(path.join('skills', 'classic-site-skills', 'author-webpage-content', 'SKILL.md'));
-  const composition = read(path.join('skills', 'classic-site-skills', 'author-webpage-content',
+  const page = readClassicReference('author-webpage');
+  const content = read(path.join('skills', 'author-webpage-content', 'SKILL.md'));
+  const composition = read(path.join('skills', 'author-webpage-content',
     'references', 'webpage-content-composition.md'));
   const styling = read(path.join('skills', 'style-site', 'references', 'design-quality.md'));
   const critique = read(path.join('skills', 'style-site', 'references', 'design-critique.md'));
@@ -398,7 +553,7 @@ test('native authors and final styling carry the approved composition without sa
     assert.match(source, /designContext/);
     assert.match(source, /preservation/);
   }
-  assert.match(page, /do not substitute the creation template's layout or branding/);
+  assert.match(page, /do not substitute the creation template's\s+layout or branding/);
   assert.match(content, /requires custom composition/);
   assert.match(composition, /required forms\/lists, data bindings, Liquid behavior, native markers and locale scope/);
   assert.match(composition, /never replace it with a\s+static lookalike or silently discard it/);
@@ -431,10 +586,10 @@ test('new-site plans require custom Home and journey layouts rather than cosmeti
 });
 
 test('component reuse preserves existing source without forcing the surrounding template layout', () => {
-  const composition = read(path.join('skills', 'classic-site-skills', 'author-webpage-content',
+  const composition = read(path.join('skills', 'author-webpage-content',
     'references', 'webpage-content-composition.md'));
-  const pageTemplate = read(path.join('skills', 'classic-site-skills', 'author-page-template', 'SKILL.md'));
-  const webTemplate = read(path.join('skills', 'classic-site-skills', 'author-web-template', 'SKILL.md'));
+  const pageTemplate = readClassicReference('author-page-template');
+  const webTemplate = readClassicReference('author-web-template');
   const planning = read(path.join('skills', 'customize-declarative-site', 'references', 'content-and-page-compositions.md'));
   assert.match(planning, /Do not create `type: form`, `type: list` or `type: reuse`/);
   assert.match(composition, /exact existing source boundary or Liquid\/snippet\s+reference and destination/);
@@ -445,8 +600,8 @@ test('component reuse preserves existing source without forcing the surrounding 
   assert.match(pageTemplate, /Carry|carry/);
   assert.match(pageTemplate, /designContext/);
   assert.match(webTemplate, /implement the custom composition in `designContext`/);
-  assert.match(webTemplate, /preserving their\s+bindings, editable regions and runtime behavior/);
-  assert.match(webTemplate, /does not require changing the website binding or dropping authentication\/navigation branches/);
+  assert.match(webTemplate, /preserving their bindings, editable regions and\s+runtime behavior/);
+  assert.match(webTemplate, /without dropping\s+authentication\/navigation branches or changing the website binding implicitly/);
 });
 
 test('new-site layout work may remove unneeded starter sections and component placements without deleting records', () => {
@@ -455,10 +610,10 @@ test('new-site layout work may remove unneeded starter sections and component pl
   const customization = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
   const planning = read(path.join('skills', 'customize-declarative-site', 'references', 'content-and-page-compositions.md'));
   const contract = read(path.join('skills', 'customize-declarative-site', 'references', 'customization-plan-contract.md'));
-  const content = read(path.join('skills', 'classic-site-skills', 'author-webpage-content', 'SKILL.md'));
-  const composition = read(path.join('skills', 'classic-site-skills', 'author-webpage-content',
+  const content = read(path.join('skills', 'author-webpage-content', 'SKILL.md'));
+  const composition = read(path.join('skills', 'author-webpage-content',
     'references', 'webpage-content-composition.md'));
-  const webTemplate = read(path.join('skills', 'classic-site-skills', 'author-web-template', 'SKILL.md'));
+  const webTemplate = readClassicReference('author-web-template');
   assert.match(shared, /remove, replace or reorder unneeded out-of-box sections and\s+components/);
   assert.match(shared, /Presence in the starter template\s+alone does not make something a requirement/);
   assert.match(creation, /Allow removal of unneeded starter sections and component placements/);
@@ -497,10 +652,10 @@ test('the existing final review treats an unimplemented custom layout as incompl
 });
 
 test('classic webpage composition supports the Generative AI Search component', () => {
-  const content = read(path.join('skills', 'classic-site-skills', 'author-webpage-content', 'SKILL.md'));
-  const composition = read(path.join('skills', 'classic-site-skills', 'author-webpage-content',
+  const content = read(path.join('skills', 'author-webpage-content', 'SKILL.md'));
+  const composition = read(path.join('skills', 'author-webpage-content',
     'references', 'webpage-content-composition.md'));
-  const search = read(path.join('skills', 'classic-site-skills', 'page-elements',
+  const search = read(path.join('skills', 'author-webpage-content',
     'references', 'design-studio-generative-ai-search-component.md'));
 
   assert.match(content, /design-studio-generative-ai-search-component\.md/);

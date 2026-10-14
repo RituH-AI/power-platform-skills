@@ -20,15 +20,16 @@ node "${PLUGIN_ROOT}/scripts/update-skill-tracking.js" --projectRoot "<PROJECT_R
 
 The script exits silently if `.powerpages-site/site-settings/` does not exist, so it is safe to call unconditionally.
 
-For the classic-site `style-site` workflow, preserve this existing contract: never create `.powerpages-site`, invent classic tracking records, or broaden telemetry just to record usage. Run tracking only as part of normal completion, not on canceled drafts. Where the supported tracking directory exists, disclose and summarize any tracking diff separately from the approved styling patch; otherwise accept the no-op. Tracking does not authorize an upload.
+For classic-site styling through `customize-declarative-site`, never create `.powerpages-site`, invent classic tracking records, or broaden telemetry just to record usage. Run entry-point tracking only after verified local completion or an explicitly requested instructions-only handoff, not on canceled drafts or blocked work. Where the supported tracking directory exists, disclose and summarize any tracking diff separately from the approved styling patch; otherwise accept the no-op. Tracking does not authorize an upload.
 
 The styling inspector excludes only the known `site-settings/Site-AI-Skills-*.sitesetting.yml` and `site-settings/Site-AI-Tools-*.sitesetting.yml` files from styling input hashes/inventory. This keeps final usage recording from invalidating a successfully verified proposal/receipt; other site settings and styling inputs remain subject to drift checks. It does not change tracking behavior or grant authority to edit unrelated files.
 
 For classic authoring through `customize-declarative-site`, record
 `CustomizeDeclarativeSite` once after successful completion. Reference workflows are not
 skill invocations; do not record reference reads as skill runs.
-`author-webpage-content` and `style-site` record their own successful usage.
-Preserve existing tracking records.
+`author-webpage-content` records its own successful usage.
+Preserve existing tracking records, including `StyleSite`; styling reference execution does not
+increment that counter or emit a separate skill invocation.
 Do not create a tracking directory or invent classic tracking records.
 
 If the tracking script creates or updates site setting YAML files, include those tracking changes in the next git commit for the current phase or final summary commit.
@@ -44,7 +45,6 @@ If the tracking script creates or updates site setting YAML files, include those
 | add-sample-data | AddSampleData | Site/AI/Skills/AddSampleData |
 | activate-site | ActivateSite | Site/AI/Skills/ActivateSite |
 | add-seo | AddSeo | Site/AI/Skills/AddSeo |
-| style-site | StyleSite | Site/AI/Skills/StyleSite |
 | create-webroles | CreateWebroles | Site/AI/Skills/CreateWebroles |
 | integrate-webapi | IntegrateWebApi | Site/AI/Skills/IntegrateWebApi |
 | setup-auth | SetupAuth | Site/AI/Skills/SetupAuth |

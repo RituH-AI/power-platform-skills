@@ -16,7 +16,7 @@ For a small caller migration, read [webpages](webpage-authoring.md),
 [web templates](web-template-authoring.md),
 or [content snippets](content-snippet-authoring.md)
 as applicable and change only the exact reference.
-Resolve broader composition through the corresponding workflow; invoke `style-site` for
+Resolve broader composition through the corresponding workflow; execute [the styling workflow](style-site-workflow.md) for
 visual CSS changes, then re-read affected callers before verification.
 
 For a new ordinary site-wide asset with no requested parent, use the structurally verified
@@ -321,7 +321,7 @@ See [Manage CSS files](https://learn.microsoft.com/power-pages/configure/manage-
 - Custom CSS uploaded through the Styling workspace has separate product constraints,
   including its supported file-size limit.
 
-For a visual styling request, delegate to `style-site` for source/cascade inspection, correct
+For a visual styling request, follow [the styling workflow](style-site-workflow.md) for source/cascade inspection, correct
 page/section/site placement, exact-diff approval, and guarded application. This owner still
 handles explicit asset imports and metadata/URL migrations. Never use a metadata change or a
 duplicated `<link>` to bypass the styling workflow.

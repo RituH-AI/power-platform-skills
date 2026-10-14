@@ -7,7 +7,7 @@ modeling, authentication, Web API integration, and ALM—through conversational 
 **Supported creation models**: Standard and Enhanced data model traditional sites; React, Angular,
 Vue, and Astro SPA sites
 
-For an existing **classic, server-rendered Power Pages site**, `/style-site` provides a separate local Desktop styling workflow; it does not create a SPA or deploy changes.
+For an existing **classic, server-rendered Power Pages site**, `/customize-declarative-site` provides a local Desktop styling workflow; it does not create a SPA or deploy changes.
 
 ## Installation
 
@@ -43,7 +43,7 @@ This keeps hook behavior in one place and avoids relying on skill-frontmatter ho
 
 ## Skills
 
-The plugin provides 38 skills that cover the full lifecycle of a Power Pages site — scaffolding, deployment, declarative-site customization, classic-site authoring and styling, data modeling, backend integration, authentication, ALM and CI/CD, security review, testing, auditing, and platform migrations. Each skill is invoked conversationally — just describe what you want to do.
+The plugin provides 37 skills that cover the full lifecycle of a Power Pages site — scaffolding, deployment, declarative-site customization, classic-site authoring and styling, data modeling, backend integration, authentication, ALM and CI/CD, security review, testing, auditing, and platform migrations. Each skill is invoked conversationally — just describe what you want to do.
 
 The `/practice-site-check` and `/add-button` descriptions below are retained for reference, but these skills are not bundled with the plugin and are excluded from this count.
 
@@ -105,7 +105,9 @@ whether it was provisioned by `/create-site` or created manually in Design Studi
 - Derives a safe content outline and supported section/column/element composition before asking
   one compact set of questions for genuinely missing business facts
 - Executes and coordinates asset, snippet, Liquid/web-template, page-layout, and webpage authoring through component
-  references, invoking separate skills only for localized body composition and guarded styling
+  references, invoking a separate skill only for localized body composition
+- Styling-only requests use [the guarded styling workflow](skills/customize-declarative-site/references/style-site-workflow.md)
+  without a broad customization plan, commits or deployment prompts
 - Reuses the same visual-quality guidance as code-site creation, adapted to native Bootstrap and
   Design Studio authoring rather than SPA theme replacement
 - New-site plans include an approved design brief and meaningful photographs or original
@@ -516,11 +518,11 @@ Adds a Design Studio-compatible link button to one localized page in a PAC CLI-d
 - Uses any user-provided button label
 - Does not upload or deploy the site
 
-#### `/style-site`
+#### Classic styling through `/customize-declarative-site`
 
 > "Style the new contact section and existing list on my classic Power Pages site; show me the proposed changes first"
 
-Styles **classic, server-rendered sites only**, from a local download in **VS Code Desktop**. Reviews the exact CSS/source diff, scope and Studio-support warnings, then applies only an explicitly approved local change set. No HTML preview, local server or browser review is required.
+Uses [the styling workflow](skills/customize-declarative-site/references/style-site-workflow.md) for **classic, server-rendered sites only**, from a local download in **VS Code Desktop**. Reviews the exact CSS/source diff, scope and Studio-support warnings, then applies only an explicitly approved local change set. No HTML preview, local server or browser review is required.
 
 - Uses a lean **Inspect/propose → Approve → Apply → Independently verify → Report** workflow for broad declarations on one locale/section: at most 3 components/10 style groups, one existing stylesheet and guarded inline/class edits. Any raw `style.css`, global rules, nonempty `externalResources`/`importantReason`, new/shared files or broader scope uses expanded review
 - Reviews small-change scope together with the exact diff/hash; expanded work confirms scope first. Every revision needs host approval, with no final-completion confirmation or unattended approval

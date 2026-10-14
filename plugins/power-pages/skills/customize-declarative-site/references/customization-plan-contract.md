@@ -360,9 +360,9 @@ Rules:
 
 - `id` is unique kebab-case.
 - `skill` is one supported authoring operation identifier. `author-web-file`,
-  `author-content-snippet`, `author-web-template`, `author-page-template`, and `author-webpage`
+  `author-content-snippet`, `author-web-template`, `author-page-template`, `author-webpage`, and `style-site`
   execute the corresponding classic-authoring reference workflow in the coordinator.
-  Only `author-webpage-content` and `style-site` are skill invocations.
+  Only `author-webpage-content` is a skill invocation.
 - `action` uses the owning workflow's terminology.
 - Existing targets include stable IDs and exact paths when available.
 - New targets use names/routes and let the owning workflow generate record IDs.
@@ -513,7 +513,9 @@ failed operation and increments its attempt count.
 
 The customization plan records visual intent, affected pages/components, and scope. It does not
 contain an executable CSS patch. `style-site` prepares the exact CSS/source diff and retains its
-own per-revision approval and drift checks.
+own per-revision approval and drift checks through [the styling workflow](style-site-workflow.md).
+Keep `style-site` as the operation identifier; executing its reference does not rewrite an
+approved plan or its execution receipt.
 
 ## Verification records
 

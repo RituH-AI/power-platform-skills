@@ -62,6 +62,28 @@ test('getValidatorScript returns null for tracked skills without validators', ()
   assert.equal(getValidatorScript('missing-skill'), null);
 });
 
+test('styling references are not tracked skills but all local scripts remain installed', () => {
+  assert.equal(TRACKED_SKILLS['style-site'], undefined);
+  for (const alias of ['style-site', '/style-site', 'power-pages:style-site', '/power-pages:style-site']) {
+    assert.equal(detectTrackedSkill(alias), null, alias);
+    assert.equal(getTrackedSkillFromToolInput({ skill: alias }), null, alias);
+    assert.equal(getValidatorScript(alias), null, alias);
+  }
+  assert.equal(detectTrackedSkill('customize-declarative-site'), 'customize-declarative-site');
+  for (const script of [
+    'inspect-style-context.js',
+    'inspect-runtime-dom.js',
+    'inspect-studio-capabilities.js',
+    'check-style-contrast.js',
+    'prepare-style-plan.js',
+    'style-site-workflow.js',
+    'apply-style-plan.js',
+    'validate-style-site.js',
+  ]) {
+    assert.ok(fs.statSync(path.join(SKILLS_DIR, 'style-site', 'scripts', script)).isFile(), script);
+  }
+});
+
 test('getValidatorScript covers every ALM skill that previously declared a Stop hook', () => {
   // These seven skills carried Stop hook frontmatter in their SKILL.md; the
   // centralized PostToolUse hook in hooks/hooks.json now drives validation

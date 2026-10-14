@@ -9,9 +9,12 @@ const { collectFindings, extractGateMarkers } = require('../lint-skills-alm');
 
 const pluginRoot = path.resolve(__dirname, '..', '..');
 const skillRoot = path.join(pluginRoot, 'skills', 'style-site');
-const skillPath = path.join(skillRoot, 'SKILL.md');
+const entryPath = path.join(pluginRoot, 'skills', 'customize-declarative-site', 'SKILL.md');
+const workflowPath = path.join(pluginRoot, 'skills', 'customize-declarative-site',
+  'references', 'style-site-workflow.md');
 const quickPath = path.join(skillRoot, 'references', 'quick-start.md');
-const skill = fs.readFileSync(skillPath, 'utf8');
+const entry = fs.readFileSync(entryPath, 'utf8');
+const workflow = fs.readFileSync(workflowPath, 'utf8');
 const quick = fs.readFileSync(quickPath, 'utf8');
 const reference = fs.readFileSync(path.join(skillRoot, 'references', 'proposal-and-verification.md'), 'utf8');
 const catalog = fs.readFileSync(path.join(pluginRoot, 'references', 'approval-gates.md'), 'utf8');
@@ -21,22 +24,33 @@ const referenceRequests = [...reference.matchAll(/```json\r?\n([\s\S]*?)\r?\n```
   .map((match) => JSON.parse(match[1]));
 
 test('mandatory styling guidance stays within its context budget', () => {
-  const bytes = Buffer.byteLength(skill) + Buffer.byteLength(quick);
-  assert.ok(bytes <= 12000, `SKILL.md + quick-start.md use ${bytes} bytes; limit is 12000.`);
-  assert.ok(skill.length <= 6000, `SKILL.md uses ${skill.length} characters; target is 6000.`);
+  const bytes = Buffer.byteLength(workflow) + Buffer.byteLength(quick);
+  assert.ok(bytes <= 12000, `Styling workflow + quick-start.md use ${bytes} bytes; limit is 12000.`);
+  assert.ok(workflow.length <= 6000, `Styling workflow uses ${workflow.length} characters; target is 6000.`);
 });
 
-test('frontmatter retains the model and comma-separated tools without mandatory task bookkeeping', () => {
-  const frontmatter = skill.match(/^---\r?\n([\s\S]*?)\r?\n---/)[1];
+test('the entry skill supplies the styling model and tools without another registration', () => {
+  assert.equal(fs.existsSync(path.join(skillRoot, 'SKILL.md')), false);
+  assert.doesNotMatch(workflow, /^---|^\w+-invocable:|\$ARGUMENTS|TaskCreate|TaskUpdate|TaskList/m);
+  const frontmatter = entry.match(/^---\r?\n([\s\S]*?)\r?\n---/)[1];
   assert.match(frontmatter, /^model: opus$/m);
   const tools = frontmatter.match(/^allowed-tools: (.+)$/m)[1];
   assert.ok(tools.includes(', '));
-  assert.doesNotMatch(tools, /[\[\]]|TaskCreate|TaskUpdate|TaskList/);
-  assert.ok(tools.includes('mcp__plugin_power-pages_playwright__browser_run_code_unsafe'));
+  assert.doesNotMatch(tools, /[\[\]]/);
+  for (const tool of [
+    'mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search',
+    'mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch',
+    'mcp__plugin_power-pages_playwright__browser_navigate',
+    'mcp__plugin_power-pages_playwright__browser_evaluate',
+    'mcp__plugin_power-pages_playwright__browser_run_code_unsafe',
+  ]) {
+    assert.ok(tools.split(', ').includes(tool), tool);
+  }
   assert.doesNotMatch(tools, /browser_resize|browser_press_key|browser_take_screenshot/);
-  assert.match(skill, /Once per installed plugin version in the current conversation/);
-  assert.match(skill, /No final-completion confirmation/);
-  assert.match(skill, /Routine CSS uses bundled verified guidance/);
+  assert.match(entry, /For styling-only requests, reuse the result once per installed plugin version in the current conversation/);
+  assert.match(workflow, /final-completion confirmation/);
+  assert.match(workflow, /Routine CSS uses bundled verified guidance/);
+  assert.match(workflow, /Reuse the entry skill's version check and preview disclosure/);
 });
 
 test('quick start has one request accepted by the existing schema', () => {
@@ -112,16 +126,16 @@ test('guidance reflects proposal-only routing while retaining optional runtime d
 
 test('approval markers and catalog retain exactly the conditional local workflow gates', () => {
   const expected = ['style-site:2.runtime', 'style-site:3.scope', 'style-site:5.approve', 'style-site:6.reapprove'];
-  assert.deepEqual(extractGateMarkers(skill).map((gate) => gate.gateId), expected);
+  assert.deepEqual(extractGateMarkers(workflow).map((gate) => gate.gateId), expected);
   assert.deepEqual([...catalog.matchAll(/^\| `(style-site:[^`]+)` \| gate \|/gm)].map((row) => row[1]), expected);
-  assert.match(skill, /expanded or ambiguous scope only/);
-  assert.match(skill, /exact diff, scope, warnings, and hash \*\*per revision\*\*/);
-  assert.match(skill, /explicit host-tool answer/);
-  assert.match(skill, /## Independently verify/);
+  assert.match(workflow, /expanded or ambiguous scope only/);
+  assert.match(workflow, /exact diff, scope, warnings, and hash \*\*per revision\*\*/);
+  assert.match(workflow, /explicit host-tool answer/);
+  assert.match(workflow, /## Independently verify/);
   assert.match(quick, /Studio save\/reopen editability/);
 
   const findings = collectFindings({ pluginRoot }).filter((finding) =>
-    finding.file === skillPath ||
+    finding.file === workflowPath ||
     (path.basename(finding.file) === 'approval-gates.md' && finding.message.includes('style-site:')));
   assert.deepEqual(findings, [], 'Use the existing linter for marker/prose/catalog pairing.');
 });
@@ -129,7 +143,7 @@ test('approval markers and catalog retain exactly the conditional local workflow
 test('all styling guidance links and script references resolve to bundled files', () => {
   const references = fs.readdirSync(path.join(skillRoot, 'references')).filter((file) => file.endsWith('.md'))
     .map((file) => path.join(skillRoot, 'references', file));
-  for (const file of [skillPath, ...references]) {
+  for (const file of [entryPath, workflowPath, ...references]) {
     const content = fs.readFileSync(file, 'utf8');
     for (const [, href] of content.matchAll(/\[[^\]]+\]\(([^)]+\.md)(?:#[^)]*)?\)/g)) {
       if (/^https?:/.test(href)) continue;
@@ -147,14 +161,14 @@ test('preview implementation and instructions cannot silently remain in the inst
     'references/preview-and-verification.md']) {
     assert.equal(fs.existsSync(path.join(skillRoot, file)), false, file);
   }
-  assert.doesNotMatch(skill + quick, /--operation preview|render-style-preview|serve-style-preview|inspect-preview-contrast/);
-  const workflow = fs.readFileSync(path.join(skillRoot, 'scripts', 'style-site-workflow.js'), 'utf8');
-  assert.doesNotMatch(workflow, /require\([^)]*(?:render-template|playwright|preview)/);
+  assert.doesNotMatch(workflow + quick, /--operation preview|render-style-preview|serve-style-preview|inspect-preview-contrast/);
+  const coordinator = fs.readFileSync(path.join(skillRoot, 'scripts', 'style-site-workflow.js'), 'utf8');
+  assert.doesNotMatch(coordinator, /require\([^)]*(?:render-template|playwright|preview)/);
 });
 
 test('capability membership describes availability while listed and unlisted properties stay local-first', () => {
-  assert.match(skill, /studio-component-capabilities\.md/);
-  assert.match(skill, /local authoring for listed\/unlisted properties/);
+  assert.match(workflow, /studio-component-capabilities\.md/);
+  assert.match(workflow, /local authoring for listed\/unlisted properties/);
   assert.match(quick, /required `owner: "custom"`/);
   assert.match(quick, /both listed and unlisted/);
   assert.match(quick, /Unlisted properties allow safe local styling/);
@@ -172,7 +186,7 @@ test('capability membership describes availability while listed and unlisted pro
 });
 
 test('conditional inline example validates native Image properties without a synthetic class requirement', () => {
-  assert.match(skill, /inline contract\/example.*read before inline edits/);
+  assert.match(workflow, /inline contract\/example.*read before inline edits/);
   assert.match(quick, /Optional `location`: `stylesheet` \(default\) or `inline`/);
   const request = referenceRequests.find((example) => example.styles.some((style) => style.location === 'inline'));
   assert.ok(request, 'Keep the inline example in the deep reference, not the normal quick start.');
@@ -233,7 +247,7 @@ test('general inline CSS retains exact source edits, composition and conservativ
 });
 
 test('repeated-wrapper guidance applies to general CSS without weakening source or Studio guards', () => {
-  assert.match(skill, /read before inline edits or repeated tags/);
+  assert.match(workflow, /read before inline edits or repeated tags/);
   assert.match(reference, /missing custom hook alone is not a blocker/);
   assert.match(reference, /`inlineContext`/);
   assert.match(reference, /before \+ match\/inlineTarget \+ after/);
@@ -314,7 +328,7 @@ test('general CSS declarations and stable selector parts are not fixed property 
   assert.match(reference, /Malformed\/injected syntax and legacy executable CSS fail/);
   assert.match(reference, /authored\/insertion order, not alphabetical order/);
   assert.match(reference, /Shorthand-effects protection uses pinned \*\*mdn-data\*\*, with logical-side safety/);
-  assert.doesNotMatch(skill + quick + reference + policy, /style-site-gradients\.js|2–8 color stops|No standalone interpolation hints|bounded gradient grammar|These are the only accepted stylesheet suffixes/);
+  assert.doesNotMatch(workflow + quick + reference + policy, /style-site-gradients\.js|2–8 color stops|No standalone interpolation hints|bounded gradient grammar|These are the only accepted stylesheet suffixes/);
 });
 
 test('resource, namespace and justified-priority contracts preserve explicit review without fetching', () => {
@@ -350,7 +364,7 @@ test('every raw stylesheet or declared resource expands review while broad decla
   assert.match(reference, /including scoped raw CSS, for selectors\/conditions\/global definitions/);
   assert.match(reference, /small-change route allows ordinary broad `declarations`/);
   assert.match(quick, /Any raw `css`.*nonempty `externalResources`\/`importantReason`.*\*\*expanded\*\* review/);
-  assert.match(skill, /raw CSS\/resources\/global\/priority work needs expanded review/);
+  assert.match(workflow, /raw CSS\/resources\/global\/priority work needs expanded review/);
   assert.match(policy, /Every raw `style.css` takes expanded review/);
   assert.match(policy, /Ordinary broad declarations remain eligible for the small-change route/);
 });
@@ -393,7 +407,7 @@ test('Studio handoffs require explicit instructions-only intent rather than nati
 test('installed guidance removes native-property prohibitions without removing source protection', () => {
   const referenceFiles = fs.readdirSync(path.join(skillRoot, 'references'))
     .filter((file) => file.endsWith('.md')).map((file) => path.join(skillRoot, 'references', file));
-  const documents = [skillPath, ...referenceFiles,
+  const documents = [entryPath, workflowPath, ...referenceFiles,
     ...['AGENTS.md', 'PLUGIN_DEVELOPMENT_GUIDE.md', 'README.md'].map((file) => path.join(pluginRoot, file))];
   const retiredInstructions = [
     'Preserve Studio ownership of supported theme/component properties',
@@ -449,8 +463,8 @@ test('Web File priority is advisory rather than display-order or runtime-proof g
 
 test('visual changes require paired resolved colors without importing the SPA redesign workflow', () => {
   const design = fs.readFileSync(path.join(skillRoot, 'references', 'design-quality.md'), 'utf8');
-  assert.match(skill, /new treatments, palette\/background, typography or redesign/);
-  assert.match(skill, /Resolve failures and local declaration dependencies before approval/);
+  assert.match(workflow, /new treatments, palette\/background, typography or redesign/);
+  assert.match(workflow, /Resolve failures and local declaration dependencies before approval/);
   assert.match(design, /\[code-site adapter\]\(\.\.\/\.\.\/\.\.\/references\/design-aesthetics\.md\)/);
   assert.match(design, /does not override a child's explicit dark color/);
   assert.match(design, /do not execute that SPA workflow/);

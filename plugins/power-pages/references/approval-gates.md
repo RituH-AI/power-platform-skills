@@ -2,11 +2,11 @@
 
 > **Status: v3 — extended to non-ALM skills.** v2 introduced the marker/lint design and catalogued the 12 ALM skills (§6.1–§6.12). v3 extends coverage to the 12 non-ALM skills (§6.13–§6.24), flips lint severity from warn-only to hard-fail across the plugin, and updates `AGENTS.md` so any new skill must add its gates here in the same PR.
 >
-> **Scope: all power-pages skills.** §6 enumerates every `AskUserQuestion` across the 24 user-invocable skills (12 ALM + 12 non-ALM). `report-issue` is a cross-plugin shared workflow — its wrapper SKILL.md contains no prompts (the workflow file at `shared/skills/report-issue/report-issue-workflow.md` lives outside the per-plugin lint scope) and is excluded from this catalog.
+> **Scope: Power Pages skills and reference workflows.** §6 catalogues their approval gates and data-gathering prompts. `report-issue` delegates to its bundled shared workflow outside this catalog's lint scope.
 >
-> **Markers applied across all SKILL.md files.** Each gate has both a machine-readable `<!-- gate: ID | category=X | cancel-leaves=Y -->` HTML comment and a human-readable `> 🚦 **Gate (...)**` block. Each pure data-gathering prompt has a `<!-- not-a-gate: <reason> -->` comment.
+> **Markers belong to the authoritative workflow.** Each gate has both a machine-readable `<!-- gate: ID | category=X | cancel-leaves=Y -->` HTML comment and a human-readable `> 🚦 **Gate (...)**` block in its skill or `references/*-workflow.md`. Each pure data-gathering prompt has a `<!-- not-a-gate: <reason> -->` comment.
 >
-> **Lint is hard-fail for every skill.** `scripts/lint-skills-alm.js` enforces seven gate-related rules at error severity on every SKILL.md under `plugins/power-pages/skills/`: `GATE-must-have-marker`, `GATE-id-must-be-unique`, `GATE-must-be-in-catalog`, `GATE-intent-must-call-helper`, `GATE-cancel-leaves-known-vocab`, `GATE-prose-block-required` (the marker must be followed by a 🚦 prose block within 10 lines, outside any code fence), and `CATALOG-row-must-have-marker` (every `kind: gate` catalog row must have a corresponding marker in some SKILL.md — the reverse of `GATE-must-be-in-catalog`).
+> **Lint is hard-fail for skills and reference workflows.** `scripts/lint-skills-alm.js` enforces seven gate-related rules at error severity on every SKILL.md and `references/*-workflow.md` under `plugins/power-pages/skills/`: `GATE-must-have-marker`, `GATE-id-must-be-unique`, `GATE-must-be-in-catalog`, `GATE-intent-must-call-helper`, `GATE-cancel-leaves-known-vocab`, `GATE-prose-block-required` (the marker must be followed by a 🚦 prose block within 10 lines, outside any code fence), and `CATALOG-row-must-have-marker` (every `kind: gate` catalog row must have a corresponding marker in an authoritative workflow — the reverse of `GATE-must-be-in-catalog`).
 
 ---
 
@@ -129,10 +129,10 @@ The default behavior **per category** when a gate is inside a loop:
 | `final` | **PER ITERATION, full stop.** The whole point of `final` is "fire immediately before the destructive call." If the destructive call runs `N` times in a loop, the gate fires `N` times. | Hard rule — never override. |
 | `pause` | **Per occurrence of the external pending state.** Polling can re-enter PendingApproval after a retry; each entry gets its own pause prompt. | Not applicable. |
 
-**Required prose in SKILL.md** for any gate that sits inside a loop:
+**Required prose in the owning workflow** for any gate that sits inside a loop:
 
 1. The gate marker block (`> 🚦 **Gate (...)**`) must include an explicit line stating *"Fires PER LOOP ITERATION"* (or equivalent) and naming the loop variable. Example: *"Three solutions in `deploymentOrder` → three Phase 6.0 prompts."*
-2. The loop description elsewhere in the SKILL.md must call out the gate by name in the per-iteration sequence. Example: *"For each entry in `DEPLOYMENT_ORDER`: ... fire Phase 6.0 consent gate ... call `DeployPackageAsync`."*
+2. The loop description elsewhere in the workflow must call out the gate by name in the per-iteration sequence. Example: *"For each entry in `DEPLOYMENT_ORDER`: ... fire Phase 6.0 consent gate ... call `DeployPackageAsync`."*
 3. The marker block must explicitly negate the most common shortcut: *"The upstream Phase 2 stage selection (whether via interactive prompt or `--stage` argument) does NOT cover subsequent iterations."*
 
 **Why prose, not lint?** The lint catches the *presence* of a marker. It cannot prove the agent actually *fired* the `AskUserQuestion` call at runtime. Loop-semantics prose narrows the LLM's interpretation space so the shortcut becomes textually impossible — *"the gate fires N times for N iterations"* leaves no room to read it as *"once is enough"*.
@@ -143,7 +143,7 @@ The default behavior **per category** when a gate is inside a loop:
 
 ## 4. Marker syntax (proposed)
 
-Every gate gets a structural marker in SKILL.md. The marker has two parts: a **machine-readable HTML comment** (lint anchor) and a **human-readable block** (documentation).
+Every gate gets a structural marker in its owning skill or `references/*-workflow.md`. The marker has two parts: a **machine-readable HTML comment** (lint anchor) and a **human-readable block** (documentation).
 
 ### 4.1 The marker
 
@@ -157,7 +157,7 @@ Every gate gets a structural marker in SKILL.md. The marker has two parts: a **m
 > **Cancel leaves:** Explicit state description — either `nothing` (clean exit) or a specific state.
 ```
 
-`skill-name` is kebab-case; `phase-id` matches the SKILL.md phase number (`6.0`, `5.4c`, `q1b`).
+`skill-name` is the kebab-case workflow identifier; `phase-id` matches its phase or step (`6.0`, `5.4c`, `q1b`). Keep existing gate IDs stable when referenced by plans or receipts.
 
 ### 4.2 Pairing rule (replaces v1's "within 10 lines" proximity rule)
 
@@ -222,7 +222,7 @@ Use `AskUserQuestion`:
 Add to `scripts/lint-skills-alm.js`:
 
 ### `GATE-must-have-marker`
-Every `AskUserQuestion` block in an ALM SKILL.md must be preceded (within the same phase section) by either:
+Every `AskUserQuestion` block in a skill or `references/*-workflow.md` must be preceded (within the same section) by either:
 - A paired `<!-- gate: ID | category=X | cancel-leaves=Y -->` comment, **or**
 - An explicit `<!-- not-a-gate: <reason> -->` comment justifying why.
 
@@ -231,15 +231,15 @@ Pairing is established by section boundary (`### Phase`), not line proximity. Mu
 Waivable via `<!-- alm-lint-ignore: GATE-must-have-marker -->`. Tracked in `.almlintignore` for known exceptions.
 
 ### `GATE-id-must-be-unique`
-The `gate-id` slug must be unique across all SKILL.md files in the plugin.
+The `gate-id` slug must be unique across all skills and reference workflows in the plugin.
 
 ### `GATE-must-be-in-catalog`
-Every `gate-id` in a SKILL.md must appear in §6 of this catalog. Catches drift when a skill adds a gate without documenting it.
+Every `gate-id` in a skill or reference workflow must appear in §6 of this catalog. Catches drift when a skill adds a gate without documenting it.
 
-Strict for ALM skills (hard-fail). Warn-only for non-ALM skills until the catalog is extended to cover them (§10).
+Hard-fail for all skills and reference workflows.
 
 ### `GATE-intent-must-call-helper`
-A marker tagged `category=intent` must be in a SKILL.md section that invokes a known helper script (one of: `check-alm-plan.js`, `verify-alm-prerequisites.js`, `check-activation-status.js`). Prevents `intent` from being abused as a generic "first prompt" label.
+A marker tagged `category=intent` must be in a workflow that invokes a known helper script (one of: `check-alm-plan.js`, `verify-alm-prerequisites.js`, `check-activation-status.js`). Prevents `intent` from being abused as a generic "first prompt" label.
 
 ### `GATE-cancel-leaves-known-vocab`
 The `cancel-leaves=` value must be one of the §4.3 vocabulary entries or a kebab-case slug. Lint flags duplicate slugs across the catalog for de-duplication.
@@ -456,13 +456,13 @@ The single `AskUserQuestion` template fires once per Error finding with `autoFix
 
 ## 7. How to add a new gate
 
-When introducing a gate in an existing or new ALM skill:
+When introducing a gate in an existing or new skill or reference workflow:
 
 1. **Pick the category** from §3. If it doesn't fit, propose a new one — don't shoehorn.
-2. **Pick a gate ID** of the form `skill-name:phase-id` (kebab-case skill name; phase number / step matches the SKILL.md heading).
+2. **Pick a gate ID** of the form `skill-name:phase-id` (kebab-case workflow identifier; phase number / step matches the owning workflow).
 3. **Add a row to the catalog** (§6 table for the owning skill) with `kind`, `category`, `phase`, trigger, question, `cancel-leaves`.
-4. **Add the marker block** in SKILL.md immediately before the (possibly distant) `AskUserQuestion` call. Use both the HTML comment and the human-readable block from §4.1.
-5. **If `category=intent`**, ensure the SKILL.md section invokes a helper script (`GATE-intent-must-call-helper` lint rule).
+4. **Add the marker block** in the owning skill or `references/*-workflow.md` before the `AskUserQuestion` call in the same section. Use both the HTML comment and the human-readable block from §4.1.
+5. **If `category=intent`**, ensure the workflow invokes a helper script (`GATE-intent-must-call-helper` lint rule).
 6. **Run** `node scripts/lint-skills-alm.js`.
 
 When **removing** a gate, also remove its catalog row in the same PR.
@@ -735,9 +735,9 @@ Reviews traditional and SPA sites for deprecated Web API wildcard fields setting
 
 ---
 
-### 6.33 `style-site` (4 gate IDs + 1 data-gathering prompt)
+### 6.33 Classic styling workflow (4 gate IDs + 1 data-gathering prompt)
 
-Classic-site styling in a local VS Code Desktop workspace. Visible progress is Inspect/propose → Approve → Apply → Independently verify → Report, without mandatory phase tasks or final-completion confirmation. The small-change route reviews scope with exact-hash approval; only expanded/ambiguous work asks initial scope confirmation. Review the exact diff/instructions/warnings without HTML generation or browser review; only the host question tool can approve the exact proposal hash. Runtime consent is separate. Repeated revisions do not inherit approval, including unattended runs.
+Classic-site styling through `customize-declarative-site` and `skills/customize-declarative-site/references/style-site-workflow.md`, in a local VS Code Desktop workspace. Visible progress is Inspect/propose → Approve → Apply → Independently verify → Report, without mandatory phase tasks or final-completion confirmation. The small-change route reviews scope with exact-hash approval; only expanded/ambiguous work asks initial scope confirmation. Review the exact diff/instructions/warnings without HTML generation or browser review; only the host question tool can approve the exact proposal hash. Runtime consent is separate. Repeated revisions do not inherit approval, including unattended runs.
 
 Local authoring is the default for listed and unlisted Studio properties; the Design-panel map describes availability, not exclusive ownership. Small changes may be inline-only, stylesheet-only or inline+CSS on the selected locale, with the existing 3-component/10-group limits and at most one existing stylesheet. Shared-template inline changes require site scope, potentially every page, and expanded review. Preserve unlisted/unknown/conditional support warnings at review, approval and final report. Reserve `owner: "studio"` for explicitly requested instructions-only work with `handoffReason: "user-requested"` and `studioAction`; native support alone is not a reason. Ambiguous/unrepresentable/generated-source local work is blocked with a specific local next step, not a successful zero-write handoff. Legacy zero-write requests without the reason require regeneration and new approval; never hand-edit plans or inherit consent.
 
@@ -751,7 +751,7 @@ General CSS declarations/raw stylesheets use pinned bundled structural parsing, 
 | `style-site:5.approve` | gate | plan | 5 | **Approve this revision locally / Revise proposal / Cancel** — approves the exact diff, scope, warnings, and hash **per revision**. Only for explicitly requested instructions-only work: **Approve Studio handoff only**; no local styling application. | local-style-state |
 | `style-site:6.reapprove` | gate | progress | 6 | **Regenerate and review / Keep current local state and stop** — fires **per occurrence** of input/selection/target drift or partial-write failure. Return through preparation/diff review and `style-site:5.approve` for the new hash; this answer does not authorize a changed patch. | local-style-state |
 
-On the first pass, cancellation before application leaves at most inspection/proposal/review artifacts outside the site tree. After an application or partial failure, preserve and report exact current local state plus receipt/recovery evidence; never reset or silently roll back concurrent edits. After verified local or explicitly requested instructions-only completion, report without another confirmation and record normal `StyleSite` usage; preserve the supported-directory no-op and separate tracking diffs. Canceled drafts and blocked local work do not count as successful completion. Runtime/Studio visual/editing round trips remain pending; no preview or deployment is initiated. No branch initiates remote authoring or submission actions. Optional approved runtime navigation executes the portal's normal scripts/requests and can retain browser/application-defined state; explain that before inspection. If the host cannot obtain explicit approval, keep a draft and stop.
+On the first pass, cancellation before application leaves at most inspection/proposal/review artifacts outside the site tree. After an application or partial failure, preserve and report exact current local state plus receipt/recovery evidence; never reset or silently roll back concurrent edits. After verified local or explicitly requested instructions-only completion, report without another confirmation; the entry skill records successful usage once, preserving the supported-directory no-op, existing counters and separate tracking diffs. Canceled drafts and blocked local work do not count as successful completion. Runtime/Studio visual/editing round trips remain pending; no preview or deployment is initiated. No branch initiates remote authoring or submission actions. Optional approved runtime navigation executes the portal's normal scripts/requests and can retain browser/application-defined state; explain that before inspection. If the host cannot obtain explicit approval, keep a draft and stop.
 
 ---
 

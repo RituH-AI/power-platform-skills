@@ -2,7 +2,7 @@
 
 Read this for general/raw CSS, global themes, external resources, justified priority, inline edits or repeated tags. Routine declarations use [quick-start.md](quick-start.md); this reference adds no mandatory browser round trips.
 
-Contents: [Review contract](#review-artifact-contract) · [Request schema](#request-schema) · [Inline edits](#guarded-inline-declarations) · [General CSS](#general-css-authoring) · [Raw CSS examples](#raw-responsive-animation-and-token-example) · [CLI](#cli-contract) · [Iteration](#iterate-then-approve-the-exact-revision) · [Verification](#local-verification-checklist) · [Hook discovery](#hook-discovery-is-only-a-backstop) · [Handoff](#evidence-levels-and-later-handoff)
+Contents: [Review contract](#review-artifact-contract) · [Request schema](#request-schema) · [Inline edits](#guarded-inline-declarations) · [General CSS](#general-css-authoring) · [Raw CSS examples](#raw-responsive-animation-and-token-example) · [CLI](#cli-contract) · [Iteration](#iterate-then-approve-the-exact-revision) · [Verification](#local-verification-checklist) · [Conventional validation](#conventional-validator-discovery) · [Handoff](#evidence-levels-and-later-handoff)
 
 ## Review artifact contract
 
@@ -445,18 +445,21 @@ Verify the exact local change set. Inspect source-level accessibility/layout ris
 
 Report unsupported controls and missing state coverage instead of claiming success. Generated-source compilation and live testing are separately authorized tasks, not operations this request schema can apply; do not add tools merely to run them.
 
-## Hook discovery is only a backstop
+## Conventional validator discovery
 
-With no arguments, `validate-style-site.js` uses the plugin's shared `runValidation` wrapper. It only looks for:
+Reference reads do not invoke skill hooks. Coordinator apply's independent validation of the
+exact plan/receipt is authoritative; never rely on hook discovery to complete styling.
+With no arguments, the standalone `validate-style-site.js` uses the plugin's shared
+`runValidation` wrapper. It only looks for:
 
 - `<host cwd>/.powerpages-style/style-site.plan.json`
 - Optional matching `<host cwd>/.powerpages-style/style-site.receipt.json`
 
 This conventional directory **must be outside the uploadable `siteRoot`**. For example, the host can run in a workspace parent containing both the site download and its sibling `.powerpages-style` review directory. If the host cwd is the upload root, do not create this conventional directory there; select an outside work directory instead.
 
-When the conventional plan does not exist, the hook approves without checking artifacts. When it exists, malformed/inconsistent plans, receipts, or local files block. A no-artifact approval is not proof of completion.
+When the conventional plan does not exist, the validator approves without checking artifacts. When it exists, malformed/inconsistent plans, receipts, or local files block. A no-artifact approval is not proof of completion.
 
-Hooks cannot infer an arbitrary `--out` location or revision directory. A new revision does not become discoverable merely because an earlier `style-site.plan.json` was checked. Preserve prior artifacts; the coordinator's exact-plan/receipt validation is authoritative for normal runs, and explicit validation remains available for standalone diagnostics. Do not overwrite conventional files or bypass an error to manufacture hook success.
+Conventional discovery cannot infer an arbitrary `--out` location or revision directory. A new revision does not become discoverable merely because an earlier `style-site.plan.json` was checked. Preserve prior artifacts; explicit validation remains available for standalone diagnostics. Do not overwrite conventional files or bypass an error to manufacture validator success.
 
 ## Evidence levels and later handoff
 
@@ -468,8 +471,8 @@ Hooks cannot infer an arbitrary `--out` location or revision directory. A new re
 | Design Studio round-trip | **Only after separately performed checks:** native properties remain editable, component handles/markers work, and save/reopen preserves custom styling |
 | Deployed runtime | **Only after separately authorized deployment/testing:** real Liquid, permissions, authentication, form submit, list filtering/paging, and dynamic loading work |
 
-Leave post-change Studio/runtime checks explicitly **pending** at this skill's end. Report any earlier read-only runtime observation separately; it does not verify an unuploaded local patch. Provide Studio property/value instructions only when explicitly requested. Supply a later checklist: compare a refreshed download safely; check component editability and locale; verify native behaviors at mobile/desktop widths; check actual computed-style winners. Neither static checks nor color math proves these, nor guarantees that local values populate native Studio controls.
+Leave post-change Studio/runtime checks explicitly **pending** at this workflow's end. Report any earlier read-only runtime observation separately; it does not verify an unuploaded local patch. Provide Studio property/value instructions only when explicitly requested. Supply a later checklist: compare a refreshed download safely; check component editability and locale; verify native behaviors at mobile/desktop widths; check actual computed-style winners. Neither static checks nor color math proves these, nor guarantees that local values populate native Studio controls.
 
-After successful verified local completion or an explicitly requested instructions-only handoff, report without a final-completion question and record normal `StyleSite` usage under the existing supported-directory/no-op contract. Keep tracking diffs separate; canceled drafts and blocked local work do not count as successful completion. Give each blocker a specific local next step, not a zero-write Studio success. Additional requested revisions always return through preparation, diff review and exact-hash approval.
+After successful verified local completion or an explicitly requested instructions-only handoff, report without a final-completion question. The entry skill records `CustomizeDeclarativeSite` once under the supported-directory/no-op contract, not per reference or styling operation. Preserve existing counters and keep tracking diffs separate; canceled drafts and blocked local work do not count as successful completion. Give each blocker a specific local next step, not a zero-write Studio success. Additional requested revisions always return through preparation, diff review and exact-hash approval.
 
 Do not invoke deployment, the Desktop site's Preview command, Studio Sync, or cache clearing. Cache differences can explain later discrepancies ([caching context](https://www.engineeredcode.com/blog/power-pages-many-layers-of-caching)), but are not permission to change remote state.

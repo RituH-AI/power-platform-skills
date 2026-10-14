@@ -55,7 +55,8 @@ test('classic final design review preserves local approval, evidence, and native
   const classic = documents.get(classicPath);
   const critique = documents.get(classicCritiquePath);
   const customization = fs.readFileSync(path.join(pluginRoot, 'skills', 'customize-declarative-site', 'SKILL.md'), 'utf8');
-  const style = fs.readFileSync(path.join(pluginRoot, 'skills', 'style-site', 'SKILL.md'), 'utf8');
+  const style = fs.readFileSync(path.join(pluginRoot, 'skills', 'customize-declarative-site',
+    'references', 'style-site-workflow.md'), 'utf8');
   const create = fs.readFileSync(path.join(pluginRoot, 'skills', 'create-site', 'SKILL.md'), 'utf8');
   const declarative = fs.readFileSync(path.join(pluginRoot, 'skills', 'create-site', 'workflows', 'declarative-site.md'), 'utf8');
   const common = create.split('## SPA-Site Workflow')[0].replace(/^---\r?\n[\s\S]*?\r?\n---/, '');
@@ -92,7 +93,7 @@ test('read-only critique routes classic metadata without executing project code 
   assert.match(entry, /do not continue into the workflow below/);
   assert.match(entry, /Without positive classic evidence, retain the existing workflow below unchanged/);
   for (const tool of ['Write', 'Edit', 'Skill', 'Task']) assert.ok(!tools.includes(tool), tool);
-  for (const reference of ['design-studio-site-discovery.md', 'design-studio-webpage-authoring.md',
+  for (const reference of ['design-studio-site-discovery.md', 'webpage-authoring.md',
     'site-design-quality.md', 'design-critique.md', 'page-blueprints.md']) {
     assert.ok(review.includes(reference), reference);
   }
@@ -181,7 +182,7 @@ test('classic imagery reuses its asset workflow and SPA execution remains in the
   const links = localLinks(classicPath, classic);
   for (const target of [
     ['skills', 'customize-declarative-site', 'references', 'visual-asset-planning.md'],
-    ['skills', 'classic-site-skills', 'author-web-file', 'SKILL.md'],
+    ['skills', 'customize-declarative-site', 'references', 'web-file-authoring.md'],
   ]) {
     assert.ok(links.includes(path.join(pluginRoot, ...target)), target.join('/'));
   }

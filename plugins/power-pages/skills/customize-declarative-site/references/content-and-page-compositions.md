@@ -232,7 +232,7 @@ Execute only reference workflows required by the resolved structure:
 - a new page-template binding: `author-page-template`.
 
 Invoke `author-webpage-content` for localized section/column/element composition and
-`style-site` for local visual treatment.
+execute [the styling workflow](style-site-workflow.md) for local visual treatment.
 
 A straightforward new page normally needs the webpage reference workflow, including default
 navigation or its explicit opt-out, followed by `author-webpage-content` with the resolved
