@@ -1,6 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const { WEB_ROLE_FILE_SUFFIX, listYamlFiles } = require('./powerpages-config');
+const {
+  detectMetadataLayout,
+  loadAggregateRecords,
+  normalizeWebRole,
+} = require('./declarative-metadata');
 const { addFinding, findUnexpectedKeys, findMissingKeys, summarize } = require('./powerpages-validation-utils');
 const { resolvePowerPagesSiteRoot } = require('./validation-helpers');
 
@@ -61,9 +66,23 @@ function loadWebRoles(webRolesDir) {
 function validateWebRoles(projectRoot) {
   const findings = [];
   const siteRoot = resolvePowerPagesSiteRoot(projectRoot);
-  const webRolesDir = siteRoot && path.join(siteRoot, 'web-roles');
+  let layout;
+  try {
+    layout = detectMetadataLayout(projectRoot);
+  } catch (error) {
+    addFinding(findings, 'error', `Failed to resolve web role metadata: ${error.message}`, {
+      filePath: siteRoot,
+    });
+    return {
+      projectRoot,
+      webRoles: [],
+      findings,
+      summary: summarize(findings),
+    };
+  }
+  const webRolesDir = layout.roles.directory;
 
-  for (const filePath of listYamlFiles(webRolesDir)) {
+  for (const filePath of layout.roles.mode === 'per-record' ? listYamlFiles(webRolesDir) : []) {
     const fileName = path.basename(filePath);
     if (!fileName.endsWith(WEB_ROLE_FILE_SUFFIX)) {
       addFinding(findings, 'error', `Web role file does not follow naming convention "*${WEB_ROLE_FILE_SUFFIX}".`, {
@@ -75,10 +94,18 @@ function validateWebRoles(projectRoot) {
 
   let webRoles = [];
   try {
-    webRoles = loadWebRoles(webRolesDir);
+    if (layout.roles.mode === 'mixed') {
+      throw new Error(
+        `Mixed web-role serialization found at ${layout.siteRoot}; ` +
+        'webrole.yml and web-roles/*.webrole.yml cannot be validated as one source.'
+      );
+    }
+    webRoles = layout.roles.mode === 'aggregate'
+      ? loadAggregateRecords(layout.roles.aggregateFile).map(normalizeWebRole)
+      : loadWebRoles(webRolesDir).map(normalizeWebRole);
   } catch (error) {
     addFinding(findings, 'error', `Failed to parse web role YAML: ${error.message}`, {
-      filePath: webRolesDir,
+      filePath: layout.roles.mode === 'aggregate' ? layout.roles.aggregateFile : webRolesDir,
     });
   }
 

@@ -306,7 +306,7 @@ Integrates Power Automate cloud flows into a Power Pages site. Discovers flows a
 
 Generates web role YAML files for SPA and traditional sites. SPA sites retain the existing
 `.powerpages-site/web-roles/` workflow; traditional sites can use nested or directly opened PAC
-metadata.
+metadata with aggregate `webrole.yml` or per-record `web-roles/` storage.
 
 - Discovers existing roles before creating new ones
 - Generates proper UUIDs for each role
@@ -331,8 +331,9 @@ Adds login/logout functionality and role-based authorization to your site.
 > "Check my table permissions for security issues"
 
 Audits existing table permissions on a deployed or in-progress SPA or traditional site by
-analyzing them against active site behavior and live Dataverse metadata. Traditional audits cover
-standard and enhanced PAC formats, native Forms/Lists, Liquid, Web API callers, web roles, and
+analyzing them against active site behavior and live Dataverse metadata. Traditional audits keep
+the authoritative Standard/Enhanced model separate from aggregate/per-record PAC storage and cover
+native Forms/Lists, Liquid, Web API callers, web roles, and
 inherited webpage access rules. Produces a visual HTML audit report grouped by severity with
 suggested fixes.
 

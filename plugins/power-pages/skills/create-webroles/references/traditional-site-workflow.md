@@ -31,8 +31,11 @@ When the sentinel is absent, use the normal interactive role-selection and final
 2. Require `siteType: "declarative"` and record `projectRoot`, `siteRoot`, `siteName`, and
    `websiteRecordId`.
 3. Confirm `siteRoot` contains declarative metadata (`.portalconfig/` or `website.yml`).
-4. Resolve `<siteRoot>/web-roles/`.
-   - If the directory does not exist, create it locally.
+4. Detect role storage before creating anything.
+   - If `<siteRoot>/webrole.yml` exists, use aggregate storage.
+   - If `<siteRoot>/web-roles/` contains role records, use per-record storage.
+   - If both contain records, stop with a mixed-storage error and identify both paths.
+   - If neither exists, the deterministic writer creates the per-record directory.
    - Do not invoke the SPA `create-webroles:1.deploy-first` gate: a resolved declarative PAC root is
      already the required local metadata.
    - If no site root resolves, stop without writing files.
@@ -41,8 +44,8 @@ Use these task descriptions:
 
 | Task subject | Description |
 |---|---|
-| Verify site structure | Resolve the traditional site and ensure `<siteRoot>/web-roles/` exists |
-| Discover existing roles | Read current traditional web role YAML and compile existing names, IDs, and flags |
+| Verify site structure | Resolve the traditional site and detect aggregate or per-record role storage |
+| Discover existing roles | Normalize current traditional roles and compile existing names, IDs, and flags |
 | Determine new roles | Analyze traditional-site access needs and confirm roles through the existing selection gate |
 | Create web role files | Create approved role YAML through the deterministic script |
 | Verify web roles | Validate role files, UUIDs, names, booleans, and uniqueness constraints |
@@ -50,7 +53,8 @@ Use these task descriptions:
 
 ## Phase 2: Discover Existing Roles
 
-Read every `.yml` and `.yaml` file under `<siteRoot>/web-roles/`. For each role, collect:
+Read roles from aggregate `<siteRoot>/webrole.yml` or per-record
+`<siteRoot>/web-roles/*.webrole.yml`. For each normalized role, collect:
 
 - `name`;
 - `id`;
@@ -90,14 +94,15 @@ node "${PLUGIN_ROOT}/skills/create-webroles/scripts/create-web-role.js" \
 ```
 
 The script resolves nested or direct PAC roots, generates a UUID through the shared UUID helper,
-uses the PAC-compatible `*.webrole.yml` suffix, and returns `{ id, filePath }`.
+appends atomically to aggregate `webrole.yml` or creates a PAC-compatible `*.webrole.yml` file,
+and returns `{ id, filePath, storage }`. It rejects mixed storage.
 
 Before each invocation, re-check all existing and newly created roles so the one-anonymous and
 one-authenticated uniqueness constraints cannot be violated. Do not write role YAML manually.
 
 ## Phase 5: Verify Web Roles
 
-1. Re-read all role files under `<siteRoot>/web-roles/`.
+1. Re-read all roles from the detected aggregate or per-record storage.
 2. Verify every created file path returned by the script is inside the resolved site root.
 3. The `PostToolUse` hook runs
    `${PLUGIN_ROOT}/skills/create-webroles/scripts/validate-webroles.js` automatically after the
@@ -113,7 +118,7 @@ Fix validation failures before proceeding.
 ## Phase 6: Review and Deploy
 
 Record skill usage as `CreateWebroles` using the exact `projectRoot`; the tracking script resolves
-the direct or nested site-settings directory.
+the direct or nested aggregate/per-record site-settings storage.
 
 Present the same role summary table as the SPA workflow. When caller-suppress mode is inactive,
 use the existing `create-webroles:6.deploy` gate. If approved, invoke `/deploy-site` with the exact

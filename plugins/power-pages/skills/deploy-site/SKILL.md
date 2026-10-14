@@ -64,8 +64,14 @@ If ambiguous, use `AskUserQuestion` to select the exact project root and detecte
 
 ### Declarative upload approval
 
-The declarative workflow contains the detailed call site below. This marker keeps its
-cloud-mutation gate visible to the repository gate catalog.
+The declarative workflow contains the detailed call sites below. These markers keep its
+pre-upload permissions review and cloud-mutation gates visible to the repository gate catalog.
+
+<!-- gate: deploy-site:declarative-4.permissions-audit | category=plan | cancel-leaves=local-customization -->
+
+> 🚦 **Gate (plan · deploy-site:declarative-4.permissions-audit):** Permission-sensitive
+> declarative metadata changed — run `/audit-permissions` before upload, explicitly continue
+> without it, or cancel.
 
 <!-- gate: deploy-site:declarative-5.upload | category=final | cancel-leaves=local-customization -->
 

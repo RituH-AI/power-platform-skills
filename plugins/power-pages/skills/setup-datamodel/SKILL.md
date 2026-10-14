@@ -406,7 +406,10 @@ Include:
 After the summary, suggest:
 
 - Review created tables in the Power Pages maker portal
-- Populate tables with sample data for testing: `/add-sample-data`
+- For a code site or no-site schema session, populate tables with sample data for testing:
+  `/add-sample-data`
+- For a traditional site, do not suggest `/add-sample-data`; downloaded sites can share live
+  Dataverse tables, so sample-record creation requires a separate explicit request
 - For a code site, integrate tables with the frontend via Web API: `/integrate-webapi`
 - For a traditional site, bind the verified schema through the appropriate native Forms, Advanced
   Forms, Lists, Liquid, or page JavaScript workflow; this skill intentionally does not edit those

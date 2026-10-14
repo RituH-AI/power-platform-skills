@@ -327,6 +327,11 @@ test('create-site can hand a Standard or Enhanced baseline to declarative custom
   assert.match(workflow, /Would you like to customize the downloaded traditional template now\?/);
   assert.match(workflow, /invoke `\/edit-site` through the `Skill` tool/);
   assert.match(workflow, /validated, committed baseline/);
+  assert.match(workflow, /Customization success is not a prerequisite/);
+  assert.match(workflow, /Suggest `\/setup-datamodel` only when/);
+  assert.match(workflow, /Never suggest `\/add-sample-data` for a traditional site/);
+  assert.match(workflow, /Suggest `\/create-webroles` only when/);
+  assert.match(workflow, /Suggest `\/integrate-webapi` only when/);
 });
 
 test('edit-site executes authoring references without changing approved-plan contracts', () => {
@@ -429,6 +434,11 @@ test('deploy-site keeps code and declarative upload commands isolated', () => {
   assert.match(declarative, /--websiteRecordId "<WEBSITE_RECORD_ID>"/);
   assert.match(declarative, /--siteRoot "<PROJECT_RELATIVE_SITE_ROOT>"/);
   assert.match(declarative, /Do not invoke `activate-site`/);
+  assert.match(skill, /deploy-site:declarative-4.permissions-audit/);
+  assert.match(declarative, /permission-sensitive surface changed/);
+  assert.match(declarative, /Run permissions audit \(Recommended\)/);
+  assert.match(declarative, /rerun the declarative validator, recompute\s+the Git diff, and regenerate the complete Phase 4 component summary/);
+  assert.match(declarative, /skip this gate without mentioning it/);
   assert.match(declarative, /deploy-site:declarative-5.upload/);
 });
 
@@ -510,7 +520,10 @@ test('classic template selection and new-site handoff distinguish requirements f
   assert.match(handoff, /newSiteDesign\.composition/);
   assert.match(handoff, /designContext/);
   assert.match(handoff, /do not default to retaining\s+the starter arrangement/);
-  assert.match(workflow, /On \*\*Keep the template unchanged\*\*, finish/);
+  assert.match(
+    workflow,
+    /On \*\*Keep the template unchanged\*\*, do not require customization before evaluating downstream\s+needs/
+  );
 });
 
 test('classic planning defaults allow recomposition but preserve explicit preferences and existing-site scope', () => {

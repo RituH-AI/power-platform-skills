@@ -29,6 +29,15 @@ Web API JavaScript only when the requested interaction needs custom client-side 
    - **Discovery mode** — no actionable scope was supplied. Inspect the active site and present
      selectable integration opportunities; do not implement every finding automatically.
 
+6. Parse the optional generic parent contract:
+   - If `$ARGUMENTS` contains `[CALLED-BY-PARENT-SKILL]`, set `caller-suppress = true` and retain
+     the optional `caller=<skill-name>` value for the final result.
+   - Caller-suppress mode skips every commit and Phase 7 deployment prompt/reminder. The parent
+     owns the combined commit and single deployment decision.
+   - It does not skip the Phase 3 scope gate, architect plan approval, validation, or usage
+     tracking. The sentinel is not user approval for local or cloud changes.
+   - Without the sentinel, preserve the normal interactive commit/deployment behavior.
+
 The `[AI-READ-ONLY]` delegated contract is SPA-only. If it is supplied for a traditional site,
 stop and report the unsupported caller contract rather than silently changing its meaning.
 
@@ -146,7 +155,8 @@ Do not create SPA files, framework hooks, TypeScript service scaffolds, or
 `src/shared/powerPagesApi.ts`.
 
 Do not use `git add -A`. Stage only the approved traditional-site files if the user asks for a
-commit, so unrelated worktree changes remain untouched.
+commit, so unrelated worktree changes remain untouched. In caller-suppress mode, do not create a
+commit even if the parent requested implementation; return the exact changed-file list instead.
 
 ## Phase 5: Verify the Local Integration
 
@@ -233,8 +243,13 @@ Present a site-type-specific summary:
 | Security | Settings, permissions, scopes, and web roles created/reused/changed |
 | Verification | Static checks passed and live checks still pending |
 
-Record skill usage as `IntegrateWebApi`. Use the existing
-`integrate-webapi:7.3.deploy` gate. If approved, invoke `/deploy-site` with the exact
-`projectRoot`; its declarative route performs `pac pages upload` with the explicit data model.
-If deployment is deferred, state that local validation is complete but Web API behavior is not
-live-verified.
+Record skill usage as `IntegrateWebApi`.
+
+In caller-suppress mode, return the summary, exact changed-file list, validations, and
+`caller=<skill-name>` value to the parent. Skip `integrate-webapi:7.3.deploy` and any deployment
+reminder.
+
+Otherwise, use the existing `integrate-webapi:7.3.deploy` gate. If approved, invoke `/deploy-site`
+with the exact `projectRoot`; its declarative route performs `pac pages upload` with the explicit
+data model. If deployment is deferred, state that local validation is complete but Web API
+behavior is not live-verified.

@@ -65,3 +65,10 @@ test('traditional analysis is evidence-only and supports a no-change result', ()
   assert.match(reference, /Unused or unreachable reference/);
   assert.match(reference, /Plain text, navigation labels, styling assets, and unused templates/);
 });
+
+test('traditional datamodel completion does not recommend sample data by default', () => {
+  const skill = read(path.join('skills', 'setup-datamodel', 'SKILL.md'));
+
+  assert.match(skill, /For a code site or no-site schema session[\s\S]*`\/add-sample-data`/);
+  assert.match(skill, /For a traditional site, do not suggest `\/add-sample-data`/);
+});

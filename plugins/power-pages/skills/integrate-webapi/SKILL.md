@@ -41,6 +41,9 @@ Before reading or executing the workflow below, perform the existing SPA project
 
 The traditional route supports request-focused and discovery invocation as defined in its
 workflow reference. SPA invocation semantics remain those defined by the existing workflow below.
+When `$ARGUMENTS` contains `[CALLED-BY-PARENT-SKILL]`, pass that sentinel and its optional
+`caller=<skill-name>` token into the traditional workflow. It suppresses commits and deployment
+handoffs only; it does not bypass the traditional scope approval or security planning.
 
 ---
 
