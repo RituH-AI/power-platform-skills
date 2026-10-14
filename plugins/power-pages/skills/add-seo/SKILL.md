@@ -5,7 +5,7 @@ description: >-
   meta tags, Open Graph tags, and favicon configuration. Use when the user wants to
   improve search engine optimization or make their site more searchable.
 user-invocable: true
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, mcp__plugin_power-pages_playwright__browser_navigate, mcp__plugin_power-pages_playwright__browser_snapshot, mcp__plugin_power-pages_playwright__browser_click, mcp__plugin_power-pages_playwright__browser_close
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, mcp__plugin_power-pages_playwright__browser_navigate, mcp__power-pages-playwright__browser_navigate, mcp__plugin_power-pages_playwright__browser_snapshot, mcp__power-pages-playwright__browser_snapshot, mcp__plugin_power-pages_playwright__browser_click, mcp__power-pages-playwright__browser_click, mcp__plugin_power-pages_playwright__browser_close, mcp__power-pages-playwright__browser_close
 model: sonnet
 ---
 

@@ -17,7 +17,7 @@ description: >
   supports it, configures it for the user -- and wires
   the client ID, authority, and claims mapping into Power Pages.
 user-invocable: true
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, Skill, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, Skill, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__power-pages-microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch, mcp__power-pages-microsoft-learn__microsoft_docs_fetch
 model: opus
 ---
 

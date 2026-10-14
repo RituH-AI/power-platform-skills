@@ -101,6 +101,38 @@ function getTrackedSkillFromToolInput(toolInput) {
   }
 }
 
+function getToolInputFromHookPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  // Hook payloads use different fields:
+  //   Claude Code: { "tool_input": { "skill": "create-site" } }
+  //   Copilot:     { "toolArgs": "{\"skill\":\"create-site\"}" }
+  // Copilot may also provide toolArgs as an object. Decode only that field so
+  // Claude's established object payload keeps precedence when both are present.
+  if (payload.tool_input && typeof payload.tool_input === 'object') {
+    return payload.tool_input;
+  }
+  if (payload.toolArgs && typeof payload.toolArgs === 'object') {
+    return payload.toolArgs;
+  }
+  if (typeof payload.toolArgs !== 'string') {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(payload.toolArgs);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function getTrackedSkillFromHookPayload(payload) {
+  return getTrackedSkillFromToolInput(getToolInputFromHookPayload(payload));
+}
+
 function getValidatorScript(skillName) {
   return TRACKED_SKILLS[skillName]?.validatorScript ?? null;
 }
@@ -167,6 +199,8 @@ module.exports = {
   ALM_PLAN_SKILLS,
   VISIBLE_SOURCE_SKILLS,
   detectTrackedSkill,
+  getToolInputFromHookPayload,
+  getTrackedSkillFromHookPayload,
   getTrackedSkillFromToolInput,
   getValidatorScript,
   getBlockingSpawnStatus,

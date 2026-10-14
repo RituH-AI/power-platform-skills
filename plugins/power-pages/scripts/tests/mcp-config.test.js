@@ -10,6 +10,18 @@ const portableConfig = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'mcp.jso
 const legacyConfig = JSON.parse(fs.readFileSync(path.join(pluginRoot, '.mcp.json'), 'utf8'));
 const portableServer = portableConfig.mcpServers['power-pages-playwright'];
 const legacyServer = legacyConfig.mcpServers.playwright;
+const markdownRoots = [
+  path.join(pluginRoot, 'skills'),
+  path.join(pluginRoot, 'references'),
+];
+
+function findMarkdownFiles(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) return findMarkdownFiles(fullPath);
+    return entry.isFile() && entry.name.endsWith('.md') ? [fullPath] : [];
+  });
+}
 
 function createSpawnPreload(dir) {
   const preloadPath = path.join(dir, 'intercept-spawn.js');
@@ -97,6 +109,34 @@ test('portable and legacy MCP configs preserve the same launcher with client-spe
   assert.deepEqual(legacyServer.args, portableServer.args);
   assert.equal(portableConfig.mcpServers['power-pages-microsoft-learn'].type, 'streamable-http');
   assert.equal(legacyConfig.mcpServers['microsoft-learn'].type, 'http');
+});
+
+test('skill permissions retain Claude aliases and include portable MCP aliases', () => {
+  const mappings = [
+    ['mcp__plugin_power-pages_playwright__', 'mcp__power-pages-playwright__'],
+    ['mcp__plugin_power-pages_microsoft-learn__', 'mcp__power-pages-microsoft-learn__'],
+  ];
+
+  for (const filePath of markdownRoots.flatMap(findMarkdownFiles)) {
+    const source = fs.readFileSync(filePath, 'utf8');
+    const frontmatterEnd = source.startsWith('---\n') ? source.indexOf('\n---\n', 4) : -1;
+    const frontmatter = frontmatterEnd === -1 ? '' : source.slice(0, frontmatterEnd + 5);
+    const body = frontmatterEnd === -1 ? source : source.slice(frontmatterEnd + 5);
+
+    for (const [legacyPrefix, portablePrefix] of mappings) {
+      const legacyTools = [...frontmatter.matchAll(new RegExp(`${legacyPrefix}([a-z0-9_-]+)`, 'g'))];
+      for (const [, toolName] of legacyTools) {
+        assert.ok(
+          frontmatter.includes(`${portablePrefix}${toolName}`),
+          `${path.relative(pluginRoot, filePath)} must allow the portable alias for ${toolName}`,
+        );
+      }
+      assert.ok(
+        !body.includes(legacyPrefix),
+        `${path.relative(pluginRoot, filePath)} instructions must use host-neutral MCP tool names`,
+      );
+    }
+  }
 });
 
 test('portable Playwright MCP bootstrap starts from the portable server entry', (t) => {

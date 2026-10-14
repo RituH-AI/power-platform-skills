@@ -142,6 +142,27 @@ test("exits 0 and emits skill_started to probe when skill is tracked (provisione
   assert.equal(body.data.skillName, "create-site");
 });
 
+test("Copilot toolArgs emits skill_started to probe when skill is tracked", () => {
+  const configDir = mkConfigDir();
+  const probePath = path.join(configDir, "probe.json");
+  const ikeyPath = writeProvisionedConfig(configDir);
+
+  const { status } = runHook({
+    input: JSON.stringify({
+      toolArgs: JSON.stringify({ skill: "create-site" }),
+    }),
+    configDir,
+    ikeyPath,
+    fakeProbe: probePath,
+  });
+
+  assert.equal(status, 0);
+  assert.ok(waitForFile(probePath, 5_000), "dispatcher should have written probe");
+  const body = JSON.parse(JSON.parse(fs.readFileSync(probePath, "utf8")).body);
+  assert.equal(body.data.eventName, "skill_started");
+  assert.equal(body.data.skillName, "create-site");
+});
+
 // Materializes a Power Pages code site (config marker + package.json) so the
 // framework detector has something to find from the hook's reported cwd.
 function mkSite(deps) {

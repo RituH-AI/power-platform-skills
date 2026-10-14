@@ -98,7 +98,7 @@ function readStdin() {
     process.exit(0);
   }
 
-  const skillName = hookUtils.getTrackedSkillFromToolInput(parsed.tool_input);
+  const skillName = hookUtils.getTrackedSkillFromHookPayload(parsed);
   if (!skillName) process.exit(0);
 
   // Repo-side hard-off / unconfigured: gate BEFORE the pac shell-outs

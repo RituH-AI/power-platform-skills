@@ -7,7 +7,7 @@ Power Pages Server Logic is a preview feature with documentation that may expand
 ### Step 1: Search to discover pages
 
 ```
-mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search("Power Pages Server Logic")
+microsoft_docs_search("Power Pages Server Logic")
 ```
 
 ### Step 2: Collect unique page URLs
@@ -31,7 +31,7 @@ Classify each discovered page into one of these categories:
 
 ### Step 4: Fetch in parallel
 
-Fetch all core reference pages plus relevant how-to guides in parallel using `mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch`.
+Fetch all core reference pages plus relevant how-to guides in parallel using `microsoft_docs_fetch`.
 
 ## Known Pages (as of March 2026)
 
@@ -79,7 +79,7 @@ If the search results contain unfamiliar but relevant pages, read them — they 
 Also search for current samples:
 
 ```
-mcp__plugin_power-pages_microsoft-learn__microsoft_code_sample_search("Power Pages server logic")
+microsoft_code_sample_search("Power Pages server logic")
 ```
 
 ## Known SDK Baseline

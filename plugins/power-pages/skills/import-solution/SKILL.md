@@ -7,7 +7,7 @@ description: >-
   "deploy to staging", "deploy to production", or "install site in new environment".
 user-invocable: true
 argument-hint: "Optional: path to solution zip file"
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, TaskCreate, TaskUpdate, TaskList, AskUserQuestion, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, TaskCreate, TaskUpdate, TaskList, AskUserQuestion, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__power-pages-microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch, mcp__power-pages-microsoft-learn__microsoft_docs_fetch
 model: opus
 ---
 

@@ -7,7 +7,7 @@ description: >-
   deploying. Use when the user wants to add server-side code, create API endpoints, or move
   logic from the browser to the server in their Power Pages site.
 user-invocable: true
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Skill, Task, TaskCreate, TaskUpdate, TaskList, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_code_sample_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Skill, Task, TaskCreate, TaskUpdate, TaskList, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__power-pages-microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_code_sample_search, mcp__power-pages-microsoft-learn__microsoft_code_sample_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch, mcp__power-pages-microsoft-learn__microsoft_docs_fetch
 model: opus
 ---
 
@@ -1311,13 +1311,13 @@ Use the Playwright MCP tools to drive the site:
 
 ### 2. Capture the Network Response
 
-Use `mcp__plugin_power-pages_playwright__browser_network_requests` to list network activity, then locate the request to `/_api/serverlogics/<name>`. Note:
+Use `browser_network_requests` to list network activity, then locate the request to `/_api/serverlogics/<name>`. Note:
 
 - The HTTP status code (e.g., 200, 400, 500)
 - The response body (often a generic error or empty payload when validation fails)
 - **Most importantly: the `X-Ms-UserTrace` response header** — this is where the actual diagnostic logs live
 
-If `browser_network_requests` does not surface the response headers directly, fall back to `mcp__plugin_power-pages_playwright__browser_evaluate` and read the headers from a `fetch()` call:
+If `browser_network_requests` does not surface the response headers directly, fall back to `browser_evaluate` and read the headers from a `fetch()` call:
 
 ```javascript
 const res = await fetch('/_api/serverlogics/<name>', { method: 'GET', credentials: 'include' });

@@ -46,13 +46,33 @@ function backdatePlan(root, secondsAgo = 60) {
 }
 
 function runHook(root, skill, env = {}) {
+  return runHookPayload(root, { tool_input: { skill }, cwd: root }, env);
+}
+
+function runHookPayload(root, payload, env = {}) {
   return spawnSync(process.execPath, [HOOK_PATH], {
-    input: JSON.stringify({ tool_input: { skill }, cwd: root }),
+    input: JSON.stringify(payload),
     encoding: 'utf8',
     cwd: root,
     env: { ...process.env, ...env },
   });
 }
+
+test('hook accepts Copilot JSON-string toolArgs', (t) => {
+  const root = makeProject(t);
+  const res = runHookPayload(
+    root,
+    {
+      toolArgs: JSON.stringify({ skill: 'setup-solution' }),
+      cwd: root,
+    },
+    { DEBUG: '1' },
+  );
+
+  assert.equal(res.status, 0, `the setup-solution validator should run successfully; stderr=${res.stderr}`);
+  assert.match(res.stderr, /Validator exited with code 0/);
+  assert.doesNotMatch(res.stderr, /No tracked skill detected/);
+});
 
 function nodeRequireOption(filePath) {
   // NODE_OPTIONS tokenization treats Windows backslashes as escapes. Forward

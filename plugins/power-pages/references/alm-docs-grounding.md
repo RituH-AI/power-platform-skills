@@ -19,7 +19,7 @@ Cap the grounding step at ~30 seconds total. Don't let it block the rest of the 
 
 ### Step 1: Search
 
-Call `mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search` once with a skill-specific query (see the per-skill table below). Capture the top 5 results.
+Call `microsoft_docs_search` once with a skill-specific query (see the per-skill table below). Capture the top 5 results.
 
 ### Step 2: Collect unique URLs
 
@@ -34,7 +34,7 @@ Discard release-plan announcements, blog posts, and unrelated configuration page
 
 ### Step 3: Fetch the canonical page(s)
 
-Fetch the anchor doc for the skill's domain (table below) plus up to 1 sister page that matches the current scope. Use parallel `mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch` calls so the wall-clock cost stays low.
+Fetch the anchor doc for the skill's domain (table below) plus up to 1 sister page that matches the current scope. Use parallel `microsoft_docs_fetch` calls so the wall-clock cost stays low.
 
 ### Step 4: Summarize for the agent
 

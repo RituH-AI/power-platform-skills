@@ -5,7 +5,7 @@ description: >-
   model proposal. Use when the user wants to set up the data model, create database tables,
   or build the Dataverse schema for their site.
 user-invocable: true
-allowed-tools: Read, Write, Bash, Grep, Glob, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_code_sample_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch
+allowed-tools: Read, Write, Bash, Grep, Glob, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__power-pages-microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_code_sample_search, mcp__power-pages-microsoft-learn__microsoft_code_sample_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch, mcp__power-pages-microsoft-learn__microsoft_docs_fetch
 model: opus
 ---
 

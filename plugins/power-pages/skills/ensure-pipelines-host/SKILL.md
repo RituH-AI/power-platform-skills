@@ -17,7 +17,7 @@ description: >-
   /power-pages:setup-pipeline when its host discovery step finds nothing.
 user-invocable: true
 argument-hint: "Optional: 'detect-only' to skip provisioning paths and report state; 'auto-platform' to run the Platform-Host fast-path (idempotent, ~3–5 min) without the path-decision prompt (still gated by tenant pre-call confirmation); 'auto-custom' to run the Custom-Host fast-path without the path-decision prompt (still gated by tenant + admin-role + pre-call-echo prompts)"
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, TaskCreate, TaskUpdate, TaskList, AskUserQuestion, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, TaskCreate, TaskUpdate, TaskList, AskUserQuestion, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__power-pages-microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch, mcp__power-pages-microsoft-learn__microsoft_docs_fetch
 model: opus
 ---
 

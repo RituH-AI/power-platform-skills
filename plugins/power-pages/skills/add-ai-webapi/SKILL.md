@@ -14,7 +14,7 @@ description: >-
   plain Dataverse CRUD (use `/integrate-webapi`).
 user-invocable: true
 argument-hint: Optional description of which pages/tables need AI capabilities
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Skill, Task, TaskCreate, TaskUpdate, TaskList, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Skill, Task, TaskCreate, TaskUpdate, TaskList, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__power-pages-microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch, mcp__power-pages-microsoft-learn__microsoft_docs_fetch
 model: opus
 ---
 
@@ -55,7 +55,7 @@ Integrate Power Pages generative-AI summarization APIs into a SPA site. This ski
 > Reference: `${PLUGIN_ROOT}/skills/add-ai-webapi/references/ai-api-reference.md` — canonical
 > API shapes, required headers, site-setting names, error codes, and the documented support-case
 > example. Read this at the start of the workflow; fetch the Microsoft Learn source pages with
-> `mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch` if the user asks for the latest.
+> `microsoft_docs_fetch` if the user asks for the latest.
 
 > **Admin governance hierarchy**: both APIs are gated by a **three-level admin
 > hierarchy** — tenant PowerShell setting (`enableGenerativeAIFeaturesForSiteUsers`), Copilot Hub

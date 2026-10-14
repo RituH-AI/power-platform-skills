@@ -8,7 +8,7 @@ description: >-
   Power Pages site.
 user-invocable: true
 argument-hint: Optional project path, languages, or [FROM_CREATE_SITE] context
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, Skill, mcp__plugin_power-pages_playwright__browser_navigate, mcp__plugin_power-pages_playwright__browser_snapshot, mcp__plugin_power-pages_playwright__browser_click, mcp__plugin_power-pages_playwright__browser_close
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, Skill, mcp__plugin_power-pages_playwright__browser_navigate, mcp__power-pages-playwright__browser_navigate, mcp__plugin_power-pages_playwright__browser_snapshot, mcp__power-pages-playwright__browser_snapshot, mcp__plugin_power-pages_playwright__browser_click, mcp__power-pages-playwright__browser_click, mcp__plugin_power-pages_playwright__browser_close, mcp__power-pages-playwright__browser_close
 model: opus
 ---
 

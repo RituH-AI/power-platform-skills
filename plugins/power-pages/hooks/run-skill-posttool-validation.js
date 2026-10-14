@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const {
-  getTrackedSkillFromToolInput,
+  getTrackedSkillFromHookPayload,
   getValidatorScript,
   getBlockingSpawnStatus,
   isAlmPlanSkill,
@@ -35,7 +35,7 @@ process.stdin.on('end', () => {
 
   try {
     input = JSON.parse(inputData);
-    skillName = getTrackedSkillFromToolInput(input.tool_input);
+    skillName = getTrackedSkillFromHookPayload(input);
     if (!skillName) {
       debug('[power-pages hook] No tracked skill detected — skipping validation\n');
       process.exit(0);

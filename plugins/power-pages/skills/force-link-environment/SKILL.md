@@ -16,7 +16,7 @@ description: >-
   "take over pipelines association", "relink environment to host".
 user-invocable: true
 argument-hint: "Optional: '--host <url>' to skip the host resolution step; '--dev-env <bapEnvId>' to skip the dev env prompt. With both flags supplied, the skill still pauses for destructive-action confirmation."
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, TaskCreate, TaskUpdate, TaskList, AskUserQuestion, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, TaskCreate, TaskUpdate, TaskList, AskUserQuestion, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_search, mcp__power-pages-microsoft-learn__microsoft_docs_search, mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch, mcp__power-pages-microsoft-learn__microsoft_docs_fetch
 model: opus
 ---
 
@@ -42,7 +42,7 @@ The action is reversible by running Force Link again from the previous host.
 
 ## Phase 1.5 — Microsoft Learn grounding (required)
 
-Before any Dataverse call, refresh the agent's grounding by fetching the doc above via `mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch`. If the doc has updated behaviors (e.g., new permission requirements, new warning text), surface them to the user before continuing. See `${PLUGIN_ROOT}/references/alm-docs-grounding.md` for the shared pattern.
+Before any Dataverse call, refresh the agent's grounding by fetching the doc above via `microsoft_docs_fetch`. If the doc has updated behaviors (e.g., new permission requirements, new warning text), surface them to the user before continuing. See `${PLUGIN_ROOT}/references/alm-docs-grounding.md` for the shared pattern.
 
 ## Phases
 
@@ -80,7 +80,7 @@ Fetch the host token from Azure CLI using the host's Dataverse URL as the resour
 Call:
 
 ```
-mcp__plugin_power-pages_microsoft-learn__microsoft_docs_fetch(url=
+microsoft_docs_fetch(url=
   "https://learn.microsoft.com/en-us/power-platform/alm/custom-host-pipelines")
 ```
 

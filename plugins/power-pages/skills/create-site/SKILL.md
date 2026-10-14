@@ -8,7 +8,7 @@ description: >-
   template for, or scaffold a new Power Pages website or portal.
 user-invocable: true
 argument-hint: Optional site description
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash, WebSearch, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, Skill, mcp__plugin_power-pages_playwright__browser_navigate, mcp__plugin_power-pages_playwright__browser_snapshot, mcp__plugin_power-pages_playwright__browser_click, mcp__plugin_power-pages_playwright__browser_take_screenshot, mcp__plugin_power-pages_playwright__browser_evaluate
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash, WebSearch, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, Skill, mcp__plugin_power-pages_playwright__browser_navigate, mcp__power-pages-playwright__browser_navigate, mcp__plugin_power-pages_playwright__browser_snapshot, mcp__power-pages-playwright__browser_snapshot, mcp__plugin_power-pages_playwright__browser_click, mcp__power-pages-playwright__browser_click, mcp__plugin_power-pages_playwright__browser_take_screenshot, mcp__power-pages-playwright__browser_take_screenshot, mcp__plugin_power-pages_playwright__browser_evaluate, mcp__power-pages-playwright__browser_evaluate
 model: opus
 ---
 
@@ -956,8 +956,8 @@ Run `npm run dev` in the background using `Bash` with `run_in_background: true`.
 
 Immediately after the dev server starts, verify the scaffold is working:
 
-1. Use `mcp__plugin_power-pages_playwright__browser_navigate` to open the dev server URL
-2. Use `mcp__plugin_power-pages_playwright__browser_snapshot` to verify the page loaded correctly (accessibility snapshots only - screenshots are reserved for the Phase 5 design checks)
+1. Use `browser_navigate` to open the dev server URL
+2. Use `browser_snapshot` to verify the page loaded correctly (accessibility snapshots only - screenshots are reserved for the Phase 5 design checks)
 3. **Share the dev server URL with the user** so they can preview the site in their own browser (e.g., "Your site is running at `http://localhost:5173` — open it in your browser to follow along as I build.")
 
 > **GATE: Do NOT proceed to Phase 3 until ALL of the following are true:**
@@ -1501,8 +1501,8 @@ git revert HEAD
 
 After each significant change (new page or component), browse the site via Playwright to confirm structure and content:
 
-1. Use `mcp__plugin_power-pages_playwright__browser_navigate` to reload or navigate to the updated page
-2. Use `mcp__plugin_power-pages_playwright__browser_snapshot` to verify the page structure and content are correct
+1. Use `browser_navigate` to reload or navigate to the updated page
+2. Use `browser_snapshot` to verify the page structure and content are correct
 3. If something looks wrong in the snapshot, fix it before proceeding
 
 Visual judgement - screenshots at desktop and mobile widths - happens only in the first-impression review (step 4 of 5.2) and the critique pass (5.7). Screenshots stay in the conversation and are re-sent with every later call, so per-page checks during the build use `browser_snapshot`, not the capture script. The user is previewing in their own browser via the dev server URL shared in Phase 2.7.

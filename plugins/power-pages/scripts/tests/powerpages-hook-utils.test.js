@@ -8,6 +8,8 @@ const {
   ALM_PLAN_SKILLS,
   VISIBLE_SOURCE_SKILLS,
   detectTrackedSkill,
+  getToolInputFromHookPayload,
+  getTrackedSkillFromHookPayload,
   getTrackedSkillFromToolInput,
   getValidatorScript,
   getBlockingSpawnStatus,
@@ -49,6 +51,38 @@ test('getTrackedSkillFromToolInput finds a tracked skill in common fields', () =
     'integrate-webapi'
   );
   assert.equal(getTrackedSkillFromToolInput({ name: 'deploy-site' }), 'deploy-site');
+});
+
+test('getToolInputFromHookPayload normalizes Claude and Copilot payloads', () => {
+  assert.deepEqual(
+    getToolInputFromHookPayload({ tool_input: { skill: 'create-site' } }),
+    { skill: 'create-site' }
+  );
+  assert.deepEqual(
+    getToolInputFromHookPayload({ toolArgs: { skill: 'setup-auth' } }),
+    { skill: 'setup-auth' }
+  );
+  assert.deepEqual(
+    getToolInputFromHookPayload({ toolArgs: JSON.stringify({ skill: 'add-seo' }) }),
+    { skill: 'add-seo' }
+  );
+  assert.equal(getToolInputFromHookPayload({ toolArgs: '{not json' }), null);
+});
+
+test('getTrackedSkillFromHookPayload preserves Claude input precedence', () => {
+  assert.equal(
+    getTrackedSkillFromHookPayload({
+      tool_input: { skill: 'create-site' },
+      toolArgs: JSON.stringify({ skill: 'setup-auth' }),
+    }),
+    'create-site'
+  );
+  assert.equal(
+    getTrackedSkillFromHookPayload({
+      toolArgs: JSON.stringify({ skill: 'setup-auth' }),
+    }),
+    'setup-auth'
+  );
 });
 
 test('getValidatorScript returns discovered validator paths when present', () => {
