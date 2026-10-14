@@ -1,7 +1,7 @@
 # Declarative Site Customization Plan Contract
 
 The customization plan is the durable coordination artifact for
-`customize-declarative-site`. It describes user intent and cross-skill dependencies without
+`edit-site`. It describes user intent and cross-skill dependencies without
 replacing the authoring references that own PAC metadata and serialization.
 
 ## Location
@@ -10,11 +10,11 @@ Keep one canonical approved plan and its browser rendering under the project doc
 directory:
 
 ```text
-<project-root>/docs/customize-declarative-site/current-plan.json
-<project-root>/docs/customize-declarative-site/current-plan.html
-<project-root>/docs/customize-declarative-site/current-execution.json
-<project-root>/docs/customize-declarative-site/power-pages-icon.png
-<project-root>/docs/customize-declarative-site/history/<UTC-timestamp>/
+<project-root>/docs/edit-site/current-plan.json
+<project-root>/docs/edit-site/current-plan.html
+<project-root>/docs/edit-site/current-execution.json
+<project-root>/docs/edit-site/power-pages-icon.png
+<project-root>/docs/edit-site/history/<UTC-timestamp>/
 ├── plan.json
 ├── plan.html
 ├── execution.json
@@ -85,7 +85,7 @@ never drop a checked review's report or invent one for an unchecked review.
 
 Render each proposed plan in a fresh external review directory outside the declarative site root.
 After approval, publish the JSON with
-`scripts/promote-customize-declarative-site-plan.js`; the publisher validates it and renders the
+`scripts/promote-edit-site-plan.js`; the publisher validates it and renders the
 canonical HTML itself. It does not accept an independently supplied HTML file. For the normal
 `.powerpages-site/` layout,
 `docs/` is its sibling under the project root. When a manually downloaded site root is also the
@@ -250,7 +250,7 @@ Capabilities describe readiness observed in the downloaded files:
 `status` is `ready`, `blocked`, or `not-requested`. A blocked capability must name the missing
 prerequisite and a local remediation; it is not a permanent template limitation.
 `ownerSkill` selects the operation workflow defined in
-`${PLUGIN_ROOT}/skills/customize-declarative-site/references/classic-site-authoring.md`.
+`${PLUGIN_ROOT}/skills/edit-site/references/classic-site-authoring.md`.
 Component reference identifiers are not `Skill` tool names.
 
 ## Visual asset records
@@ -496,7 +496,7 @@ Publication creates `current-execution.json` with the plan hash, run ID, site id
 Use:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/update-customize-declarative-site-execution.js" \
+node "${PLUGIN_ROOT}/scripts/update-edit-site-execution.js" \
   --projectRoot "<PROJECT_ROOT>" --action resolve --operationId "<OPERATION_ID>"
 ```
 

@@ -17,7 +17,7 @@ function read(relativePath) {
 }
 
 function readClassicReference(owner) {
-  return read(path.join('skills', 'customize-declarative-site', 'references',
+  return read(path.join('skills', 'edit-site', 'references',
     classicReferences.get(owner)));
 }
 
@@ -37,7 +37,7 @@ test('classic component authoring uses references without extra skill registrati
   const advertisedCount = read('README.md').match(/The plugin provides (\d+) skills/);
   assert.ok(advertisedCount, 'README must advertise the bundled skill count');
   assert.equal(Number(advertisedCount[1]), registered.length);
-  assert.ok(names.includes('customize-declarative-site'));
+  assert.ok(names.includes('edit-site'));
   assert.ok(names.includes('author-webpage-content'));
   assert.ok(!names.includes('style-site'));
   assert.ok(!fs.existsSync(path.join(skillsRoot, 'style-site', 'SKILL.md')));
@@ -56,8 +56,8 @@ test('classic component authoring uses references without extra skill registrati
 });
 
 test('reference dispatch preserves the coordinator phases and local authoring boundaries', () => {
-  const skill = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
-  const shared = read(path.join('skills', 'customize-declarative-site', 'references', 'classic-site-authoring.md'));
+  const skill = read(path.join('skills', 'edit-site', 'SKILL.md'));
+  const shared = read(path.join('skills', 'edit-site', 'references', 'classic-site-authoring.md'));
   assert.match(skill, /Apply \*\*Request routing\*\* before creating coordination tasks/);
   assert.match(skill, /For an individual page or component request, follow the shared authoring reference and\s+finish/);
   assert.match(skill, /For coordinated work, create these tasks before starting/);
@@ -66,7 +66,7 @@ test('reference dispatch preserves the coordinator phases and local authoring bo
   assert.deepEqual([...skill.matchAll(/^## Phase (\d+):/gm)].map((match) => Number(match[1])),
     [1, 2, 3, 4, 5, 6, 7]);
   assert.deepEqual([...skill.matchAll(/<!-- gate: ([^ |]+)/g)].map((match) => match[1]),
-    ['customize-declarative-site:4.approve', 'customize-declarative-site:7.deploy']);
+    ['edit-site:4.approve', 'edit-site:7.deploy']);
   assert.match(shared, /Do not invoke these operation identifiers through the `Skill` tool/);
   assert.match(shared, /Do not rewrite an approved plan, its identifiers, or its hash/);
   assert.match(shared, /Load another component reference only when its records or callers are affected/);
@@ -86,10 +86,10 @@ test('reference dispatch preserves the coordinator phases and local authoring bo
 });
 
 test('styling-only requests use local reference execution without coordinated planning', () => {
-  const skill = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
-  const workflow = read(path.join('skills', 'customize-declarative-site',
+  const skill = read(path.join('skills', 'edit-site', 'SKILL.md'));
+  const workflow = read(path.join('skills', 'edit-site',
     'references', 'style-site-workflow.md'));
-  const contract = read(path.join('skills', 'customize-declarative-site',
+  const contract = read(path.join('skills', 'edit-site',
     'references', 'customization-plan-contract.md'));
   assert.match(skill, /For styling-only requests outside a current approved coordinated execution, follow/);
   assert.match(skill, /references\/style-site-workflow\.md/);
@@ -98,7 +98,7 @@ test('styling-only requests use local reference execution without coordinated pl
   assert.match(workflow, /commit, deployment prompt, final-completion confirmation, HTML preview, local server or browser review/);
   assert.match(workflow, /Preserve identifiers, approved inputs, scope, locales, design context, hashes and\s+receipts/);
   assert.match(workflow, /Coordinated approval does not approve the exact CSS\/source diff/);
-  assert.match(workflow, /records `CustomizeDeclarativeSite` once after successful completion, not per/);
+  assert.match(workflow, /records `EditSite` once after successful completion, not per/);
   assert.match(contract, /Only `author-webpage-content` is a skill invocation/);
   assert.match(contract, /Keep `style-site` as the operation identifier/);
   assert.doesNotMatch(skill + contract, /invoke `style-site`|`style-site` are skill invocations/);
@@ -122,18 +122,18 @@ test('new classic pages default to navigation with explicit opt-out and resolved
   for (const relativePath of [
     'AGENTS.md',
     'README.md',
-    path.join('skills', 'customize-declarative-site', 'references', 'classic-site-authoring.md'),
+    path.join('skills', 'edit-site', 'references', 'classic-site-authoring.md'),
   ]) {
     assert.match(read(relativePath), /[Nn]ew pages update\s+navigation by default unless (?:the user|you) explicitly asks? not to/,
       relativePath);
   }
-  const compositions = read(path.join('skills', 'customize-declarative-site',
+  const compositions = read(path.join('skills', 'edit-site',
     'references', 'content-and-page-compositions.md'));
   assert.match(compositions, /including default\s+navigation or its explicit opt-out/);
 });
 
 test('classic authoring links and contents resolve within the installed plugin', () => {
-  const skills = ['customize-declarative-site', 'author-webpage-content'];
+  const skills = ['edit-site', 'author-webpage-content'];
   const documents = [
     ...skills.map((skill) => path.join('skills', skill, 'SKILL.md')),
     ...skills.flatMap((skill) => {
@@ -176,7 +176,7 @@ test('all declarative preview entry points disclose once and propagate the hando
     path.join('skills', 'create-site', 'workflows', 'declarative-site.md')
   );
   const coveredSkills = [
-    path.join('skills', 'customize-declarative-site', 'SKILL.md'),
+    path.join('skills', 'edit-site', 'SKILL.md'),
     path.join('skills', 'author-webpage-content', 'SKILL.md'),
   ];
 
@@ -240,18 +240,18 @@ test('all declarative preview entry points disclose once and propagate the hando
   }
 
   const customization = read(
-    path.join('skills', 'customize-declarative-site', 'SKILL.md')
+    path.join('skills', 'edit-site', 'SKILL.md')
   );
   assert.match(customization, /previewNoticeShown: true/);
-  assert.match(customization, /invocationSource: customize-declarative-site/);
+  assert.match(customization, /invocationSource: edit-site/);
 });
 
 test('classic header planning reaches creation, approval and styling without widening narrow edits', () => {
   const workflow = read(path.join('skills', 'create-site', 'workflows', 'declarative-site.md'));
-  const customization = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
-  const composition = read(path.join('skills', 'customize-declarative-site', 'references', 'content-and-page-compositions.md'));
-  const contract = read(path.join('skills', 'customize-declarative-site', 'references', 'customization-plan-contract.md'));
-  const styling = read(path.join('skills', 'customize-declarative-site', 'references', 'styling', 'design-quality.md'));
+  const customization = read(path.join('skills', 'edit-site', 'SKILL.md'));
+  const composition = read(path.join('skills', 'edit-site', 'references', 'content-and-page-compositions.md'));
+  const contract = read(path.join('skills', 'edit-site', 'references', 'customization-plan-contract.md'));
+  const styling = read(path.join('skills', 'edit-site', 'references', 'styling', 'design-quality.md'));
   const headerSection = composition.match(/## Site header planning\r?\n([\s\S]*?)(?=\r?\n## |$)/);
   assert.ok(headerSection);
   const header = headerSection[1];
@@ -281,11 +281,11 @@ test('classic header planning reaches creation, approval and styling without wid
 
 test('every classic header update includes a website-appropriate logo decision and native verification', () => {
   const workflow = read(path.join('skills', 'create-site', 'workflows', 'declarative-site.md'));
-  const customization = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
-  const composition = read(path.join('skills', 'customize-declarative-site', 'references', 'content-and-page-compositions.md'));
-  const contract = read(path.join('skills', 'customize-declarative-site', 'references', 'customization-plan-contract.md'));
-  const assets = read(path.join('skills', 'customize-declarative-site', 'references', 'visual-asset-planning.md'));
-  const styling = read(path.join('skills', 'customize-declarative-site', 'references', 'styling', 'design-quality.md'));
+  const customization = read(path.join('skills', 'edit-site', 'SKILL.md'));
+  const composition = read(path.join('skills', 'edit-site', 'references', 'content-and-page-compositions.md'));
+  const contract = read(path.join('skills', 'edit-site', 'references', 'customization-plan-contract.md'));
+  const assets = read(path.join('skills', 'edit-site', 'references', 'visual-asset-planning.md'));
+  const styling = read(path.join('skills', 'edit-site', 'references', 'styling', 'design-quality.md'));
   const logoSection = assets.match(/## Logos and favicons\r?\n([\s\S]*?)(?=\r?\n## |$)/);
   assert.ok(logoSection);
   const logos = logoSection[1];
@@ -325,15 +325,15 @@ test('create-site can hand a Standard or Enhanced baseline to declarative custom
   assert.match(workflow, /--modelVersion "<MODEL_VERSION>"/);
   assert.match(workflow, /verify the site reports `MODEL_VERSION`/);
   assert.match(workflow, /Would you like to customize the downloaded traditional template now\?/);
-  assert.match(workflow, /invoke `\/customize-declarative-site` through the `Skill` tool/);
+  assert.match(workflow, /invoke `\/edit-site` through the `Skill` tool/);
   assert.match(workflow, /validated, committed baseline/);
 });
 
-test('customize-declarative-site executes authoring references without changing approved-plan contracts', () => {
-  const skill = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
+test('edit-site executes authoring references without changing approved-plan contracts', () => {
+  const skill = read(path.join('skills', 'edit-site', 'SKILL.md'));
   const contract = read(path.join(
     'skills',
-    'customize-declarative-site',
+    'edit-site',
     'references',
     'customization-plan-contract.md'
   ));
@@ -350,7 +350,7 @@ test('customize-declarative-site executes authoring references without changing 
   assert.match(skill, /Execute reference workflows directly; invoke only/);
   assert.match(skill, /current-plan\.json/);
   assert.match(skill, /current-execution\.json/);
-  assert.match(skill, /promote-customize-declarative-site-plan\.js/);
+  assert.match(skill, /promote-edit-site-plan\.js/);
   assert.match(skill, /content-and-page-compositions\.md/);
   assert.match(skill, /visual-asset-planning\.md/);
   assert.match(skill, /prepare-declarative-asset\.js/);
@@ -375,9 +375,9 @@ test('customize-declarative-site executes authoring references without changing 
 });
 
 test('classic Unsplash sourcing follows SPA discovery without a photo-page or attribution gate', () => {
-  const skill = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
-  const assets = read(path.join('skills', 'customize-declarative-site', 'references', 'visual-asset-planning.md'));
-  const contract = read(path.join('skills', 'customize-declarative-site', 'references', 'customization-plan-contract.md'));
+  const skill = read(path.join('skills', 'edit-site', 'SKILL.md'));
+  const assets = read(path.join('skills', 'edit-site', 'references', 'visual-asset-planning.md'));
+  const contract = read(path.join('skills', 'edit-site', 'references', 'customization-plan-contract.md'));
   assert.match(skill, /WebSearch-to-CDN flow, as in SPA creation/);
   assert.match(skill, /without requiring a photo-page fetch or photographer\s+lookup/);
   assert.match(skill, /renderer labels unchecked external images as unverified/);
@@ -393,9 +393,9 @@ test('classic Unsplash sourcing follows SPA discovery without a photo-page or at
 });
 
 test('classic image verification is opt-in without another gate or mandatory runtime preview', () => {
-  const skill = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
-  const assets = read(path.join('skills', 'customize-declarative-site', 'references', 'visual-asset-planning.md'));
-  const contract = read(path.join('skills', 'customize-declarative-site', 'references', 'customization-plan-contract.md'));
+  const skill = read(path.join('skills', 'edit-site', 'SKILL.md'));
+  const assets = read(path.join('skills', 'edit-site', 'references', 'visual-asset-planning.md'));
+  const contract = read(path.join('skills', 'edit-site', 'references', 'customization-plan-contract.md'));
   const gates = read(path.join('references', 'approval-gates.md'));
   assert.match(skill, /Only when the user requests source verification, append `--verifyImages true`/);
   assert.match(skill, /By default, the renderer validates the plan without image-network requests/);
@@ -407,7 +407,7 @@ test('classic image verification is opt-in without another gate or mandatory run
   assert.match(contract, /missing, malformed, stale or failed supplied reports block publication/);
   assert.match(gates, /external images explicitly unverified or supported by successful requested exact-plan checks/);
   assert.deepEqual([...skill.matchAll(/<!-- gate: ([^ |]+)/g)].map((match) => match[1]), [
-    'customize-declarative-site:4.approve', 'customize-declarative-site:7.deploy',
+    'edit-site:4.approve', 'edit-site:7.deploy',
   ]);
 });
 
@@ -435,7 +435,7 @@ test('deploy-site keeps code and declarative upload commands isolated', () => {
 test('classic creation uses verified Bootstrap 5 and image-rich design without SPA preview requirements', () => {
   const skill = read(path.join('skills', 'create-site', 'SKILL.md'));
   const workflow = read(path.join('skills', 'create-site', 'workflows', 'declarative-site.md'));
-  const customization = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
+  const customization = read(path.join('skills', 'edit-site', 'SKILL.md'));
   const common = skill.split('## SPA-Site Workflow')[0];
   assert.match(common, /references\/site-design-quality\.md/);
   assert.match(common, /Classic sites need no dev server or live preview/);
@@ -478,10 +478,10 @@ test('classic authors preserve Bootstrap conventions and do not gate CSS on disp
 });
 
 test('creation image URL policy reaches content planning and the classic design adapter', () => {
-  const assetGuide = read(path.join('skills', 'customize-declarative-site', 'references', 'visual-asset-planning.md'));
-  const contentGuide = read(path.join('skills', 'customize-declarative-site', 'references', 'content-and-page-compositions.md'));
-  const designGuide = read(path.join('skills', 'customize-declarative-site', 'references', 'styling', 'design-quality.md'));
-  const contract = read(path.join('skills', 'customize-declarative-site', 'references', 'customization-plan-contract.md'));
+  const assetGuide = read(path.join('skills', 'edit-site', 'references', 'visual-asset-planning.md'));
+  const contentGuide = read(path.join('skills', 'edit-site', 'references', 'content-and-page-compositions.md'));
+  const designGuide = read(path.join('skills', 'edit-site', 'references', 'styling', 'design-quality.md'));
+  const contract = read(path.join('skills', 'edit-site', 'references', 'customization-plan-contract.md'));
   assert.match(assetGuide, /direct HTTPS URLs for added images/);
   assert.match(assetGuide, /Power Pages permissions do not protect external URLs/);
   assert.match(assetGuide, /Do not download the image to a file/);
@@ -515,10 +515,10 @@ test('classic template selection and new-site handoff distinguish requirements f
 
 test('classic planning defaults allow recomposition but preserve explicit preferences and existing-site scope', () => {
   const shared = read(path.join('references', 'site-design-quality.md'));
-  const customization = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
-  const content = read(path.join('skills', 'customize-declarative-site', 'references', 'content-and-page-compositions.md'));
-  const contract = read(path.join('skills', 'customize-declarative-site', 'references', 'customization-plan-contract.md'));
-  const assets = read(path.join('skills', 'customize-declarative-site', 'references', 'visual-asset-planning.md'));
+  const customization = read(path.join('skills', 'edit-site', 'SKILL.md'));
+  const content = read(path.join('skills', 'edit-site', 'references', 'content-and-page-compositions.md'));
+  const contract = read(path.join('skills', 'edit-site', 'references', 'customization-plan-contract.md'));
+  const assets = read(path.join('skills', 'edit-site', 'references', 'visual-asset-planning.md'));
   const templateRole = shared.split('## Classic creation templates:')[1].split('## Direction')[0];
   for (const term of ['data-model/domain', 'requirements', 'appearance', 'page composition',
     'layout', 'branding', 'presentation', 'PAC metadata', 'record identities', 'data bindings',
@@ -546,8 +546,8 @@ test('native authors and final styling carry the approved composition without sa
   const content = read(path.join('skills', 'author-webpage-content', 'SKILL.md'));
   const composition = read(path.join('skills', 'author-webpage-content',
     'references', 'webpage-content-composition.md'));
-  const styling = read(path.join('skills', 'customize-declarative-site', 'references', 'styling', 'design-quality.md'));
-  const critique = read(path.join('skills', 'customize-declarative-site', 'references', 'styling', 'design-critique.md'));
+  const styling = read(path.join('skills', 'edit-site', 'references', 'styling', 'design-quality.md'));
+  const critique = read(path.join('skills', 'edit-site', 'references', 'styling', 'design-critique.md'));
   for (const source of [page, content, composition, styling, critique]) {
     assert.match(source, /creation template/);
     assert.match(source, /designContext/);
@@ -565,9 +565,9 @@ test('native authors and final styling carry the approved composition without sa
 });
 
 test('new-site plans require custom Home and journey layouts rather than cosmetic template changes', () => {
-  const customization = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
-  const planning = read(path.join('skills', 'customize-declarative-site', 'references', 'content-and-page-compositions.md'));
-  const contract = read(path.join('skills', 'customize-declarative-site', 'references', 'customization-plan-contract.md'));
+  const customization = read(path.join('skills', 'edit-site', 'SKILL.md'));
+  const planning = read(path.join('skills', 'edit-site', 'references', 'content-and-page-compositions.md'));
+  const contract = read(path.join('skills', 'edit-site', 'references', 'customization-plan-contract.md'));
   const shared = read(path.join('references', 'site-design-quality.md'));
   assert.match(shared, /custom design and layout are required, not merely permitted/i);
   assert.match(shared, /forms, lists, content snippets/);
@@ -590,7 +590,7 @@ test('component reuse preserves existing source without forcing the surrounding 
     'references', 'webpage-content-composition.md'));
   const pageTemplate = readClassicReference('author-page-template');
   const webTemplate = readClassicReference('author-web-template');
-  const planning = read(path.join('skills', 'customize-declarative-site', 'references', 'content-and-page-compositions.md'));
+  const planning = read(path.join('skills', 'edit-site', 'references', 'content-and-page-compositions.md'));
   assert.match(planning, /Do not create `type: form`, `type: list` or `type: reuse`/);
   assert.match(composition, /exact existing source boundary or Liquid\/snippet\s+reference and destination/);
   assert.match(composition, /dependent scripts, IDs and Liquid scope/);
@@ -607,9 +607,9 @@ test('component reuse preserves existing source without forcing the surrounding 
 test('new-site layout work may remove unneeded starter sections and component placements without deleting records', () => {
   const shared = read(path.join('references', 'site-design-quality.md'));
   const creation = read(path.join('skills', 'create-site', 'workflows', 'declarative-site.md'));
-  const customization = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
-  const planning = read(path.join('skills', 'customize-declarative-site', 'references', 'content-and-page-compositions.md'));
-  const contract = read(path.join('skills', 'customize-declarative-site', 'references', 'customization-plan-contract.md'));
+  const customization = read(path.join('skills', 'edit-site', 'SKILL.md'));
+  const planning = read(path.join('skills', 'edit-site', 'references', 'content-and-page-compositions.md'));
+  const contract = read(path.join('skills', 'edit-site', 'references', 'customization-plan-contract.md'));
   const content = read(path.join('skills', 'author-webpage-content', 'SKILL.md'));
   const composition = read(path.join('skills', 'author-webpage-content',
     'references', 'webpage-content-composition.md'));
@@ -634,10 +634,10 @@ test('new-site layout work may remove unneeded starter sections and component pl
 });
 
 test('the existing final review treats an unimplemented custom layout as incomplete without adding gates', () => {
-  const customization = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
+  const customization = read(path.join('skills', 'edit-site', 'SKILL.md'));
   const review = customization.split('## Phase 6:')[1].split('## Phase 7:')[0];
-  const styling = read(path.join('skills', 'customize-declarative-site', 'references', 'styling', 'design-quality.md'));
-  const critique = read(path.join('skills', 'customize-declarative-site', 'references', 'styling', 'design-critique.md'));
+  const styling = read(path.join('skills', 'edit-site', 'references', 'styling', 'design-quality.md'));
+  const critique = read(path.join('skills', 'edit-site', 'references', 'styling', 'design-critique.md'));
   assert.match(review, /Trace the planned Home\/primary-journey section structure and reused-component placements/);
   assert.match(review, /copy\/image swaps or CSS on an unchanged starter layout do not satisfy/);
   assert.match(review, /Record missing planned composition work as incomplete/);
@@ -646,7 +646,7 @@ test('the existing final review treats an unimplemented custom layout as incompl
   assert.match(critique, /incomplete layout work, not a completed custom design/);
   assert.match(critique, /Do not infer success from a larger diff, or failure from missing screenshots/);
   assert.deepEqual([...customization.matchAll(/<!-- gate: ([^ |]+)/g)].map((match) => match[1]),
-    ['customize-declarative-site:4.approve', 'customize-declarative-site:7.deploy']);
+    ['edit-site:4.approve', 'edit-site:7.deploy']);
   assert.match(customization, /--imageChecks "<APPROVED_REVIEW_DIR>\/plan.html.image-checks.json"/);
   assert.match(customization, /exact-diff\/hash approval is a separate binding/);
 });

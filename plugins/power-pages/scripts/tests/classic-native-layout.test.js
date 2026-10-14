@@ -4,8 +4,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { sectionLayout } = require('../lib/classic-native-layout');
-const { validateCustomizationPlan, planHash } = require('../lib/customize-declarative-site-plan');
-const { renderCustomizationPlan } = require('../render-customize-declarative-site-plan');
+const { validateCustomizationPlan, planHash } = require('../lib/edit-site-plan');
+const { renderCustomizationPlan } = require('../render-edit-site-plan');
 const { renderDocument } = require('./customization-plan-test-helpers');
 
 test('legacy names resolve without imposing their catalogue on explicit spans', () => {
@@ -46,7 +46,7 @@ test('malformed new descriptors fail rather than silently overriding a preset', 
 test('explicit spans and compatibility warnings survive the classic plan renderer and hash', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'native-layout-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const plan = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'customize-declarative-site-plan.json')));
+  const plan = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'edit-site-plan.json')));
   const operation = plan.operations[1];
   operation.inputs.sections = [{
     layout: 'Bespoke <layout>', columns: [7, 5, 3, 3].map((span, index) => ({

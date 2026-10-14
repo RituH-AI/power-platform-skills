@@ -12,14 +12,14 @@ const {
   planHash,
   validateCustomizationPlan,
   writeJsonAtomic,
-} = require('./lib/customize-declarative-site-plan');
+} = require('./lib/edit-site-plan');
 const { validateImageChecks } = require('./lib/declarative-image-verification');
 
 function main() {
   const args = parseArgs(process.argv);
   if (!args.projectRoot || !args.action) {
     console.error(
-      'Usage: node update-customize-declarative-site-execution.js ' +
+      'Usage: node update-edit-site-execution.js ' +
         '--projectRoot <path> --action <status|resolve|start|complete|fail|finish> ' +
         '[--operationId <id>] [--outputs <json-file>] [--error <message>] ' +
         '[--websiteRecordId <id>] [--siteRoot <relative-path>]'

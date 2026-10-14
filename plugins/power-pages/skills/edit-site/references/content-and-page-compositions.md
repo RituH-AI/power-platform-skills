@@ -1,6 +1,6 @@
 # Declarative Content and Page Planning
 
-Use this reference when `customize-declarative-site` must turn an outcome such as “add an FAQs
+Use this reference when `edit-site` must turn an outcome such as “add an FAQs
 page” into resolved visitor-facing content and a supported page composition.
 
 ## Content reasoning
@@ -222,7 +222,7 @@ a supported alternative rather than inventing a serialization.
 
 ## Minimal operation selection
 
-Use the dispatch in `${PLUGIN_ROOT}/skills/customize-declarative-site/references/classic-site-authoring.md`.
+Use the dispatch in `${PLUGIN_ROOT}/skills/edit-site/references/classic-site-authoring.md`.
 Execute only reference workflows required by the resolved structure:
 
 - page metadata, route, template, localized shells, navigation: `author-webpage`;

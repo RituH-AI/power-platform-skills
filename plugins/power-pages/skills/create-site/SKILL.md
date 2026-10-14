@@ -102,7 +102,7 @@ load-bearing declarative question paired with the repository gate catalog.
 <!-- gate: create-site:declarative-8-customize | category=plan | cancel-leaves=declarative-baseline -->
 
 > 🚦 **Gate (plan · create-site:declarative-8-customize):** Choose whether to customize the
-> verified downloaded template through `/customize-declarative-site`.
+> verified downloaded template through `/edit-site`.
 
 ---
 

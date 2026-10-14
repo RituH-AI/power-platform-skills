@@ -8,7 +8,7 @@ const path = require('path');
 const { parseArgs, renderTemplate } = require('./lib/render-template');
 const {
   validateCustomizationPlan,
-} = require('./lib/customize-declarative-site-plan');
+} = require('./lib/edit-site-plan');
 const { externalImageUrls, validateImageChecks, verifyPlanImages } = require('./lib/declarative-image-verification');
 const { compositionLayouts } = require('./lib/classic-native-layout');
 
@@ -16,7 +16,7 @@ const templatePath = path.join(
   __dirname,
   '..',
   'skills',
-  'customize-declarative-site',
+  'edit-site',
   'assets',
   'customization-plan.html'
 );
@@ -98,7 +98,7 @@ async function main() {
   const args = parseArgs(process.argv);
   if (!args.output || !args.data) {
     console.error(
-      'Usage: node render-customize-declarative-site-plan.js --output <path> --data <json-file> ' +
+      'Usage: node render-edit-site-plan.js --output <path> --data <json-file> ' +
         '[--verifyImages <true|false>]'
     );
     process.exit(1);

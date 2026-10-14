@@ -69,8 +69,11 @@ test('styling references are not tracked skills but all local scripts remain ins
     assert.equal(getTrackedSkillFromToolInput({ skill: alias }), null, alias);
     assert.equal(getValidatorScript(alias), null, alias);
   }
-  assert.equal(detectTrackedSkill('customize-declarative-site'), 'customize-declarative-site');
-  assert.equal(getValidatorScript('customize-declarative-site'), null);
+  for (const alias of ['edit-site', '/edit-site', 'power-pages:edit-site', '/power-pages:edit-site']) {
+    assert.equal(detectTrackedSkill(alias), 'edit-site', alias);
+    assert.equal(getTrackedSkillFromToolInput({ skill: alias }), 'edit-site', alias);
+  }
+  assert.equal(getValidatorScript('edit-site'), null);
   for (const script of [
     'inspect-style-context.js',
     'inspect-runtime-dom.js',

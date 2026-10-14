@@ -4,17 +4,17 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { renderReviewedPlan } = require('../render-customize-declarative-site-plan');
-const { publishApprovedPlan } = require('../promote-customize-declarative-site-plan');
-const { updateExecution } = require('../update-customize-declarative-site-execution');
-const { hashText, planHash } = require('../lib/customize-declarative-site-plan');
+const { renderReviewedPlan } = require('../render-edit-site-plan');
+const { publishApprovedPlan } = require('../promote-edit-site-plan');
+const { updateExecution } = require('../update-edit-site-execution');
+const { hashText, planHash } = require('../lib/edit-site-plan');
 const { externalImagePlan, renderDocument, successfulImageCheck } = require('./customization-plan-test-helpers');
 
-const scriptPath = path.join(__dirname, '..', 'promote-customize-declarative-site-plan.js');
+const scriptPath = path.join(__dirname, '..', 'promote-edit-site-plan.js');
 const fixturePath = path.join(
   __dirname,
   'fixtures',
-  'customize-declarative-site-plan.json'
+  'edit-site-plan.json'
 );
 
 function writeReview(root, name, mutate = (plan) => plan) {
@@ -50,7 +50,10 @@ test('published technical JSON, trace-free HTML, hashes and receipt survive revi
   assert.equal(result.status, 0, result.stderr || result.stdout);
   fs.rmSync(path.dirname(review.data), { recursive: true, force: true });
   const output = JSON.parse(result.stdout);
-  const planRoot = path.join(root, 'docs', 'customize-declarative-site');
+  const planRoot = path.join(root, 'docs', 'edit-site');
+  assert.equal(output.currentJson, path.join(planRoot, 'current-plan.json'));
+  assert.equal(output.currentHtml, path.join(planRoot, 'current-plan.html'));
+  assert.equal(output.currentExecution, path.join(planRoot, 'current-execution.json'));
   assert.deepEqual(
     JSON.parse(fs.readFileSync(path.join(planRoot, 'current-plan.json'), 'utf8')),
     review.plan
@@ -85,7 +88,7 @@ test('archives the complete technical plan, HTML, receipt and icon after review 
   });
 
   assert.equal(promote(root, first).status, 0);
-  const planRoot = path.join(root, 'docs', 'customize-declarative-site');
+  const planRoot = path.join(root, 'docs', 'edit-site');
   const firstHtml = fs.readFileSync(path.join(planRoot, 'current-plan.html'), 'utf8');
   const firstExecution = fs.readFileSync(path.join(planRoot, 'current-execution.json'), 'utf8');
   fs.rmSync(path.dirname(first.data), { recursive: true, force: true });
@@ -112,7 +115,7 @@ test('rejects a syntactically valid but schema-invalid plan before replacing cur
   const valid = writeReview(root, 'review-one');
   assert.equal(promote(root, valid).status, 0);
   const before = fs.readFileSync(
-    path.join(root, 'docs', 'customize-declarative-site', 'current-plan.json'),
+    path.join(root, 'docs', 'edit-site', 'current-plan.json'),
     'utf8'
   );
 
@@ -122,7 +125,7 @@ test('rejects a syntactically valid but schema-invalid plan before replacing cur
   assert.match(result.stderr, /Missing required plan keys/);
   assert.equal(
     fs.readFileSync(
-      path.join(root, 'docs', 'customize-declarative-site', 'current-plan.json'),
+      path.join(root, 'docs', 'edit-site', 'current-plan.json'),
       'utf8'
     ),
     before
@@ -151,7 +154,7 @@ test('does not accept an independently supplied HTML document', () => {
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.doesNotMatch(
     fs.readFileSync(
-      path.join(root, 'docs', 'customize-declarative-site', 'current-plan.html'),
+      path.join(root, 'docs', 'edit-site', 'current-plan.html'),
       'utf8'
     ),
     /unrelated/
@@ -210,7 +213,7 @@ test('optional pre-approval image checks are validated and reused during publica
   assert.deepEqual(resolved.resolvedInputs, review.plan.operations[0].inputs);
   assert.equal(calls, 1);
   assert.equal(fs.existsSync(path.join(root, '.powerpages-customization')), false);
-  assert.match(fs.readFileSync(path.join(root, 'docs', 'customize-declarative-site', 'current-plan.html'), 'utf8'), /Image source checks passed before review/);
+  assert.match(fs.readFileSync(path.join(root, 'docs', 'edit-site', 'current-plan.html'), 'utf8'), /Image source checks passed before review/);
 });
 
 test('explicitly supplied invalid report paths cannot silently disable verification', (t) => {
@@ -237,7 +240,7 @@ test('stale or failed image checks leave the current approved run unchanged', as
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const current = writeReview(root, 'baseline');
   assert.equal(promote(root, current).status, 0);
-  const currentPath = path.join(root, 'docs', 'customize-declarative-site', 'current-plan.json');
+  const currentPath = path.join(root, 'docs', 'edit-site', 'current-plan.json');
   const before = fs.readFileSync(currentPath, 'utf8');
   const review = writeReview(root, 'review', () => externalImagePlan());
   const rendered = await renderReviewedPlan(review.plan, path.join(root, 'review', 'plan.html'), {
@@ -266,5 +269,5 @@ test('stale or failed image checks leave the current approved run unchanged', as
   assert.equal(stale.status, 1);
   assert.match(stale.stderr, /stale image checks/);
   assert.equal(fs.readFileSync(currentPath, 'utf8'), before);
-  assert.equal(fs.existsSync(path.join(root, 'docs', 'customize-declarative-site', 'history')), false);
+  assert.equal(fs.existsSync(path.join(root, 'docs', 'edit-site', 'history')), false);
 });

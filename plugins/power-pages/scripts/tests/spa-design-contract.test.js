@@ -45,7 +45,7 @@ test('SPA typography, implementation and critique completion retain the upstream
   const routed = source.split('## SPA-Site Workflow');
   assert.equal(routed.length, 2);
   assert.match(routed[0], /classic exceptions never alter SPA fonts/i);
-  assert.doesNotMatch(routed[1], /customize-declarative-site\/references\/styling\/design-critique|workflows\/classic-site/);
+  assert.doesNotMatch(routed[1], /edit-site\/references\/styling\/design-critique|workflows\/classic-site/);
   const start = source.indexOf('### 5.7 Design Critique Pass');
   const end = source.indexOf('## Phase 6: Accessibility Verification');
   assert.ok(start >= 0 && end > start);

@@ -7,7 +7,7 @@ modeling, authentication, Web API integration, and ALM—through conversational 
 **Supported creation models**: Standard and Enhanced data model traditional sites; React, Angular,
 Vue, and Astro SPA sites
 
-For an existing **classic, server-rendered Power Pages site**, `/customize-declarative-site` provides a local Desktop styling workflow; it does not create a SPA or deploy changes.
+For an existing **classic, server-rendered Power Pages site**, `/edit-site` provides a local Desktop styling workflow; it does not create a SPA or deploy changes.
 
 ## Installation
 
@@ -64,7 +64,7 @@ site from a template accepted by the documented Power Platform Create Website AP
   the selected model
   and environment toggle with an administrator, and choose a Bootstrap-compatible first-party
   template. Provision through the Power Platform API, verify the resulting model and downloaded
-  Bootstrap assets, and create a Git baseline. Continue through `/customize-declarative-site` for
+  Bootstrap assets, and create a Git baseline. Continue through `/edit-site` for
   a coherent experience brief, first-screen hierarchy, narrative, typography, palette, responsive
   composition, and meaningful images using direct HTTPS
   URLs without image downloads or Web File creation, or explicitly
@@ -91,7 +91,7 @@ Routes by project type and deploys either a code site or a PAC-downloaded declar
   choice when the website is absent for a first upload; they summarize local component changes,
   obtain final upload approval, and use `pac pages upload` with an explicit model
 
-#### `/customize-declarative-site`
+#### `/edit-site`
 
 > "Turn this downloaded Event Portal into our developer conference site"
 
@@ -101,12 +101,12 @@ whether it was provisioned by `/create-site` or created manually in Design Studi
 - Individual page or component edits load only the relevant references, then inspect, author, independently
   verify, and report
 - Broad and new-site customization keeps one current approved JSON/HTML plan plus a resumable execution receipt under
-  `docs/customize-declarative-site/`, and archives earlier approved runs in timestamped history
+  `docs/edit-site/`, and archives earlier approved runs in timestamped history
 - Derives a safe content outline and supported section/column/element composition before asking
   one compact set of questions for genuinely missing business facts
 - Executes and coordinates asset, snippet, Liquid/web-template, page-layout, and webpage authoring through component
   references, invoking a separate skill only for localized body composition
-- Styling-only requests use [the guarded styling workflow](skills/customize-declarative-site/references/style-site-workflow.md)
+- Styling-only requests use [the guarded styling workflow](skills/edit-site/references/style-site-workflow.md)
   without a broad customization plan, commits or deployment prompts
 - Reuses the same visual-quality guidance as code-site creation, adapted to native Bootstrap and
   Design Studio authoring rather than SPA theme replacement
@@ -159,19 +159,19 @@ Provides a small, read-only example for learning skill development. It recognize
 
 ### Classic site authoring
 
-Use `/customize-declarative-site` to customize local PAC CLI-downloaded declarative
+Use `/edit-site` to customize local PAC CLI-downloaded declarative
 Power Pages sites. The following capabilities are reference workflows, not separate slash commands,
 and do not apply to React, Angular, Vue, or Astro code sites.
 
 | Capability | Reference |
 |---|---|
-| Root/localized webpages, routes, parents, template assignments, content shells, and navigation | [Webpages](skills/customize-declarative-site/references/webpage-authoring.md) |
-| Localized/neutral snippets, translations, Text/HTML values, Liquid, and exact caller migrations | [Content snippets](skills/customize-declarative-site/references/content-snippet-authoring.md) |
-| Site-served images, CSS, JavaScript, fonts, documents, and adjacent PAC metadata | [Web files](skills/customize-declarative-site/references/web-file-authoring.md) |
-| Liquid/HTML fragments, inherited layouts, and explicitly requested callers or bindings | [Web templates](skills/customize-declarative-site/references/web-template-authoring.md) |
-| Page-template metadata, web-template-backed layouts, rewrite templates, and requested page assignments | [Page templates](skills/customize-declarative-site/references/page-template-authoring.md) |
+| Root/localized webpages, routes, parents, template assignments, content shells, and navigation | [Webpages](skills/edit-site/references/webpage-authoring.md) |
+| Localized/neutral snippets, translations, Text/HTML values, Liquid, and exact caller migrations | [Content snippets](skills/edit-site/references/content-snippet-authoring.md) |
+| Site-served images, CSS, JavaScript, fonts, documents, and adjacent PAC metadata | [Web files](skills/edit-site/references/web-file-authoring.md) |
+| Liquid/HTML fragments, inherited layouts, and explicitly requested callers or bindings | [Web templates](skills/edit-site/references/web-template-authoring.md) |
+| Page-template metadata, web-template-backed layouts, rewrite templates, and requested page assignments | [Page templates](skills/edit-site/references/page-template-authoring.md) |
 
-The [shared authoring contract](skills/customize-declarative-site/references/classic-site-authoring.md) owns routing,
+The [shared authoring contract](skills/edit-site/references/classic-site-authoring.md) owns routing,
 autonomy, dependency loading, local-only boundaries, and final verification. New pages update
 navigation by default unless you explicitly ask not to. Coordinated asset planning retains provenance, placement,
 accessibility, secure explicit Web File imports, and direct HTTPS imagery for new-site design.
@@ -518,11 +518,11 @@ Adds a Design Studio-compatible link button to one localized page in a PAC CLI-d
 - Uses any user-provided button label
 - Does not upload or deploy the site
 
-#### Classic styling through `/customize-declarative-site`
+#### Classic styling through `/edit-site`
 
 > "Style the new contact section and existing list on my classic Power Pages site; show me the proposed changes first"
 
-Uses [the styling workflow](skills/customize-declarative-site/references/style-site-workflow.md) for **classic, server-rendered sites only**, from a local download in **VS Code Desktop**. Reviews the exact CSS/source diff, scope and Studio-support warnings, then applies only an explicitly approved local change set. No HTML preview, local server or browser review is required.
+Uses [the styling workflow](skills/edit-site/references/style-site-workflow.md) for **classic, server-rendered sites only**, from a local download in **VS Code Desktop**. Reviews the exact CSS/source diff, scope and Studio-support warnings, then applies only an explicitly approved local change set. No HTML preview, local server or browser review is required.
 
 - Uses a lean **Inspect/propose → Approve → Apply → Independently verify → Report** workflow for broad declarations on one locale/section: at most 3 components/10 style groups, one existing stylesheet and guarded inline/class edits. Any raw `style.css`, global rules, nonempty `externalResources`/`importantReason`, new/shared files or broader scope uses expanded review
 - Reviews small-change scope together with the exact diff/hash; expanded work confirms scope first. Every revision needs host approval, with no final-completion confirmation or unattended approval
@@ -661,9 +661,9 @@ SPA site:
 13. /test-site              →  Runtime smoke test
 
 Traditional site:
-1.  /create-site                    →  Provision, download, and verify Bootstrap 5 (Enhanced recommended)
-2.  /customize-declarative-site     →  Approve and author coordinated design, content, and imagery
-3.  /deploy-site                    →  Verify identity/model and upload the declarative site
+1.  /create-site            →  Provision, download, and verify Bootstrap 5 (Enhanced recommended)
+2.  /edit-site              →  Approve and author coordinated design, content, and imagery
+3.  /deploy-site            →  Verify identity/model and upload the declarative site
 
 ALM and release:
 1.  /security-review        →  Review security before release

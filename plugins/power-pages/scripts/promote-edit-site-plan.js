@@ -19,17 +19,17 @@ const {
   validateCustomizationPlan,
   writeFileAtomic,
   writeJsonAtomic,
-} = require('./lib/customize-declarative-site-plan');
+} = require('./lib/edit-site-plan');
 const {
   renderCustomizationPlan,
-} = require('./render-customize-declarative-site-plan');
+} = require('./render-edit-site-plan');
 const { externalImageUrls, validateImageChecks } = require('./lib/declarative-image-verification');
 
 function main() {
   const args = parseArgs(process.argv);
   if (!args.projectRoot || !args.data) {
     console.error(
-      'Usage: node promote-customize-declarative-site-plan.js ' +
+      'Usage: node promote-edit-site-plan.js ' +
         '--projectRoot <path> --data <approved-json> [--imageChecks <review-image-checks-json>]'
     );
     process.exit(1);

@@ -156,7 +156,7 @@ test('does not count customization documentation as a declarative site asset', (
     writeFile(root, 'website.yml', `id: ${WEBSITE_ID}\nname: Documentation Only\n`);
     writeFile(
       root,
-      path.join('docs', 'customize-declarative-site', 'current-plan.html'),
+      path.join('docs', 'edit-site', 'current-plan.html'),
       '<html><body>Plan</body></html>',
     );
 

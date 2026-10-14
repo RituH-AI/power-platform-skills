@@ -816,7 +816,7 @@ test('reference workflows cover catalog gates without their own skill registrati
   const root = mkPluginRoot(t);
   const ids = ['style-site:2.runtime', 'style-site:3.scope', 'style-site:5.approve', 'style-site:6.reapprove'];
   writeCatalogTable(root, ids.map((id) => ({ id, kind: 'gate' })));
-  writeReferenceWorkflow(root, 'customize-declarative-site', ids.map((id) => [
+  writeReferenceWorkflow(root, 'edit-site', ids.map((id) => [
     `## ${id}`,
     `<!-- gate: ${id} | category=plan | cancel-leaves=local-style-state -->`,
     `> 🚦 **Gate (plan · ${id}):** Review this revision.`,
@@ -828,7 +828,7 @@ test('reference workflows cover catalog gates without their own skill registrati
 
 test('reference workflows enforce marker pairing even when every marker is missing', (t) => {
   const root = mkPluginRoot(t);
-  const file = writeReferenceWorkflow(root, 'customize-declarative-site',
+  const file = writeReferenceWorkflow(root, 'edit-site',
     '# Styling\n\n## Approve\nUse `AskUserQuestion`: **Approve / Cancel**.\n');
   const findings = collectFindings({ pluginRoot: root });
   assert.deepEqual(findings.map(({ rule, severity, file: findingFile }) =>
@@ -840,7 +840,7 @@ test('reference workflows enforce marker pairing even when every marker is missi
 test('reference workflows require prose outside code fences and catalog membership', (t) => {
   const root = mkPluginRoot(t);
   writeCatalogTable(root, []);
-  const file = writeReferenceWorkflow(root, 'customize-declarative-site', [
+  const file = writeReferenceWorkflow(root, 'edit-site', [
     '# Styling',
     '## Approve',
     '<!-- gate: style-site:5.approve | category=plan | cancel-leaves=local-style-state -->',
@@ -865,8 +865,8 @@ test('gate IDs remain unique across skills and reference workflows', (t) => {
     'Use `AskUserQuestion`: **Approve / Cancel**.',
   ].join('\n');
   writeCatalogTable(root, [{ id: 'style-site:5.approve', kind: 'gate' }]);
-  writeSkill(root, 'customize-declarative-site', content);
-  writeReferenceWorkflow(root, 'customize-declarative-site', content);
+  writeSkill(root, 'edit-site', content);
+  writeReferenceWorkflow(root, 'edit-site', content);
   const findings = collectFindings({ pluginRoot: root });
   assert.equal(findings.length, 1);
   assert.equal(findings[0].rule, 'GATE-id-must-be-unique');
@@ -877,7 +877,7 @@ test('gate IDs remain unique across skills and reference workflows', (t) => {
 test('deleting reference gate markers leaves enforceable catalog orphans', (t) => {
   const root = mkPluginRoot(t);
   writeCatalogTable(root, [{ id: 'style-site:5.approve', kind: 'gate' }]);
-  writeReferenceWorkflow(root, 'customize-declarative-site',
+  writeReferenceWorkflow(root, 'edit-site',
     '# Styling\n\n## Approve\nUse `AskUserQuestion`: **Approve / Cancel**.\n');
   const findings = collectFindings({ pluginRoot: root });
   assert.deepEqual(findings.map((finding) => finding.rule).sort(),

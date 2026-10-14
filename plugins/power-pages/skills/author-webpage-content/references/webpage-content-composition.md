@@ -67,7 +67,7 @@ Visitor-facing body content belongs in the selected localized file:
 web-pages/<page-directory>/content-pages/<Page>.<locale>.webpage.copy.html
 ```
 
-The calling coordinator's [webpage reference workflow](../../customize-declarative-site/references/webpage-authoring.md)
+The calling coordinator's [webpage reference workflow](../../edit-site/references/webpage-authoring.md)
 owns the corresponding root/localized metadata and
 must create the target file before composition. This workflow does not inspect, create,
 or repair webpage YAML. The root-level copy file is not an interchangeable target.
@@ -170,7 +170,7 @@ Use this workflow for `create` and `replace`:
    destination, including dependent scripts, IDs and Liquid scope. If not established, stop
    and return the dependency to the caller/native owner rather than retaining the whole layout
    or dropping the component. Shared/rendering-template changes return to the coordinator's
-   [web-template reference workflow](../../customize-declarative-site/references/web-template-authoring.md).
+   [web-template reference workflow](../../edit-site/references/web-template-authoring.md).
 5. Load the section-layout reference and every component-specific reference needed by
    the plan.
 6. Generate new elements using their final resolved values and place verified reused source at

@@ -3,15 +3,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { publishApprovedPlan } = require('../promote-customize-declarative-site-plan');
+const { publishApprovedPlan } = require('../promote-edit-site-plan');
 const {
   updateExecution,
-} = require('../update-customize-declarative-site-execution');
+} = require('../update-edit-site-execution');
 
 const fixturePath = path.join(
   __dirname,
   'fixtures',
-  'customize-declarative-site-plan.json'
+  'edit-site-plan.json'
 );
 
 function setup() {
@@ -130,7 +130,7 @@ test('component operation identifiers execute without rewriting the approved pla
   const dataPath = path.join(root, 'approved-plan.json');
   fs.writeFileSync(dataPath, JSON.stringify(plan), 'utf8');
   publishApprovedPlan({ projectRoot: root, dataPath });
-  const currentPlanPath = path.join(root, 'docs', 'customize-declarative-site', 'current-plan.json');
+  const currentPlanPath = path.join(root, 'docs', 'edit-site', 'current-plan.json');
   const approvedBytes = fs.readFileSync(currentPlanPath, 'utf8');
   const initial = updateExecution({ projectRoot: root, action: 'status' });
   const outputsPath = path.join(root, 'outputs.json');
@@ -230,7 +230,7 @@ test('allows a failed operation to restart after the cause is resolved', () => {
 
 test('detects a stale execution receipt after the current plan changes', () => {
   const root = setup();
-  const planPath = path.join(root, 'docs', 'customize-declarative-site', 'current-plan.json');
+  const planPath = path.join(root, 'docs', 'edit-site', 'current-plan.json');
   const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
   plan.summary = 'Changed without publication';
   fs.writeFileSync(planPath, JSON.stringify(plan, null, 2), 'utf8');
@@ -246,7 +246,7 @@ test('rejects malformed durable operation state', () => {
   const executionPath = path.join(
     root,
     'docs',
-    'customize-declarative-site',
+    'edit-site',
     'current-execution.json'
   );
   const execution = JSON.parse(fs.readFileSync(executionPath, 'utf8'));

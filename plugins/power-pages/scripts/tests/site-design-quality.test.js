@@ -9,12 +9,12 @@ const { checkColorPair } = require('../lib/style-site-contrast');
 const pluginRoot = path.resolve(__dirname, '..', '..');
 const sharedPath = path.join(pluginRoot, 'references', 'site-design-quality.md');
 const codePath = path.join(pluginRoot, 'skills', 'create-site', 'references', 'design-aesthetics.md');
-const classicPath = path.join(pluginRoot, 'skills', 'customize-declarative-site', 'references', 'styling', 'design-quality.md');
+const classicPath = path.join(pluginRoot, 'skills', 'edit-site', 'references', 'styling', 'design-quality.md');
 const currentCodePath = path.join(pluginRoot, 'references', 'design-aesthetics.md');
 const blueprintsPath = path.join(pluginRoot, 'references', 'page-blueprints.md');
 const critiquePath = path.join(pluginRoot, 'references', 'design-critique.md');
-const classicCritiquePath = path.join(pluginRoot, 'skills', 'customize-declarative-site', 'references', 'styling', 'design-critique.md');
-const compositionPath = path.join(pluginRoot, 'skills', 'customize-declarative-site', 'references', 'content-and-page-compositions.md');
+const classicCritiquePath = path.join(pluginRoot, 'skills', 'edit-site', 'references', 'styling', 'design-critique.md');
+const compositionPath = path.join(pluginRoot, 'skills', 'edit-site', 'references', 'content-and-page-compositions.md');
 const documents = new Map([sharedPath, codePath, classicPath, currentCodePath, blueprintsPath, critiquePath, classicCritiquePath, compositionPath]
   .map((file) => [file, fs.readFileSync(file, 'utf8')]));
 const shared = documents.get(sharedPath);
@@ -54,8 +54,8 @@ test('classic and code design share experience and narrative principles without 
 test('classic final design review preserves local approval, evidence, and native-source contracts', () => {
   const classic = documents.get(classicPath);
   const critique = documents.get(classicCritiquePath);
-  const customization = fs.readFileSync(path.join(pluginRoot, 'skills', 'customize-declarative-site', 'SKILL.md'), 'utf8');
-  const style = fs.readFileSync(path.join(pluginRoot, 'skills', 'customize-declarative-site',
+  const customization = fs.readFileSync(path.join(pluginRoot, 'skills', 'edit-site', 'SKILL.md'), 'utf8');
+  const style = fs.readFileSync(path.join(pluginRoot, 'skills', 'edit-site',
     'references', 'style-site-workflow.md'), 'utf8');
   const create = fs.readFileSync(path.join(pluginRoot, 'skills', 'create-site', 'SKILL.md'), 'utf8');
   const declarative = fs.readFileSync(path.join(pluginRoot, 'skills', 'create-site', 'workflows', 'declarative-site.md'), 'utf8');
@@ -181,8 +181,8 @@ test('classic imagery reuses its asset workflow and SPA execution remains in the
   const classic = documents.get(classicPath);
   const links = localLinks(classicPath, classic);
   for (const target of [
-    ['skills', 'customize-declarative-site', 'references', 'visual-asset-planning.md'],
-    ['skills', 'customize-declarative-site', 'references', 'web-file-authoring.md'],
+    ['skills', 'edit-site', 'references', 'visual-asset-planning.md'],
+    ['skills', 'edit-site', 'references', 'web-file-authoring.md'],
   ]) {
     assert.ok(links.includes(path.join(pluginRoot, ...target)), target.join('/'));
   }

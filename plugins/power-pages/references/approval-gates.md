@@ -489,12 +489,12 @@ When **removing** a gate, also remove its catalog row in the same PR.
 
 ---
 
-### 6.13.1 `customize-declarative-site` (2 calls)
+### 6.13.1 `edit-site` (2 calls)
 
 | ID | Kind | Category | Phase | Trigger / question | Cancel leaves |
 |---|---|---|---|---|---|
-| `customize-declarative-site:4.approve` | gate | plan | 4 | External review JSON and rendered HTML complete; external images explicitly unverified or supported by successful requested exact-plan checks — *"Approve and customize / Revise plan / Cancel"* | plan-artifacts |
-| `customize-declarative-site:7.deploy` | gate | plan | 7 | Verified local customization — *"Deploy now / Keep changes local"* | local-customization |
+| `edit-site:4.approve` | gate | plan | 4 | External review JSON and rendered HTML complete; external images explicitly unverified or supported by successful requested exact-plan checks — *"Approve and customize / Revise plan / Cancel"* | plan-artifacts |
+| `edit-site:7.deploy` | gate | plan | 7 | Verified local customization — *"Deploy now / Keep changes local"* | local-customization |
 
 ---
 
@@ -737,7 +737,7 @@ Reviews traditional and SPA sites for deprecated Web API wildcard fields setting
 
 ### 6.33 Classic styling workflow (4 gate IDs + 1 data-gathering prompt)
 
-Classic-site styling through `customize-declarative-site` and `skills/customize-declarative-site/references/style-site-workflow.md`, in a local VS Code Desktop workspace. Visible progress is Inspect/propose → Approve → Apply → Independently verify → Report, without mandatory phase tasks or final-completion confirmation. The small-change route reviews scope with exact-hash approval; only expanded/ambiguous work asks initial scope confirmation. Review the exact diff/instructions/warnings without HTML generation or browser review; only the host question tool can approve the exact proposal hash. Runtime consent is separate. Repeated revisions do not inherit approval, including unattended runs.
+Classic-site styling through `edit-site` and `skills/edit-site/references/style-site-workflow.md`, in a local VS Code Desktop workspace. Visible progress is Inspect/propose → Approve → Apply → Independently verify → Report, without mandatory phase tasks or final-completion confirmation. The small-change route reviews scope with exact-hash approval; only expanded/ambiguous work asks initial scope confirmation. Review the exact diff/instructions/warnings without HTML generation or browser review; only the host question tool can approve the exact proposal hash. Runtime consent is separate. Repeated revisions do not inherit approval, including unattended runs.
 
 Local authoring is the default for listed and unlisted Studio properties; the Design-panel map describes availability, not exclusive ownership. Small changes may be inline-only, stylesheet-only or inline+CSS on the selected locale, with the existing 3-component/10-group limits and at most one existing stylesheet. Shared-template inline changes require site scope, potentially every page, and expanded review. Preserve unlisted/unknown/conditional support warnings at review, approval and final report. Reserve `owner: "studio"` for explicitly requested instructions-only work with `handoffReason: "user-requested"` and `studioAction`; native support alone is not a reason. Ambiguous/unrepresentable/generated-source local work is blocked with a specific local next step, not a successful zero-write handoff. Legacy zero-write requests without the reason require regeneration and new approval; never hand-edit plans or inherit consent.
 

@@ -2,7 +2,7 @@ const dns = require('node:dns').promises;
 const https = require('node:https');
 const { BlockList, isIP } = require('node:net');
 const { inspectAssetBuffer, DEFAULT_MAX_BYTES } = require('./declarative-asset-preparation');
-const { planHash, validateCustomizationPlan } = require('./customize-declarative-site-plan');
+const { planHash, validateCustomizationPlan } = require('./edit-site-plan');
 
 const TIMEOUT_MS = 20000;
 const MAX_REDIRECTS = 3;

@@ -9,7 +9,7 @@ data model, Design Studio, or PAC CLI generally.
 Apply this disclosure contract to:
 
 - the declarative route in `create-site`;
-- `customize-declarative-site`;
+- `edit-site`;
 - `author-webpage-content`.
 
 Classic component authoring, styling and supporting page-element references are not separate
@@ -69,7 +69,7 @@ prerequisite or environment discovery. For an ambiguous site-type request, also 
 > live website unless deployment is separately requested and approved. Keep the site under source
 > control and review proposed changes before applying them.
 
-Use this notice for direct invocation of `customize-declarative-site` or
+Use this notice for direct invocation of `edit-site` or
 `author-webpage-content`, including styling requests and sites created in Design Studio or downloaded independently
 with PAC CLI.
 

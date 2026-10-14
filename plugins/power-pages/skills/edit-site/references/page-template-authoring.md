@@ -73,7 +73,7 @@ When the requested outcome is a complete custom page layout rather than an isola
 metadata record, implement the components in dependency order:
 
 1. Create and verify the web-template metadata/source pair by following
-   `${PLUGIN_ROOT}/skills/customize-declarative-site/references/web-template-authoring.md`.
+   `${PLUGIN_ROOT}/skills/edit-site/references/web-template-authoring.md`.
 2. Inspect existing page templates for a compatible record before creating another one.
 3. Reuse or rebind an existing record only when its target table, header/footer
    boundary, default behavior, layout purpose, and all current webpage dependencies are
@@ -111,7 +111,7 @@ Page templates are single YAML records stored directly under `page-templates/`:
 ```
 
 For the webpage structure, use
-`${PLUGIN_ROOT}/skills/customize-declarative-site/references/webpage-authoring.md`.
+`${PLUGIN_ROOT}/skills/edit-site/references/webpage-authoring.md`.
 
 A page template has no companion source file. Its rendering source belongs to the
 referenced web template or the selected rewrite target.
@@ -167,7 +167,7 @@ Rules:
 - `adx_webtemplateid` must reference an existing web template record.
 - Do not use a web template name where a UUID is required.
 - `adx_rewriteurl` is not required for a new web-template-backed page template.
-- Use `${PLUGIN_ROOT}/skills/customize-declarative-site/references/web-template-authoring.md` when creating or
+- Use `${PLUGIN_ROOT}/skills/edit-site/references/web-template-authoring.md` when creating or
   modifying the referenced web template.
 
 ### Rewrite
@@ -297,7 +297,7 @@ adx_pagetemplateid: <page-template-id>
 For each selected webpage:
 
 1. Resolve and validate the complete root/localized record set by following
-   `${PLUGIN_ROOT}/skills/customize-declarative-site/references/webpage-authoring.md`.
+   `${PLUGIN_ROOT}/skills/edit-site/references/webpage-authoring.md`.
 2. Update `adx_pagetemplateid` on the root and every localized record in one logical
    operation.
 3. Preserve all unrelated webpage metadata and content.

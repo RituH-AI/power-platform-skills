@@ -1,6 +1,6 @@
 # Style a Classic Power Pages Site
 
-Execute through `customize-declarative-site` for styling-only requests or approved `style-site`
+Execute through `edit-site` for styling-only requests or approved `style-site`
 operations. Preserve identifiers, approved inputs, scope, locales, design context, hashes and
 receipts. Coordinated approval does not approve the exact CSS/source diff.
 
@@ -75,7 +75,7 @@ independently validate its proposal with
 
 Report local evidence, pending checks and all warnings, including Web File priority. Blocked
 local work needs a local next step, not Studio-only success. Return verified results to the
-entry skill; it records `CustomizeDeclarativeSite` once after successful completion, not per
+entry skill; it records `EditSite` once after successful completion, not per
 reference read or styling operation. Preserve existing tracking records and disclose tracking
 diffs separately.
 

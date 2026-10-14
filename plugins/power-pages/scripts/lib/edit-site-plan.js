@@ -531,7 +531,7 @@ function createExecutionReceipt(plan, runId, hash, now = new Date()) {
 }
 
 function customizationPaths(projectRoot) {
-  const root = path.join(path.resolve(projectRoot), 'docs', 'customize-declarative-site');
+  const root = path.join(path.resolve(projectRoot), 'docs', 'edit-site');
   return {
     root,
     historyRoot: path.join(root, 'history'),

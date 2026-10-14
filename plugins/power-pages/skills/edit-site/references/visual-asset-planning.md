@@ -32,7 +32,7 @@ For each external image:
 
 ### Optional network checks
 
-`render-customize-declarative-site-plan.js` makes no image-network requests by default. It
+`render-edit-site-plan.js` makes no image-network requests by default. It
 validates the plan and renders external images with an explicit unverified notice, without
 creating an image-check report. Its result includes `imageChecks: null`, `verifiedImages: 0`,
 and the number of unique unchecked URLs in `unverifiedImages`. Normal review and publication
@@ -266,7 +266,7 @@ Verify that actual image references, after HTML attribute decoding, match that U
 download/cache/Web File was created. Do not treat a remote asset as a byte-hashed local artifact.
 
 For Web File delivery, create/import operations use the `author-web-file` reference workflow
-from `${PLUGIN_ROOT}/skills/customize-declarative-site/references/web-file-authoring.md`.
+from `${PLUGIN_ROOT}/skills/edit-site/references/web-file-authoring.md`.
 Their consumers depend on
 the import and bind the verified `publicUrl`; never guess a future Web File URL.
 

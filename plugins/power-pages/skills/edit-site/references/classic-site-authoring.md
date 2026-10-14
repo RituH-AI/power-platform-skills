@@ -1,7 +1,7 @@
 # Classic Site Authoring
 
 Shared routing and execution contract for local PAC-downloaded declarative Power Pages
-authoring. `/customize-declarative-site` supports individual page or component edits and
+authoring. `/edit-site` supports individual page or component edits and
 coordinated customization. These references are not independently invocable skills.
 Read-only callers may consult metadata and identity rules without executing authoring.
 
@@ -128,11 +128,11 @@ remain explicit in the execution receipt.
 The entry skill owns its version check and
 `${PLUGIN_ROOT}/references/declarative-preview.md` disclosure. When invoking a
 covered skill, forward `previewNoticeShown: true` and
-`invocationSource: customize-declarative-site` only after the notice was displayed.
+`invocationSource: edit-site` only after the notice was displayed.
 Reading another reference is not another preview entry or skill invocation.
 
 Record successful entry-point usage through
-`${PLUGIN_ROOT}/references/skill-tracking-reference.md` as `CustomizeDeclarativeSite`.
+`${PLUGIN_ROOT}/references/skill-tracking-reference.md` as `EditSite`.
 Record only skill invocations, not reference reads. Preserve existing tracking records;
 never create a tracking directory merely to record classic authoring.
 Report any supported tracking diff separately from authored site changes.

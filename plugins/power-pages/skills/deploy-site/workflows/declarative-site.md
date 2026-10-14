@@ -48,12 +48,12 @@ Create these tasks:
    ```
 
 6. Inspect Git status and
-   `<PROJECT_ROOT>/docs/customize-declarative-site/current-plan.json` when present. Do not require
+   `<PROJECT_ROOT>/docs/edit-site/current-plan.json` when present. Do not require
    the plan for a targeted manual edit. Before using it, validate the current plan, execution
    receipt, website identity, and project-relative site root:
 
    ```bash
-   node "${PLUGIN_ROOT}/scripts/update-customize-declarative-site-execution.js" \
+   node "${PLUGIN_ROOT}/scripts/update-edit-site-execution.js" \
      --projectRoot "<PROJECT_ROOT>" --action status \
      --websiteRecordId "<WEBSITE_RECORD_ID>" --siteRoot "<PROJECT_RELATIVE_SITE_ROOT>"
    ```
@@ -151,7 +151,7 @@ Summarize the local diff by declarative component category:
 - styling/CSS;
 - other metadata.
 
-Review `docs/customize-declarative-site/**` separately as orchestration evidence. It is not a PAC
+Review `docs/edit-site/**` separately as orchestration evidence. It is not a PAC
 component category, must not be presented as uploadable metadata, and does not expand upload scope.
 
 Include uncommitted files, validation warnings, deployment mode, model source, and the explicit

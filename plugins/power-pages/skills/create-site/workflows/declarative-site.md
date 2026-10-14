@@ -536,7 +536,7 @@ On **Customize now**, tell the user:
 
 > Continuing with the preview traditional-site customization experience.
 
-Then invoke `/customize-declarative-site` through the `Skill` tool and provide:
+Then invoke `/edit-site` through the `Skill` tool and provide:
 
 - exact `PROJECT_ROOT` and declarative site root;
 - site name and selected template as data-model/domain and requirements context, not a visual

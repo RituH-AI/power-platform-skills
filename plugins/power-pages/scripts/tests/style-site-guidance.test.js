@@ -9,10 +9,10 @@ const { collectFindings, extractGateMarkers } = require('../lint-skills-alm');
 
 const pluginRoot = path.resolve(__dirname, '..', '..');
 const retiredSkillRoot = path.join(pluginRoot, 'skills', 'style-site');
-const referencesRoot = path.join(pluginRoot, 'skills', 'customize-declarative-site', 'references', 'styling');
+const referencesRoot = path.join(pluginRoot, 'skills', 'edit-site', 'references', 'styling');
 const scriptsRoot = path.join(pluginRoot, 'scripts', 'style-site');
-const entryPath = path.join(pluginRoot, 'skills', 'customize-declarative-site', 'SKILL.md');
-const workflowPath = path.join(pluginRoot, 'skills', 'customize-declarative-site',
+const entryPath = path.join(pluginRoot, 'skills', 'edit-site', 'SKILL.md');
+const workflowPath = path.join(pluginRoot, 'skills', 'edit-site',
   'references', 'style-site-workflow.md');
 const quickPath = path.join(referencesRoot, 'quick-start.md');
 const entry = fs.readFileSync(entryPath, 'utf8');
@@ -20,6 +20,7 @@ const workflow = fs.readFileSync(workflowPath, 'utf8');
 const quick = fs.readFileSync(quickPath, 'utf8');
 const reference = fs.readFileSync(path.join(referencesRoot, 'proposal-and-verification.md'), 'utf8');
 const catalog = fs.readFileSync(path.join(pluginRoot, 'references', 'approval-gates.md'), 'utf8');
+const agentsGuide = fs.readFileSync(path.join(pluginRoot, 'AGENTS.md'), 'utf8');
 const capabilities = fs.readFileSync(path.join(referencesRoot, 'studio-component-capabilities.md'), 'utf8');
 const policy = fs.readFileSync(path.join(referencesRoot, 'styling-policy.md'), 'utf8');
 const referenceRequests = [...reference.matchAll(/```json\r?\n([\s\S]*?)\r?\n```/g)]
@@ -53,6 +54,24 @@ test('the entry skill supplies the styling model and tools without another regis
   assert.match(workflow, /final-completion confirmation/);
   assert.match(workflow, /Routine CSS uses bundled verified guidance/);
   assert.match(workflow, /Reuse the entry skill's version check and preview disclosure/);
+});
+
+test('agent guidance routes styling through edit-site instead of a separate skill', () => {
+  const editSiteGuide = agentsGuide.match(/^- `edit-site`:.*(?:\r?\n {2}.+)*/m)?.[0];
+  assert.ok(editSiteGuide, 'Document the edit-site entry in the skill inventory.');
+  assert.match(editSiteGuide, /Styling-only requests follow/);
+  assert.match(editSiteGuide, /skills\/edit-site\/references\/style-site-workflow\.md/);
+  assert.match(editSiteGuide, /not a separate skill/);
+  assert.match(editSiteGuide, /Broad customization keeps/);
+  assert.doesNotMatch(agentsGuide, /^- `style-site`:/m);
+});
+
+test('agent guidance documents the canonical shared tracking filenames', () => {
+  const trackingGuide = agentsGuide.match(/^- `update-skill-tracking\.js`:.*$/m)?.[0];
+  assert.ok(trackingGuide, 'Document the shared skill tracking script.');
+  assert.match(trackingGuide, /`Site-AI-Skills-<SkillName>\.sitesetting\.yml`/);
+  assert.match(trackingGuide, /`Site-AI-Tools-AuthoringTool\.sitesetting\.yml`/);
+  assert.doesNotMatch(trackingGuide, /`Site-AI-(?:<SkillName>|AuthoringTool)\.sitesetting\.yml`/);
 });
 
 test('quick start has one request accepted by the existing schema', () => {
@@ -161,7 +180,7 @@ test('all styling guidance links and script references resolve to bundled files'
 });
 
 test('preview implementation and instructions cannot silently remain in the styling resources', () => {
-  const assetsRoot = path.join(pluginRoot, 'skills', 'customize-declarative-site', 'assets');
+  const assetsRoot = path.join(pluginRoot, 'skills', 'edit-site', 'assets');
   for (const file of [
     path.join(assetsRoot, 'style-preview.html'),
     path.join(assetsRoot, 'component-samples.json'),

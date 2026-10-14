@@ -107,8 +107,8 @@ This skill does not create or modify:
   for that locale.
 
 The calling orchestrator must create or confirm the file and resolve its webpage and locale
-identity before invoking this skill. `customize-declarative-site` uses
-`${PLUGIN_ROOT}/skills/customize-declarative-site/references/webpage-authoring.md`
+identity before invoking this skill. `edit-site` uses
+`${PLUGIN_ROOT}/skills/edit-site/references/webpage-authoring.md`
 for that metadata workflow.
 This skill does not search for or select a webpage record.
 

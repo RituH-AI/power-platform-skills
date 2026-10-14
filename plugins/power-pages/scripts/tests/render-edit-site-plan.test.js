@@ -4,14 +4,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { renderReviewedPlan } = require('../render-customize-declarative-site-plan');
+const { renderReviewedPlan } = require('../render-edit-site-plan');
 const { externalImagePlan, renderDocument, successfulImageCheck } = require('./customization-plan-test-helpers');
 
-const scriptPath = path.join(__dirname, '..', 'render-customize-declarative-site-plan.js');
+const scriptPath = path.join(__dirname, '..', 'render-edit-site-plan.js');
 const fixturePath = path.join(
   __dirname,
   'fixtures',
-  'customize-declarative-site-plan.json'
+  'edit-site-plan.json'
 );
 const SAMPLE_PLAN = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
 

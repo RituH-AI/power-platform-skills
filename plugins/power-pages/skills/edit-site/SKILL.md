@@ -1,5 +1,5 @@
 ---
-name: customize-declarative-site
+name: edit-site
 description: >-
   Plans, coordinates and customizes PAC CLI-downloaded traditional Power Pages sites, including Enhanced data model
   sites created from Microsoft templates or manually in Design Studio. Use for
@@ -29,29 +29,29 @@ protocol**. Unless the initial request contains the explicit marker from an actu
 handoff, present the **Customization notice** before site discovery, task creation, or any other
 project inspection. This notice is informational and does not replace plan or deployment
 approval. Include `previewNoticeShown: true` and
-`invocationSource: customize-declarative-site` in every covered child-skill request.
+`invocationSource: edit-site` in every covered child-skill request.
 
 Read:
 
 - `${PLUGIN_ROOT}/references/design-studio-site-discovery.md`
-- `${PLUGIN_ROOT}/skills/customize-declarative-site/references/classic-site-authoring.md`
+- `${PLUGIN_ROOT}/skills/edit-site/references/classic-site-authoring.md`
 
 Apply **Request routing** before creating coordination tasks or starting the phases below.
 For styling-only requests outside a current approved coordinated execution, follow
-`${PLUGIN_ROOT}/skills/customize-declarative-site/references/style-site-workflow.md`
+`${PLUGIN_ROOT}/skills/edit-site/references/style-site-workflow.md`
 and finish after its local verification/report, without the phases below.
 For an individual page or component request, follow the shared authoring reference and
 finish after its verification/report.
 For coordinated work, also read:
 
 - `${PLUGIN_ROOT}/references/site-design-quality.md`
-- `${PLUGIN_ROOT}/skills/customize-declarative-site/references/customization-plan-contract.md`
-- `${PLUGIN_ROOT}/skills/customize-declarative-site/references/content-and-page-compositions.md`
-- `${PLUGIN_ROOT}/skills/customize-declarative-site/references/visual-asset-planning.md`
+- `${PLUGIN_ROOT}/skills/edit-site/references/customization-plan-contract.md`
+- `${PLUGIN_ROOT}/skills/edit-site/references/content-and-page-compositions.md`
+- `${PLUGIN_ROOT}/skills/edit-site/references/visual-asset-planning.md`
 
 For coordinated new-site design or requested styling, also read:
 
-- `${PLUGIN_ROOT}/skills/customize-declarative-site/references/styling/design-quality.md`
+- `${PLUGIN_ROOT}/skills/edit-site/references/styling/design-quality.md`
 
 ## Ownership
 
@@ -67,7 +67,7 @@ For coordinated work, this skill owns:
 - offering deployment after local verification.
 
 It authors webpage, snippet, web-file, web-template, and page-template records only through
-`${PLUGIN_ROOT}/skills/customize-declarative-site/references/classic-site-authoring.md` and the selected component reference.
+`${PLUGIN_ROOT}/skills/edit-site/references/classic-site-authoring.md` and the selected component reference.
 The `author-webpage-content` skill owns localized body HTML; the
 `style-site` reference workflow owns guarded styling.
 It does not upload, activate, or modify Dataverse directly.
@@ -116,8 +116,8 @@ For coordinated work, create these tasks before starting:
 7. Define `<PROJECT_ROOT>` as the repository root that owns the selected site. For the normal
    nested layout it is the parent of `.powerpages-site/`; for a direct-root download it is that
    site root itself.
-8. If `docs/customize-declarative-site/current-plan.json` or
-   `docs/customize-declarative-site/current-execution.json` exists, validate the pair against the
+8. If `docs/edit-site/current-plan.json` or
+   `docs/edit-site/current-execution.json` exists, validate the pair against the
    selected website identity. Offer to resume the first ready pending operation when its request
    still matches the user's intent; otherwise prepare a new plan.
 
@@ -126,11 +126,11 @@ For coordinated work, create these tasks before starting:
 Use the smallest route that fully satisfies the request:
 
 - styling-only work outside a current approved coordinated execution: follow
-  `${PLUGIN_ROOT}/skills/customize-declarative-site/references/style-site-workflow.md`,
+  `${PLUGIN_ROOT}/skills/edit-site/references/style-site-workflow.md`,
   including its conditional scope and exact-diff/hash approvals, then report locally.
   Do not create coordination tasks, a broad plan, Git baseline, commits or deployment prompts;
 - one narrow component change: execute the corresponding reference workflow through
-  `${PLUGIN_ROOT}/skills/customize-declarative-site/references/classic-site-authoring.md`;
+  `${PLUGIN_ROOT}/skills/edit-site/references/classic-site-authoring.md`;
 - one straightforward page: use the lightweight webpage-reference workflow with one resolved
   `author-webpage-content` composition;
 - multiple pages or cross-component dependencies: use the complete orchestration below;
@@ -308,7 +308,7 @@ modifying Dataverse.
 6. Render the browser plan:
 
    ```bash
-   node "${PLUGIN_ROOT}/scripts/render-customize-declarative-site-plan.js" \
+   node "${PLUGIN_ROOT}/scripts/render-edit-site-plan.js" \
      --output "<REVIEW_DIR>/plan.html" \
      --data "<REVIEW_DIR>/plan.json"
    ```
@@ -339,9 +339,9 @@ describes visible outcomes rather than authoring-skill mechanics. Do not include
 technical implementation trace. Keep the complete execution details in the validated JSON,
 which remains the execution source of truth and is persisted after approval.
 
-<!-- gate: customize-declarative-site:4.approve | category=plan | cancel-leaves=plan-artifacts -->
+<!-- gate: edit-site:4.approve | category=plan | cancel-leaves=plan-artifacts -->
 
-> 🚦 **Gate (plan · customize-declarative-site:4.approve):** Approve the coordinated
+> 🚦 **Gate (plan · edit-site:4.approve):** Approve the coordinated
 > customization plan before executing any authoring operation.
 >
 > **Trigger:** JSON and HTML plan artifacts are complete, with external images explicitly
@@ -362,7 +362,7 @@ the rendered HTML as the source of truth.
 After approval, publish the approved JSON:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/promote-customize-declarative-site-plan.js" \
+node "${PLUGIN_ROOT}/scripts/promote-edit-site-plan.js" \
   --projectRoot "<PROJECT_ROOT>" \
   --data "<APPROVED_REVIEW_DIR>/plan.json"
 ```
@@ -402,7 +402,7 @@ For each ready operation:
    behavior. A source change needs a new approved plan, with fresh checks if requested.
 3. Retain the exact selected site root, action, target identity, locales, final values, callers,
    and preservation requirements. For a covered-skill handoff, include
-   `previewNoticeShown: true` and `invocationSource: customize-declarative-site`.
+   `previewNoticeShown: true` and `invocationSource: edit-site`.
    The operation may be expressed as structured
    YAML/JSON or unambiguous natural language; it must resolve the same decisions as the plan
    contract.
@@ -460,7 +460,7 @@ Do not execute an empty operation, and do not invoke deployment from this phase.
    was introduced. The plan hashes the URL, not mutable remote bytes; availability and CSP remain
    pending runtime checks unless separately performed.
 4. Review the complete Git diff against the approved plan. Unexpected component categories or
-   unrelated changes block completion. Classify `docs/customize-declarative-site/**` separately as
+   unrelated changes block completion. Classify `docs/edit-site/**` separately as
    orchestration evidence; it is not a PAC component category and is not uploaded.
 5. Run the create-site declarative validator when a website record ID is available:
 
@@ -485,7 +485,7 @@ Do not execute an empty operation, and do not invoke deployment from this phase.
    missing planned header work as incomplete; mobile-menu, keyboard and live-state behavior
    remain unverified until separately observed.
 7. Compare the completed composition with the approved experience brief once, using
-   `${PLUGIN_ROOT}/skills/customize-declarative-site/references/styling/design-critique.md`'s native interpretation of the
+   `${PLUGIN_ROOT}/skills/edit-site/references/styling/design-critique.md`'s native interpretation of the
    shared categories and source-only evidence.
    Trace the planned Home/primary-journey section structure and reused-component placements to
    the changed native files, including the source that actually owns the shell. Compare against
@@ -516,9 +516,9 @@ Report:
 - warnings and pending runtime checks;
 - explicit state: local customization is not live until deployment succeeds.
 
-<!-- gate: customize-declarative-site:7.deploy | category=plan | cancel-leaves=local-customization -->
+<!-- gate: edit-site:7.deploy | category=plan | cancel-leaves=local-customization -->
 
-> 🚦 **Gate (plan · customize-declarative-site:7.deploy):** Choose whether to dispatch the
+> 🚦 **Gate (plan · edit-site:7.deploy):** Choose whether to dispatch the
 > verified local declarative project to `/deploy-site`.
 >
 > **Trigger:** Local customization and combined verification succeeded.
@@ -529,5 +529,5 @@ Ask: **Deploy these declarative-site changes now?** Options: **Deploy now**, **K
 local**. On deploy, invoke `/deploy-site` with the exact project root. Otherwise finish with the
 local/live distinction.
 
-Record normal successful usage as `CustomizeDeclarativeSite` through
+Record normal successful usage as `EditSite` through
 `${PLUGIN_ROOT}/references/skill-tracking-reference.md`.

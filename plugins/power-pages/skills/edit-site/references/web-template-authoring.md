@@ -99,7 +99,7 @@ targets `adx_webpage`. Rebinding changes the layout of every webpage that refere
 that page template. Confirm its current dependencies, response boundary, default status,
 and intended layout role before reuse.
 
-Use `${PLUGIN_ROOT}/skills/customize-declarative-site/references/page-template-authoring.md` for the
+Use `${PLUGIN_ROOT}/skills/edit-site/references/page-template-authoring.md` for the
 page-template record and assignment sequence.
 
 ## PAC download structure
