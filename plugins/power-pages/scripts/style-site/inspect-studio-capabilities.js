@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
-const { parseArgs, readText } = require('../../../scripts/lib/classic-site-style-context');
-const { compactSummary } = require('../../../scripts/lib/style-site-summary');
-const { studioSupport, requestSupport } = require('../../../scripts/lib/studio-style-capabilities');
+const { parseArgs, readText } = require('../lib/classic-site-style-context');
+const { compactSummary } = require('../lib/style-site-summary');
+const { studioSupport, requestSupport } = require('../lib/studio-style-capabilities');
 
 function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv, ['component', 'properties', 'flex', 'request']);

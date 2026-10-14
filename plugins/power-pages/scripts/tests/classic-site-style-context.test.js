@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { fixture, ids } = require('./style-site-fixtures');
 const { inspectSite, safePath, assertOutsideSite, parseArgs } = require('../lib/classic-site-style-context');
-const { main } = require('../../skills/style-site/scripts/inspect-style-context');
+const { main } = require('../style-site/inspect-style-context');
 
 for (const options of [{ major: 3 }, { major: 5, prefix: '', nested: true, wrapped: true }]) {
   test(`discovers classic assets and localization (${JSON.stringify(options)})`, (t) => {

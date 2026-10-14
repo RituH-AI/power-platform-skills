@@ -9,9 +9,9 @@ const { preparePlan, validatePlan, validateRequest, planHash, applyMarkup } = re
 const { hash, inspectSite } = require('../lib/classic-site-style-context');
 const { reviewPlan } = require('../lib/style-site-summary');
 const { requestSupport } = require('../lib/studio-style-capabilities');
-const { applyPlan } = require('../../skills/style-site/scripts/apply-style-plan');
-const { verify } = require('../../skills/style-site/scripts/validate-style-site');
-const { main: workflow } = require('../../skills/style-site/scripts/style-site-workflow');
+const { applyPlan } = require('../style-site/apply-style-plan');
+const { verify } = require('../style-site/validate-style-site');
+const { main: workflow } = require('../style-site/style-site-workflow');
 
 const decoration = {
   'box-shadow': '0 12px 32px #00000033', 'border-width': '1px',

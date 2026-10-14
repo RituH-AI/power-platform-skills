@@ -9,8 +9,8 @@ const { inspectSite, hash } = require('../lib/classic-site-style-context');
 const { preparePlan, validatePlan, validateRequest, openingTag, planHash } = require('../lib/style-site-plan');
 const { needsContrastReview } = require('../lib/style-site-contrast');
 const { reviewPlan } = require('../lib/style-site-summary');
-const { main: workflow } = require('../../skills/style-site/scripts/style-site-workflow');
-const { applyPlan } = require('../../skills/style-site/scripts/apply-style-plan');
+const { main: workflow } = require('../style-site/style-site-workflow');
+const { applyPlan } = require('../style-site/apply-style-plan');
 const { decodeHTMLAttribute } = require('../vendor/css-tools/css-tools.cjs');
 
 function runWorkflow(f) {

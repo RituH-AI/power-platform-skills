@@ -39,7 +39,7 @@ Standard CSS syntax is not a guarantee of Power Pages/browser rendering or nativ
 | [css-tree](https://github.com/csstree/csstree) | Maintainer context for the bundled parser and semantic grammar | Use the pinned bundle, not runtime npm installs or automatic downloads |
 | [mdn-data](https://github.com/mdn/data) | Pinned shorthand-effects metadata, including logical-side safety | Preserve authored declaration order and review conflicts; metadata is not live rendering proof |
 
-The parser bundle is under `scripts/vendor/css-tools`: `package.json`, `package-lock.json`, `css-tools.cjs` and licenses, including mdn-data's license, travel together. See the plugin [development guide](../../../PLUGIN_DEVELOPMENT_GUIDE.md#maintaining-the-bundled-css-parser) for the reproducible maintainer build (`npm ci --ignore-scripts`, `npm run build` in that directory). Plugin/site users need no npm installs. Resource URLs still require explicit review; the compiler fetches neither resources nor imports.
+The parser bundle is under `scripts/vendor/css-tools`: `package.json`, `package-lock.json`, `css-tools.cjs` and licenses, including mdn-data's license, travel together. See the plugin [development guide](../../../../PLUGIN_DEVELOPMENT_GUIDE.md#maintaining-the-bundled-css-parser) for the reproducible maintainer build (`npm ci --ignore-scripts`, `npm run build` in that directory). Plugin/site users need no npm installs. Resource URLs still require explicit review; the compiler fetches neither resources nor imports.
 
 ## Microsoft MVP perspectives
 

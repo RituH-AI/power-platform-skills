@@ -381,8 +381,8 @@ Use unique paths outside the uploadable site tree. Normal preparation takes a **
 The inspector's default full JSON stdout is backward compatible. `--summary --out` returns at most 4,096 bytes and writes the full inventory with selection evidence externally. Select `--pageId` (also offline) or `--page "<name-substring>"`; an optional `--target` is a literal DOM ID/class/tag, not a complex selector. Bounded source candidates remain advisory; read full evidence and actual source when needed. Inspection/preparation require `--siteRoot`; apply/validate take identity from the hash-bound plan and **do not accept `--siteRoot`**.
 
 ```bash
-node "${PLUGIN_ROOT}/skills/style-site/scripts/inspect-style-context.js" --siteRoot "<siteRoot>" --summary --out "<workDir>/context.json" --pageId "<pageId>" --target ".pp-card"
-node "${PLUGIN_ROOT}/skills/style-site/scripts/style-site-workflow.js" --operation prepare --siteRoot "<siteRoot>" --request "<workDir>/request.json" --out "<workDir>/revision-1"
+node "${PLUGIN_ROOT}/scripts/style-site/inspect-style-context.js" --siteRoot "<siteRoot>" --summary --out "<workDir>/context.json" --pageId "<pageId>" --target ".pp-card"
+node "${PLUGIN_ROOT}/scripts/style-site/style-site-workflow.js" --operation prepare --siteRoot "<siteRoot>" --request "<workDir>/request.json" --out "<workDir>/revision-1"
 ```
 
 Prepare validates and writes only `style-site.plan.json` and `style-site.review.json`. The bounded result reports `status: "ready-for-review"`, `artifacts: { plan, review }`, `planHash`, `route.name` (`small-change` or `expanded`), and verification/diff evidence. **If `truncated=true`, read the full `artifacts.review` before approval.** Its exact replacement spans use `start`, `deleteCount`, `removed`, and `inserted`; offsets/counts are **UTF-16 code units** (JavaScript string indices), not byte offsets.
@@ -394,7 +394,7 @@ The small-change route allows ordinary broad `declarations`: **inline-only, styl
 After host approval of the exact `planHash`, apply and independently validate in one invocation:
 
 ```bash
-node "${PLUGIN_ROOT}/skills/style-site/scripts/style-site-workflow.js" --operation apply --plan "<workDir>/revision-1/style-site.plan.json" --approvedHash "<approved-planHash>" --receipt "<workDir>/receipt-1.json"
+node "${PLUGIN_ROOT}/scripts/style-site/style-site-workflow.js" --operation apply --plan "<workDir>/revision-1/style-site.plan.json" --approvedHash "<approved-planHash>" --receipt "<workDir>/receipt-1.json"
 ```
 
 The coordinator retains fresh apply preflights and calls the separate validator against the exact plan/receipt after writing. No extra routine validate/dry-run/validate commands are required. **`--receipt` is mandatory** with coordinator apply, including an empty change set, and must be a new external path. An existing receipt is not overwritten. Empty application reports `no-local-changes` and creates only the external receipt; an explicitly requested, entirely instructions-only Studio outcome normally skips apply and verifies the proposal/no styling edits instead. Empty writes do not turn blocked local work into success. Do not compute an alternative hash or edit the compiled plan.
@@ -406,9 +406,9 @@ The coordinator uses **four full scans**: preparation, two fresh preflights, and
 Individual commands remain supported for troubleshooting and explicit standalone use, not as additional steps in the normal coordinator flow:
 
 ```bash
-node "${PLUGIN_ROOT}/skills/style-site/scripts/prepare-style-plan.js" --siteRoot "<siteRoot>" --request "<workDir>/request.json" --out "<workDir>/diagnostic-plan.json"
-node "${PLUGIN_ROOT}/skills/style-site/scripts/validate-style-site.js" --plan "<workDir>/diagnostic-plan.json"
-node "${PLUGIN_ROOT}/skills/style-site/scripts/apply-style-plan.js" --plan "<workDir>/diagnostic-plan.json"
+node "${PLUGIN_ROOT}/scripts/style-site/prepare-style-plan.js" --siteRoot "<siteRoot>" --request "<workDir>/request.json" --out "<workDir>/diagnostic-plan.json"
+node "${PLUGIN_ROOT}/scripts/style-site/validate-style-site.js" --plan "<workDir>/diagnostic-plan.json"
+node "${PLUGIN_ROOT}/scripts/style-site/apply-style-plan.js" --plan "<workDir>/diagnostic-plan.json"
 ```
 
 The last command is a dry-run. Standalone application requires `--apply --approvedHash "<approved-planHash>" --receipt "<new-external-receipt.json>"`, followed by independent `validate-style-site.js --plan "<plan>" --receipt "<receipt>"`. These lower-level paths retain explicit validation duties; the coordinator already performs them. Diagnostic `--out` arguments are filenames with exclusive create, unlike the coordinator's revision directory.

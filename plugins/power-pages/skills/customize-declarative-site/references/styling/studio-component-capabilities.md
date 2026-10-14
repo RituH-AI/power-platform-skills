@@ -143,8 +143,8 @@ The lookup normalizes physical margin/padding sides, border details and individu
 ## Using the lookup
 
 ```bash
-node "${PLUGIN_ROOT}/skills/style-site/scripts/inspect-studio-capabilities.js" --component "Button" --properties "text-shadow,text-align,background-color"
-node "${PLUGIN_ROOT}/skills/style-site/scripts/inspect-studio-capabilities.js" --component "Text" --properties "gap,flex-direction" --flex available
+node "${PLUGIN_ROOT}/scripts/style-site/inspect-studio-capabilities.js" --component "Button" --properties "text-shadow,text-align,background-color"
+node "${PLUGIN_ROOT}/scripts/style-site/inspect-studio-capabilities.js" --component "Text" --properties "gap,flex-direction" --flex available
 ```
 
 Use `--request "<external-request.json>"` instead to batch existing style groups. Output is bounded; narrow the request if lookup details are truncated. Normal coordinator proposals also include the assessment and warnings, so do not repeat the lookup after support is assessed.

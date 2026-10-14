@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { styleProperties } = require('./style-site-css');
 
-const referencePath = path.resolve(__dirname, '../../skills/style-site/references/studio-component-capabilities.md');
+const referencePath = path.resolve(__dirname, '../../skills/customize-declarative-site/references/styling/studio-component-capabilities.md');
 const block = fs.readFileSync(referencePath, 'utf8').match(/^```json\r?\n([\s\S]*?)\r?\n```/m);
 if (!block) throw new Error('Studio capability reference is missing its canonical JSON map.');
 const capabilityMap = JSON.parse(block[1]);

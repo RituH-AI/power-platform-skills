@@ -8,9 +8,9 @@ const { fixture, ids } = require('./style-site-fixtures');
 const { preparePlan, validatePlan, validateRequest, planHash } = require('../lib/style-site-plan');
 const { inspectSite, hash } = require('../lib/classic-site-style-context');
 const { reviewPlan } = require('../lib/style-site-summary');
-const { applyPlan } = require('../../skills/style-site/scripts/apply-style-plan');
-const { verify } = require('../../skills/style-site/scripts/validate-style-site');
-const { main: workflow } = require('../../skills/style-site/scripts/style-site-workflow');
+const { applyPlan } = require('../style-site/apply-style-plan');
+const { verify } = require('../style-site/validate-style-site');
+const { main: workflow } = require('../style-site/style-site-workflow');
 
 const gradient = 'linear-gradient(135deg, #17324d 0%, #285b70 100%)';
 const colors = ['#285b70', '#584477', '#285948'];

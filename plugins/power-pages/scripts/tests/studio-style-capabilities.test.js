@@ -8,8 +8,8 @@ const { fixture } = require('./style-site-fixtures');
 const { studioSupport, capabilityMap, createStudioSupport, requestSupport } = require('../lib/studio-style-capabilities');
 const { preparePlan, validateRequest, compileStyles } = require('../lib/style-site-plan');
 const { analyzeStyle } = require('../lib/style-site-css');
-const { applyPlan } = require('../../skills/style-site/scripts/apply-style-plan');
-const { verify } = require('../../skills/style-site/scripts/validate-style-site');
+const { applyPlan } = require('../style-site/apply-style-plan');
+const { verify } = require('../style-site/validate-style-site');
 const { reviewPlan } = require('../lib/style-site-summary');
 
 test('the supplied component/property examples retain their distinct capabilities', () => {

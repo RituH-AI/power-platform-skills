@@ -8,18 +8,20 @@ const { validateRequest } = require('../lib/style-site-plan');
 const { collectFindings, extractGateMarkers } = require('../lint-skills-alm');
 
 const pluginRoot = path.resolve(__dirname, '..', '..');
-const skillRoot = path.join(pluginRoot, 'skills', 'style-site');
+const retiredSkillRoot = path.join(pluginRoot, 'skills', 'style-site');
+const referencesRoot = path.join(pluginRoot, 'skills', 'customize-declarative-site', 'references', 'styling');
+const scriptsRoot = path.join(pluginRoot, 'scripts', 'style-site');
 const entryPath = path.join(pluginRoot, 'skills', 'customize-declarative-site', 'SKILL.md');
 const workflowPath = path.join(pluginRoot, 'skills', 'customize-declarative-site',
   'references', 'style-site-workflow.md');
-const quickPath = path.join(skillRoot, 'references', 'quick-start.md');
+const quickPath = path.join(referencesRoot, 'quick-start.md');
 const entry = fs.readFileSync(entryPath, 'utf8');
 const workflow = fs.readFileSync(workflowPath, 'utf8');
 const quick = fs.readFileSync(quickPath, 'utf8');
-const reference = fs.readFileSync(path.join(skillRoot, 'references', 'proposal-and-verification.md'), 'utf8');
+const reference = fs.readFileSync(path.join(referencesRoot, 'proposal-and-verification.md'), 'utf8');
 const catalog = fs.readFileSync(path.join(pluginRoot, 'references', 'approval-gates.md'), 'utf8');
-const capabilities = fs.readFileSync(path.join(skillRoot, 'references', 'studio-component-capabilities.md'), 'utf8');
-const policy = fs.readFileSync(path.join(skillRoot, 'references', 'styling-policy.md'), 'utf8');
+const capabilities = fs.readFileSync(path.join(referencesRoot, 'studio-component-capabilities.md'), 'utf8');
+const policy = fs.readFileSync(path.join(referencesRoot, 'styling-policy.md'), 'utf8');
 const referenceRequests = [...reference.matchAll(/```json\r?\n([\s\S]*?)\r?\n```/g)]
   .map((match) => JSON.parse(match[1]));
 
@@ -30,7 +32,7 @@ test('mandatory styling guidance stays within its context budget', () => {
 });
 
 test('the entry skill supplies the styling model and tools without another registration', () => {
-  assert.equal(fs.existsSync(path.join(skillRoot, 'SKILL.md')), false);
+  assert.equal(fs.existsSync(retiredSkillRoot), false);
   assert.doesNotMatch(workflow, /^---|^\w+-invocable:|\$ARGUMENTS|TaskCreate|TaskUpdate|TaskList/m);
   const frontmatter = entry.match(/^---\r?\n([\s\S]*?)\r?\n---/)[1];
   assert.match(frontmatter, /^model: opus$/m);
@@ -141,10 +143,13 @@ test('approval markers and catalog retain exactly the conditional local workflow
 });
 
 test('all styling guidance links and script references resolve to bundled files', () => {
-  const references = fs.readdirSync(path.join(skillRoot, 'references')).filter((file) => file.endsWith('.md'))
-    .map((file) => path.join(skillRoot, 'references', file));
+  const references = fs.readdirSync(referencesRoot).filter((file) => file.endsWith('.md'))
+    .map((file) => path.join(referencesRoot, file));
+  assert.equal(references.length, 9);
+  assert.equal(fs.readdirSync(scriptsRoot).filter((file) => file.endsWith('.js')).length, 8);
   for (const file of [entryPath, workflowPath, ...references]) {
     const content = fs.readFileSync(file, 'utf8');
+    assert.doesNotMatch(content, /(?:skills\/style-site\/(?:scripts|references)|(?:\.\.\/)+style-site\/(?:scripts|references))/);
     for (const [, href] of content.matchAll(/\[[^\]]+\]\(([^)]+\.md)(?:#[^)]*)?\)/g)) {
       if (/^https?:/.test(href)) continue;
       assert.ok(fs.existsSync(path.resolve(path.dirname(file), href)), `${file}: ${href}`);
@@ -155,14 +160,20 @@ test('all styling guidance links and script references resolve to bundled files'
   }
 });
 
-test('preview implementation and instructions cannot silently remain in the installed skill', () => {
-  for (const file of ['assets/style-preview.html', 'assets/component-samples.json',
-    'scripts/render-style-preview.js', 'scripts/serve-style-preview.js', 'scripts/inspect-preview-contrast.js',
-    'references/preview-and-verification.md']) {
-    assert.equal(fs.existsSync(path.join(skillRoot, file)), false, file);
+test('preview implementation and instructions cannot silently remain in the styling resources', () => {
+  const assetsRoot = path.join(pluginRoot, 'skills', 'customize-declarative-site', 'assets');
+  for (const file of [
+    path.join(assetsRoot, 'style-preview.html'),
+    path.join(assetsRoot, 'component-samples.json'),
+    path.join(scriptsRoot, 'render-style-preview.js'),
+    path.join(scriptsRoot, 'serve-style-preview.js'),
+    path.join(scriptsRoot, 'inspect-preview-contrast.js'),
+    path.join(referencesRoot, 'preview-and-verification.md'),
+  ]) {
+    assert.equal(fs.existsSync(file), false, file);
   }
   assert.doesNotMatch(workflow + quick, /--operation preview|render-style-preview|serve-style-preview|inspect-preview-contrast/);
-  const coordinator = fs.readFileSync(path.join(skillRoot, 'scripts', 'style-site-workflow.js'), 'utf8');
+  const coordinator = fs.readFileSync(path.join(scriptsRoot, 'style-site-workflow.js'), 'utf8');
   assert.doesNotMatch(coordinator, /require\([^)]*(?:render-template|playwright|preview)/);
 });
 
@@ -405,8 +416,8 @@ test('Studio handoffs require explicit instructions-only intent rather than nati
 });
 
 test('installed guidance removes native-property prohibitions without removing source protection', () => {
-  const referenceFiles = fs.readdirSync(path.join(skillRoot, 'references'))
-    .filter((file) => file.endsWith('.md')).map((file) => path.join(skillRoot, 'references', file));
+  const referenceFiles = fs.readdirSync(referencesRoot)
+    .filter((file) => file.endsWith('.md')).map((file) => path.join(referencesRoot, file));
   const documents = [entryPath, workflowPath, ...referenceFiles,
     ...['AGENTS.md', 'PLUGIN_DEVELOPMENT_GUIDE.md', 'README.md'].map((file) => path.join(pluginRoot, file))];
   const retiredInstructions = [
@@ -462,10 +473,10 @@ test('Web File priority is advisory rather than display-order or runtime-proof g
 });
 
 test('visual changes require paired resolved colors without importing the SPA redesign workflow', () => {
-  const design = fs.readFileSync(path.join(skillRoot, 'references', 'design-quality.md'), 'utf8');
+  const design = fs.readFileSync(path.join(referencesRoot, 'design-quality.md'), 'utf8');
   assert.match(workflow, /new treatments, palette\/background, typography or redesign/);
   assert.match(workflow, /Resolve failures and local declaration dependencies before approval/);
-  assert.match(design, /\[code-site adapter\]\(\.\.\/\.\.\/\.\.\/references\/design-aesthetics\.md\)/);
+  assert.match(design, /\[code-site adapter\]\(\.\.\/\.\.\/\.\.\/\.\.\/references\/design-aesthetics\.md\)/);
   assert.match(design, /does not override a child's explicit dark color/);
   assert.match(design, /do not execute that SPA workflow/);
   assert.match(design, /theme\.css rewrite/);

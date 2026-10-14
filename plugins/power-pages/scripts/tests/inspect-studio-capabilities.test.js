@@ -6,9 +6,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { fixture } = require('./style-site-fixtures');
-const { main } = require('../../skills/style-site/scripts/inspect-studio-capabilities');
+const { main } = require('../style-site/inspect-studio-capabilities');
 
-const script = path.resolve(__dirname, '../../skills/style-site/scripts/inspect-studio-capabilities.js');
+const script = path.resolve(__dirname, '../style-site/inspect-studio-capabilities.js');
 
 test('CLI looks up only requested properties without dumping the reference', () => {
   const result = spawnSync(process.execPath, [script, '--component', 'Button', '--properties', 'text-shadow,text-align,background-color'], { encoding: 'utf8' });

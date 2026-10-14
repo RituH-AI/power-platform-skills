@@ -20,7 +20,7 @@ The first impression is the initial viewport before scrolling. It should make th
 
 Use [page blueprints](page-blueprints.md) for role-appropriate first screens, narrative beats, section rhythm, copy, and honest proof. Map these concepts through the platform adapter, not literal framework markup. The **point of doubt** is where a visitor hesitates; place reassurance there. A **template look** is interchangeable composition, copy, or decoration that says nothing about this organization.
 
-Keep this brief in the calling workflow's existing approved plan and carry it through authoring handoffs. Do not restart discovery, ask for every design choice, or run a full critique at each component. For classic work, use the [classic critique adapter](../skills/style-site/references/design-critique.md) to interpret the shared categories without loading the SPA capture/fix loop. Code sites retain their existing design references and completion contract; classic exceptions do not change those rules.
+Keep this brief in the calling workflow's existing approved plan and carry it through authoring handoffs. Do not restart discovery, ask for every design choice, or run a full critique at each component. For classic work, use the [classic critique adapter](../skills/customize-declarative-site/references/styling/design-critique.md) to interpret the shared categories without loading the SPA capture/fix loop. Code sites retain their existing design references and completion contract; classic exceptions do not change those rules.
 
 ## Classic creation templates: reference, not a design constraint
 

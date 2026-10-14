@@ -4,8 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { fixture } = require('./style-site-fixtures');
 const { preparePlan, planHash } = require('../lib/style-site-plan');
-const { applyPlan, main } = require('../../skills/style-site/scripts/apply-style-plan');
-const { verify } = require('../../skills/style-site/scripts/validate-style-site');
+const { applyPlan, main } = require('../style-site/apply-style-plan');
+const { verify } = require('../style-site/validate-style-site');
 
 test('dry-run never writes and apply requires exact approval plus receipt', (t) => {
   const f = fixture(t);

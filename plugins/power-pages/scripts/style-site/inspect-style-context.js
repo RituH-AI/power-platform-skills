@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 'use strict';
 
-const { captureSite, parseArgs, assertOutsideSite, readText } = require('../../../scripts/lib/classic-site-style-context');
-const { attachRuntimeEvidence } = require('../../../scripts/lib/runtime-style-context');
-const { saveJson } = require('../../../scripts/lib/style-site-plan');
-const { selectContext, inspectionSummary } = require('../../../scripts/lib/style-site-summary');
+const { captureSite, parseArgs, assertOutsideSite, readText } = require('../lib/classic-site-style-context');
+const { attachRuntimeEvidence } = require('../lib/runtime-style-context');
+const { saveJson } = require('../lib/style-site-plan');
+const { selectContext, inspectionSummary } = require('../lib/style-site-summary');
 
 function main(argv) {
   const args = parseArgs(argv, ['siteRoot', 'runtimeSnapshot', 'pageId', 'page', 'target', 'summary', 'out']);

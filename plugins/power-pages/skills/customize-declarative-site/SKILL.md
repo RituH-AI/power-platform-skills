@@ -51,7 +51,7 @@ For coordinated work, also read:
 
 For coordinated new-site design or requested styling, also read:
 
-- `${PLUGIN_ROOT}/skills/style-site/references/design-quality.md`
+- `${PLUGIN_ROOT}/skills/customize-declarative-site/references/styling/design-quality.md`
 
 ## Ownership
 
@@ -485,7 +485,7 @@ Do not execute an empty operation, and do not invoke deployment from this phase.
    missing planned header work as incomplete; mobile-menu, keyboard and live-state behavior
    remain unverified until separately observed.
 7. Compare the completed composition with the approved experience brief once, using
-   `${PLUGIN_ROOT}/skills/style-site/references/design-critique.md`'s native interpretation of the
+   `${PLUGIN_ROOT}/skills/customize-declarative-site/references/styling/design-critique.md`'s native interpretation of the
    shared categories and source-only evidence.
    Trace the planned Home/primary-journey section structure and reused-component placements to
    the changed native files, including the source that actually owns the shell. Compare against

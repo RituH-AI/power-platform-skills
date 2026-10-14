@@ -251,7 +251,7 @@ test('classic header planning reaches creation, approval and styling without wid
   const customization = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
   const composition = read(path.join('skills', 'customize-declarative-site', 'references', 'content-and-page-compositions.md'));
   const contract = read(path.join('skills', 'customize-declarative-site', 'references', 'customization-plan-contract.md'));
-  const styling = read(path.join('skills', 'style-site', 'references', 'design-quality.md'));
+  const styling = read(path.join('skills', 'customize-declarative-site', 'references', 'styling', 'design-quality.md'));
   const headerSection = composition.match(/## Site header planning\r?\n([\s\S]*?)(?=\r?\n## |$)/);
   assert.ok(headerSection);
   const header = headerSection[1];
@@ -285,7 +285,7 @@ test('every classic header update includes a website-appropriate logo decision a
   const composition = read(path.join('skills', 'customize-declarative-site', 'references', 'content-and-page-compositions.md'));
   const contract = read(path.join('skills', 'customize-declarative-site', 'references', 'customization-plan-contract.md'));
   const assets = read(path.join('skills', 'customize-declarative-site', 'references', 'visual-asset-planning.md'));
-  const styling = read(path.join('skills', 'style-site', 'references', 'design-quality.md'));
+  const styling = read(path.join('skills', 'customize-declarative-site', 'references', 'styling', 'design-quality.md'));
   const logoSection = assets.match(/## Logos and favicons\r?\n([\s\S]*?)(?=\r?\n## |$)/);
   assert.ok(logoSection);
   const logos = logoSection[1];
@@ -480,7 +480,7 @@ test('classic authors preserve Bootstrap conventions and do not gate CSS on disp
 test('creation image URL policy reaches content planning and the classic design adapter', () => {
   const assetGuide = read(path.join('skills', 'customize-declarative-site', 'references', 'visual-asset-planning.md'));
   const contentGuide = read(path.join('skills', 'customize-declarative-site', 'references', 'content-and-page-compositions.md'));
-  const designGuide = read(path.join('skills', 'style-site', 'references', 'design-quality.md'));
+  const designGuide = read(path.join('skills', 'customize-declarative-site', 'references', 'styling', 'design-quality.md'));
   const contract = read(path.join('skills', 'customize-declarative-site', 'references', 'customization-plan-contract.md'));
   assert.match(assetGuide, /direct HTTPS URLs for added images/);
   assert.match(assetGuide, /Power Pages permissions do not protect external URLs/);
@@ -546,8 +546,8 @@ test('native authors and final styling carry the approved composition without sa
   const content = read(path.join('skills', 'author-webpage-content', 'SKILL.md'));
   const composition = read(path.join('skills', 'author-webpage-content',
     'references', 'webpage-content-composition.md'));
-  const styling = read(path.join('skills', 'style-site', 'references', 'design-quality.md'));
-  const critique = read(path.join('skills', 'style-site', 'references', 'design-critique.md'));
+  const styling = read(path.join('skills', 'customize-declarative-site', 'references', 'styling', 'design-quality.md'));
+  const critique = read(path.join('skills', 'customize-declarative-site', 'references', 'styling', 'design-critique.md'));
   for (const source of [page, content, composition, styling, critique]) {
     assert.match(source, /creation template/);
     assert.match(source, /designContext/);
@@ -636,8 +636,8 @@ test('new-site layout work may remove unneeded starter sections and component pl
 test('the existing final review treats an unimplemented custom layout as incomplete without adding gates', () => {
   const customization = read(path.join('skills', 'customize-declarative-site', 'SKILL.md'));
   const review = customization.split('## Phase 6:')[1].split('## Phase 7:')[0];
-  const styling = read(path.join('skills', 'style-site', 'references', 'design-quality.md'));
-  const critique = read(path.join('skills', 'style-site', 'references', 'design-critique.md'));
+  const styling = read(path.join('skills', 'customize-declarative-site', 'references', 'styling', 'design-quality.md'));
+  const critique = read(path.join('skills', 'customize-declarative-site', 'references', 'styling', 'design-critique.md'));
   assert.match(review, /Trace the planned Home\/primary-journey section structure and reused-component placements/);
   assert.match(review, /copy\/image swaps or CSS on an unchanged starter layout do not satisfy/);
   assert.match(review, /Record missing planned composition work as incomplete/);

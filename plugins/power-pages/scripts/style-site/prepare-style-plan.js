@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-const { readText, parseArgs } = require('../../../scripts/lib/classic-site-style-context');
-const { preparePlan, saveJson } = require('../../../scripts/lib/style-site-plan');
+const { readText, parseArgs } = require('../lib/classic-site-style-context');
+const { preparePlan, saveJson } = require('../lib/style-site-plan');
 
 function main(argv) {
   const args = parseArgs(argv, ['siteRoot', 'request', 'out']);

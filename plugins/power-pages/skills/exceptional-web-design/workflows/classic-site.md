@@ -31,7 +31,7 @@ Source only means no screenshots and no server, authentication or deployment. Di
 Reuse references already in context:
 
 - `${PLUGIN_ROOT}/references/site-design-quality.md` for the experience brief and shared visual principles.
-- `${PLUGIN_ROOT}/skills/style-site/references/design-quality.md` and `design-critique.md` for native styling, rubric interpretation and evidence boundaries.
+- `${PLUGIN_ROOT}/skills/customize-declarative-site/references/styling/design-quality.md` and `design-critique.md` for native styling, rubric interpretation and evidence boundaries.
 - `${PLUGIN_ROOT}/skills/customize-declarative-site/references/content-and-page-compositions.md` when reviewing narrative/composition; use only the relevant `page-blueprints.md` patterns it links.
 
 The classic critique adapter governs this route. Do not apply the SPA font rules, theme-file convention, first-screen prescriptions or automatic fix loop.

@@ -1,10 +1,10 @@
 # Classic design critique adapter
 
-Read for the final coordinated classic design review or a separately requested classic visual critique, not for every small styling operation. Read and apply [shared site design quality](../../../references/site-design-quality.md) and the [classic styling adapter](design-quality.md). This file governs classic interpretation only; it does not change the SPA design references, scoring, fonts, or build loop.
+Read for the final coordinated classic design review or a separately requested classic visual critique, not for every small styling operation. Read and apply [shared site design quality](../../../../references/site-design-quality.md) and the [classic styling adapter](design-quality.md). This file governs classic interpretation only; it does not change the SPA design references, scoring, fonts, or build loop.
 
 ## Reuse the rubric, not the SPA execution contract
 
-Use only the two tables in the shared [Rubric section](../../../references/design-critique.md#rubric): the 0-4 scale and ten design categories. Do not copy those tables here or load the SPA Capture, Scorecard, or Loop sections for ordinary local edits. The rules below adapt the categories to native source and available evidence; they are not a second score-to-pass gate.
+Use only the two tables in the shared [Rubric section](../../../../references/design-critique.md#rubric): the 0-4 scale and ten design categories. Do not copy those tables here or load the SPA Capture, Scorecard, or Loop sections for ordinary local edits. The rules below adapt the categories to native source and available evidence; they are not a second score-to-pass gate.
 
 - Reuse the approved experience brief and `designContext`. Review first-screen hierarchy, narrative, proof, visual coherence and responsive intent once after coordinated native authoring; do not repeat discovery or critique at every component.
 - Judge new-site design against that brief, not resemblance to the selected creation template. The template supplies data/domain and requirements context; a different supported composition, layout or brand treatment is not a defect. Check required capabilities/content, native integrity and explicit preservation preferences separately. Do not turn an existing-site narrow edit into an unsolicited redesign.
@@ -35,4 +35,4 @@ No browser, local server, deployment, or extra gate is required. Reuse child ver
 
 The SPA automatic capture/fix/commit loop does not apply to classic creation, customization, styling, or read-only critique. Missing rendering cannot block an otherwise independently verified local edit or authorize deploying it for screenshots. Known local failures still follow the existing owner and approval rules.
 
-A separately requested classic `/exceptional-web-design` review follows [its native workflow](../../exceptional-web-design/workflows/classic-site.md). Its broader screenshot capture is not authorized by `style-site:2.runtime`, which remains bounded structural/computed-style discovery. Recommendations require fresh owner/scope/diff/hash approval; no automatic fix loop or deployment follows.
+A separately requested classic `/exceptional-web-design` review follows [its native workflow](../../../exceptional-web-design/workflows/classic-site.md). Its broader screenshot capture is not authorized by `style-site:2.runtime`, which remains bounded structural/computed-style discovery. Recommendations require fresh owner/scope/diff/hash approval; no automatic fix loop or deployment follows.

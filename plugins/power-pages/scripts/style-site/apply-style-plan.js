@@ -3,11 +3,11 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const generateUuid = require('../../../scripts/generate-uuid');
-const { preparePlanFromSnapshot, validatePlan, saveJson } = require('../../../scripts/lib/style-site-plan');
+const generateUuid = require('../generate-uuid');
+const { preparePlanFromSnapshot, validatePlan, saveJson } = require('../lib/style-site-plan');
 const {
   safePath, readText, hash, resolveSiteRoot, captureSite, assertOutsideSite, parseArgs,
-} = require('../../../scripts/lib/classic-site-style-context');
+} = require('../lib/classic-site-style-context');
 
 function currentHash(root, relative) {
   const file = safePath(root, relative);

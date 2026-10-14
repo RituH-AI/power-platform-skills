@@ -4,8 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { main } = require('../../skills/style-site/scripts/check-style-contrast');
-const script = path.resolve(__dirname, '../../skills/style-site/scripts/check-style-contrast.js');
+const { main } = require('../style-site/check-style-contrast');
+const script = path.resolve(__dirname, '../style-site/check-style-contrast.js');
 
 test('contrast CLI checks a supplied pair without a site, plan, browser or output file', () => {
   const args = ['--foreground', '#ffffff', '--background', '#111827', '--fontSize', '16', '--fontWeight', '400'];

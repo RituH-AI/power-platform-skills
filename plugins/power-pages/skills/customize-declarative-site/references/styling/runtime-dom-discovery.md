@@ -21,7 +21,7 @@ Use small, structural-first discovery instead of computing every style on a broa
 **First pass — structure only, at most 10 candidates:**
 
 ```bash
-node "${PLUGIN_ROOT}/skills/style-site/scripts/inspect-runtime-dom.js" --url "https://contoso.powerappsportals.com/services/" --selector "main .pp-services" --mode structure --maxCandidates 10
+node "${PLUGIN_ROOT}/scripts/style-site/inspect-runtime-dom.js" --url "https://contoso.powerappsportals.com/services/" --selector "main .pp-services" --mode structure --maxCandidates 10
 ```
 
 The collector does not call `getComputedStyle` in this mode; each candidate has `computedStyles: {}`. It uses layout boxes and the native visibility check where supported, not text or content. On older browsers without `checkVisibility`, this pass cannot distinguish every CSS visibility state; structural presence is not proof of visibility.
@@ -29,7 +29,7 @@ The collector does not call `getComputedStyle` in this mode; each candidate has 
 **Second pass — only the chosen target and required properties:**
 
 ```bash
-node "${PLUGIN_ROOT}/skills/style-site/scripts/inspect-runtime-dom.js" --url "https://contoso.powerappsportals.com/services/" --selector "main .pp-services > .pp-card:nth-of-type(1)" --mode styles --properties "color,background-color,border-radius" --maxCandidates 1
+node "${PLUGIN_ROOT}/scripts/style-site/inspect-runtime-dom.js" --url "https://contoso.powerappsportals.com/services/" --selector "main .pp-services > .pp-card:nth-of-type(1)" --mode styles --properties "color,background-color,border-radius" --maxCandidates 1
 ```
 
 Choose the target from the structural result and confirm it is still the intended instance within the approved scope. The example positional selector is **inspection-only**, never an apply selector. An explicit selector must still match exactly one native element. `--maxCandidates 1` avoids computing descendants' styles; a `truncated` result may simply mean other candidate elements remain below the selected root.
@@ -53,7 +53,7 @@ The JavaScript API `buildRuntimeInspection({ url, selector?, maxCandidates?, mod
 To avoid relaying the collector source through conversation **when the browser host supports input script files**, generate a private file:
 
 ```bash
-node "${PLUGIN_ROOT}/skills/style-site/scripts/inspect-runtime-dom.js" --url "https://contoso.powerappsportals.com/services/" --selector "main .pp-services" --mode structure --maxCandidates 10 --siteRoot "<siteRoot>" --out "<workDir>/runtime-structure-r1.js"
+node "${PLUGIN_ROOT}/scripts/style-site/inspect-runtime-dom.js" --url "https://contoso.powerappsportals.com/services/" --selector "main .pp-services" --mode structure --maxCandidates 10 --siteRoot "<siteRoot>" --out "<workDir>/runtime-structure-r1.js"
 ```
 
 `--out` requires `--siteRoot`, resolves the classic site boundary with the existing artifact path guard, and exclusively creates a new `.js` file **outside the uploadable site tree**. Parent directories are created as needed. Existing files are never overwritten; use a new filename for a new capture. Stdout contains only `{"path":"<absolute-path>","bytes":12345}` (actual UTF-8 byte size), not code or the approved URL. The exported CLI `main(argv)` returns this object in file mode and the function string otherwise. `--siteRoot` without `--out` is rejected.
@@ -89,7 +89,7 @@ Uncollected computed fields are **absent evidence, not zero, empty declarations 
 ## Reconcile with local source
 
 ```bash
-node "${PLUGIN_ROOT}/skills/style-site/scripts/inspect-style-context.js" --siteRoot "<siteRoot>" --runtimeSnapshot "<workDir>/runtime-dom-r1.json" --pageId "<resolved-localized-page-id>"
+node "${PLUGIN_ROOT}/scripts/style-site/inspect-style-context.js" --siteRoot "<siteRoot>" --runtimeSnapshot "<workDir>/runtime-dom-r1.json" --pageId "<resolved-localized-page-id>"
 ```
 
 This validates the snapshot and adds `runtime` evidence to the normal inspection result. It compares observed tags and literal IDs/classes only against the selected page copy and its statically reachable templates. Matches include file, line, UTF-16 character offset, source hash, and matched classes. It does not query Dataverse, download runtime files, or create a styling request automatically.

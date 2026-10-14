@@ -5,8 +5,8 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { fixture } = require('./style-site-fixtures');
 const { preparePlan } = require('../lib/style-site-plan');
-const { main, verify } = require('../../skills/style-site/scripts/validate-style-site');
-const validator = path.resolve(__dirname, '../../skills/style-site/scripts/validate-style-site.js');
+const { main, verify } = require('../style-site/validate-style-site');
+const validator = path.resolve(__dirname, '../style-site/validate-style-site.js');
 
 test('validates proposal then rejects changes without a matching completed receipt', (t) => {
   const f = fixture(t);
@@ -43,7 +43,7 @@ for (const applied of [false, true]) {
     let receipt;
     if (applied) {
       const receiptPath = path.join(f.work, 'receipt.json');
-      require('../../skills/style-site/scripts/apply-style-plan').applyPlan(plan, {
+      require('../style-site/apply-style-plan').applyPlan(plan, {
         apply: true, approvedHash: plan.planHash, receipt: receiptPath,
       });
       receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'));

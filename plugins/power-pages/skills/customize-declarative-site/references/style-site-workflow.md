@@ -6,7 +6,7 @@ receipts. Coordinated approval does not approve the exact CSS/source diff.
 
 Reuse the entry skill's version check and preview disclosure; reference reads are not
 skill invocations. Read
-[quick-start.md](../../style-site/references/quick-start.md).
+[quick-start.md](styling/quick-start.md).
 Show **Inspect/propose → Approve → Apply → Independently verify → Report** without mandatory tasks.
 Styling-only requests finish here: no broad customization plan, Git initialization,
 commit, deployment prompt, final-completion confirmation, HTML preview, local server or browser review.
@@ -21,7 +21,7 @@ property/gradient allowlists.
 Use `AskUserQuestion` only for missing/ambiguous inputs.
 
 Runtime URL only: read
-[runtime-dom-discovery.md](../../style-site/references/runtime-dom-discovery.md).
+[runtime-dom-discovery.md](styling/runtime-dom-discovery.md).
 
 <!-- gate: style-site:2.runtime | category=progress | cancel-leaves=local-style-state -->
 > 🚦 **Gate (progress · style-site:2.runtime):** Before exact-URL inspection, disclose normal page scripts/requests and bounded collection.
@@ -40,7 +40,7 @@ Use `AskUserQuestion`: **Confirm scope and prepare / Revise scope / Cancel**; no
 ## Prepare and approve
 
 For new treatments, palette/background, typography or redesign, read
-[design-quality.md](../../style-site/references/design-quality.md).
+[design-quality.md](styling/design-quality.md).
 Resolve failures and local declaration dependencies before approval; rendering remains pending.
 
 Prepare in a **fresh external directory** per revision; edit requests, never plans. No reviewable proposal means stop.
@@ -55,7 +55,7 @@ Use `AskUserQuestion`: **Approve this revision locally / Revise proposal / Cance
 
 ## Apply
 
-Run `${PLUGIN_ROOT}/skills/style-site/scripts/style-site-workflow.js` apply with approved hash/new receipt;
+Run `${PLUGIN_ROOT}/scripts/style-site/style-site-workflow.js` apply with approved hash/new receipt;
 no direct writes. The quick start supplies the exact command.
 
 <!-- gate: style-site:6.reapprove | category=progress | cancel-leaves=local-style-state -->
@@ -69,7 +69,7 @@ Use `AskUserQuestion`: **Regenerate and review / Keep current local state and st
 Require independent validator success from coordinator apply; re-read files/diffs against
 targets/receipt. Follow quick-start verification. Requested Studio-only work skips apply;
 independently validate its proposal with
-`node "${PLUGIN_ROOT}/skills/style-site/scripts/validate-style-site.js" --plan "<plan>"` and verify no styling edits.
+`node "${PLUGIN_ROOT}/scripts/style-site/validate-style-site.js" --plan "<plan>"` and verify no styling edits.
 
 ## Report
 
@@ -83,8 +83,8 @@ diffs separately.
 
 ## Conditional references
 
-- [Studio panel availability, not ownership](../../style-site/references/studio-component-capabilities.md).
-- [Expanded scope/source/cascade](../../style-site/references/styling-policy.md).
-- [Bootstrap/locale uncertainty](../../style-site/references/bootstrap-and-studio.md).
-- [CSS/source schema](../../style-site/references/proposal-and-verification.md): raw/global CSS, resources/priority and **inline contract/example**; read before inline edits or repeated tags.
-- [sources.md](../../style-site/references/sources.md): unknown/conflicting/stale guidance or explicit requests. Routine CSS uses bundled verified guidance.
+- [Studio panel availability, not ownership](styling/studio-component-capabilities.md).
+- [Expanded scope/source/cascade](styling/styling-policy.md).
+- [Bootstrap/locale uncertainty](styling/bootstrap-and-studio.md).
+- [CSS/source schema](styling/proposal-and-verification.md): raw/global CSS, resources/priority and **inline contract/example**; read before inline edits or repeated tags.
+- [sources.md](styling/sources.md): unknown/conflicting/stale guidance or explicit requests. Routine CSS uses bundled verified guidance.

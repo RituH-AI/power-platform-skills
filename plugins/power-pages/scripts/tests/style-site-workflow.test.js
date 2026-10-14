@@ -6,12 +6,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { fixture, heroFixture, ids } = require('./style-site-fixtures');
-const { main } = require('../../skills/style-site/scripts/style-site-workflow');
-const { main: inspect } = require('../../skills/style-site/scripts/inspect-style-context');
+const { main } = require('../style-site/style-site-workflow');
+const { main: inspect } = require('../style-site/inspect-style-context');
 const { inspectSite, captureSite, snapshotText, hash } = require('../lib/classic-site-style-context');
 const { preparePlan, preparePlanFromSnapshot } = require('../lib/style-site-plan');
 const { reviewPlan, compactSummary, SUMMARY_BYTES } = require('../lib/style-site-summary');
-const workflow = path.resolve(__dirname, '../../skills/style-site/scripts/style-site-workflow.js');
+const workflow = path.resolve(__dirname, '../style-site/style-site-workflow.js');
 
 function requestFile(f, name = 'request.json') {
   const file = path.join(f.work, name);

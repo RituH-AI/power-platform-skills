@@ -11,8 +11,8 @@ const { inspectSite } = require('../lib/classic-site-style-context');
 const {
   STYLE_PROPERTIES, normalizeRuntimeUrl, buildRuntimeInspection, validateRuntimeSnapshot, attachRuntimeEvidence,
 } = require('../lib/runtime-style-context');
-const { main: inspect } = require('../../skills/style-site/scripts/inspect-style-context');
-const { main: generate } = require('../../skills/style-site/scripts/inspect-runtime-dom');
+const { main: inspect } = require('../style-site/inspect-style-context');
+const { main: generate } = require('../style-site/inspect-runtime-dom');
 
 const runtimeUrl = 'https://contoso.powerappsportals.com/services/';
 
@@ -389,7 +389,7 @@ test('local inspection optionally consumes an external snapshot but offline insp
 });
 
 test('CLI generates a self-contained browser function without installing or launching a browser', () => {
-  const script = path.resolve(__dirname, '../../skills/style-site/scripts/inspect-runtime-dom.js');
+  const script = path.resolve(__dirname, '../style-site/inspect-runtime-dom.js');
   const result = spawnSync(process.execPath, [script, '--url', runtimeUrl], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.doesNotThrow(() => new vm.Script(`(${result.stdout})`));
@@ -470,7 +470,7 @@ test('collector output cannot traverse a symlink or junction into the upload tre
 test('CLI file mode emits only a path/byte summary, not collector code or the approved URL', (t) => {
   const f = fixture(t);
   const output = path.join(f.work, 'collector.js');
-  const script = path.resolve(__dirname, '../../skills/style-site/scripts/inspect-runtime-dom.js');
+  const script = path.resolve(__dirname, '../style-site/inspect-runtime-dom.js');
   const result = spawnSync(process.execPath, [script, '--url', runtimeUrl + '?context=example-only',
     '--mode', 'styles', '--properties', 'color,background-color', '--selector', '.pp-card', '--maxCandidates', '1',
     '--siteRoot', f.root, '--out', output], { encoding: 'utf8', shell: false });

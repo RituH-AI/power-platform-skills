@@ -70,6 +70,7 @@ test('styling references are not tracked skills but all local scripts remain ins
     assert.equal(getValidatorScript(alias), null, alias);
   }
   assert.equal(detectTrackedSkill('customize-declarative-site'), 'customize-declarative-site');
+  assert.equal(getValidatorScript('customize-declarative-site'), null);
   for (const script of [
     'inspect-style-context.js',
     'inspect-runtime-dom.js',
@@ -80,7 +81,7 @@ test('styling references are not tracked skills but all local scripts remain ins
     'apply-style-plan.js',
     'validate-style-site.js',
   ]) {
-    assert.ok(fs.statSync(path.join(SKILLS_DIR, 'style-site', 'scripts', script)).isFile(), script);
+    assert.ok(fs.statSync(path.join(__dirname, '..', 'style-site', script)).isFile(), script);
   }
 });
 

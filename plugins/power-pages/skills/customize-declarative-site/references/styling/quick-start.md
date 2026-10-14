@@ -15,7 +15,7 @@
 Select the locale; save full evidence with a 4,096-byte summary:
 
 ```bash
-node "${PLUGIN_ROOT}/skills/style-site/scripts/inspect-style-context.js" --siteRoot "<siteRoot>" --summary --out "<workDir>/context.json" --pageId "<pageId>" --target ".pp-card"
+node "${PLUGIN_ROOT}/scripts/style-site/inspect-style-context.js" --siteRoot "<siteRoot>" --summary --out "<workDir>/context.json" --pageId "<pageId>" --target ".pp-card"
 ```
 
 Use `--page "<name-substring>"` for discovery or offline `--pageId`. Inspector targets are literal IDs/classes/tags, not complex selectors; candidates are advisory.
@@ -54,7 +54,7 @@ Optional `location`: `stylesheet` (default) or `inline`. General `declarations` 
 Read the [deep contract/examples](proposal-and-verification.md) for raw `css`, `global: true`, resources, priority and inline/context edits. Scoped CSS needs verified hooks; global themes need no fictitious source/class. Inline `null` removes an exact property; combine scoped CSS in the same approved plan. Preserve other source/priority.
 
 ```bash
-node "${PLUGIN_ROOT}/skills/style-site/scripts/style-site-workflow.js" --operation prepare --siteRoot "<siteRoot>" --request "<workDir>/request.json" --out "<workDir>/revision-1"
+node "${PLUGIN_ROOT}/scripts/style-site/style-site-workflow.js" --operation prepare --siteRoot "<siteRoot>" --request "<workDir>/request.json" --out "<workDir>/revision-1"
 ```
 
 Result: `status: "ready-for-review"`, `artifacts: {plan,review}`, `route.name: small-change|expanded`, hash/diff/warnings; no edits. Follow `contrastReview: "required-before-approval"` guidance. **Read full review before approval if truncated** (`truncated=true`). Use a revised request and a fresh directory.
@@ -66,7 +66,7 @@ Review targets/diffs, pages/locales, parser/resource warnings and global/priorit
 After host approval of this exact hash:
 
 ```bash
-node "${PLUGIN_ROOT}/skills/style-site/scripts/style-site-workflow.js" --operation apply --plan "<workDir>/revision-1/style-site.plan.json" --approvedHash "<approved-planHash>" --receipt "<workDir>/receipt-1.json"
+node "${PLUGIN_ROOT}/scripts/style-site/style-site-workflow.js" --operation apply --plan "<workDir>/revision-1/style-site.plan.json" --approvedHash "<approved-planHash>" --receipt "<workDir>/receipt-1.json"
 ```
 
 Require fresh preflights and independent validator success, not just a receipt. Verify blocks/tags, scope, defaults/markers and unrelated bytes. Drift/partial failure needs `6.reapprove`, recovery evidence and new diff/hash approval; never rollback.

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { fixture, ids } = require('./style-site-fixtures');
 const { preparePlan, validatePlan, compileStyles, replaceBlock, addClass, planHash } = require('../lib/style-site-plan');
-const { main } = require('../../skills/style-site/scripts/prepare-style-plan');
+const { main } = require('../style-site/prepare-style-plan');
 
 test('prepares exact localized page CSS without changing baseline or site files', (t) => {
   const f = fixture(t);

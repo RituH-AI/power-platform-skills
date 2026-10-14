@@ -3,12 +3,12 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { preparePlan, validatePlan, saveJson } = require('../../../scripts/lib/style-site-plan');
-const { resolveSiteRoot, assertOutsideSite, parseArgs, readText } = require('../../../scripts/lib/classic-site-style-context');
-const { compactSummary, reviewPlan } = require('../../../scripts/lib/style-site-summary');
+const { preparePlan, validatePlan, saveJson } = require('../lib/style-site-plan');
+const { resolveSiteRoot, assertOutsideSite, parseArgs, readText } = require('../lib/classic-site-style-context');
+const { compactSummary, reviewPlan } = require('../lib/style-site-summary');
 const { applyPlan } = require('./apply-style-plan');
 const { verify } = require('./validate-style-site');
-const { needsContrastReview } = require('../../../scripts/lib/style-site-contrast');
+const { needsContrastReview } = require('../lib/style-site-contrast');
 
 function prepare({ siteRoot, request, out }) {
   if (!request || !out) throw new Error('Prepare requires --siteRoot, --request and a new external --out directory.');
