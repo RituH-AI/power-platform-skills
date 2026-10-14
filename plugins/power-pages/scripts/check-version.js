@@ -42,13 +42,11 @@ function compareSemver(a, b) {
  */
 function formatUpdateMessage(pluginName, localVersion, remoteVersion, marketplaceName) {
   const qualifiedName = marketplaceName ? `${pluginName}@${marketplaceName}` : pluginName;
-  let msg = `\nPlugin update available: ${pluginName} ${localVersion} → ${remoteVersion}.\n`;
-  if (marketplaceName) {
-    msg += `Run:\n  claude plugin marketplace update ${marketplaceName}\n  claude plugin update ${qualifiedName}`;
-  } else {
-    msg += `Run: claude plugin update ${qualifiedName}`;
-  }
-  return msg;
+  const target = marketplaceName
+    ? `the ${marketplaceName} marketplace and ${qualifiedName}`
+    : `the ${qualifiedName} plugin`;
+  return `\nPlugin update available: ${pluginName} ${localVersion} → ${remoteVersion}.\n` +
+    `Update ${target} with the client that installed it.`;
 }
 
 /**

@@ -45,21 +45,20 @@ test('formatUpdateMessage includes plugin name and both versions', () => {
   assert.ok(msg.includes('1.3.0'));
 });
 
-test('formatUpdateMessage includes marketplace update then plugin update when marketplace is provided', () => {
+test('formatUpdateMessage identifies the marketplace and plugin without assuming a client', () => {
   const msg = formatUpdateMessage('power-pages', '1.2.0', '1.3.0', 'power-platform-skills');
-  assert.ok(msg.includes('claude plugin marketplace update power-platform-skills'));
-  assert.ok(msg.includes('claude plugin update power-pages@power-platform-skills'));
-  const marketplaceIdx = msg.indexOf('marketplace update');
-  const pluginIdx = msg.indexOf('plugin update power-pages@');
-  assert.ok(marketplaceIdx < pluginIdx, 'marketplace update should come before plugin update');
+  assert.ok(msg.includes('power-platform-skills'));
+  assert.ok(msg.includes('power-pages@power-platform-skills'));
+  assert.ok(msg.includes('client that installed it'));
+  assert.ok(!msg.includes('claude plugin'));
   assert.ok(msg.startsWith('\n'), 'output should start with an empty line');
 });
 
-test('formatUpdateMessage uses plain name when marketplace is not provided', () => {
+test('formatUpdateMessage uses the plugin name when marketplace is not provided', () => {
   const msg = formatUpdateMessage('power-pages', '1.2.0', '1.3.0');
-  assert.ok(msg.includes('claude plugin update power-pages'));
+  assert.ok(msg.includes('power-pages'));
+  assert.ok(msg.includes('client that installed it'));
   assert.ok(!msg.includes('@'));
-  assert.ok(!msg.includes('marketplace update'));
   assert.ok(msg.startsWith('\n'), 'output should start with an empty line');
 });
 

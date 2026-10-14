@@ -6,8 +6,10 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const pluginRoot = path.resolve(__dirname, '..', '..');
-const config = JSON.parse(fs.readFileSync(path.join(pluginRoot, '.mcp.json'), 'utf8'));
-const server = config.mcpServers.playwright;
+const portableConfig = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'mcp.json'), 'utf8'));
+const legacyConfig = JSON.parse(fs.readFileSync(path.join(pluginRoot, '.mcp.json'), 'utf8'));
+const portableServer = portableConfig.mcpServers['power-pages-playwright'];
+const legacyServer = legacyConfig.mcpServers.playwright;
 
 function createSpawnPreload(dir) {
   const preloadPath = path.join(dir, 'intercept-spawn.js');
@@ -33,6 +35,7 @@ require('node:child_process').spawn = (command, args, options) => {
 }
 
 function runBootstrap({
+  server = portableServer,
   cwd,
   pluginRoot: pluginRootValue,
   claudePluginRoot,
@@ -87,6 +90,30 @@ function runBootstrap({
     timeout: 5_000,
   });
 }
+
+test('portable and legacy MCP configs preserve the same launcher with client-specific names and transport', () => {
+  assert.equal(portableConfig.mcpServers['power-pages-playwright'].type, 'stdio');
+  assert.equal(legacyConfig.mcpServers.playwright.command, portableServer.command);
+  assert.deepEqual(legacyServer.args, portableServer.args);
+  assert.equal(portableConfig.mcpServers['power-pages-microsoft-learn'].type, 'streamable-http');
+  assert.equal(legacyConfig.mcpServers['microsoft-learn'].type, 'http');
+});
+
+test('portable Playwright MCP bootstrap starts from the portable server entry', (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'power-pages-portable-mcp-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const preloadPath = createSpawnPreload(tempDir);
+  const result = runBootstrap({
+    server: portableServer,
+    cwd: tempDir,
+    pluginRoot,
+    preloadPath,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /fake-npx-cli/);
+  assert.match(result.stdout, /--package=@playwright\/mcp@0\.0\.78/);
+});
 
 test('playwright MCP bootstrap wraps root stat errors with a clear diagnostic', () => {
   const root = fs.realpathSync(pluginRoot);

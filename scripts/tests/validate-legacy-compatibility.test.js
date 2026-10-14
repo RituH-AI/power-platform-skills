@@ -25,6 +25,15 @@ const LOCAL_MANIFEST = {
   license: 'MIT',
   keywords: ['local'],
 };
+const MIGRATED_MANIFEST = {
+  ...LOCAL_MANIFEST,
+  $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
+  extensions: {
+    'com.example.client': {
+      hooks: './hooks/hooks.json',
+    },
+  },
+};
 
 function marketplace(remoteSource) {
   return {
@@ -55,6 +64,21 @@ function fixture(openRemote, legacyRemote) {
   writeJson(path.join(root, '.claude-plugin', 'marketplace.json'), marketplace(legacyRemote));
   writeJson(path.join(root, 'plugins', 'local-plugin', '.plugin', 'plugin.json'), LOCAL_MANIFEST);
   writeJson(path.join(root, 'plugins', 'local-plugin', '.claude-plugin', 'plugin.json'), LOCAL_MANIFEST);
+  return root;
+}
+
+function migratedFixture(openRemote, legacyRemote, {
+  rootManifest = MIGRATED_MANIFEST,
+  legacyManifest = LOCAL_MANIFEST,
+  transitionalManifest,
+} = {}) {
+  const root = fixture(openRemote, legacyRemote);
+  writeJson(path.join(root, 'plugins', 'local-plugin', 'plugin.json'), rootManifest);
+  writeJson(
+    path.join(root, 'plugins', 'local-plugin', '.plugin', 'plugin.json'),
+    transitionalManifest || LOCAL_MANIFEST,
+  );
+  writeJson(path.join(root, 'plugins', 'local-plugin', '.claude-plugin', 'plugin.json'), legacyManifest);
   return root;
 }
 
@@ -98,6 +122,26 @@ test('malformed remote sources are rejected', () => {
     const errors = validate(fixture(open, expectedLegacyRemoteSource(open)));
     assert.ok(errors.length > 0, `expected ${JSON.stringify(open)} to be rejected`);
   }
+});
+
+test('a migrated plugin uses root plugin.json and ignores transitional metadata', () => {
+  assert.deepEqual(
+    validate(
+      migratedFixture(OPEN_REMOTE, LEGACY_REMOTE, {
+        transitionalManifest: { ...LOCAL_MANIFEST, version: '9.9.9' },
+      }),
+    ),
+    [],
+  );
+});
+
+test('a migrated plugin rejects drift between root and Claude Code manifests', () => {
+  const errors = validate(
+    migratedFixture(OPEN_REMOTE, LEGACY_REMOTE, {
+      legacyManifest: { ...LOCAL_MANIFEST, version: '1.0.1' },
+    }),
+  );
+  assert.ok(errors.some((error) => /plugin\.json/.test(error)), errors.join('\n'));
 });
 
 test('the committed marketplace files pass', () => {

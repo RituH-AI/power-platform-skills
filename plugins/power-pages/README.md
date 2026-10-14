@@ -23,8 +23,8 @@ claude --plugin-dir /path/to/power-platform-skills/plugins/power-pages
 
 ## Hook behavior
 
-The plugin centralizes hook registration in `hooks/hooks.json`.
-GitHub Copilot loads the same registration through the `com.github.copilot/hooks/hooks.json` client extension namespace.
+The plugin centralizes Claude Code and Codex hook registration in `hooks/hooks.json`.
+GitHub Copilot uses the equivalent registration through the `com.github.copilot/hooks/hooks.json` client extension namespace.
 
 - `PostToolUse` hooks match the `Skill` tool so validation runs when a tracked Power Pages skill completes.
 - Command validators and checklist verification are maintained centrally instead of in per-skill frontmatter.
