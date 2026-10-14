@@ -49,8 +49,9 @@ From a GitHub Copilot CLI or Claude Code session:
 
 ## MCP server
 
-`mcp.json` and legacy `.mcp.json` register the FlowAgent MCP server under the name `flowagent` and
-loads it from the bundled engine at `server/mcp.mjs` via a small Node bootstrap
+`mcp.json` registers the FlowAgent MCP server as `power-automate-flowagent`; legacy
+`.mcp.json` keeps the name `flowagent`. Both configurations load it from the
+bundled engine at `server/mcp.mjs` via a small Node bootstrap
 that resolves the plugin's installation directory and reports an actionable
 error if the bundle is missing. That file is a single self-contained ESM bundle
 (stdio transport, all 50+ tools, deps inlined). It needs only Node.js 18+ — no

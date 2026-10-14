@@ -56,12 +56,17 @@ function portableMetadata(manifest) {
   return metadata;
 }
 
-function expectedPortableMcp(legacyMcp) {
+function expectedPortableMcp(legacyMcp, pluginName) {
   const servers = Object.fromEntries(
     Object.entries(legacyMcp.mcpServers || {}).map(([name, server]) => {
-      const type = server.type || (server.url ? 'http' : 'stdio');
+      const type = server.type === 'http'
+        ? 'streamable-http'
+        : server.type || (server.url ? 'streamable-http' : 'stdio');
       const { type: ignoredType, ...configuration } = server;
-      return [name, { type, ...configuration }];
+      const portableName = name === pluginName || name.startsWith(`${pluginName}-`)
+        ? name
+        : `${pluginName}-${name}`;
+      return [portableName, { type, ...configuration }];
     })
   );
   return { $schema: AGENT_MCP_SCHEMA, mcpServers: servers };
@@ -284,7 +289,7 @@ function validate(root = ROOT) {
         return;
       }
       assert.ok(fs.existsSync(portableMcpPath), 'missing root mcp.json');
-      assert.deepEqual(readJson(portableMcpPath), expectedPortableMcp(readJson(legacyMcpPath)));
+      assert.deepEqual(readJson(portableMcpPath), expectedPortableMcp(readJson(legacyMcpPath), plugin.name));
     });
   }
 

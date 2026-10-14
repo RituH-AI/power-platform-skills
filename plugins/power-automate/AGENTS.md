@@ -12,7 +12,8 @@ publish/run flows, environments, connections, connectors, run history + run
 management (**cancel**, **cancel_all**, **resubmit**, **diagnose**, loop
 repetitions), dynamic resolvers, templates, and `get_expression_help`.
 
-The MCP server (`mcp.json` or legacy `.mcp.json` → `flowagent`) is the supported integration path:
+The FlowAgent MCP server (`power-automate-flowagent` in portable `mcp.json`,
+`flowagent` in legacy `.mcp.json`) is the supported integration path:
 it handles auth (Azure CLI + MSAL), session-scoped current env/flow, structured
 errors, and stays in-process. Shelling out re-pays auth cost and breaks session
 state.

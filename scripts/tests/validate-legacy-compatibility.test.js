@@ -75,7 +75,7 @@ function fixture(openRemote, legacyRemote) {
   writeJson(path.join(root, 'plugins', 'local-plugin', '.mcp.json'), LEGACY_MCP);
   writeJson(
     path.join(root, 'plugins', 'local-plugin', 'mcp.json'),
-    expectedPortableMcp(LEGACY_MCP)
+    expectedPortableMcp(LEGACY_MCP, 'local-plugin')
   );
   return root;
 }
@@ -144,17 +144,37 @@ test('portable metadata must match both legacy manifests', () => {
   assert.ok(validate(root).some((error) => /Agent Plugins manifest/.test(error)));
 });
 
-test('portable MCP configuration adds the schema and explicit transport type', () => {
-  assert.deepEqual(expectedPortableMcp(LEGACY_MCP), {
+test('portable MCP configuration adds the schema, portable transport type, and unique server name', () => {
+  assert.deepEqual(expectedPortableMcp(LEGACY_MCP, 'local-plugin'), {
     $schema: MCP_SCHEMA,
     mcpServers: {
-      local: {
+      'local-plugin-local': {
         type: 'stdio',
         command: 'node',
         args: ['./server.js'],
       },
     },
   });
+
+  assert.deepEqual(
+    expectedPortableMcp({
+      mcpServers: {
+        docs: {
+          type: 'http',
+          url: 'https://example.com/mcp',
+        },
+      },
+    }, 'local-plugin'),
+    {
+      $schema: MCP_SCHEMA,
+      mcpServers: {
+        'local-plugin-docs': {
+          type: 'streamable-http',
+          url: 'https://example.com/mcp',
+        },
+      },
+    }
+  );
 
   const root = fixture(OPEN_REMOTE, LEGACY_REMOTE);
   fs.rmSync(path.join(root, 'plugins', 'local-plugin', 'mcp.json'));
