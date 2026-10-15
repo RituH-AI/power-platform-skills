@@ -80,12 +80,13 @@ node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working
 ```
 
 If the affected workflow supplied actual selected base versions and fingerprints,
-check them read-only using all three flags: `--platform android|ios`,
+check them read-only using `--platform android|ios`,
 `--base-version <actual-intended-version>`, and
-`--base-fingerprint <actual-intended-fingerprint>`. A version-only deployment
+`--base-fingerprint <actual-intended-fingerprint>`, and
+`--base-runtime-version <actual-intended-runtime-version>`. A version-only deployment
 check blocks. Collect actual target metadata, never copy expected policy values.
 Record unknown/missing evidence honestly; reporting must still work when the
-policy is empty. Do not infer the runtime from the newest bundled template,
+package contract cannot be resolved. Do not infer the runtime from the newest bundled template,
 claim a published package proves player/base availability, or mutate native
 dependencies to make diagnostics pass.
 

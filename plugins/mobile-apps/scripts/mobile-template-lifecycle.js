@@ -6,7 +6,6 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {
-  readCatalog,
   selectRelease,
   selectProjectRelease,
   resolveProjectRelease,
@@ -51,7 +50,8 @@ function assertMajorTransition(source, target) {
   }
 }
 
-function planUpdate(projectRoot, releaseId, catalog = readCatalog()) {
+function planUpdate(projectRoot, releaseId, catalog) {
+  if (catalog === undefined) return require('./lib/mobile-published-packages').planPublishedUpdate(projectRoot, releaseId);
   const source = selectProjectRelease(projectRoot, catalog);
   const target = selectRelease(releaseId, catalog);
   const installedHost = readJson(path.join(projectRoot, 'node_modules', HOST, 'package.json')).version;
@@ -104,13 +104,13 @@ function run(command, args, cwd) {
   const timeoutMs = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
     ? configuredTimeoutMs
     : 10 * 60 * 1000;
-  const result = spawnSync(isNpm && process.platform === 'win32' ? 'npm.cmd' : command, args, {
+  const invocation = isNpm ? require('./lib/mobile-published-packages').npmInvocation(args) : { command, args };
+  const result = spawnSync(invocation.command, invocation.args, {
     cwd,
     encoding: 'utf8',
     timeout: timeoutMs,
     maxBuffer: 4 * 1024 * 1024,
-    // Only fixed npm options and a validated package@version reach cmd.exe.
-    shell: isNpm && process.platform === 'win32',
+    shell: false,
     env: { ...process.env, npm_config_ignore_scripts: 'true' },
   });
   if (result.error || result.status !== 0) {
@@ -133,7 +133,8 @@ function assertTemplateManifest(manifest, release) {
 }
 
 function acquireTemplate(destination, releaseId, options = {}) {
-  const release = selectRelease(releaseId, options.catalog || readCatalog());
+  const release = options.catalog ? selectRelease(releaseId, options.catalog)
+    : require('./lib/mobile-published-packages').selectTemplateContract(releaseId, options);
   const target = path.resolve(destination);
   assertEmptyDestination(target);
   const execute = options.run || run;
@@ -181,12 +182,45 @@ function acquireTemplate(destination, releaseId, options = {}) {
   }
 }
 
+function acquireHost(destination, version, options = {}) {
+  const target = path.resolve(destination);
+  assertEmptyDestination(target);
+  const contract = require('./lib/mobile-published-packages').selectPublishedContract(version, options);
+  const execute = options.run || run;
+  assertEmptyDestination(target);
+  fs.mkdirSync(target, { recursive: true });
+  fs.writeFileSync(path.join(target, 'package.json'), `${JSON.stringify({
+    name: 'mobile-upgrade-tooling', private: true, dependencies: { [HOST]: version },
+  }, null, 2)}\n`, { flag: 'wx' });
+  execute('npm', ['install', '--ignore-scripts', '--strict-peer-deps', '--no-legacy-peer-deps', '--no-force', '--no-audit', '--no-fund'], target);
+  const hostRoot = path.join(target, 'node_modules', HOST);
+  const installed = readJson(path.join(hostRoot, 'package.json'));
+  const locked = readJson(path.join(target, 'package-lock.json')).packages?.[`node_modules/${HOST}`];
+  if (installed.name !== HOST || installed.version !== version || locked?.version !== version
+    || locked.integrity !== contract.host.integrity || locked.link
+    || !fs.lstatSync(hostRoot).isDirectory() || fs.lstatSync(hostRoot).isSymbolicLink()) {
+    throw new Error('The tooling installation does not match the selected published host integrity');
+  }
+  const executable = installed.bin?.['upgrade-template'];
+  if (typeof executable !== 'string' || path.isAbsolute(executable) || executable.split(/[\\/]/).includes('..')) {
+    throw new Error('The published host does not expose a contained upgrade-template CLI');
+  }
+  const relative = path.relative(fs.realpathSync(hostRoot), fs.realpathSync(path.join(hostRoot, executable)));
+  if (relative.startsWith('..') || path.isAbsolute(relative) || !fs.lstatSync(path.join(hostRoot, executable)).isFile()) {
+    throw new Error('The upgrade CLI must be a regular file inside the published host package');
+  }
+  return {
+    target: summarizeRelease(contract), installedDependencies: true, lifecycleScriptsExecuted: false,
+    upgradeCli: `node_modules/${HOST}/${executable.replaceAll('\\', '/')}`,
+  };
+}
+
 function main(argv) {
   const [action, ...args] = argv;
   const values = {};
   const allowed = action === 'acquire'
-    ? ['--destination', '--release', '--diagnostic-artifacts']
-    : ['--project-root', '--release', '--diagnostic-artifacts'];
+    ? ['--destination', '--release', '--host-version', '--template-version', '--diagnostic-artifacts']
+    : ['--project-root', '--release', '--host-version', '--diagnostic-artifacts'];
   if (!['acquire', 'plan'].includes(action)) throw new Error('Use acquire or plan with an explicit selection; the producer host CLI owns diagnostic migration writes');
   for (let index = 0; index < args.length; index += 2) {
     const key = args[index];
@@ -194,17 +228,19 @@ function main(argv) {
       || args[index + 1].startsWith('--')) throw new Error('Unknown, duplicate, or missing lifecycle argument');
     values[key] = args[index + 1];
   }
-  if (!values[allowed[0]] || Boolean(values['--release']) === Boolean(values['--diagnostic-artifacts'])) {
-    throw new Error(`Required: ${allowed[0]} and exactly one of --release or --diagnostic-artifacts`);
+  if (!values[allowed[0]] || ['--release', '--host-version', '--template-version', '--diagnostic-artifacts']
+    .filter((key) => values[key]).length !== 1) {
+    throw new Error(`Required: ${allowed[0]} and one exact host/template version or --diagnostic-artifacts`);
   }
   if (values['--diagnostic-artifacts']) {
     const { acquireDiagnosticTemplate, planDiagnosticUpdate } = require('./lib/mobile-diagnostic-artifacts');
     const helper = action === 'acquire' ? acquireDiagnosticTemplate : planDiagnosticUpdate;
     return helper(path.resolve(values[allowed[0]]), values['--diagnostic-artifacts']);
   }
-  return action === 'acquire'
-    ? acquireTemplate(values['--destination'], values['--release'])
-    : planUpdate(path.resolve(values['--project-root']), values['--release']);
+  if (action === 'plan') return planUpdate(path.resolve(values['--project-root']), values['--host-version'] || values['--release']);
+  return values['--host-version']
+    ? acquireHost(values['--destination'], values['--host-version'])
+    : acquireTemplate(values['--destination'], values['--template-version'] || values['--release']);
 }
 
 if (require.main === module) {
@@ -219,4 +255,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { acquireTemplate, assertEmptyDestination, assertTemplateManifest, assertMajorTransition, compareVersions, main, planUpdate };
+module.exports = { acquireTemplate, acquireHost, assertEmptyDestination, assertTemplateManifest, assertMajorTransition, compareVersions, main, planUpdate };

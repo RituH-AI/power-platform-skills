@@ -628,6 +628,7 @@ function acquireDiagnosticTemplate(destination, manifestPath, options = {}) {
 }
 
 module.exports = {
+  unpack,
   loadDiagnosticArtifacts, resolveDiagnosticProject, planDiagnosticUpdate, summary,
   assertOnlineOnly, parseAndroidPlayerMetadata, acquireDiagnosticTemplate,
 };

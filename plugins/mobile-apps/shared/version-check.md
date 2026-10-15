@@ -5,8 +5,9 @@ Tooling prerequisites only. Runtime compatibility comes from the app-matched
 file or the newest bundled template.
 
 The lifecycle's explicit `--diagnostic-artifacts` workflow is a separate
-online-only Android test selection. Only that opt-in inspection needs `tar`, `unzip` and
-an explicitly selected SDK `aapt2` on `PATH`; it does not discover devices or
+online-only Android test selection. Published package inspection uses npm and
+`tar`; the diagnostic opt-in additionally needs `unzip` and an explicitly selected
+SDK `aapt2` on `PATH`. Neither path discovers devices or
 build native code. Keep normal tooling tiers unchanged, record iOS as untested,
 and never use this selection for deployment.
 
@@ -82,9 +83,9 @@ node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working
 ```
 
 Use only its sanitized tuple for the app's template, host, Expo, React Native,
-native inventory, and verified player/base context. A package version existing
-on npm is not a verified player/base release. An empty policy is intentional:
-unknown/missing records block native mutations and deployment. Existing pure
+native inventory, and package-owned runtime requirements. A package version existing
+on npm is not a verified player/base release. There is no bundled release list:
+unknown/missing published contracts block native mutations and deployment. Existing pure
 source/UI work may continue with installed contracts and an explicit
 `native compatibility unverified` limitation.
 

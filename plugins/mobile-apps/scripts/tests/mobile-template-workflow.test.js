@@ -49,8 +49,8 @@ test('JavaScript updates retain approval and audit safeguards without native bum
   ]) assert.ok(updates.includes(`\`${checkpoint}\``), checkpoint);
 });
 
-test('creation resolves a reviewed immutable release before planning or data mutations', () => {
-  assert.match(create, /No reviewed release means `BLOCKED` before scaffolding or data-platform mutations/);
+test('creation resolves immutable published package metadata before planning or data mutations', () => {
+  assert.match(create, /Missing or incompatible published package metadata means `BLOCKED` before scaffolding or data-platform mutations/);
   assert.match(create, /mobile-template-lifecycle\.js acquire/);
   assert.match(create, /Separately approve dependency installation/);
   assert.match(create, /Never run acquisition over a non-empty directory/);
@@ -58,7 +58,10 @@ test('creation resolves a reviewed immutable release before planning or data mut
   assert.match(create, /`app\.json` byte-for-byte/);
   assert.match(create, /project-rooted aliases/);
   assert.doesNotMatch(create, /npx degit|template#main/);
-  assert.match(lifecycle, /initially has \*\*no releases and no default\*\*/);
-  assert.match(lifecycle, /not an upstream service/);
+  assert.match(lifecycle, /no plugin-owned release catalogue/);
+  assert.match(lifecycle, /host's `compatibility\/current\.json` owns/);
+  assert.match(updates, /npm outdated --json --depth=0/);
+  assert.match(updates, /--host-version "<exact-host-version>"/);
+  assert.doesNotMatch(updates, /--release "<release-id>"|empty production catalogue/);
   assert.match(lifecycle, /Per-customer optional-permission selection during wrapping\s+is not part/);
 });

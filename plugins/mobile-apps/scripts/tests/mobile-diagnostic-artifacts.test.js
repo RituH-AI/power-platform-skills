@@ -10,7 +10,7 @@ const {
   loadDiagnosticArtifacts, resolveDiagnosticProject, planDiagnosticUpdate, summary,
   assertOnlineOnly, parseAndroidPlayerMetadata, acquireDiagnosticTemplate,
 } = require('../lib/mobile-diagnostic-artifacts');
-const { readCatalog, selectRelease } = require('../lib/mobile-release');
+const { selectRelease } = require('../lib/mobile-release');
 const { writeJson, readJson, modifyJson, writeProject, fixtureRelease, addDependency, PLUGIN_ROOT } = require('./helpers/mobile-release-fixture');
 
 const HOST = '@microsoft/power-apps-native-host';
@@ -214,8 +214,8 @@ test('explicit immutable local selection verifies real package CLI and lock with
     assert.equal(fs.existsSync(call.cwd), false);
   }
   assert.doesNotMatch(JSON.stringify(result), new RegExp(f.root));
-  assert.equal(readCatalog().defaultRelease, null);
-  assert.throws(() => selectRelease(), /No verified/);
+  assert.equal(fs.existsSync(path.join(PLUGIN_ROOT, 'shared/mobile-releases.json')), false);
+  assert.throws(() => selectRelease(), /exact stable/);
   assert.equal(fs.readdirSync(process.cwd()).some((name) => name.startsWith('.mobile-artifact-inspection-')), false);
 });
 
@@ -461,7 +461,7 @@ test('private source-version inspection artifacts are never relabeled as the req
   const destination = path.join(f.root, 'must-not-create');
   assert.throws(() => acquireDiagnosticTemplate(destination, f.file, f.options), /upgrade-inspection-only/);
   assert.equal(fs.existsSync(destination), false);
-  assert.throws(() => selectRelease(), /No verified/);
+  assert.throws(() => selectRelease(), /exact stable/);
 });
 
 test('source-version scope reuses exact host archives but requires a private inspection template and no stale lock', (t) => {
@@ -494,7 +494,7 @@ test('controlled private targets preserve real identities, provenance and the AP
   const destination = path.join(f.root, 'must-not-scaffold');
   assert.throws(() => acquireDiagnosticTemplate(destination, f.file, f.options), /upgrade-inspection-only/);
   assert.equal(fs.existsSync(destination), false);
-  assert.equal(readCatalog().defaultRelease, null);
+  assert.equal(fs.existsSync(path.join(PLUGIN_ROOT, 'shared/mobile-releases.json')), false);
 });
 
 test('controlled private planning uses migration source major even when the host is already updated', (t) => {
@@ -748,8 +748,10 @@ test('published/default and deployment options cannot mix with diagnostic artifa
     'stage-diagnostic', '--project-root', 'fixture', '--diagnostic-artifacts', 'fixture.json',
   ]), /producer host CLI owns diagnostic migration writes/);
   for (const args of [
-    ['--default'], ['--diagnostic-artifacts', 'ignored', '--default'],
+    ['--diagnostic-artifacts', 'ignored', '--default'],
     ['--diagnostic-artifacts', 'ignored', '--release', 'fake'],
+    ['--diagnostic-artifacts', 'ignored', '--host-version', '1.0.0'],
+    ['--diagnostic-artifacts', 'ignored', '--template-version', '1.0.0'],
     ['--diagnostic-artifacts', 'ignored', '--platform', 'android', '--base-version', 'fake', '--base-fingerprint', 'fake'],
     ['--diagnostic-artifacts', 'ignored', '--requirements-only', '--project-root', '.'],
   ]) {
@@ -800,7 +802,7 @@ test('resolver and changed-file validator share the explicit diagnostic selectio
   const strict = spawnSync(process.execPath, [path.join(PLUGIN_ROOT, 'scripts/validate-mobile-files.js'),
     '--project-root', f.reference, '--file', 'package.json'], { encoding: 'utf8', cwd: f.root, env });
   assert.equal(strict.status, 2);
-  assert.match(strict.stderr, /No verified mobile releases/);
+  assert.match(strict.stderr, /exact installed production host/);
   const app = path.join(f.root, 'js-app');
   fs.cpSync(f.reference, app, { recursive: true });
   bindToBundle(f, app);

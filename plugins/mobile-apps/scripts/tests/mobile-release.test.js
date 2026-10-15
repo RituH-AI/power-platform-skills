@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
-  readCatalog, selectRelease, resolveProjectRelease, validateRelease, summarizeRelease,
+  selectRelease, resolveProjectRelease, validateRelease, summarizeRelease,
   readProjectRequirements, selectProjectRelease, readPlatformContext,
 } = require('../lib/mobile-release');
 const {
@@ -20,9 +20,9 @@ function blocked(result, message) {
   assert.doesNotMatch(result.stderr, /fixture-secret-do-not-echo/);
 }
 
-test('bundled policy starts empty and has no speculative default or release', () => {
-  assert.deepEqual(readCatalog(), { schemaVersion: 1, defaultRelease: null, releases: [] });
-  assert.throws(() => selectRelease(), /No verified mobile release.*maintainer/);
+test('production resolution has no bundled catalogue or speculative package selection', () => {
+  assert.equal(fs.existsSync(path.resolve(__dirname, '../../shared/mobile-releases.json')), false);
+  assert.throws(() => selectRelease(), /exact stable host or template package version/);
 });
 
 test('reusable fixtures deep-merge overrides and write a strictly resolvable synthetic project', (t) => {
@@ -178,7 +178,7 @@ test('summary rejects credentials and unsafe paths rather than publishing depend
       assert.doesNotMatch(error.message, /fixture-secret-do-not-echo/);
       return error.code === 'MOBILE_RELEASE_BLOCKED';
     });
-    writeJson(path.join(fixture.pluginRoot, 'shared/mobile-releases.json'), {
+    writeJson(path.join(fixture.pluginRoot, 'shared/fixture-contracts.json'), {
       schemaVersion: 1, defaultRelease: release.id, releases: [release],
     });
     blocked(runCli(fixture, ['--default']));

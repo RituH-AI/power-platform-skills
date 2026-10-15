@@ -8,7 +8,7 @@ This file provides guidance to AI Agents when working with the **mobile-app** pl
 
 A plugin for building and deploying **Power Apps code apps that run as native mobile + web apps** using Expo + React Native + TypeScript. Connects to Power Platform via connectors using the standard `pa app add data-source` workflow.
 
-`/create-mobile-app` selects an exact reviewed template package, acquires it only into a new/empty folder after approval, installs its lockfile after separate approval, then validates and prepares it. Existing fresh installed folders must match that release. See [mobile-release-lifecycle.md](shared/references/mobile-release-lifecycle.md); missing release evidence blocks native adoption.
+`/create-mobile-app` selects an exact published template package, acquires it only into a new/empty folder after approval, installs its lockfile after separate approval, then validates and prepares it. Existing fresh installed folders must match its package-owned host contract. See [mobile-release-lifecycle.md](shared/references/mobile-release-lifecycle.md); missing published compatibility metadata blocks native adoption.
 
 ## Local Development
 
@@ -32,7 +32,7 @@ hooks/                         ← Telemetry start hooks plus validators invoked
 
 ## Template source
 
-The bundled `template/` is retained for existing preparation/source tests. Runtime selection comes from the plugin-owned reviewed release policy, not that snapshot or npm `latest`. `/create-mobile-app` never copies it over a user's folder. After immutable acquisition and release validation, preparation applies these bounded edits:
+The bundled `template/` is retained for existing preparation/source tests. Runtime selection comes from the published host's compatibility profile and the matching immutable template metadata/lock, not a plugin-owned release array, bundled snapshot or independently chosen npm `latest` dependencies. `/check-updates` keeps npm outdated discovery and delegates migration writes to the published target host. `/create-mobile-app` never copies the bundled snapshot over a user's folder. After immutable acquisition and package validation, preparation applies these bounded edits:
 
 | Edit | Purpose |
 |---|---|

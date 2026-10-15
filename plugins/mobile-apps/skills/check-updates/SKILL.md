@@ -1,6 +1,6 @@
 ---
 name: check-updates
-description: Use when a Power Apps mobile project needs dependency updates, template migration, native-host repair, or an npm audit review. Offers a verified native release upgrade before individually approved JavaScript updates, with previews, validation, and rollback.
+description: Use when a Power Apps mobile project needs dependency updates, template migration, native-host repair, or an npm audit review. Uses published host compatibility and migration metadata before individually approved JavaScript updates, with previews, validation, and rollback.
 user-invocable: true
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebFetch, AskUserQuestion
 model: opus
@@ -17,8 +17,8 @@ lifecycle reference's immutable local **online-only Android test**, not a
 published release. Keep Step 1's plugin/version check and all approvals and
 checkpoints. In Step 2 use `mobile-template-lifecycle.js plan --project-root
 "<working_dir>" --diagnostic-artifacts "<manifest.json>"` instead of published
-source/default selection. The packed migration identifies the old source; an
-empty production catalogue still blocks ordinary invocations. Review the
+published-package selection. The packed migration identifies the old source;
+ordinary invocations never fall back to diagnostic archives. Review the
 returned manifest hash, major transition, known APK's supported counters, and
 untested iOS limitation. Use only the verified target-host CLI for migration
 writes after isolated-preview approval; it binds the bundle's local archives.
@@ -81,18 +81,25 @@ Before changing each **JavaScript-only** package in Steps 3-4, show a one-row ta
 
 **Telemetry checkpoint: `update_native_host_dependency`**
 
-Run this step even when the host is absent from `outdated.json`. A manual host update can leave an older template behind. Resolve the recorded source with `resolve-mobile-release.js --project-root "<working_dir>" --requirements-only`, select an explicit reviewed target (or inspect `--default`), then run:
+Run this step even when the host is absent from `outdated.json`. A manual host update can leave an older template behind. Read the recorded source with `resolve-mobile-release.js --project-root "<working_dir>" --requirements-only`; this reads app state and the installed host without a catalogue or registry lookup and does not authorize native changes.
+
+Keep `npm outdated --json --depth=0` as discovery. Review its `current`, `wanted`, and `latest` host versions and the user's requested supported npm channel; do not update every runtime package independently. Select one **exact stable published host version**. If the installed host is already current, still inspect that version for a pending template migration. `resolve-mobile-release.js --default` can inspect npm's default host channel, but it is not proof of Player or Wrap availability. Then run:
 
 ```bash
 node "${PLUGIN_ROOT}/scripts/mobile-template-lifecycle.js" plan \
-  --project-root "<working_dir>" --release "<release-id>"
+  --project-root "<working_dir>" --host-version "<exact-host-version>"
 ```
 
-No reviewed release/default, unknown or missing protected metadata, unavailable package, or unsupported CLI means `BLOCKED` for native adoption. Do not invent a version, use npm `latest`, or copy the plugin template as a fallback. Report the blocker and still offer the read-only direct-advisory audit; do not claim the update succeeded.
+Planning inspects published package archives with scripts disabled. It reads the host's compatibility profile/migration graph and finds the immutable template with matching recorded requirements and native fingerprints. It does not modify the app or execute package code. There is no separate hand-maintained release array.
 
-The planning boundary rejects an Expo/React Native, native runtime counter or
-fingerprint transition within the same host/template package major for production
-or scaffoldable diagnostic packages, and also for controlled private prerelease
+Missing protected metadata, unpublished packages, an unfinalized host migration, no matching published template, or an unsupported CLI means `BLOCKED` for native adoption. Do not invent versions, infer native counters from semver, independently install npm `latest`, or copy the plugin template as a fallback. Report the concrete blocker and still offer the read-only direct-advisory audit.
+
+For a patch/minor update with unchanged native requirements, no new Player or base release record is required. A native-changing update requires the host-owned migration and a matching Player for preview. Rely on the existing Player native-version mismatch check; it directs older apps to `/check-updates`. Do not add a routine Play Store/App Store lookup or block upgrade planning on store availability. Only inspect availability when it helps explain a specific mismatch; npm publication alone does not prove availability or a release date. Wrap performs its own selected-base compatibility and availability checks before deployment.
+
+The published planning boundary rejects native transitions without a host major
+and an unambiguous template migration. Package producers own version preparation;
+use actual published versions, never predicted majors. Diagnostic planning still
+requires a new host and template package major for its controlled private prerelease
 targets. Use their actual packed versions, never their source-version provenance.
 A previously verified `0.x` source-version inspection-only bundle reports the
 required future production major without pretending to be that release. Neither
@@ -110,13 +117,13 @@ Interpret the decision:
 ### Preview the entire change before approval
 
 1. Inspect the app's installed host documentation and supported CLI. Check for an active/interrupted upgrade journal **under `<working_dir>`**, never the process's unrelated cwd. Stop for documented recovery; do not delete a journal or reset template state.
-2. Show source/target template, host, Expo/RN, Android/iOS runtime and base/player versions, the coupled dependency changes, and required downloads/install scripts. Ask **Prepare isolated preview** or **Skip native release** (recommended). This only authorizes local rehearsal, not changes to the app. Skipping excludes all coupled packages from Steps 3-4.
+2. Show source/target template, host, Expo/RN, Android/iOS runtime requirements/fingerprints, the coupled dependency changes, and required downloads/install scripts. Report Player/base availability separately as verified or unknown; package metadata does not supply binary release evidence. Ask **Prepare isolated preview** or **Skip native release** (recommended). This only authorizes local rehearsal, not changes to the app. Skipping excludes all coupled packages from Steps 3-4.
 3. Capture a private local snapshot of the current app (including dirty/untracked app-owned files, instructions, lockfiles, configuration, permissions and absent-file state). Exclude `.git`, `node_modules`, generated native build output, and logs from the rehearsal copy. Do not follow symlinks outside the project or upload the snapshot. Stop if the copy cannot preserve the app safely. No Git reset/checkout/stash.
    Restore the preview's source dependencies from its unchanged lock using the
    reviewed install policy before resolving inherited TypeScript configuration.
    A missing source configuration is a preparation blocker; do not substitute
    target-reference `NODE_PATH` resolution for the source dependency context.
-4. Obtain the **exact reviewed target host** in a separate private reference installation, not by installing it into the old app's dependency graph. For a published release, reuse `mobile-template-lifecycle.js acquire --destination "<reference_dir>" --release "<release-id>"` with a new/empty directory, review lifecycle scripts, and restore that reference with strict `npm ci` from its packaged lock. Resolve it against the selected release before executing its host CLI. Diagnostic mode uses its already-verified reference instead. Read the installed host's actual `bin["upgrade-template"]` path and supported help; invoke that CLI with `--project "<preview_dir>" --dry-run` to preview one edge. The host owns the app's dependency edits and installation, including the section/spec recorded in the target's `managedDependencies`; an exact installed version does not authorize rewriting a reviewed range. Do not install a new host with incompatible peers into the old dependency set before previewing the coupled migration. Classify output: conflicts block application and need a reviewed resolution; other command failures block investigation. A nonzero preview is never automatically a clean plan.
+4. Obtain the **exact reviewed target host** in a separate private tooling installation, not by installing it into the old app's dependency graph. Use `mobile-template-lifecycle.js acquire --destination "<reference_dir>" --host-version "<exact-host-version>"` with a new/empty directory. It installs the exact host with lifecycle scripts disabled and checks its npm lock integrity and contained upgrade CLI. Review any required lifecycle scripts separately before approving their execution. This tooling folder is not a scaffolded app; do not run app admission against it or copy its lock over the customer app. Diagnostic mode uses its already-verified reference instead. Read the installed host's actual `bin["upgrade-template"]` path and supported help; invoke that CLI with `--project "<preview_dir>" --dry-run` to preview one edge. The host owns the app's dependency edits and installation, including the section/spec recorded in the target's `managedDependencies`; an exact installed version does not authorize rewriting a reviewed range. Do not install a new host with incompatible peers into the old dependency set before previewing the coupled migration. Classify output: conflicts block application and need a reviewed resolution; other command failures block investigation. A nonzero preview is never automatically a clean plan.
    Package override conflicts are blocking even when source patches apply. Show
    the retained override and proposed direct dependency, obtain approval for the
    exact resolution, and rerun the preview. Never silently remove customer pins

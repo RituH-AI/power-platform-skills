@@ -59,8 +59,8 @@ node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working
 ```
 
 Use its sanitized tuple as the shared resolved context for helpers/planners/builders.
-Unknown/missing records block native mutations; the initially empty policy is
-intentional, not permission to assume a release. Classify the intent, resolve
+Unknown/missing published contracts block native mutations, not permission to
+assume a runtime. No separate skills release list is required. Classify the intent, resolve
 the exact package and version from this app's inventory, confirm it is not
 runtime-banned, and verify input/output/storage constraints. The newest bundled
 template is never a runtime allowlist. Every “present” requirement below means

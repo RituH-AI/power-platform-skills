@@ -114,11 +114,11 @@ test('old apps are admitted by their release, not by a newer default release', (
 test('unknown, missing or malformed policy fails closed without reading template dependencies', (t) => {
   for (const mode of ['empty', 'missing', 'malformed']) {
     const fixture = createFixture(t);
-    const policy = path.join(fixture.pluginRoot, 'shared/mobile-releases.json');
+    const policy = path.join(fixture.pluginRoot, 'shared/fixture-contracts.json');
     if (mode === 'empty') writeJson(policy, { schemaVersion: 1, defaultRelease: null, releases: [] });
     if (mode === 'missing') fs.rmSync(policy);
     if (mode === 'malformed') fs.writeFileSync(policy, '{"fixture-secret-do-not-echo":');
-    blocked(runValidator(fixture), /verified mobile|mobile release policy/);
+    blocked(runValidator(fixture), /verified mobile|mobile release policy|Unable to verify package dependencies/);
   }
 });
 

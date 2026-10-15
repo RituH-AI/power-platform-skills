@@ -18,12 +18,13 @@ Start from the Power Platform mobile app template, then use the mobile-app
 skill to generate the app plan, data model, screens, native capabilities, and
 connector wiring.
 
-1. Select a verified release and create a new app from its immutable template:
+1. Select an exact published template version and create a new app from that immutable package:
 
     ```sh
-    node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --default
+    npm view @microsoft/power-apps-native-template dist-tags --json
+    node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --template-version "<exact-template-version>"
     node "${PLUGIN_ROOT}/scripts/mobile-template-lifecycle.js" acquire \
-      --release "<reviewed-release-id>" --destination ./my-mobile-app
+      --template-version "<exact-template-version>" --destination ./my-mobile-app
     cd my-mobile-app
     npm ci
     ```
@@ -34,12 +35,13 @@ connector wiring.
     a non-empty target. Use existing npm user/environment authentication; it
     does not provision registry credentials.
 
-    **Release gate:** the reviewed policy currently contains no release/default.
-    These commands therefore block until maintainers verify matching template,
-    host, native dependencies, Android/iOS bases, and available players. Do not
-    substitute `latest`, a Git branch, or the bundled template to bypass this
-    check. Existing source-only editing remains possible without claiming native
-    compatibility. See [the lifecycle contract](shared/references/mobile-release-lifecycle.md).
+    **Package compatibility:** the helpers inspect published host/template metadata
+    and the immutable template lock, not a manually populated skills release list.
+    They check exact package integrity, native requirements and dependency
+    inventory. Missing/unfinalized published contracts remain blockers. Player
+    and Wrap availability are reported separately; npm publication does not
+    establish either. Do not substitute a Git branch or bundled snapshot.
+    See [the lifecycle contract](shared/references/mobile-release-lifecycle.md).
 
     An explicitly requested online-only Android test may instead select immutable
     local archives with `--diagnostic-artifacts "<manifest.json>"`, following

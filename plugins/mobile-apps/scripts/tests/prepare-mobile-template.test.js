@@ -201,7 +201,7 @@ test('scaffold validation uses preparation writes, not later generator output', 
   // can still be tested, but its package write must not bypass native admission.
   const packageValidation = validate(['package.json']);
   assert.strictEqual(packageValidation.status, 2, packageValidation.stderr);
-  assert.match(packageValidation.stderr, /release/i);
+  assert.match(packageValidation.stderr, /package-lock\.json/i);
   const manualFiles = [...prepared.writtenFiles.filter((file) => file !== 'package.json'), 'memory-bank.md'];
   const valid = validate(manualFiles);
   assert.strictEqual(valid.status, 0, valid.stderr);

@@ -8,8 +8,8 @@ const { spawnSync } = require('node:child_process');
 const PLUGIN_ROOT = path.resolve(__dirname, '../../..');
 const HOST = '@microsoft/power-apps-native-host';
 
-// Synthetic test records only. They are never inserted into the bundled policy
-// and do not assert publication, compatibility, or real-device verification.
+// Synthetic injected contracts only; they never populate a shipped catalogue
+// or assert publication, compatibility, or real-device verification.
 function fixtureRelease(number = 1) {
   const version = `${number}.0.0`;
   const dependencies = { [HOST]: `^${version}`, expo: version, 'react-native': version, react: version, 'expo-haptics': version };
@@ -126,7 +126,26 @@ function createFixture(t, { release = fixtureRelease(), catalog = { schemaVersio
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(PLUGIN_ROOT, file), target);
   }
-  writeJson(path.join(pluginRoot, 'shared/mobile-releases.json'), catalog);
+  writeJson(path.join(pluginRoot, 'shared/fixture-contracts.json'), catalog);
+  // Isolate the old inventory/CLI tests from npm. Package-source tests exercise
+  // the real registry/archive reader separately; no runtime override is added.
+  fs.writeFileSync(path.join(pluginRoot, 'scripts/lib/mobile-published-packages.js'), `
+    'use strict';
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const contracts = () => JSON.parse(fs.readFileSync(path.join(__dirname, '../../shared/fixture-contracts.json'), 'utf8'));
+    const release = () => require('./mobile-release');
+    module.exports = {
+      createSource: () => ({ defaultVersion: () => contracts().defaultRelease }),
+      selectPublishedContract: id => release().selectRelease(id, contracts()),
+      selectTemplateContract: id => release().selectRelease(id, contracts()),
+      readSourceRequirements: root => ({
+        ...release().summarizeRelease(release().selectProjectRelease(root, contracts())),
+        validationScope: 'requirements-only',
+      }),
+      projectContract: root => release().resolveProjectRelease(root, contracts()),
+    };
+  `);
   writeProject(projectRoot, release);
   return { directory, pluginRoot, projectRoot, release, catalog };
 }

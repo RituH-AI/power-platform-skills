@@ -29,7 +29,7 @@ and summary.
 
 ## Verified fresh-template working-directory mode
 
-Read [mobile-release-lifecycle.md](../../shared/references/mobile-release-lifecycle.md). Select an explicit reviewed release with `resolve-mobile-release.js --release "<release-id>"` (or inspect `--default`). No reviewed release means `BLOCKED` before scaffolding or data-platform mutations. npm `latest`, the plugin's bundled snapshot, and a mutable Git branch are not compatibility evidence.
+Read [mobile-release-lifecycle.md](../../shared/references/mobile-release-lifecycle.md). Discover published template versions through npm, select an exact stable version, and inspect it with `resolve-mobile-release.js --template-version "<exact-template-version>"`. Missing or incompatible published package metadata means `BLOCKED` before scaffolding or data-platform mutations. The helper checks the immutable template against its published host contract; there is no plugin-owned release list. npm channel names, the plugin's bundled snapshot, and a mutable Git branch are not compatibility evidence. Report Player availability separately; if its native runtime differs, offer an explicitly selected compatible template for the new app rather than promising the latest package can run in that Player.
 
 Only when the user explicitly supplies `--diagnostic-artifacts "<manifest.json>"`
 for a local test, follow the lifecycle's separate artifact inspection/acquisition
@@ -46,9 +46,9 @@ If the selected package is `upgrade-inspection-only`, stop before acquisition:
 it supports existing-app diagnostic upgrade inspection, not creation. Never
 reconstruct a template or copy its reference staging source/lock to bypass this.
 
-For a new/empty target, offer **Acquire reviewed template** or **Cancel**. After explicit approval, run `mobile-template-lifecycle.js acquire --release "<release-id>" --destination "<working_dir>"`. It verifies the immutable package and metadata before using the package's creation CLI. Separately approve dependency installation with the shipped lockfile (`npm ci`); use existing registry authentication, never print/provision credentials here. Do not fall back to `degit` or copy a bundled template on failure.
+For a new/empty target, offer **Acquire reviewed template** or **Cancel**. After explicit approval, run `mobile-template-lifecycle.js acquire --template-version "<exact-template-version>" --destination "<working_dir>"`. It verifies the immutable package and metadata before using the package's creation CLI. Separately approve dependency installation with the shipped lockfile (`npm ci`); use existing registry authentication, never print/provision credentials here. Do not fall back to `degit` or copy a bundled template on failure.
 
-An existing **fresh installed** template may be used only after `resolve-mobile-release.js --project-root "<working_dir>" --release "<release-id>"` succeeds. Preserve its shipped instructions and all compatibility metadata. Never run acquisition over a non-empty directory or adopt an already-created app through this gate.
+An existing **fresh installed** template may be used only after `resolve-mobile-release.js --project-root "<working_dir>" --template-version "<exact-template-version>"` succeeds. Preserve its shipped instructions and all compatibility metadata. Never run acquisition over a non-empty directory or adopt an already-created app through this gate.
 
 Use these markers:
 

@@ -56,23 +56,24 @@ native inventory; never use the newest bundled template as its runtime allowlist
 node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working_dir>"
 ```
 
-Then obtain the **actual intended base version and fingerprint** for each target
+Then obtain the **actual intended base version, native runtime version and fingerprint** for each target
 from the selected deployment target's verifiable metadata. Do not silently
 substitute the policy's expected values, assume “latest”, or claim a player/base
 is available because its package exists on npm. Missing selection is a blocker.
-If the target cannot expose both values, STOP; a version label alone does not
+If the target cannot expose these values, STOP; a version label alone does not
 prove matching native runtime content.
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working_dir>" --platform android --base-version "<actual-intended-android-base-version>" --base-fingerprint "<actual-intended-android-base-fingerprint>"
-node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working_dir>" --platform ios --base-version "<actual-intended-ios-base-version>" --base-fingerprint "<actual-intended-ios-base-fingerprint>"
+node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working_dir>" --platform android --base-version "<actual-intended-android-base-version>" --base-fingerprint "<actual-intended-android-base-fingerprint>" --base-runtime-version "<actual-intended-android-runtime-version>"
+node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working_dir>" --platform ios --base-version "<actual-intended-ios-base-version>" --base-fingerprint "<actual-intended-ios-base-fingerprint>" --base-runtime-version "<actual-intended-ios-runtime-version>"
 ```
 
-Every resolver invocation must succeed. Unknown/missing release or base records
-STOP before build/push, including when the policy is intentionally empty.
+Every resolver invocation must succeed. Unknown/missing package contracts or base metadata
+STOP before build/push. npm publication does not attest regional base availability;
+that selection and publication check belongs to Wrap, not a skills catalogue.
 Each deployment check requires `--platform`, `--base-version`, and
-`--base-fingerprint` together. The fingerprint must exactly match the verified
-release's platform fingerprint; a missing or mismatched fingerprint blocks.
+`--base-fingerprint` together, plus `--base-runtime-version`. The native runtime
+and fingerprint must exactly match the published host contract; a missing or mismatched fingerprint blocks.
 `--requirements-only` is planning-only and cannot authorize deployment.
 There is no `deploy without compatibility` override. A successful web preview,
 Metro run, native import, or Hermes magic check is not evidence of native

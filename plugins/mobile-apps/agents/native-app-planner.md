@@ -176,11 +176,11 @@ node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working
 ```
 
 Carry the sanitized resolved context unchanged to every architect, screen
-planner, revision, and downstream builder. An empty policy is intentional and
-blocks native mutations, not evidence that every package is supported.
+planner, revision, and downstream builder. Missing published compatibility
+metadata blocks native mutations; it is not evidence that every package is supported.
 Inspect `nativePackages` for canonical `node_modules`-relative package paths
 and exact reviewed versions, including nested native dependencies. Inspect
-`managedDependencies` for reviewed dependency declarations. These are policy
+`managedDependencies` for published host dependency declarations. These are package
 metadata, not absolute project paths, raw manifests, or lockfile download URLs.
 Do not collapse distinct nested package versions into a name-only allowlist.
 Planning-only `--requirements-only` output cannot authorize native mutation.

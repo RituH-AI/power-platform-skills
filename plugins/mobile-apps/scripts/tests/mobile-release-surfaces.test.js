@@ -89,7 +89,8 @@ test('deploy checks both actual intended base versions and fingerprints before b
   assert.match(source, /version label alone does not[\s\S]{0,60}prove matching native runtime content/);
   assert.match(source, /missing or mismatched fingerprint blocks/);
   assert.match(source, /requirements-only[\s\S]{0,70}cannot authorize deployment/);
-  assert.match(source, /Unknown\/missing release or base records[\s\S]{0,120}STOP/);
+  assert.match(source, /Unknown\/missing package contracts or base metadata[\s\S]{0,120}STOP/);
+  assert.match(source, /--base-runtime-version/);
   assert.match(source, /no `deploy without compatibility` override/);
   assert.match(source, /Re-run Step 1\.2[\s\S]{0,160}fingerprints before this push/);
   assert.match(source, /Hermes magic bytes[\s\S]{0,180}compatibility/);
@@ -247,8 +248,7 @@ test('explicit local diagnostics are consistently scoped without promoting produ
   for (const helper of nativeHelpers) {
     assert.match(read(`skills/add-native/${helper}/SKILL.md`), /--diagnostic-artifacts/, helper);
   }
-  const policy = JSON.parse(read('shared/mobile-releases.json'));
-  assert.deepEqual(policy, { schemaVersion: 1, defaultRelease: null, releases: [] });
+  assert.equal(fs.existsSync(path.join(pluginRoot, 'shared/mobile-releases.json')), false);
   const lifecycle = read('shared/references/mobile-release-lifecycle.md');
   assert.match(lifecycle, /source manifest[\s\S]{0,120}not evidence of a matching binary/);
   assert.match(lifecycle, /actual APK/);
@@ -293,7 +293,7 @@ test('upgrade skills reuse the verified external host CLI rather than duplicatin
     assert.match(source, /producer fix/);
     assert.match(source, /Player.build scripts|Player-build scripts/);
   }
-  assert.match(skill, /separate private reference installation/);
+  assert.match(skill, /separate private tooling installation/);
   assert.match(skill, /not by installing it into the old app's dependency graph/);
   assert.match(skill, /same verified reference host CLI/);
   assert.match(skill, /never[\s\S]{0,90}delete the app's lock or `node_modules`/);

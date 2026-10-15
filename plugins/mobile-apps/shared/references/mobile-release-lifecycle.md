@@ -1,9 +1,11 @@
 # Mobile release compatibility
 
-Use one reviewed release set for creation, native changes, upgrades, previews,
-and deployment. A newer npm package, matching Hermes header, or successful
-TypeScript build does not prove that a player or wrapped binary contains the
-same native runtime.
+Use package-owned compatibility for creation, native changes, upgrades, previews,
+and deployment. npm identifies published versions; the selected host supplies its
+template/native requirements and migrations. The matching immutable template
+supplies dependency declarations and locked native versions. A newer npm package,
+matching Hermes header, or successful TypeScript build does not prove that a
+player or wrapped binary contains the same native runtime.
 
 ## Resolve before native work
 
@@ -30,39 +32,58 @@ protected compatibility fields for release selection, and preserve the
 remaining app-owned configuration. Tenant configuration is not native release
 evidence and must not be included in sanitized release/telemetry summaries.
 
-`--requirements-only` resolves the recorded source for **upgrade planning**,
-even when installed dependencies have drifted. It is not a native admission or
+`--requirements-only` reads the recorded source and installed host identity for
+**upgrade planning**, even when installed dependencies have drifted. It does not
+query npm or require a historical release record. It is not a native admission or
 deployment check. Source/UI-only work can continue without claiming native
 compatibility; adding or updating dependencies still needs explicit validation.
 
-## Reviewed release policy
+## Published package selection
 
-[`mobile-releases.json`](../mobile-releases.json) is this plugin's own reviewed
-policy, not an upstream service or a manifest emitted by npm or the host CLI.
-It initially has **no releases and no default**. Creation, native dependency
-admission, native upgrades, and deployment therefore stop with a release-evidence
-block. Do not work around this with `latest`, a bundled snapshot, implicit local overrides,
-or an app-authored “verified” flag. This is intentional until a maintainer has
-verified an actual release set.
+There is no plugin-owned release catalogue to populate or republish. Keep
+`npm outdated --json --depth=0` for update discovery and select an exact stable
+host version from the supported npm channel. The resolver uses npm's configured
+registry/authentication without reading or printing credentials. It downloads
+archives with scripts disabled into temporary private storage, checks published
+integrity and contained archive paths, reads package metadata without executing
+package code, and removes its scratch files.
+Template archives require sha512 integrity. Historical host packages that only
+publish npm's SHA-1 shasum retain verification against that exact registry digest;
+the helper never treats a missing hash as success.
 
-Each record binds an exact template package version and npm integrity to its
-template/runtime requirements, managed dependency declarations, installed native
-package inventory (including nested native dependencies), and Android/iOS base
-and player versions/fingerprints. Evidence references must be public and contain
-no credentials. Maintainers must verify publication, exact package content,
-native inventory, matching binaries, store/distribution availability, and device
-validation on **both platforms** before adding a record or promoting a default.
-A schema-valid record alone is not evidence that those checks happened.
+The published host's `compatibility/current.json` owns target template/runtime
+requirements, managed dependencies and migration references. A matching published
+template's protected metadata and packaged lock provide the immutable native
+inventory, including nested packages. The app's own lock is checked against that
+reference; it is not allowed to declare new native packages compatible with a
+fixed binary. Missing or malformed metadata, fingerprint disagreement, an
+unpublished/unfinalized target, and dependency drift remain blockers.
 
-Inspect a reviewed target without changing the app:
+Inspect a target without changing the app:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --release "<release-id>"
+node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --host-version "<exact-host-version>"
 ```
+
+For creation, inspect `--template-version "<exact-template-version>"` and acquire
+that immutable package only after approval. For an upgrade, use
+`mobile-template-lifecycle.js plan --project-root "<working_dir>" --host-version
+"<exact-host-version>"`, then acquire the approved host into a separate empty
+tooling directory. The host CLI, not the skill, owns migration writes and install
+validation. Never independently upgrade every native dependency to npm `latest`.
+
+Package compatibility and binary availability are separate. A same-runtime
+patch/minor host update needs no new Player/base record. Native changes need a
+host major, a template migration and matching native binaries before those
+features can run. Compare actual Player metadata when available; do not invent
+store availability or a future release date. Wrap must supply and verify its
+selected base's version, native runtime and fingerprint before deployment.
+The resolver reports binary availability as **not checked**, not success.
 
 Do not invent missing package metadata or CLI flags. The template CLI's
 `--manifest` reports package identity and template/runtime requirements, not
-release readiness or an entire native dependency inventory.
+store readiness. Package inspection uses npm and `tar`; native build tools are
+not prerequisites.
 
 ## Explicit local diagnostic artifacts (not a release)
 
@@ -275,7 +296,7 @@ After the user approves acquisition and installation, use:
 
 ```bash
 node "${PLUGIN_ROOT}/scripts/mobile-template-lifecycle.js" acquire \
-  --release "<release-id>" --destination "<new-empty-directory>"
+  --template-version "<exact-template-version>" --destination "<new-empty-directory>"
 ```
 
 The helper installs the exact template package in a private temporary directory
@@ -299,22 +320,23 @@ decision helper runs even if `npm outdated` reports no host update:
 
 ```bash
 node "${PLUGIN_ROOT}/scripts/mobile-template-lifecycle.js" plan \
-  --project-root "<working_dir>" --release "<release-id>"
+  --project-root "<working_dir>" --host-version "<exact-host-version>"
 ```
 
 An equal supported target is valid. A stale template still needs migrations
 when the host is already at target; a host-only repair does not require template
-advancement. Reject lower target host or template package versions relative to
-the recorded source release even when the installed host has drifted downward.
+advancement. Reject lower target host versions or recorded template/native
+versions; never infer an old template package version from a runtime counter.
 Runtime counter or fingerprint changes require a published template migration.
 No independent host, Expo, React Native, controls, or other native package bumps
 are permitted.
 
-At planning, a runtime counter/fingerprint or Expo/React Native transition must
-target a **new host and template package major**, not only new runtime counters.
+At published planning, a native transition must target a **new host major** and
+a host-owned template migration, not only new runtime counters. Producers own
+the coordinated host/template release-version rules.
 Published host and template identities require exact stable versions; prerelease
-hosts are restricted to the diagnostic contract. Scaffoldable local diagnostics and
-controlled private prerelease targets must also satisfy this transition rule.
+hosts are restricted to the diagnostic contract. Scaffoldable local diagnostics and controlled private prerelease targets require
+a new host and template package major for a native transition.
 Previously verified `0.x` source-version `upgrade-inspection-only` artifacts
 instead report the required production major and cannot claim to satisfy that
 production release requirement.
@@ -327,10 +349,11 @@ output; never treat every failure as a clean preview or apply it to the real app
 
 Keep the target CLI outside the source dependency graph. For a published
 release, reuse `mobile-template-lifecycle.js acquire` with a new private
-reference directory and the selected release ID, then restore the packaged
-lock with `npm ci --strict-peer-deps --no-legacy-peer-deps --no-force` after
-reviewing install scripts. Verify that reference against the selected release
-and resolve its installed host's actual `bin["upgrade-template"]` path.
+tooling directory and `--host-version "<exact-host-version>"`. The helper installs
+that exact host with scripts disabled, verifies its registry/lock integrity,
+and resolves its installed host's actual `bin["upgrade-template"]` path.
+Review any required lifecycle scripts before separately approving them.
+The tooling directory is not a scaffold and its lock never replaces the app lock.
 Use that same verified CLI with `--project` for both the disposable rehearsal
 and the separately approved real application. Diagnostic mode already supplies
 its immutable reference. Neither path preinstalls an incompatible target host

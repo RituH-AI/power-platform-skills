@@ -1,12 +1,11 @@
 'use strict';
 
-// This is a plugin-owned, maintainer-reviewed policy, not an npm release feed.
-// An entry is admitted only after its template, host, players and bases are verified.
+// Package-owned compatibility is the default. Explicit contracts remain an
+// injection seam for the validators' synthetic tests, not an app-authored policy.
 const fs = require('node:fs');
 const path = require('node:path');
 const net = require('node:net');
 
-const CATALOG_PATH = path.resolve(__dirname, '../../shared/mobile-releases.json');
 const HOST = '@microsoft/power-apps-native-host';
 const SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
 const CORE = [HOST, 'expo', 'react-native', 'react'];
@@ -55,6 +54,11 @@ function exactVersion(value, stable = false) {
     && (!match[4] || match[4].split('.').every((part) => !/^\d+$/.test(part) || part === '0' || part[0] !== '0')));
 }
 
+function validHostIntegrity(value) {
+  return typeof value === 'string'
+    && /^(?:sha512-[A-Za-z0-9+/]{86}==|sha1-[A-Za-z0-9+/]{27}=)$/.test(value);
+}
+
 function safePackageName(name) {
   return typeof name === 'string' && name.length <= 214 && PACKAGE_NAME.test(name)
     && !name.split('/').some((part) => part === '.' || part === '..' || part === 'node_modules');
@@ -99,10 +103,17 @@ function publicEvidence(value) {
 }
 
 function validateRelease(release) {
+  const published = release?.source === 'npm';
   requireValue(keys(release, [
     'id', 'template', 'templateVersion', 'nativeRuntimeVersions', 'managedDependencies',
-    'nativePackages', 'platforms', 'evidence',
+    'nativePackages', 'platforms', ...(published ? ['source', 'host'] : ['evidence']),
   ]), 'Invalid reviewed release schema; ask a maintainer to repair the release policy.');
+  if (published) {
+    requireValue(keys(release.host, ['package', 'version', 'integrity'])
+      && release.host.package === HOST && exactVersion(release.host.version, true)
+      && validHostIntegrity(release.host.integrity),
+    'Invalid published host identity or integrity.');
+  }
   requireValue(typeof release.id === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(release.id), 'Invalid reviewed release id.');
   requireValue(keys(release.template, ['package', 'version', 'integrity'])
     && release.template.package === '@microsoft/power-apps-native-template'
@@ -132,22 +143,26 @@ function validateRelease(release) {
   requireValue(CORE.every((name) => Object.hasOwn(release.nativePackages, `node_modules/${name}`)), 'Reviewed native inventory must include the host, expo, react-native and react.');
   requireValue(exactVersion(release.nativePackages[`node_modules/${HOST}`], true),
     'Reviewed host must have an exact stable version; prerelease hosts require the separate diagnostic contract.');
+  requireValue(!published || release.nativePackages[`node_modules/${HOST}`] === release.host.version,
+    'Published host identity differs from the native inventory.');
   for (const name of managedNames) {
     requireValue(!isRuntimePackage(name) || Object.hasOwn(release.nativePackages, `node_modules/${name}`), 'Reviewed native inventory is missing a managed runtime dependency.');
   }
-  requireValue(keys(release.platforms, ['android', 'ios']), 'Reviewed release needs both Android and iOS verification.');
+  requireValue(keys(release.platforms, ['android', 'ios']), 'The host contract must describe Android and iOS requirements.');
   for (const platform of Object.values(release.platforms)) {
-    requireValue(keys(platform, ['fingerprint', 'base', 'player'])
+    requireValue(keys(platform, published ? ['fingerprint'] : ['fingerprint', 'base', 'player'])
       && typeof platform.fingerprint === 'string'
       && /^[a-zA-Z0-9][a-zA-Z0-9._:+-]{0,255}$/.test(platform.fingerprint), 'Invalid reviewed platform fingerprint.');
-    for (const target of ['base', 'player']) {
+    for (const target of published ? [] : ['base', 'player']) {
       requireValue(keys(platform[target], ['version', 'evidence'])
         && typeof platform[target].version === 'string' && TOKEN.test(platform[target].version)
         && publicEvidence(platform[target].evidence), 'Reviewed base and player need versions and public HTTPS verification evidence.');
     }
   }
-  requireValue(Array.isArray(release.evidence) && release.evidence.length > 0
-    && release.evidence.every(publicEvidence), 'Reviewed release needs public HTTPS publication and device-validation evidence.');
+  if (!published) {
+    requireValue(Array.isArray(release.evidence) && release.evidence.length > 0
+      && release.evidence.every(publicEvidence), 'Reviewed release needs public HTTPS publication and device-validation evidence.');
+  }
   return release;
 }
 
@@ -176,11 +191,8 @@ function readJson(filePath, label) {
   }
 }
 
-function readCatalog() {
-  return validateCatalog(readJson(CATALOG_PATH, 'bundled mobile release policy'));
-}
-
-function selectRelease(id, catalog = readCatalog()) {
+function selectRelease(id, catalog) {
+  if (catalog === undefined) return require('./mobile-published-packages').selectPublishedContract(id);
   validateCatalog(catalog);
   requireValue(id === undefined || id === null || (typeof id === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(id)), 'Use a valid reviewed release id.');
   const selected = catalog.releases.find((release) => release.id === (id ?? catalog.defaultRelease));
@@ -480,7 +492,8 @@ function matchingProjectRequirements(metadata, catalog) {
   return candidates;
 }
 
-function selectProjectRelease(projectRoot, catalog = readCatalog()) {
+function selectProjectRelease(projectRoot, catalog) {
+  if (catalog === undefined) return require('./mobile-published-packages').readSourceRequirements(projectRoot);
   reviewedProjectCatalog(catalog);
   // Read-only update planning must survive host/dependency drift. This identifies
   // the source template's requirements, not an admitted installation or deployment.
@@ -502,13 +515,19 @@ function selectProjectRelease(projectRoot, catalog = readCatalog()) {
   return candidates[0];
 }
 
-function resolveProjectRelease(projectRoot, catalog = readCatalog(), platformContext = readPlatformContext()) {
-  reviewedProjectCatalog(catalog);
+function resolveProjectRelease(projectRoot, catalog, platformContext = readPlatformContext()) {
+  if (catalog !== undefined) reviewedProjectCatalog(catalog);
   requireValue(keys(platformContext, ['os', 'cpu', 'libc']) && typeof platformContext.os === 'string'
     && /^[a-z0-9_-]+$/.test(platformContext.os) && typeof platformContext.cpu === 'string'
     && /^[a-z0-9_-]+$/.test(platformContext.cpu) && [null, 'glibc', 'musl'].includes(platformContext.libc),
   'A valid installation platform context is required.');
   const project = readProject(projectRoot, platformContext);
+  if (catalog === undefined) {
+    const release = require('./mobile-published-packages').projectContract(projectRoot, project);
+    validateRelease(release);
+    validateProjectAgainstRelease(project, release);
+    return release;
+  }
   const candidates = matchingProjectRequirements(project.metadata, catalog);
   const matches = [];
   let mismatch;
@@ -527,6 +546,7 @@ function resolveProjectRelease(projectRoot, catalog = readCatalog(), platformCon
 }
 
 function summarizeRelease(release) {
+  if (release?.validationScope === 'requirements-only') return { ...release };
   validateRelease(release);
   // Only reviewed policy metadata: canonical package-relative inventory and
   // safe declarations are useful to planners. Never include project config,
@@ -542,17 +562,21 @@ function summarizeRelease(release) {
     nativePackages: { ...release.nativePackages },
     platforms: Object.fromEntries(['android', 'ios'].map((platform) => [platform, {
       fingerprint: release.platforms[platform].fingerprint,
-      base: { ...release.platforms[platform].base },
-      player: { ...release.platforms[platform].player },
+      ...(release.source !== 'npm' ? {
+        base: { ...release.platforms[platform].base },
+        player: { ...release.platforms[platform].player },
+      } : {}),
     }])),
-    evidence: [...release.evidence],
+    ...(release.source === 'npm'
+      ? { source: 'npm', host: { ...release.host }, binaryAvailability: 'not-checked' }
+      : { evidence: [...release.evidence] }),
   };
 }
 
 module.exports = {
-  readCatalog, selectRelease, resolveProjectRelease, validateRelease, summarizeRelease,
+  selectRelease, resolveProjectRelease, validateRelease, summarizeRelease,
   readProjectRequirements, selectProjectRelease,
   // Shared by the backwards-compatible write validator; not a release bypass.
   dependencySections, inspectInstalledPackages, isRuntimePackage, resolveInstalledDependency, readPlatformContext, npmAliasTarget,
-  readProject, validateProjectAgainstRelease, exactVersion, declarationSpec,
+  readProject, validateProjectAgainstRelease, exactVersion, declarationSpec, validHostIntegrity,
 };
