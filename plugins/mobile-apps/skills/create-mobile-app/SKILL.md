@@ -14,9 +14,19 @@ model: opus
 
 Top-level orchestrator. Owns the user-visible flow; delegates planning to the `native-app-planner` agent and per-domain mutation to dedicated `/add-*` skills.
 
+For every child skill handoff, pass the invocation-scoped
+[app-edit-routing.md](../../shared/references/app-edit-routing.md) context:
+`MOBILE_APP_ORCHESTRATING=1`, `orchestrator: create-mobile-app`, the absolute
+`working_dir`, current `phase`, and the exact approved scope/answers for
+implementation. Forward it through routers and native helpers; do not persist it
+or rely on an earlier shell export. The plan exists before the app is fully built,
+so children must use this context rather than mistake creation for a standalone
+edit. Design/configuration children still own any approval explicitly delegated
+to their phase; this marker never skips those gates.
+
 ## Workflow
 
-Resume/template checks → prerequisites → requirements (iOS + Android fixed) →
+Intent and creation-state checks → prerequisites → requirements (iOS + Android fixed) →
 rough plan preview → Gate 1 architecture (native capabilities, connectors,
 then data platform) → Gate 2 Dataverse model when selected → Gates 3 and 4
 screen graph/specifications → environment and template preparation → app
@@ -27,11 +37,17 @@ and summary.
 
 ---
 
-## Verified fresh-template working-directory mode
+## Fresh-template working-directory mode
 
-Read [mobile-release-lifecycle.md](../../shared/references/mobile-release-lifecycle.md). Discover published template versions through npm, select an exact stable version, and inspect it with `resolve-mobile-release.js --template-version "<exact-template-version>"`. Missing or incompatible published package metadata means `BLOCKED` before scaffolding or data-platform mutations. The helper checks the immutable template against its published host contract; there is no plugin-owned release list. npm channel names, the plugin's bundled snapshot, and a mutable Git branch are not compatibility evidence. Report Player availability separately; if its native runtime differs, offer an explicitly selected compatible template for the new app rather than promising the latest package can run in that Player.
+Only after confirming new-app intent through the state routing below, read [mobile-release-lifecycle.md](../../shared/references/mobile-release-lifecycle.md). Discover published template versions through npm, select an exact stable version, and inspect it with `resolve-mobile-release.js --template-version "<exact-template-version>"`. Missing or incompatible published package metadata means `BLOCKED` before scaffolding or data-platform mutations. The helper checks the immutable template against its published host contract; there is no plugin-owned release list. npm channel names, the plugin's bundled snapshot, and a mutable Git branch are not compatibility evidence. Report Player availability separately; if its native runtime differs, offer an explicitly selected compatible template for the new app rather than promising the latest package can run in that Player.
 
-Only when the user explicitly supplies `--diagnostic-artifacts "<manifest.json>"`
+**Fresh template required for creation.** If the working directory is not a fresh
+template, STOP creation and follow the state-specific routing below. Do not send
+an existing-app edit request to a new folder. Missing generated markers alone do
+not prove freshness: if the template is customized or its state is unclear, ask
+before proceeding. Only a request for a new app requires a fresh template folder.
+
+Only when the user explicitly supplies `--diagnostic-artifacts '<manifest.json>'`
 for a local test, follow the lifecycle's separate artifact inspection/acquisition
 path in place of published selection. Keep new/empty destination checks,
 acquisition/install approvals, customer instructions and telemetry checkpoints.
@@ -46,21 +62,42 @@ If the selected package is `upgrade-inspection-only`, stop before acquisition:
 it supports existing-app diagnostic upgrade inspection, not creation. Never
 reconstruct a template or copy its reference staging source/lock to bypass this.
 
-For a new/empty target, offer **Acquire reviewed template** or **Cancel**. After explicit approval, run `mobile-template-lifecycle.js acquire --template-version "<exact-template-version>" --destination "<working_dir>"`. It verifies the immutable package and metadata before using the package's creation CLI. Separately approve dependency installation with the shipped lockfile (`npm ci`); use existing registry authentication, never print/provision credentials here. Do not fall back to `degit` or copy a bundled template on failure.
+For a new/empty target, offer **Acquire reviewed template** or **Cancel**. After explicit approval, run `mobile-template-lifecycle.js acquire --template-version "<exact-template-version>" --destination '<working_dir>'`. It verifies the immutable package and metadata before using the package's creation CLI. Separately approve dependency installation with the shipped lockfile (`npm ci`); use existing registry authentication, never print/provision credentials here. Do not fall back to `degit` or copy a bundled template on failure.
 
-An existing **fresh installed** template may be used only after `resolve-mobile-release.js --project-root "<working_dir>" --template-version "<exact-template-version>"` succeeds. Preserve its shipped instructions and all compatibility metadata. Never run acquisition over a non-empty directory or adopt an already-created app through this gate.
+An existing **fresh installed** template may be used only after `resolve-mobile-release.js --project-root '<working_dir>' --template-version "<exact-template-version>"` succeeds. Preserve its shipped instructions and all compatibility metadata. Never run acquisition over a non-empty directory or adopt an already-created app through this gate.
 
-Use these markers:
+Resolve the original request before classifying project state. Apply this
+state-routing table once in Step 0, in the order below; file markers are
+supporting evidence, not user intent or approval.
 
 | State | Detection | Action |
 |---|---|---|
-| Fresh template | Required files and installed dependencies exist, created-app markers are absent, and the selected release resolves | Proceed using that sanitized release context. |
-| Template not installed | Fresh-template files exist but `node_modules/expo` is absent | Offer the approved `npm ci` install, then resolve the release. Stop for missing/mismatched lockfile; do not regenerate native pins. |
-| Already-created app | `memory-bank.md`, `native-app-plan.md`, `.datamodel-manifest.json`, or `src/generated/services/*.ts` exists | Use only the explicit resume path below, otherwise route to `/edit-app` or `/check-updates`. |
-| New/empty directory | No existing customer files | Offer immutable acquisition as above. |
-| Non-empty non-template | Required template files are missing | STOP: choose a separate empty target. Preserve every existing file. |
+| Creation continuation | Explicit creation-continuation intent or a valid current create handoff for this app, not a request to edit an existing app | Use Step 0's continuation path. Require matching unfinished creation progress and confirm the next phase before continuing; missing or conflicting progress requires clarification, not fresh scaffolding. |
+| Already-created app | Existing-app intent or confirmed app customizations/materialized state, even when generated markers are missing. `memory-bank.md`, `.datamodel-manifest.json`, and `src/generated/services/*.ts` can corroborate state, but do not select creation resume | STOP creation: never re-scaffold it. If the request changes this app, preserve the original request and execute the shared existing-app entry routing; invoke `/edit-app` only after **Full app integration**. If the user wants a separate new app, ask for a fresh template folder. |
+| Fresh template | Confirmed new-app intent and a confirmed uncustomized starter; `package.json`, `app.config.js`, `auth.config.json`, and `tamagui.config.ts` exist; `node_modules/expo` exists; no materialized app bindings, `memory-bank.md`, `.datamodel-manifest.json`, or generated Dataverse services. An approved creation plan and its planning artifacts are allowed | Proceed to Step 1 only when every condition is satisfied and the selected published package contract resolves. Missing generated markers alone do not establish freshness. |
+| Template not installed | Confirmed new-app intent and a confirmed uncustomized starter with the required template files, but `node_modules/expo` is absent | Offer the separately approved `npm ci` install from its shipped lock, then resolve the package contract. Stop for a missing/mismatched lock; do not provision registry credentials or regenerate native pins here. |
+| New/empty directory | Confirmed new-app intent after excluding existing-app work and creation continuation, with no existing customer files | Offer the immutable acquisition described above, then separately approve the shipped-lock installation. |
+| Not template | Confirmed new-app intent in a non-empty unsupported directory, after excluding existing-app work and creation continuation | STOP: preserve every file and select a separate empty target. Never re-scaffold existing work or copy a mutable bundled template. |
+| Unclear state or intent | New-app versus edit intent, customization, or creation progress cannot be established | Ask before selecting a workflow. Preserve the directory, plan, and history; do not default to fresh creation or resume. |
 
-This gate is intentionally simple: `/create-mobile-app` creates a new app from a fresh template. It does not adopt, repair, resume, or overwrite an already-created app.
+An approved `native-app-plan.md` alone is not a created-app marker. Creation
+writes it before template preparation, and `assertFreshTemplate` intentionally
+allows it. A plan alone also does not identify a safe resume phase: use current
+caller context and saved creation progress, or ask. Do not treat an unrelated or
+stale plan as approved for this request.
+
+`/create-mobile-app` creates from a confirmed fresh starter or continues an
+explicitly requested unfinished creation. It does not adopt, repair, overwrite,
+or resume a completed app just because a bank or plan exists.
+
+An already-created app is a routing boundary, not a reason to discard the
+user's edit request. Do not merely suggest `/edit-app` or ask the user to repeat
+the request. For a current-app feature request, execute
+[app-edit-routing.md](../../shared/references/app-edit-routing.md), then invoke
+`/edit-app` with the original request, absolute `working_dir`, and
+`entry_choice: full-integration` only when that choice is approved. Reported
+problems still route to `/debug-app`; dependency/template upgrades route to
+`/check-updates`.
 
 ---
 
@@ -95,6 +132,11 @@ This gate is intentionally simple: `/create-mobile-app` creates a new app from a
 
 ## Build documentation protocol
 
+This protocol applies after Step 0 selects fresh creation or an approved
+creation continuation. Routing an existing-app request elsewhere, asking for
+unclear intent, or declining creation does not create, reopen, or reset the
+creation plan or change its phase status.
+
 The run also writes a plan the user can read while it happens and keep afterwards:
 `<working_dir>/docs/create-app-plan.html`, rendered by
 [`scripts/app-docs.js`](${PLUGIN_ROOT}/scripts/app-docs.js) in the same Fluent format the
@@ -103,7 +145,7 @@ so a teammate opening the repo months later can see the environment, the approve
 and the screen plan without re-reading a transcript.
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" <command>
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' <command>
 ```
 
 | Command | Use |
@@ -134,12 +176,12 @@ the pattern each one follows:
 ```bash
 DOCS="${PLUGIN_ROOT}/scripts/app-docs.js"
 # 1. propose - the tab shows "Proposed - review this, then answer the prompt in your terminal"
-node "$DOCS" --working-dir "<working_dir>" set --section dataModel --json-file <tmp>/data-model.json --state proposed
-node "$DOCS" --working-dir "<working_dir>" step --id data-model --status active --note "Gate 2 — awaiting your approval"
+node "$DOCS" --working-dir '<working_dir>' set --section dataModel --json-file <tmp>/data-model.json --state proposed
+node "$DOCS" --working-dir '<working_dir>' step --id data-model --status active --note "Gate 2 — awaiting your approval"
 # 2. point the user at that tab, then ask the gate question
 # 3. on approval
-node "$DOCS" --working-dir "<working_dir>" set --section dataModel --json-file <tmp>/data-model.json --state approved
-node "$DOCS" --working-dir "<working_dir>" step --id data-model --status done --note "Gate 2 — approved"
+node "$DOCS" --working-dir '<working_dir>' set --section dataModel --json-file <tmp>/data-model.json --state approved
+node "$DOCS" --working-dir '<working_dir>' step --id data-model --status done --note "Gate 2 — approved"
 ```
 
 Pass a fresh `--note` when you close a gate. A note belongs to the status it was written with, so
@@ -184,47 +226,93 @@ all user-authored, so they are written to a file with the `Write` tool and passe
 **Every one of these calls is best-effort.** If `app-docs.js` fails, say nothing and carry on:
 the documentation must never gate, retry, or fail a build.
 
-**Mark the phase `failed` before you stop.** Every STOP in this skill is a terminal state the
-user has to act on, and the plan is probably still open in their browser. Without this the last
+**Mark the active creation phase `failed` before stopping on a creation error.**
+Step 0 routing exits leave existing creation history untouched. Once creation is
+underway, a STOP is a terminal state the user has to act on, and the plan is
+probably still open in their browser. Without this the last
 phase stays `active`, so the page keeps reloading and keeps reporting work in progress on a run
 that ended. A failed phase settles the page, so the final thing it shows names what stopped.
 
 **No argument switches this protocol off.** `--no-design` suppresses design previews and
 `--no-preview` does not exist (Step 2c). The plan is how an abandoned or failed run explains
-itself, so it is written on every path.
+itself, so it is written on every creation path after Step 0's routing decision.
 
 ---
 
-### Step 0 — Resume check + fresh-template gate
+### Step 0 — Intent routing + creation-state gate
 
 **Telemetry checkpoint: `validate_fresh_template`**
 
-If `$ARGUMENTS` includes a `--working-dir` (or the user names an existing directory), check whether `<working_dir>/memory-bank.md` exists.
+Before project reads or commands, bind the absolute `working_dir` through
+[app-working-directory.md](../../shared/references/app-working-directory.md).
+Apply the state-routing table above once. Classify the original request before
+considering a creation resume or testing freshness; do not derive the requested
+operation from the presence or absence of `memory-bank.md`.
 
-- **Bank present** → read it. Identify the highest-numbered completed step. Inform the user:
-  > "Found existing project '<name>' at `<dir>`. Steps 1–<N> already completed (last update <date>). Resume from Step <N+1>?"
-  Wait for confirmation. If the user says yes, jump to that step. Skip the wizard (Step 2) and re-use the values stored in the bank.
+**Existing-app changes leave this skill before resume handling.** Follow the
+table's existing-app handoff, preserving the original request and root, then
+return without entering Step 1 or modifying creation progress. Reported problems
+and dependency/template upgrades retain their matching workflows. If intent or
+customization is unclear, ask and wait; do not offer a creation resume merely
+because a bank exists.
 
-  **Reopen the build plan on resume.** A resume skips Step 2b, where the plan is created and
-  opened, so open `<working_dir>/docs/create-app-plan.html` in the browser yourself when it exists.
-  If the earlier run stopped on a failure, the plan still says so and has stopped reloading. Run
-  `node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" show`, and if it reports a `failedPhase`, reopen that phase before continuing:
+Only a confirmed **Fresh template** or explicit **Creation continuation**
+enters the creation workflow below. All other table outcomes stop or hand off
+without re-scaffolding, overwriting history, or running template preparation.
 
-  ```bash
-  node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id <failedPhase> --status active
-  ```
-- **Bank absent** → fresh project. Continue to Step 1.
-- **Bank present but corrupted** (missing required headings) → surface the parse error, ask the user whether to overwrite (lose history) or fix manually before proceeding.
+#### Fresh run
 
-The bank is the only resume mechanism. Do not infer resume state from `package.json` or `node_modules/` — those can lie.
+Require every condition in the Fresh-template row, including confirmed new-app
+intent and an uncustomized starter. The template/dependency failure rows apply
+only after that intent is established. An approved plan from the current
+creation is allowed; preparation stays in Step 5, not this read-only entry gate.
+Resolve the CLI below, then continue to Step 1.
 
-After the resume check, run the **fresh-template gate** from the section above. This is a create-only command:
+#### Creation continuation
 
-- If `memory-bank.md` exists and the user confirms resume, resume as documented above.
-- If any already-created-app marker exists and there is no approved resume path, STOP and offer `/edit-app` or a separate empty target.
-- If required template files are missing in a non-empty folder, STOP without modifying it.
-- For a new target or missing dependencies, follow the separate acquisition/install approvals above.
-- Before continuing or resuming native work, resolve the app against the reviewed release. Pass its sanitized compatibility context to every planner/builder; do not use the plugin template's current dependency list as the app's inventory.
+For an explicit request to continue this app's unfinished creation, inspect the
+matching `memory-bank.md` when present, `docs/.run-plan.json` when present, the
+approved creation plan, and any valid current create caller context. Establish
+the unfinished creation phase and corroborate it against current app artifacts.
+Do not infer the next phase from arbitrary completed entries belonging to edits,
+deployment, or another workflow.
+
+- **Missing or conflicting progress** — ask which creation phase is being
+  continued or ask to restore its records, then stop. Do not guess a phase,
+  restart creation, or classify the app as fresh.
+- **Completed creation** — report that there is no unfinished creation to resume.
+  Clarify whether the user wants an app edit or a separate new app and use the
+  table's matching route.
+- **Corrupt records** — report the error and ask to repair/restore them. Do not
+  delete or overwrite history to make the directory pass a freshness check.
+- **Verified unfinished phase** — show the phase, remaining scope, and target
+  app, then obtain continuation approval unless that exact continuation already
+  has current approval. Reuse only decisions approved for the same current
+  scope; pending or changed decisions keep their owning approval gates.
+
+Pre-initialization creation may have an approved plan and saved planning
+progress without a memory bank. It stays on this continuation path when the
+phase can be established; the plan's presence does not redirect it to editing.
+For a post-initialization continuation, resume the verified phase directly; do
+not rerun the fresh preparation or `pa app init` over the materialized app.
+
+**Reopen the build plan only after continuation approval.** When
+`<working_dir>/docs/create-app-plan.html` exists, reopen it. Inspect the existing
+plan with the read-only
+`node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' show`
+command. If it reports a `failedPhase` matching the approved continuation,
+reopen that phase before continuing:
+
+```bash
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id <failedPhase> --status active
+```
+
+Use only a validated phase ID from the recorded creation state. Resolve the CLI
+below before entering the verified phase; do not skip unresolved approval or
+validation gates merely because an older plan exists.
+
+Before continuing or resuming native work, resolve the app against its published host/template contract. Pass its sanitized compatibility context to every planner/builder; do not use the plugin template's current dependencies as the app's inventory.
 
 **Do not silently copy a bundled template over the user's folder.** A fresh template may contain an empty placeholder `power.config.json`; Step 5 removes only that empty placeholder immediately before Step 6 runs `pa app init`. Preserve populated settings even when `environmentId` is empty.
 
@@ -398,8 +486,8 @@ a `"`, a backtick or `$(…)` in it would break out of a shell argument before N
 
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" init --json-file <tmp>/plan-init.json
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id requirements --status active --note "Waiting for your answers to the setup questions"
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' init --json-file <tmp>/plan-init.json
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id requirements --status active --note "Waiting for your answers to the setup questions"
 ```
 
 The note is what raises the waiting-for-input banner on the plan, so the user can tell from the page
@@ -527,8 +615,8 @@ and none of it may go through the shell:
 ```
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" set --section requirements --json-file <tmp>/requirements.json
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id requirements --status active --note "Brief confirmed"
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' set --section requirements --json-file <tmp>/requirements.json
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id requirements --status active --note "Brief confirmed"
 ```
 
 ### Step 2c — Plan preview (rough, always shown)
@@ -597,9 +685,9 @@ Proceed, edit brief, or abort? [proceed/edit/abort]
 Raise the wait before showing the estimate, and close the phase once the user approves:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id requirements --status active --note "Waiting for you to approve the plan preview"
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id requirements --status active --note "Waiting for you to approve the plan preview"
 # ... after they approve ...
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id requirements --status done
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id requirements --status done
 ```
 
 > "Brief locked in. Planning surfaces up to 4 approval prompts (data platform + native capabilities + connectors → data model when Dataverse is selected → screen graph → screen specs). Data-model readiness is quality-first, with a 10–15 minute target:
@@ -639,7 +727,7 @@ between gates the agents work for minutes, and the plan must not tell the user t
 on them while it is not.
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id architecture --status active --note "Planning the architecture"
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id architecture --status active --note "Planning the architecture"
 ```
 
 **Raise every gate in the plan as you present it, and take it down as soon as it is answered** -
@@ -656,11 +744,11 @@ browser, and its banner is how they can tell the run is waiting on them rather t
 ```bash
 DOCS="${PLUGIN_ROOT}/scripts/app-docs.js"
 # Just before presenting gate <N>:
-node "$DOCS" --working-dir "<working_dir>" set --section <section> --json-file <tmp>/<section>.json --state proposed
-node "$DOCS" --working-dir "<working_dir>" step --id <id> --status active --note "Gate <N> — awaiting your approval"
+node "$DOCS" --working-dir '<working_dir>' set --section <section> --json-file <tmp>/<section>.json --state proposed
+node "$DOCS" --working-dir '<working_dir>' step --id <id> --status active --note "Gate <N> — awaiting your approval"
 # As soon as the user approves it:
-node "$DOCS" --working-dir "<working_dir>" set --section <section> --json-file <tmp>/<section>.json --state approved
-node "$DOCS" --working-dir "<working_dir>" step --id <next id> --status active --note "<note from the table>"
+node "$DOCS" --working-dir '<working_dir>' set --section <section> --json-file <tmp>/<section>.json --state approved
+node "$DOCS" --working-dir '<working_dir>' step --id <next id> --status active --note "<note from the table>"
 ```
 
 Flip each section to `approved` when its gate is answered, not later in the Step 3.9 batch. A
@@ -708,6 +796,17 @@ call `detect-publisher-prefix.js`.
 
 ### Foreground Dataverse planning snapshot and evidence
 
+This read-only helper recipe is also used by
+[scoped Dataverse change planning](../../shared/references/dataverse-change-planning.md).
+Those callers supply their own request scope and approvals; they do not run
+the create wizard or dispatch its native-app planner.
+
+Apply [app-working-directory.md](../../shared/references/app-working-directory.md)
+before this recipe. Each shell block below and in Dataverse planning recovery
+re-enters the owner's absolute root. Re-supply the selected identity and artifact
+paths on every call; fresh-shell retries re-execute the complete guarded
+attempt block, including its variable assignments and function definition.
+
 Planning stays read-only. The resolver's `--no-cache` mode may read existing
 identity metadata, but must not persist the environment cache, auth settings,
 or telemetry cluster, and must not replay pending telemetry. Normal resolution
@@ -727,6 +826,7 @@ Branch on the Gate 1-approved
   nested planner or architect rediscover the tenant.
 
 ```bash
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
 node "${PLUGIN_ROOT}/scripts/resolve-environment.js" "$ACTIVE_ENV_ID" --no-cache --require-tenant
 ```
 
@@ -774,10 +874,11 @@ Detailed advisory discovery is quality-bounded:
   expansion, at most once per newly selected logical name.
 
 ```bash
-SNAPSHOT_PATH="<working_dir>/.tmp/dataverse-foreground-planning-snapshot.json"
-CONCEPTS_PATH="<working_dir>/.tmp/dataverse-concepts.json"
-ARCHITECT_EVIDENCE_PATH="<working_dir>/.tmp/dataverse-architect-evidence.json"
-INVENTORY_CACHE_PATH="<working_dir>/.tmp/dataverse-inventory-cache.json"
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
+SNAPSHOT_PATH='<working_dir>/.tmp/dataverse-foreground-planning-snapshot.json'
+CONCEPTS_PATH='<working_dir>/.tmp/dataverse-concepts.json'
+ARCHITECT_EVIDENCE_PATH='<working_dir>/.tmp/dataverse-architect-evidence.json'
+INVENTORY_CACHE_PATH='<working_dir>/.tmp/dataverse-inventory-cache.json'
 
 run_dataverse_planning_attempt() {
 if ! node "${PLUGIN_ROOT}/scripts/create-dataverse-snapshot.js" \
@@ -882,6 +983,8 @@ pair activates the architect's `snapshot-only` path: no Bash discovery and no
 live Dataverse calls inside the agent. For `connector-only`, pass the mode
 explicitly and state that both paths are not supplied; never provide placeholder
 file paths.
+
+#### Planner completion dispatch
 
 **Hard rule — planner writes are restricted during Step 3.** The planner (and any sub-agents it spawns) is permitted to write to **only**:
 
@@ -1103,6 +1206,8 @@ non-Dataverse context, capped at 2 retries; `BLOCKED:` reports the blocker. Unkn
 lines are malformed. Recoverable artifact/input failures return to their
 owning phase for repair; they never authorize skipping an applicable gate.
 
+#### Dataverse planning recovery
+
 The structured Dataverse signals below use monotonic name tracking or
 deterministic revision instead of the generic retry cap. In `required` only,
 initialize two in-memory sets from the current validated snapshot before
@@ -1152,6 +1257,7 @@ Compute `NEW_DETAIL_NAMES = requested names - DETAIL_ATTEMPTED_NAMES`.
   and a new app-owned table.
 
 ```bash
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
 node "${PLUGIN_ROOT}/scripts/create-dataverse-snapshot.js" \
   --env-url "$ACTIVE_ENV_URL" \
   --tenant-id "$ACTIVE_TENANT_ID" \
@@ -1200,6 +1306,7 @@ snapshot. Compute
   this same set-difference rule automatically.
 
 ```bash
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
 node "${PLUGIN_ROOT}/scripts/create-dataverse-snapshot.js" \
   --env-url "$ACTIVE_ENV_URL" \
   --tenant-id "$ACTIVE_TENANT_ID" \
@@ -1282,7 +1389,7 @@ user-facing design decision without another planning question.
 4. Persist the answer:
 
    ```bash
-   echo "<chosen-industry-slug>" > "<working_dir>/.industry-confirmed"
+   echo "<chosen-industry-slug>" > '<working_dir>/.industry-confirmed'
    ```
 
    For option (e), let the user free-text a description; map it to the closest slug (or `productivity` as final fallback) and store that.
@@ -1386,13 +1493,13 @@ document explaining what was agreed:
 
 ```bash
 DOCS="${PLUGIN_ROOT}/scripts/app-docs.js"
-node "$DOCS" --working-dir "<working_dir>" set --section architecture --json-file <tmp>/architecture.json --state approved
-node "$DOCS" --working-dir "<working_dir>" step --id architecture --status done --note "Gate 1 — approved"
-node "$DOCS" --working-dir "<working_dir>" set --section trust --json-file <tmp>/trust.json --state proposed
-node "$DOCS" --working-dir "<working_dir>" set --section dataModel --json-file <tmp>/data-model.json --state approved
-node "$DOCS" --working-dir "<working_dir>" step --id data-model --status done --note "Gate 2 — <n> tables approved"
-node "$DOCS" --working-dir "<working_dir>" set --section screens --json-file <tmp>/screens.json --state approved
-node "$DOCS" --working-dir "<working_dir>" step --id screen-plan --status done --note "Gates 3-4 — <n> screens approved"
+node "$DOCS" --working-dir '<working_dir>' set --section architecture --json-file <tmp>/architecture.json --state approved
+node "$DOCS" --working-dir '<working_dir>' step --id architecture --status done --note "Gate 1 — approved"
+node "$DOCS" --working-dir '<working_dir>' set --section trust --json-file <tmp>/trust.json --state proposed
+node "$DOCS" --working-dir '<working_dir>' set --section dataModel --json-file <tmp>/data-model.json --state approved
+node "$DOCS" --working-dir '<working_dir>' step --id data-model --status done --note "Gate 2 — <n> tables approved"
+node "$DOCS" --working-dir '<working_dir>' set --section screens --json-file <tmp>/screens.json --state approved
+node "$DOCS" --working-dir '<working_dir>' step --id screen-plan --status done --note "Gates 3-4 — <n> screens approved"
 ```
 
 **Write a first-pass trust report here.** Gate 1 settles the device capabilities and connectors,
@@ -1411,8 +1518,8 @@ the ER diagram, the column tables, and the new/reused/extended colours are all d
 pending, or the plan never reaches 100%:
 
 ```bash
-node "$DOCS" --working-dir "<working_dir>" step --id data-model --status skipped
-node "$DOCS" --working-dir "<working_dir>" step --id dataverse --status skipped
+node "$DOCS" --working-dir '<working_dir>' step --id data-model --status skipped
+node "$DOCS" --working-dir '<working_dir>' step --id dataverse --status skipped
 ```
 
 ### Step 4 — Auth & environment selection
@@ -1432,7 +1539,7 @@ If the resolved environment doesn't match what the planner used in Step 3, ask t
 Open the scaffold phase:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id scaffold --status active
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id scaffold --status active
 ```
 
 This step is template-only and foreground-only. Do not clone/copy templates, do not run background scaffold jobs, and do not use any legacy fallback path.
@@ -1514,22 +1621,23 @@ Substitute the hardcoded template values with wizard answers from Step 2:
 
 Bundle ID and scheme are left as template defaults — they are fixed across all dev builds and patched by the wrap pipeline at release time.
 
-**Fix 1b — Verify captured dev logging path**
+**Fix 1b — Verify template-owned development lifecycle scripts**
 
-Manual `npm run dev` must remain the normal Expo entry point. The template's `metro.config.js` delegates to `createPowerAppsMetroConfig` from `@microsoft/power-apps-native-host/config/metroConfig`; that factory installs sanitized Metro terminal and HTTP bundle-failure logging under `.powernative/metro-logs/`. Manual starts and `/debug-app` use the same log source without a process-owning wrapper. Verify these script entries only; do not add wrapper-specific scripts:
+Manual `npm run dev` remains the development entry point, and npm invokes `predev` before it. The template owns the command bodies for both lifecycle scripts and may change them as the native host evolves. Verify only that both entries exist as non-empty strings; do not compare, rewrite, or otherwise enforce their command bodies.
+
+The template's `metro.config.js` delegates to `createPowerAppsMetroConfig` from `@microsoft/power-apps-native-host/config/metroConfig`; that factory installs sanitized Metro terminal and HTTP bundle-failure logging under `.powernative/metro-logs/`. Manual starts and `/debug-app` use the same log source without a process-owning wrapper.
 
 ```bash
-node - "<working_dir>" <<'NODE'
+node - '<working_dir>' <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
 const root = process.argv[2];
 const packagePath = path.join(root, 'package.json');
 const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
-if (!pkg.scripts || pkg.scripts.dev !== 'expo start') {
-  throw new Error('Expected package.json scripts.dev to be "expo start". Do not route dev through a wrapper.');
-}
-if (pkg.scripts.predev !== 'npm run generate-schemas && npm run type-check') {
-  throw new Error('Expected predev to run schema generation followed by type-checking.');
+for (const scriptName of ['dev', 'predev']) {
+  if (typeof pkg.scripts?.[scriptName] !== 'string' || pkg.scripts[scriptName].trim() === '') {
+    throw new Error(`Expected package.json scripts.${scriptName} to be a non-empty command.`);
+  }
 }
 NODE
 ```
@@ -1564,7 +1672,13 @@ template or repair the precise stale import before continuing.
 
 **Fix 6 — Schema generation boundary**
 
-`app/_layout.tsx` imports `schemaMap` from `src/generated/connectorSchemas.ts`, which is generated by `npm run generate-schemas` (the `generate-connector-schemas` binary from the `@microsoft/power-apps-cli` devDep). Do not generate an empty schema map during initial scaffold: the template's `@ts-ignore` boundary lets `tsc` validate the scaffold without that artifact, and schema generation is more useful after a data source exists or immediately before dev/build entry points.
+`app/_layout.tsx` imports `schemaMap` from `src/generated/connectorSchemas.ts`, which
+is generated by the template's `npm run generate-schemas` script. This builds the
+runtime schema map; Power Apps CLI add/refresh/remove commands own source
+registrations and generated models/services. Do not generate an empty schema map
+during initial scaffold: the template's `@ts-ignore` boundary lets `tsc` validate
+the scaffold without that artifact, and schema generation is more useful after a
+data source exists or immediately before dev/build entry points.
 
 Do NOT hand-write a stub `connectorSchemas.ts` — the generated output has a specific shape that downstream code depends on; a placeholder will break `pa app push`.
 
@@ -1648,7 +1762,7 @@ do not add this CLI-generated file to Step 5's manual validation targets or hand
 This step verifies dependencies only. The user must have run `npm install` before invoking the skill.
 
 ```bash
-[ -d "<working_dir>/node_modules/expo" ] && echo "✓ node_modules present" || echo "✗ missing — run npm install in the template folder and rerun"
+[ -d '<working_dir>/node_modules/expo' ] && echo "✓ node_modules present" || echo "✗ missing — run npm install in the template folder and rerun"
 ```
 
 If `node_modules/expo` is missing, STOP. Tell the user to run `npm install` in the template folder. Do not provision ADO tokens or run `npm install` from this skill.
@@ -1683,13 +1797,13 @@ This is the **Scaffold gate** from the TypeScript Gate Policy. If it fails, capt
 A clean scaffold gate is what completes the scaffold phase:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id scaffold --status done
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id scaffold --status done
 ```
 
 ### Step 6.7 — Seed the memory bank
 
 ```bash
-cp "${PLUGIN_ROOT}/shared/memory-bank.md" "<working_dir>/memory-bank.md"
+cp "${PLUGIN_ROOT}/shared/memory-bank.md" '<working_dir>/memory-bank.md'
 ```
 
 Fill in the Project facts and Power Platform context sections from Steps 2 and 4. From here on, every step appends to the relevant section of `<working_dir>/memory-bank.md` immediately after success — not at the end. This is what enables Step 0's resume on a future run.
@@ -1719,7 +1833,7 @@ visual_companion: <yes|no>   # default from Step 2b; applied at Step 6.75 and la
 it open, because this branch never reaches the `done` call below:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id design --status skipped
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id design --status skipped
 ```
 
 Marking it `active` here instead would leave it active through auth and most of Step 8, until
@@ -1731,7 +1845,7 @@ opening the next phase auto-closed it as `done` — reporting a design system th
 asks for brand inputs, a cost choice and a style pick, so the phase opens as waiting:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id design --status active --note "Waiting for your brand and design choices"
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id design --status active --note "Waiting for your brand and design choices"
 ```
 
 ```
@@ -1740,21 +1854,32 @@ Invoke skill: /design-system
 Environment:
   CODE_APPS_NATIVE_ORCHESTRATING=1
 
+Context:
+  MOBILE_APP_ORCHESTRATING=1
+  orchestrator: create-mobile-app
+  working_dir: <working_dir>
+  phase: design
+  approved_scope: <confirmed app intent; design-system owns its design approval>
+
 Arguments:
-  --working-dir <working_dir>
+  --working-dir '<working_dir>'
 ```
 
 The `Environment` block is load-bearing, and follows the nested-skill handoff `/edit-app` already
 uses. `/design-system` and its style picker gate every browser opener on that variable; without it
 they detect a standalone run and open tabs over the build plan.
 
-The skill detects orchestrator mode (`CODE_APPS_NATIVE_ORCHESTRATING=1`), collects brand inputs, presents the cost picker (a/b/c/d), runs the internal style picker, writes `brand/design-system.md` + `brand/tokens.ts`, renders `brand/design-system.html`, and returns with status.
+The scoped `MOBILE_APP_ORCHESTRATING=1` context identifies the owner and approval
+boundary; `CODE_APPS_NATIVE_ORCHESTRATING=1` separately suppresses nested browser
+openers. The skill collects brand inputs, presents the cost picker (a/b/c/d),
+runs the internal style picker, writes approved brand artifacts, and returns
+with status.
 
 As soon as `/design-system` returns, replace the note — the user has answered and the run is
 working again:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id design --status active --note "Applying your design system"
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id design --status active --note "Applying your design system"
 ```
 
 Handle the return per the status protocol (AGENTS.md rule #10):
@@ -1799,23 +1924,23 @@ Offline profile setup is intentionally deferred until after the approved
 Dataverse model has been materialized. Follow the shared connectivity-intent
 ownership contract during this phase.
 
-**Switch the plan's phone to the screen carousel.** `/design-system` has just rendered
-`_plan_preview.html` — plan-time mockups built from the locked brand tokens, before a single line
-of TSX exists. Those same per-screen blocks become the carousel:
+**Switch the plan's phone to the screen carousel.**
+`/design-system` has just rendered `_plan_preview.html`, with plan-time mockups built from the locked brand tokens before any TSX exists.
+Pass that complete file to the carousel:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" phone --stage screens --screens-file <tmp>/screens-preview.json
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' phone --stage screens --preview-file '<working_dir>/_plan_preview.html'
 ```
 
-`screens-preview.json` is `[{ "name": "Today's route", "html": "<the screen's markup>" }, …]`, in
-navigation order.
+The page extracts every `.screen` block in document order and takes its label from the matching `data-screen` tab.
+It preserves shared styles, root tokens, and ancestor selectors inside a sandboxed 375 × 812 viewport, scaled to fit the phone.
+The gallery's outer phone shell and controls stay outside the carousel.
+Pass the file unchanged; copying only a screen's markup loses its stylesheet.
+The legacy `--screens-file` JSON input remains supported for self-contained screen documents.
 
-**Carry over exactly the screens `_plan_preview.html` contains — no more, no fewer.** How many
-that is depends on what the user chose at `/design-system` Sub-step 6.5: option (a) renders every
-screen, and the default (b) renders only the List, Form and Detail archetypes. Take the markup
-from those blocks rather than re-authoring any of it: a hand-written block would drift from
-`_plan_preview.html` and from the screen the builder later generates, which is the one thing the
-carousel exists to rule out. A three-screen carousel is the expected shape, not a failure.
+**Carry over exactly the screens `_plan_preview.html` contains - no more, no fewer.**
+Option (a) at `/design-system` Sub-step 6.5 renders every screen; the default (b) renders only the List, Form and Detail archetypes.
+A three-screen carousel is the expected shape, not a failure.
 
 **When there is no preview to carry over, leave the phone on the building animation.** That is
 `--no-design`, or Sub-step 6.5 option (c) "Skip preview" — in both cases `_plan_preview.html` was
@@ -1837,8 +1962,8 @@ goes to a file rather than through the shell:
 
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" set --section design --json-file <tmp>/design.json
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id design --status done
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' set --section design --json-file <tmp>/design.json
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id design --status done
 ```
 
 Only `#rrggbb` literals render as swatches; any other value is shown as text rather than
@@ -1853,7 +1978,7 @@ own the plan showed nothing in progress here at all: the design phase closes bef
 Dataverse phase does not open until Step 8.
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id auth --status active --note "Waiting for your Entra ID app registration"
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id auth --status active --note "Waiting for your Entra ID app registration"
 ```
 
 **Print before starting:**
@@ -2054,8 +2179,8 @@ Do NOT touch `src/playerConfig.ts` — auth identifiers live in `auth.config.jso
 Close the auth phase once the client ID is written and the config is in place:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" set --section auth --json-file <tmp>/auth.json
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id auth --status done
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' set --section auth --json-file <tmp>/auth.json
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id auth --status done
 ```
 
 `auth.json` is `{"status":"<Configured — how sign-in was set up|Deferred — why>"}`. It goes to a
@@ -2076,7 +2201,7 @@ Otherwise open the Dataverse phase now. Creating tables is one of the longest wa
 with no phase open the plan reads "Waiting to start" through all of it:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id dataverse --status active
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id dataverse --status active
 ```
 
 **Print before starting:**
@@ -2103,23 +2228,23 @@ resolved context and these structured artifacts, never values inferred from
 free-form Markdown:
 
 ```bash
-SCHEMA_CONTRACT="<working_dir>/.tmp/dataverse-schema-contract.json"
-APPROVAL_RECEIPT="<working_dir>/.tmp/mobile-plan-status.json"
-FOREGROUND_PLANNING_SNAPSHOT="<working_dir>/.tmp/dataverse-foreground-planning-snapshot.json"
-RECONCILIATION_SCOPE="<working_dir>/.tmp/dataverse-reconciliation-scope.json"
-EXECUTION_RECONCILIATION="<working_dir>/.tmp/dataverse-execution-reconciliation.json"
-OPERATION_MANIFEST="<working_dir>/.tmp/dataverse-operation-manifest.json"
-PUBLISH_CHECKPOINT="<working_dir>/.tmp/dataverse-publish-pending.json"
+SCHEMA_CONTRACT='<working_dir>/.tmp/dataverse-schema-contract.json'
+APPROVAL_RECEIPT='<working_dir>/.tmp/mobile-plan-status.json'
+FOREGROUND_PLANNING_SNAPSHOT='<working_dir>/.tmp/dataverse-foreground-planning-snapshot.json'
+RECONCILIATION_SCOPE='<working_dir>/.tmp/dataverse-reconciliation-scope.json'
+EXECUTION_RECONCILIATION='<working_dir>/.tmp/dataverse-execution-reconciliation.json'
+OPERATION_MANIFEST='<working_dir>/.tmp/dataverse-operation-manifest.json'
+PUBLISH_CHECKPOINT='<working_dir>/.tmp/dataverse-publish-pending.json'
 ACTIVE_SOLUTION_UNIQUE_NAME="Default"
 
 test -f "$SCHEMA_CONTRACT" -a -f "$APPROVAL_RECEIPT" \
   -a -f "$FOREGROUND_PLANNING_SNAPSHOT" \
-  -a -f "<working_dir>/native-app-plan.md"
+  -a -f '<working_dir>/native-app-plan.md'
 
 node "${PLUGIN_ROOT}/scripts/build-dataverse-operation-manifest.js" \
   --bind-plan "$SCHEMA_CONTRACT" \
   --approval-receipt "$APPROVAL_RECEIPT" \
-  --plan "<working_dir>/native-app-plan.md" \
+  --plan '<working_dir>/native-app-plan.md' \
   --output "$SCHEMA_CONTRACT"
 
 node "${PLUGIN_ROOT}/scripts/build-dataverse-operation-manifest.js" \
@@ -2142,7 +2267,7 @@ node "${PLUGIN_ROOT}/scripts/build-dataverse-operation-manifest.js" \
   --contract "$SCHEMA_CONTRACT" \
   --approval-receipt "$APPROVAL_RECEIPT" \
   --reconciliation "$EXECUTION_RECONCILIATION" \
-  --plan "<working_dir>/native-app-plan.md" \
+  --plan '<working_dir>/native-app-plan.md' \
   --output "$OPERATION_MANIFEST" \
   --environment-id "$ACTIVE_ENV_ID" \
   --env-url "$ACTIVE_ENV_URL" \
@@ -2164,7 +2289,7 @@ node "${PLUGIN_ROOT}/scripts/build-dataverse-operation-manifest.js" \
   --contract "$SCHEMA_CONTRACT" \
   --approval-receipt "$APPROVAL_RECEIPT" \
   --reconciliation "$EXECUTION_RECONCILIATION" \
-  --plan "<working_dir>/native-app-plan.md" \
+  --plan '<working_dir>/native-app-plan.md' \
   --environment-id "$ACTIVE_ENV_ID" \
   --env-url "$ACTIVE_ENV_URL" \
   --tenant-id "$ACTIVE_TENANT_ID" \
@@ -2179,6 +2304,13 @@ artifact paths:
 
 ```
 Invoke skill: /add-dataverse
+
+Context:
+  MOBILE_APP_ORCHESTRATING=1
+  orchestrator: create-mobile-app
+  working_dir: <working_dir>
+  phase: implementation
+  approved_scope: <approved Data Model and bound operation-manifest artifacts>
 
 Arguments:
   --working-dir <working_dir>
@@ -2214,12 +2346,12 @@ npx --no-install tsc --noEmit
 
 If this fails, do not continue to native capabilities, connectors, navigation, or screens. Capture the full error list once, batch-fix generated-service/model or alias-map issues, then rerun the gate. If the failure is a hidden Dataverse collision already recovered via an alias (for example `aircraft` → `aircraftv2`), make sure the alias is reflected in `native-app-plan.md`, `memory-bank.md`, and the Generated Services snapshot before rerunning.
 
-### Step 8.5 — Seed sample data (auto)
+### Step 8.5 — Seed sample data (approved scope)
 
 Before sample data or offline setup, require the materialized table inventory
 from `/add-dataverse` Step 6d, including verified reused tables. Compare its
 coverage with the validated operation manifest's `service.requiredTables` and
-run `verify-dataverse-services.js --project-root "<working_dir>" --manifest "$OPERATION_MANIFEST"`.
+run `verify-dataverse-services.js --project-root '<working_dir>' --manifest "$OPERATION_MANIFEST"`.
 Zero schema writes is a valid reuse-only result, not failed materialization.
 If an older run produced an empty or partial table inventory, recover through
 `/add-dataverse` Steps 6c–6d using the approved service list and verified live
@@ -2232,18 +2364,38 @@ produce a usable .datamodel-manifest.json` with the remaining verification
 failure. Do not seed or offer offline setup from unverified table names.
 
 **Print before starting:**
-> "→ [Step 8.5/13] Checking existing record counts and seeding sample data into tables with fewer than 5 records."
+> "→ [Step 8.5/13] Confirming seed scope, then checking record counts for approved tables."
 
-Invoke `/add-sample-data` after Step 8. This step is **not optional** — every fresh-scaffolded app must have data to render on first launch:
+Run this phase after Step 8 for Dataverse apps. Derive the seed candidate list
+from the approved service requirements and verified materialized inventory,
+excluding standard system tables by default. Include reused custom tables when
+the approved app needs sample data from them. Do not infer insertion permission
+from `status: new`, record counts, or manifest presence. If the initial approval
+did not cover the exact seed set and count/media policy, obtain that approval
+before invoking; an empty or declined scope skips seeding without cloud writes.
 
 ```
 Invoke skill: /add-sample-data
 
+Context:
+  MOBILE_APP_ORCHESTRATING=1
+  orchestrator: create-mobile-app
+  working_dir: <working_dir>
+  phase: implementation
+  approved_scope: <approved seed tables and count/media policy>
+  retiring_tables: <empty for fresh creation>
+
 Arguments:
-  --working-dir <working_dir>
+  --working-dir '<working_dir>'
+  --tables "<approved-seed-table-logical-names>"
 ```
 
-`/add-sample-data` reads `.datamodel-manifest.json`, queries the current record count for each table, skips any table that already has ≥5 records, and seeds the rest with contextually appropriate rows in dependency-tier order. Inserted GUIDs are tracked in `memory-bank.md` for idempotent re-runs.
+`/add-sample-data` validates this explicit allowlist against
+`.datamodel-manifest.json` before per-table discovery, then checks row counts
+only for approved targets. It skips tables with enough rows and seeds the
+eligible targets in dependency order. Inserted GUIDs are tracked in
+`memory-bank.md` for idempotent re-runs. Missing parents cannot widen the seed
+scope without returning to the owner for approval.
 
 If the seeding step fails (network drop, permission error, etc.), surface the
 failure but continue to the offline-profile phase — the app is still usable,
@@ -2275,7 +2427,7 @@ Otherwise ask one neutral foreground question. Say so in the plan first, and rep
 once the user answers:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id dataverse --status active --note "Waiting for your offline support choice"
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id dataverse --status active --note "Waiting for your offline support choice"
 ```
 
 
@@ -2294,6 +2446,12 @@ node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --i
 >   `status: not-applicable`, then continue to Step 9
 
 If the user selects Yes, invoke `/setup-offline-profile` from the project root.
+Pass `--working-dir '<working_dir>'` and invocation context
+`MOBILE_APP_ORCHESTRATING=1`, `orchestrator: create-mobile-app`, the same absolute
+`working_dir`, `phase: implementation`, and the selected environment ID/URL/tenant.
+This choice approves entering the offline wizard, not its prerequisite or
+profile mutations; the wizard retains its own gates and forwards their exact
+approved scope to its helpers.
 It consumes the materialized manifest, owns its own profile approval flow, and
 writes `offline-profile.json`. Surface concerns and stop on a substantive
 failure. Do not reopen data-model or screen approvals after this choice.
@@ -2301,7 +2459,7 @@ failure. Do not reopen data-model or screen approvals after this choice.
 Tables and generated services now exist, so the Dataverse phase is complete:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id dataverse --status done
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id dataverse --status done
 ```
 
 ### Step 9 — Apply native capabilities
@@ -2311,7 +2469,7 @@ node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --i
 Open the capabilities phase; Step 10 closes it after connectors are added:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id capabilities --status active
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id capabilities --status active
 ```
 
 **Print before starting:**
@@ -2321,6 +2479,13 @@ Read the `## Native Capabilities` section from `native-app-plan.md`. For each ca
 
 ```
 Invoke skill: /add-native
+
+Context:
+  MOBILE_APP_ORCHESTRATING=1
+  orchestrator: create-mobile-app
+  working_dir: <working_dir>
+  phase: implementation
+  approved_scope: <approved capability row, storage target, and screen requirements>
 
 Arguments:
   --working-dir <working_dir>
@@ -2363,6 +2528,12 @@ summary. Re-run `npx --no-install tsc --noEmit` after Tamagui config changes.
 **Brand-token wiring** — when `brand/tokens.ts` exists, the Tamagui integration
 exports `appLightTheme` and `appDarkTheme`. Map those resolved semantic values
 into the host themes so `useTheme()` and `useThemeTokens()` cannot drift:
+
+If the approved design includes a custom dark palette, apply the reference's
+**Approved dark palette** branch first: import `darkTokens` from
+`brand/tokens.dark.ts` in `tamagui.config.ts` and derive `appDarkTheme` from
+`darkTokens.color`. The provider mapping below then consumes that resolved theme;
+do not leave the base accent-only dark declaration in place.
 
 ```tsx
 import {
@@ -2413,9 +2584,11 @@ const brandedDarkTheme: ThemeTokens = {
 <PowerAppsProvider ... theme={brandedLightTheme} darkTheme={brandedDarkTheme}>
 ```
 
-The generated schema has one brand palette, so the exported dark app theme
-retains Config v5 dark surfaces and text while carrying brand accents and
-statuses. For runtime theme switching, use `useThemeControl()` from
+Without an approved custom dark palette, the exported dark app theme retains
+Config v5 dark surfaces and text while carrying brand accents and statuses.
+With an approved custom dark palette, `appDarkTheme` instead resolves the full
+`darkTokens.color` palette, including its surfaces and text, and the provider
+mapping above uses that same resolved theme. For runtime theme switching, use `useThemeControl()` from
 `@microsoft/power-apps-native-host`.
 
 ### Step 10 — Add connectors
@@ -2429,6 +2602,11 @@ Read the `## Connectors` section from `native-app-plan.md`. If it says "None", s
 
 For each row in the table, route to the correct skill based on the API name:
 
+Pass `MOBILE_APP_ORCHESTRATING=1`, `orchestrator: create-mobile-app`,
+`phase: implementation`, `working_dir`, and `approved_scope` containing the
+connector row and supplied operation/dataset/table/connection choices to each
+invocation. A dedicated skill inherits this context when the generic skill routes.
+
 | API name | Invoke |
 |---|---|
 | `sharepointonline` | `/add-sharepoint --working-dir <working_dir>` |
@@ -2441,7 +2619,7 @@ Run sequentially — each generates files under `src/generated/`. Parallel write
 Device capabilities and connectors are both wired, so close the phase:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id capabilities --status done
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id capabilities --status done
 ```
 
 **Finalise the trust report.** Gate 1 wrote a first pass from the approved plan; everything it
@@ -2450,7 +2628,7 @@ what the offline profile syncs. Rewrite it in full and mark it `approved`, so it
 app *does* rather than what was intended. `set` merges, so restate every key you want to change.
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" set --section trust --json-file <tmp>/trust.json --state approved
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' set --section trust --json-file <tmp>/trust.json --state approved
 ```
 
 `trust.json` has four keys:
@@ -2508,7 +2686,7 @@ Open the screens phase here rather than at the first screen wave. Navigation, sh
 first wave are most of what is left of the run, and the plan should say what is being built:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id screens --status active
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id screens --status active
 ```
 
 Read `## Screens → Navigation Pattern` from `native-app-plan.md`.
@@ -2741,7 +2919,7 @@ Read all per-screen specs in `## Screens → ### Per-Screen Specs`. Identify:
 
 ```bash
 # Example — if plan has "Inspections" entity used on list + detail + home screens:
-cat > "<working_dir>/src/components/InspectionRow.tsx" << 'EOF'
+cat > '<working_dir>/src/components/InspectionRow.tsx' << 'EOF'
 ... generated component ...
 EOF
 ```
@@ -3021,7 +3199,7 @@ npx --no-install tsc --noEmit
 **Mark screen progress in the plan** once the wave's TypeScript gate is clean:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id screens --status active --note "<n> of <total> screens built"
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id screens --status active --note "<n> of <total> screens built"
 ```
 
 The plan's phone is already showing the screen carousel from Step 6.75, so there is nothing to
@@ -3112,7 +3290,7 @@ After `tsc` passes, offer a static HTML preview. The dev server starts next (Ste
 Mark the wait, since the run does not continue until the user picks:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id screens --status active --note "Waiting for your preview choice"
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id screens --status active --note "Waiting for your preview choice"
 ```
 
 
@@ -3135,7 +3313,7 @@ node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --i
 Every screen is built and type-checked, so close the screens phase:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id screens --status done
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id screens --status done
 ```
 
 ### Step 12 — Start dev server (Metro writes project-local logs)
@@ -3148,10 +3326,10 @@ node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --i
 Open the final phase (Step 13 marks it done):
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id run --status active
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id run --status active
 ```
 
-This skill launches the template's canonical `npm run dev` command. Its `predev` lifecycle runs schema generation followed by the final TypeScript gate before Expo starts, and logging is configured in `metro.config.js`.
+This skill launches the template's canonical `npm run dev` command. The template owns the `dev` and `predev` command bodies; this skill relies only on npm's lifecycle ordering and does not require either script to expand to a particular command. Logging is configured in `metro.config.js`.
 
 1. Expo prints the native Metro URL and may also render a QR in its terminal. Capture the URL and generate the QR PNG below so the user always receives a scannable code even when Metro runs in a background terminal or the host does not expose terminal rendering.
 2. Hot-reload works on file edits — no restart needed for screen tweaks.
@@ -3168,18 +3346,18 @@ The **port** is the log identity: it is what the QR encodes, what the device dia
 **Launch command:**
 
 ```bash
-cd "<working_dir>"
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
 npm run dev
 ```
 
-`npm run dev` runs `predev` first: `npm run generate-schemas && npm run type-check`. npm does not launch `expo start` when either gate fails. Capture the full failing gate output once, batch-fix by root cause, then rerun `npm run dev`; continue only when `predev` passes and Expo prints its Metro URL.
+`npm run dev` runs the template-owned `predev` script first. If either lifecycle script fails, capture the full output once, batch-fix by root cause, then rerun `npm run dev`; continue only when `predev` passes and the development command prints its Metro URL.
 
 This is a long-running dev server. In hosts that support background terminals, run it as a background/async terminal only for process lifetime; do not persist or depend on the terminal ID. `/debug-app` discovers logs from `.powernative/metro-logs/`, not from terminal output.
 
 Read the initial terminal output and locate the generated `.powernative` log directly:
 
 ```bash
-ls -t "<working_dir>/.powernative/metro-logs"/metro-*-pid-*-port-*.log 2>/dev/null | head -1
+ls -t '<working_dir>/.powernative/metro-logs'/metro-*-pid-*-port-*.log 2>/dev/null | head -1
 ```
 
 Branch as follows:
@@ -3193,7 +3371,7 @@ Branch as follows:
 **When Expo prints a Metro URL:** Do not rely on Expo's terminal-rendered QR as the only presentation path.
 
 1. **Generate QR code PNG and present it to the user** (chat-first, deterministic fallback):
-  - Define `METRO_QR="<working_dir>/.expo/metro-qr.png"` and run `npx --no-install qrcode -o "$METRO_QR" "<metro-url>"`. The template pins `qrcode` as a devDependency, so this runs the copy from the user's `npm install` and never downloads. If it fails (for example, a project created before the pin), continue without the image — never retry with `--yes`, a bare `npx qrcode`, or a different registry.
+  - Define `METRO_QR='<working_dir>/.expo/metro-qr.png'` and run `npx --no-install qrcode -o "$METRO_QR" "<metro-url>"`. The template pins `qrcode` as a devDependency, so this runs the copy from the user's `npm install` and never downloads. If it fails (for example, a project created before the pin), continue without the image — never retry with `--yes`, a bare `npx qrcode`, or a different registry.
   - Verify the PNG with a host-neutral Node check: `node -e "const fs=require('node:fs'); process.exit(fs.existsSync(process.argv[1]) ? 0 : 1)" "$METRO_QR"`. If it fails, print the qrcode error and continue without the image.
   - **Chat-first render (best effort):** read and base64-encode the file with Node (`node -e "process.stdout.write(require('node:fs').readFileSync(process.argv[1]).toString('base64'))" "$METRO_QR"`) and embed in markdown as a data URI (`![QR](data:image/png;base64,<data>)`) so hosts that support inline image markdown show the QR directly in chat.
   - **Guaranteed visible fallback: the build plan, not a new window.** If inline chat image rendering is unavailable, do **not** open the PNG with the host's file-open tool or an OS command. The plan already draws the QR in its phone frame and links the file underneath it for scanning full size, so a window opening on top of a run the user is watching adds nothing. Print the quoted path instead, and point at the plan. Never interpolate an unquoted project path.
@@ -3218,8 +3396,8 @@ Do not persist PIDs, ports, or Metro URLs to the memory bank. They are ephemeral
 **Put the QR in the plan** so the document ends on the thing the user acts on:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" phone --stage qr \
-  --qr-image "<working_dir>/.expo/metro-qr.png" --qr-url "<metro-url>"
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' phone --stage qr \
+  --qr-image '<working_dir>/.expo/metro-qr.png' --qr-url "<metro-url>"
 ```
 
 The PNG is inlined as a data URI, so the plan still shows the code after `.expo/` is cleaned. This
@@ -3270,7 +3448,7 @@ Debug logs    : .powernative/metro-logs/
 Close the build plan before printing the summary:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir "<working_dir>" step --id run --status done
+node "${PLUGIN_ROOT}/scripts/app-docs.js" --working-dir '<working_dir>' step --id run --status done
 ```
 
 Point the user at `docs/create-app-plan.html` once — it holds the environment, the approved data

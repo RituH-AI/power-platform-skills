@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const { spawnSync } = require('node:child_process');
+const { runCliSync, CliLaunchError } = require('./process-runner');
 const {
   exactVersion, declarationSpec, dependencySections, isRuntimePackage, readProjectRequirements, validateRelease,
   readProject, readPlatformContext, validateProjectAgainstRelease, summarizeRelease, validHostIntegrity,
@@ -47,36 +47,18 @@ function compareVersions(left, right) {
   return 0;
 }
 
-function npmInvocation(args, options = {}) {
-  // npm.cmd requires a shell; invoke npm's installed JS entrypoint so paths stay literal arguments.
-  if ((options.platform || process.platform) !== 'win32') return { command: 'npm', args };
-  const node = options.nodeExecutable || process.execPath;
-  const configured = options.npmExecPath === undefined ? process.env.npm_execpath : options.npmExecPath;
-  const directories = (options.pathValue ?? process.env.PATH ?? '').split(';').filter(Boolean);
-  const candidates = [
-    configured,
-    path.join(path.dirname(node), 'node_modules/npm/bin/npm-cli.js'),
-    ...directories.map((directory) => path.join(directory, 'node_modules/npm/bin/npm-cli.js')),
-  ];
-  const cli = candidates.find((candidate) => typeof candidate === 'string' && path.isAbsolute(candidate)
-    && path.basename(candidate) === 'npm-cli.js' && fs.statSync(candidate, { throwIfNoEntry: false })?.isFile());
-  requireValue(cli, 'Cannot locate the installed npm CLI. Repair Node/npm on PATH; package commands are never passed through cmd.exe.');
-  return { command: node, args: [cli, ...args] };
-}
-
 function run(command, args, cwd) {
-  const npm = command === 'npm';
-  const invocation = npm ? npmInvocation(args) : { command, args };
-  const result = spawnSync(invocation.command, invocation.args, {
-    cwd, encoding: 'utf8', shell: false,
-    timeout: 120000, maxBuffer: 32 * 1024 * 1024,
-    env: { ...process.env, npm_config_ignore_scripts: 'true', npm_config_update_notifier: 'false' },
-  });
-  requireValue(!result.error && result.status === 0,
-    npm
+  try {
+    return runCliSync(command, args, {
+      cwd, encoding: 'utf8', timeout: 120000, maxBuffer: 32 * 1024 * 1024,
+      env: { ...process.env, npm_config_ignore_scripts: 'true', npm_config_update_notifier: 'false' },
+    });
+  } catch (error) {
+    if (!(error instanceof CliLaunchError) && !(Number.isInteger(error.status) && error.status > 0)) throw error;
+    requireValue(false, command === 'npm'
       ? 'Published package lookup failed. Check the exact version, configured npm registry, authentication and network; no other version was substituted.'
       : 'Package inspection failed. Ensure tar is available; no package code was executed.');
-  return result.stdout;
+  }
 }
 
 function parseOutput(output) {
@@ -395,5 +377,5 @@ function planPublishedUpdate(projectRoot, hostVersion, options = {}) {
 
 module.exports = {
   HOST, TEMPLATE, createSource, compareVersions, selectPublishedContract, selectTemplateContract,
-  readSourceRequirements, projectContract, planPublishedUpdate, npmInvocation,
+  readSourceRequirements, projectContract, planPublishedUpdate,
 };

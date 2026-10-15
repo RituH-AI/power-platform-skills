@@ -4,7 +4,7 @@ Read the [release lifecycle](../../../shared/references/mobile-release-lifecycle
 first. Resolve the existing app, not the newest plugin template:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working_dir>"
+node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root '<working_dir>'
 ```
 
 The explicit local diagnostic path may carry `--diagnostic-artifacts` through

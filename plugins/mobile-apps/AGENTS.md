@@ -76,6 +76,9 @@ Do not add preparation rewrites for `scheme`, `package`, `bundleIdentifier`, `sr
    plan.
 7. **Persisted plan** — Write `native-app-plan.md` (Mermaid ER + per-screen specs + native capabilities matrix) as the source of truth that sub-skills `Read`.
 8. **CLI compatibility** — Resolve the Power Apps CLI per [`shared/cli-binary.md`](./shared/cli-binary.md) and run code-app lifecycle and data-source commands as `$PA …` in the canonical grouped `pa` form — never a bare `pa`, `power-apps`, or `npx pa`. Every other agent-run `npx` (`tsc`, `expo`, `qrcode`, …) also uses `--no-install` against a package the template pins; never `npx --yes` or a bare `npx <pkg>` that can download from the registry. Use `scripts/resolve-environment.js` plus `az` tokens for Dataverse environment URL/tenant discovery and Azure/Entra operations. See [`shared/shared-instructions.md`](./shared/shared-instructions.md).
+   Mobile Node helpers use `scripts/lib/process-runner.js` for external CLI
+   execution. Keep arguments separate from commands and reuse its native/batch
+   handling rather than adding per-tool Windows shims or `shell: true`.
 9. **Agent invocation namespace** — All `Task` invocations of agents in this plugin MUST use the fully-qualified `mobile-app:<agent-name>` form (e.g. `mobile-app:native-app-planner`, `mobile-app:screen-builder`). Bare names like `native-app-planner` return `Agent type 'native-app-planner' not found` because Claude Code namespaces all plugin agents by plugin name.
 10. **Plugin isolation** — `hooks/hooks.json` is limited to fail-open telemetry start hooks. They never validate, mutate, or block tool calls. Do not add write/validation hooks: mutating skills follow the changed-file gate in `shared/shared-instructions.md`, and final-artifact agents invoke `scripts/validate-mobile-files.js` directly.
 11. **Invocation metadata** — Public entry skills use `user-invocable: true` and remain model-invocable. Bundled implementation helpers use both `user-invocable: false` and `disable-model-invocation: true`; their owner reads `SKILL.md` directly. Hidden standalone workflows such as `assign-offline-profile` and `preview-offline-scope` use `user-invocable: false` without disabling model invocation because no owner reads them directly. Agents use `user-invocable: false` without `disable-model-invocation` so qualified `Task` delegation remains available.
@@ -100,6 +103,64 @@ Do not add preparation rewrites for `scheme`, `package`, `bundleIdentifier`, `sr
 15. **First-party native package defects are reported, not patched in customer projects** — a `node_modules/@microsoft/power-apps-native-*` frame alone is not proof of package ownership; first rule out invalid app usage against the package's public contract. Once a defect is confirmed inside one of these packages, do not edit `node_modules/`, generate `patch-package` or postinstall rewrites, vendor or fork the package, replace it with a git/tarball/local dependency, or shadow it through resolver aliases. Capture sanitized reproduction evidence and route to `/report-issue`.
 16. **Custom events are Application Insights-specific and opt-in** — Each generated app targets one customer-owned, workspace-based Application Insights resource. `app.json` → `expo.extra.appInsightsConfig` defaults to disabled and stores its connection string, matching the Power Apps canvas-app model. Treat the value as sensitive project configuration: do not print it, write it to `memory-bank.md`, or include it in summaries. Keep `includeUserId` false unless explicitly approved.
 17. **Plugin update notification** — Immediately after the frontmatter of every `user-invocable: true` skill except `/check-updates`, run `node "${PLUGIN_ROOT}/scripts/check-version.js"` and show any output before proceeding. The check is best-effort and must never block the requested workflow. `/check-updates` owns its explicit plugin-version check in Step 1 and must not run a duplicate startup check.
+
+18. **Data-source operations preserve scope and app identity** — Before data
+    work, follow [Data-source invocation scope](shared/shared-instructions.md#data-source-invocation-scope).
+    Standalone workflows approve the current delta; child calls carry the owner,
+    phase, absolute root, and exact approved operations. Neither a flag nor an
+    old plan grants approval. Every shell/file operation uses the same root;
+    follow [app-working-directory.md](shared/references/app-working-directory.md)
+    for Bash and PowerShell guards.
+19. **Data-source retirement is app-local and CLI-owned** — After approved
+    consumer edits, use the supported removal command to update registrations,
+    schemas, and generated models/services, then regenerate the runtime schema
+    map. Never turn a removed plan row into server-table deletion. Follow
+    [`shared/references/data-source-removal.md`](shared/references/data-source-removal.md)
+    for shared-reference safety, inventory/offline reconciliation, and no-op
+    detection; successful exit alone is insufficient.
+20. **Seed scope is not the schema inventory** — Orchestrated `/add-sample-data`
+    calls pass an approved `--tables` allowlist and retiring-table exclusions.
+    Lookup fanout, prototype seeds, media uploads, and retries cannot widen that
+    scope. Preserve transitional manifest entries until verified removal.
+21. **Offline retirement survives addition checks** — Preserve per-table
+    `offlineRetirement` outcomes in leaf results and memory-bank. Addition-only
+    `in-sync` never clears a pending profile decision/migration. App-binding
+    approval is not permission to delete offline profile items or server data.
+22. **Dataverse change planning shares creation's helpers, not its gates** —
+    Setup/edit/standalone proposals use compact hash-bound evidence, required
+    snapshot-only architect context, and decision validation before the owner's existing approval.
+    The same checks apply to diagrams and inline fallbacks. Preapproval
+    environment resolution uses `--no-cache --require-tenant`; never downgrade
+    to the persistent resolver. Follow
+    [scoped Dataverse planning](shared/references/dataverse-change-planning.md).
+    Accepted contract/plan hashes travel in the existing scoped context; do not
+    fabricate the four-approval create-only execution receipt for an edit.
+23. **Feature entry points share one edit owner** — Direct native, connector,
+    data-model, and design requests on existing apps choose implementation-only,
+    full integration, or cancellation before costly work. Natural-language
+    existing-app feature requests preserve the original prompt and invoke
+    `/edit-app` after full-integration consent; never merely suggest the command
+    or send an existing app through `/create-mobile-app`. Approved children reuse
+    their current owner/root/phase/scope and never recurse into another edit.
+    Follow [app-edit-routing.md](shared/references/app-edit-routing.md); the
+    choice enters a workflow, not permission to mutate.
+24. **Shared entry policy is not copied into every skill** — Every new public
+    app workflow starts with a read-first link to `shared/shared-instructions.md`
+    and allows `Read`. The shared preflight classifies feature work before
+    operational commands; leaves only link to it. Invocation discovery tests
+    cover newly added skills automatically. These static checks verify the
+    instruction contract, not model compliance; do not claim smaller-model or
+    host reliability without agent-run evidence.
+25. **Natural-language routing is not a fixed skill list** — App guidance selects
+    the most specific host-advertised skill by description and supported scope,
+    including future/custom workflows not in the example table. Invoke rather
+    than merely recommend it after required entry consent. Preserve exact
+    namespaces, invocation restrictions, current owners, and all approval gates;
+    do not route every request through `/edit-app`.
+    Selection needs no extra invocation-approval prompt, but Dataverse and other
+    consequential actions keep their target/scope checks and mutation approvals.
+    Never fabricate approval context or substitute ad-hoc mutations for an
+    unavailable domain workflow.
 
 ## Telemetry
 

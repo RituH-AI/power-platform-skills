@@ -76,7 +76,8 @@ evidence to a public issue. iOS remains untested; reporting still works if local
 inspection fails.
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working_dir>"
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
+node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root '<working_dir>'
 ```
 
 If the affected workflow supplied actual selected base versions and fingerprints,

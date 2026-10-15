@@ -4,7 +4,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { runCliSync, CliLaunchError } = require('./lib/process-runner');
 const {
   selectRelease,
   selectProjectRelease,
@@ -104,19 +104,18 @@ function run(command, args, cwd) {
   const timeoutMs = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
     ? configuredTimeoutMs
     : 10 * 60 * 1000;
-  const invocation = isNpm ? require('./lib/mobile-published-packages').npmInvocation(args) : { command, args };
-  const result = spawnSync(invocation.command, invocation.args, {
-    cwd,
-    encoding: 'utf8',
-    timeout: timeoutMs,
-    maxBuffer: 4 * 1024 * 1024,
-    shell: false,
-    env: { ...process.env, npm_config_ignore_scripts: 'true' },
-  });
-  if (result.error || result.status !== 0) {
+  try {
+    return runCliSync(command, args, {
+      cwd,
+      encoding: 'utf8',
+      timeout: timeoutMs,
+      maxBuffer: 4 * 1024 * 1024,
+      env: { ...process.env, npm_config_ignore_scripts: 'true' },
+    });
+  } catch (error) {
+    if (!(error instanceof CliLaunchError) && !(Number.isInteger(error.status) && error.status > 0)) throw error;
     throw new Error(`${isNpm ? 'Template package installation' : 'Template CLI'} failed; check registry access, slow network conditions, package support locally, or increase MOBILE_TEMPLATE_NPM_TIMEOUT_MS if the command is timing out (raw output withheld)`);
   }
-  return result.stdout;
 }
 
 function assertTemplateManifest(manifest, release) {

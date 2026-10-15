@@ -2,7 +2,7 @@
 name: add-native
 description: Public entry point for native device capabilities and native controls — camera, image picker, barcode/QR scanner, document picker, file picker, secure storage, file system, sharing, haptic feedback, PDF generation/viewing, pen/signature capture, background GPS/geolocation tracking, or supported local file workflows — in a Power Apps mobile app. Also owns routing to internal camera/PDF/pen/geolocation implementation helpers and the guidance boundary between native wrappers and Dataverse File/Image host controls.
 user-invocable: true
-allowed-tools: Read, Edit, Write, Grep, Glob, Bash, AskUserQuestion
+allowed-tools: Read, Edit, Write, Grep, Glob, Bash, AskUserQuestion, Skill
 model: sonnet
 ---
 
@@ -10,7 +10,15 @@ model: sonnet
 
 **📋 Shared instructions: [shared-instructions.md](${PLUGIN_ROOT}/shared/shared-instructions.md)** — read first.
 
+**Working directory:** before any project read or command, execute
+[native-artifact-compatibility.md Step 0](${PLUGIN_ROOT}/shared/references/native-artifact-compatibility.md#0-bind-every-operation-to-the-app-root).
+Resolve `--working-dir` / owner context there; use the resolved absolute root for
+every shell call and file tool, not a previous shell's cwd.
+
 # Add Native Capability
+
+**Entry routing:** use the shared [App feature entry points](../../shared/shared-instructions.md#app-feature-entry-points)
+preflight before the workflow below.
 
 Generate a typed wrapper under `src/native/` for a native capability in the app's
 [verified release context](../../shared/references/mobile-release-lifecycle.md).
@@ -47,16 +55,13 @@ For every other capability listed below, this skill writes the wrapper directly.
 ## Native capability gate
 
 For an explicitly approved local diagnostic, append `--diagnostic-artifacts
-"<manifest.json>"` to the resolver and changed-file validator below, and carry
+'<manifest.json>'` to the resolver and changed-file validator below, and carry
 that selection into every internal helper. Follow the lifecycle reference:
 online-only Android test inventory only, iOS untested, no deployment. Do not
 install a missing control or infer support from a source profile.
 
-Before adding any native control or wrapper, run:
-
-```bash
-node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working_dir>"
-```
+Before adding any native control or wrapper, verify the project and run the
+package-contract resolver in Step 1.
 
 Use its sanitized tuple as the shared resolved context for helpers/planners/builders.
 Unknown/missing published contracts block native mutations, not permission to
@@ -76,7 +81,7 @@ published host 0.4.0 lacks it. No root barrel or barcode subpath is available.
 |---|---|---|---|
 | Form field bound to a Dataverse File column | Host `<FilePicker>` in screen JSX | `@microsoft/power-apps-native-host` host control | Do not generate document-picker/file-system/sharing wrappers for this field |
 | Form field bound to a Dataverse Image column | Host `<ImagePicker>` in screen JSX | `@microsoft/power-apps-native-host` host control | Do not use camera/image-picker wrappers for normal form-bound image fields |
-| Dedicated photo/gallery/scanner workflow | `/add-native camera`, `image-picker`, or `barcode-scanner` | `expo-camera` and/or `expo-image-picker` present | If packages are absent, stop with missing-package guidance |
+| Dedicated photo/gallery/scanner workflow | `/add-native camera`, `image-picker`, or `barcode-scanner` | `expo-image-picker` for photo/gallery; `expo-camera` for scanner; both for combined requests | If packages are absent, stop with missing-package guidance |
 | Pick/import/upload a user-selected PDF/document | `/add-native document-picker`, or host `<FilePicker>` for Dataverse File fields | `expo-document-picker` present, or host File control | Do not treat this as `pdf-report` or native PDF viewer |
 | Generate/export/print an app-owned report PDF | `/add-native pdf-report` | `expo-print` present | If `expo-print` is absent, do not add PDF report capability |
 | Share a generated local PDF | `pdfReport.ts` share helper | `expo-sharing` present | If `expo-sharing` is absent, do not render sharing UI |
@@ -162,8 +167,8 @@ release includes the matching leaf. Read installed public docs/types first.
 
 | Capability | Module | Wrapper to generate | Notes |
 |---|---|---|---|
-| `camera`, `take-photo`, `photo`, `expo-camera` | `expo-camera` | `src/native/camera.ts` | `/add-native` routes internally to `add-camera` |
-| `image-picker`, `gallery`, `expo-image-picker` | `expo-image-picker` | `src/native/imagePicker.ts` | `/add-native` routes internally to `add-camera` |
+| `camera`, `take-photo`, `photo`, `expo-camera` | `expo-image-picker` | `src/native/camera.ts` | `/add-native` routes internally to `add-camera` for the `photo` artifact; `expo-camera` is a capability alias, not its required package |
+| `image-picker`, `gallery`, `expo-image-picker` | `expo-image-picker` | `src/native/camera.ts` (`pickImage`) | `/add-native` routes internally to `add-camera`; preserve compatible existing re-exports |
 | `barcode-scanner`, `qr-scanner`, `scanner`, `barcode`, `qr` | `expo-camera` | `src/native/barcodeScanner.tsx` | `/add-native` routes internally to `add-camera` |
 | `document-picker` | `expo-document-picker` | `src/native/documentPicker.ts` | Picks/imports user-selected files (PDF, docs, etc.) from the device |
 | `pdf-viewer`, `native-pdf-viewer`, `pdf-control`, `open-pdf`, `@microsoft/power-apps-native-pdf-viewer` | Controls `/pdf` or verified legacy PDF leaf | `src/native/pdfViewer.ts` | `/add-native` routes internally to `add-pdf-viewer`; require the resolved contract's HTTPS/file URI support |
@@ -220,7 +225,15 @@ stop with a transparency note; never claim native readiness from TypeScript alon
 ### Step 1 — Verify project
 
 ```bash
-test -f app.config.js && test -f power.config.json && test -f package.json
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
+test -f app.config.js && test -f power.config.json && test -f package.json || { echo "BLOCKED: working_dir is not an initialized app" >&2; exit 1; }
+```
+
+After the project gate succeeds, resolve its native contract:
+
+```bash
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
+node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root '<working_dir>'
 ```
 
 ### Step 2 — Resolve capability
@@ -248,6 +261,7 @@ If the user names something not in the supported table, apply the Native capabil
 For normalized `camera`, `image-picker`, `barcode-scanner`, `qr-scanner`, `pdf-report`, `pdf-viewer`, `pen-input`, `location`, or `geolocation`, do not fall through to the generic wrapper flow and do not tell the user to run another slash command. Read the nested helper and follow its steps inside this `/add-native` invocation:
 
 ```bash
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
 case "<capability>" in
   camera|image-picker|barcode-scanner|qr-scanner) test -f "${PLUGIN_ROOT}/skills/add-native/add-camera/SKILL.md" && echo "INTERNAL_HELPER:add-camera" ;;
   pdf-report) test -f "${PLUGIN_ROOT}/skills/add-native/add-pdf-report/SKILL.md" && echo "INTERNAL_HELPER:add-pdf-report" ;;
@@ -258,7 +272,16 @@ case "<capability>" in
 esac
 ```
 
-- **INTERNAL_HELPER:** read the printed helper file, execute its workflow with the same `--working-dir` and forwarded arguments, then STOP. `/add-native` remains the only user-facing command for these controls.
+- **INTERNAL_HELPER:** read the printed helper file and execute its workflow with
+  the same absolute `working_dir`, arguments, supplied answers, mode flags, and
+  current owner/phase/`approved_scope`. The helper must bind every operation to
+  that root using Step 0, even if launched from another directory. Each helper must execute
+  [native-artifact-compatibility.md](${PLUGIN_ROOT}/shared/references/native-artifact-compatibility.md)
+  before its writes/reuse and before its success summary; outer Step 5 is not
+  reached on this branch. Propagate `NEEDS_CONTEXT`/`BLOCKED` and the artifact
+  result to the owner, then STOP this leaf, not the owning workflow. Do not
+  fall through to inline generation or report success for a partial helper result.
+  `/add-native` remains the only user-facing command for these controls.
 - **INLINE:** continue to Step 4.
 
 ### Step 4 — Verify module in the resolved release
@@ -268,6 +291,7 @@ Confirm the exact installed version against the resolved inventory and read its
 public docs/types. A matching package name alone does not prove compatibility.
 
 ```bash
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
 node -e "const p = require('./package.json'); const m = '<resolved-package-name>'; if (!p.dependencies?.[m]) { console.error('MISSING: ' + m + '. Stop and reconcile the app with its verified release; do not install native packages or re-scaffold an existing app.'); process.exit(1); }"
 ```
 
@@ -280,7 +304,14 @@ If the check fails, STOP. Do not run `npx expo install`. Print the error verbati
 **Print before starting:**
 > "→ Writing src/native/<wrapper>.ts (typed wrapper with discriminated-union result + iOS/Android platform guards)…"
 
-Create `src/native/<wrapper-filename>.ts` (per the supported-capabilities table). If the file already exists, **do NOT overwrite** — append a comment noting "regeneration skipped — wrapper already exists" and skip to Step 6.
+Read and execute [native-artifact-compatibility.md](${PLUGIN_ROOT}/shared/references/native-artifact-compatibility.md)
+Steps 1–3 for the inline capability row before writing or reusing output.
+Create `src/native/<wrapper-filename>.ts` only when missing and in scope. If the
+file already exists, inspect its exports against the approved capability
+contract, including behavior and storage. Reuse it unchanged when compatible;
+make a scoped update without re-asking when already approved. Otherwise return
+`NEEDS_CONTEXT` to the owner (or ask standalone) before updating; never silently
+skip the feature or overwrite custom code.
 
 Each wrapper exports:
 
@@ -430,14 +461,25 @@ export async function setSecret(key: string, value: string): Promise<SecureResul
 > "→ Running tsc to verify wrapper compiles (~10–20 seconds)."
 
 ```bash
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
 npx --no-install tsc --noEmit
 ```
 
-Fix wrapper-side errors only. Do not run local native builds. A package/version
-change requires a maintainer-verified Android/iOS release, not customer-side
-linking. Type-check success is not a native device validation pass.
+Fix only in-scope wrapper-side errors. Execute the shared compatibility contract's
+Step 4 after type-checking: recheck all requested artifacts, API/behavior, and
+storage obligations before returning success. Type-check success alone is
+insufficient. Do not run platform-specific native build commands during normal
+`/add-native` use because the module is already part of the current template binary.
+When a template/base maintainer first adds `expo-haptics` or changes its version,
+that release must rebuild the Android and iOS base binaries so Expo autolinking
+includes the module.
+
+Type-check success is not native device validation. Native package changes require a separately approved host migration and matching native binaries, not customer-side linking.
 
 ### Step 7 — Summary
+
+Return the shared compatibility result before the summary; use the actual
+created/updated/reused paths and do not claim completion for unresolved artifacts.
 
 ```
 ✅ Native wrapper generated: <capability>

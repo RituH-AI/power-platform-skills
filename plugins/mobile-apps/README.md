@@ -197,11 +197,40 @@ After the prereq sanity check passes:
 > /create-mobile-app build me a small notes app
 ```
 
-Expected: ~6 prompts (wizard + gates), then ~5 minutes of scaffolding, table creation, and parallel screen builds. End state: a working Notes app with a project-local Metro session ready to scan and debug. If anything fails, the [memory bank](#glossary) remembers where you left off — re-run the same command and it resumes.
+Expected: ~6 prompts (wizard + gates), then ~5 minutes of scaffolding, table creation, and parallel screen builds. End state: a working Notes app with a project-local Metro session ready to scan and debug.
+
+If creation stops, explicitly ask to continue that creation. The skill checks
+the [memory bank](#glossary), saved build-plan progress, and current artifacts,
+then confirms the unfinished phase. A plan written before app initialization
+is not a completed app. Opening an existing app or asking for a feature change
+does not automatically resume creation, even if a memory bank exists.
 
 ## Quick examples
 
-The plugin is conversational — you describe what you want and the skill drives the rest. Five typical flows:
+The plugin is conversational: slash commands are optional when the agent host
+loads the app guidance and advertises the matching skills. Describe the task
+naturally, such as "Add signature capture", "Connect a data source", or "Upgrade
+this app's dependencies". The agent selects the most specific matching skill by
+description and supported scope, then invokes it after any required entry
+consent rather than asking you to repeat the prompt as a command.
+
+The intent table in the generated app guidance is examples, not a closed
+allowlist. Future or custom skills advertised by your host are eligible too.
+An ambiguous scope prompts clarification; a missing plugin requires approval
+before installation or enabling. Opening the folder alone starts nothing, and
+`edit-app` is not the default for every request. Existing approval gates and
+fresh-template safeguards still apply.
+
+There is no extra approval just to select or load a clearly matching skill.
+Approvals cover the work: integration scope/cost, Dataverse schema/data changes,
+installations, native builds, and deployment. Dataverse workflows validate the
+app root and selected environment/tenant, inspect existing inventory, and show
+the proposed changes before mutation approval. Missing skills or unresolved
+targets block that work instead of falling back to ad-hoc commands. Approval to
+install a plugin never authorizes its Dataverse changes; current approvals are
+reused only for the same target and scope.
+
+Five typical flows:
 
 ### 1. Create a new app from a one-liner
 
@@ -226,7 +255,11 @@ End state: a working app you can iterate on with hot reload. ~5–12 minutes for
 > /add-dataverse I need an Asset table with name, serial number, and a lookup to an existing Account
 ```
 
-Or paste an ER diagram (image / Mermaid / text). The data-model-architect agent discovers what already exists in your environment, scores reuse vs extend vs create, walks through approval, then creates the tables in dependency order and regenerates `src/generated/services/`.
+Or paste an ER diagram (image / Mermaid / text). For an existing app, this first
+asks whether to integrate through `/edit-app`, do data-only work, or cancel.
+Full integration approves the schema delta and affected screens together.
+The data-model-architect checks reuse vs extend vs create before the Dataverse
+leaf applies approved operations and regenerates services.
 
 ### 3. Add a native capability
 
@@ -234,7 +267,13 @@ Or paste an ER diagram (image / Mermaid / text). The data-model-architect agent 
 > /add-native camera
 ```
 
-Generates `src/native/camera.ts` (typed wrapper around `expo-camera` + `expo-image-picker`) and — if Dataverse image columns exist — a `cameraUpload.ts` helper that bridges to `Service.upload()`. The Expo modules are already in the upstream template; no `package.json` or `app.config.js` edits.
+On an existing app, `/add-native` first asks whether to do implementation-only
+work, full app integration, or cancel. Only full integration invokes `/edit-app`,
+which resolves how the camera will be used, updates the Native Capabilities and
+Screens plan, and asks about retention only when needed. It then generates the supported
+wrappers/helpers and integrates the approved screen flow. Dataverse schema
+changes are conditional, not required for every capture. Native modules must
+already ship in the template; no native dependency or permission-config edits.
 
 For other capabilities (only those actually shipped by the template):
 ```text
@@ -254,7 +293,40 @@ Native modules are allowlist-bound by the current template `package.json`. If th
 > /add-connector                 # any other Power Platform connector
 ```
 
-Runs `pa app add data-source` under the hood, regenerates services, prints how to import in your screens.
+On an existing app, these entry points ask before invoking the fuller, more
+costly `/edit-app` workflow. Choose implementation-only work, full integration,
+or cancel. Full integration clarifies the operation and consuming screens,
+approves the Connectors delta, generates services with `pa app add data-source`,
+and wires the intended behavior. Teams/email actions and profile lookups
+do not automatically create a Dataverse model. SQL/Excel/SharePoint tables
+also stay in the connector plan unless Dataverse storage is separately required.
+
+Choose implementation-only in that question, or use `--implementation-only` (for example,
+`/add-native secure-store --implementation-only`) or explicitly request only a
+wrapper/service registration. The skill keeps applicable plan entries current,
+but leaves screens unchanged and reports that integration was not performed.
+When the change is already part of an approved creation/edit workflow, the
+extra entry question is skipped. This choice runs before costly app scans or
+planners and does not replace mutation/removal approval.
+
+### Data-source planning, refresh, and retirement
+
+Use `/setup-datamodel` or `/add-dataverse` to review and approve a data change.
+Add `--plan-only` to preview it without changing the app or its data.
+
+For existing sources, use the dedicated refresh/removal operation:
+
+```text
+> /add-dataverse --refresh --data-source-name <registered-name>
+> /add-connector --refresh --data-source-name <registered-name>
+> /add-sharepoint --remove --data-source-name <registered-name>
+```
+
+Refresh updates an existing source without adding it again. Removal stops if
+app code still uses the source and never deletes server tables, records, lists,
+or connections. For a fully integrated removal, `/edit-app` updates the approved
+consumers before retiring their data sources. Offline-profile changes require
+separate approval. Cloud-flow integration is not supported.
 
 ### 5. Iterate on the generated app after the fact
 
@@ -268,7 +340,29 @@ Runs `pa app add data-source` under the hood, regenerates services, prints how t
 > /report-issue                  # copy-paste-ready GitHub issue body
 ```
 
-Use `/edit-app` for post-generation improvements. It first inspects the existing app and asks only for missing intent details (which screen, table, scanned field, launch point, brand source, etc.). Then it updates `native-app-plan.md` when the request changes the plan, applies the generated app edits, runs the relevant verification, updates `memory-bank.md`, and regenerates `preview.html` when UI changed. You do not need to manually run `npm run generate-schemas`, `npx --no-install tsc --noEmit`, or `/preview-screens` after each edit unless you are doing diagnostics outside the skill.
+Use `/edit-app` for post-generation improvements. Users can invoke it directly
+or ask naturally, for example, "This app already exists; add an asset detail
+screen." For a natural-language existing-app feature request, the generated app
+guidance asks whether the user wants **Implementation only**, **Full app
+integration**, or **Cancel**. Full integration invokes `/edit-app` with the
+original request; it does not merely recommend the command or ask the user to
+repeat the prompt. Reported failures still go to `/debug-app`, dependency or
+template upgrades go to `/check-updates`, and small app-owned fixes remain
+small.
+
+A fresh starter is not an already-generated app. Native-control requests such
+as "Add signature capture" use `/add-native` and its standalone prerequisites;
+they do not automatically start `/edit-app` or full app creation. An existing
+app with a missing plan is not considered fresh and must not be re-scaffolded.
+
+`/edit-app` first inspects the existing app and asks only for missing intent
+details (which screen, table, scanned field, launch point, brand source, etc.).
+Then it updates `native-app-plan.md` when the request changes the plan, applies
+the generated app edits, runs the relevant verification, updates
+`memory-bank.md`, and regenerates `preview.html` when UI changed. You do not
+need to manually run `npm run generate-schemas`,
+`npx --no-install tsc --noEmit`, or `/preview-screens` after each edit unless
+you are doing diagnostics outside the skill.
 
 Common follow-ups:
 
@@ -301,7 +395,7 @@ Example edit flows:
 | `/create-mobile-app` | ✅ v0 | Orchestrator — acquires an exact reviewed immutable template into a new/empty folder after approval, or validates an existing fresh installed app against its release. Separately approves installation, gates planning, runs the resolved `pa app init`, verifies environment/auth setup, then applies data/native/connectors, builds screens and starts the dev server. Missing release evidence blocks creation. |
 | `/set-app-registration-native` | ✅ v0 | Auth helper — discovers tenant-visible app registrations, checks the applicable native runtime permission profile, opens the environment-specific Wrap page for creation or repair, and writes the selected client ID to `auth.config.json`. |
 | `/add-dataverse` | ✅ v0 | Add Dataverse — connect to existing tables, or create / extend tables in Tier 0 → N order via the Dataverse Web API, then generate TS services. Accepts ER diagrams via image / Mermaid / text, or spawns the data-model-architect agent. |
-| `/setup-datamodel` | ✅ v0 | Discoverable alias for `/add-dataverse` optimized for the design-first entry point ("how do I plan my Dataverse schema?"). Same workflow under a more searchable name. |
+| `/setup-datamodel` | ✅ v0 | Plan and approve a scoped Dataverse/connector change. Choose data-only work or full `/edit-app` integration; `--plan-only` returns a proposal without applying it. |
 | `/add-connector` | ✅ v0 | Generic connector — runs `pa app add data-source` for any first-party or custom connector |
 | `/add-native` | ✅ v0 | Add a supported native capability/control (camera, image-picker, barcode/QR scanner, document-picker, PDF viewer/report, pen/signature, secure-store, file-system, sharing, haptics, etc.) — resolves the app-matched reviewed native inventory and installed closure, then writes typed wrappers under `src/native/`. The newest bundled template is not the allowlist; missing native support requires a coordinated release, not an independent package install. |
 | `/list-connections` | ✅ v0 | Finds or creates a Power Platform connection ID, or resolves a solution connection reference, for `pa app add data-source`. Use when adding non-Dataverse connectors or re-binding after a 401. |
@@ -315,7 +409,7 @@ Example edit flows:
 | `/telemetry` | ✅ v0 | Enable, disable, or show the per-user Mobile Apps telemetry transmission preference. |
 | `/design-system` | ✅ v0 | End-to-end design system — collects brand inputs (logo, brand doc, website, free text, canvas app, code app, Figma), runs a 3-style visual picker, writes `brand/design-system.md` + `brand/tokens.ts`, renders branded screen previews. Auto-invoked at Step 6.75 of `/create-mobile-app`; also standalone. |
 | `/preview-screens` | ✅ v0 | Renders generated TSX screens as a browser-viewable HTML preview (no Metro needed). Uses Tamagui → HTML mapping. |
-| `/add-datasource` | ✅ v0 | Alias for `/add-connector` — discoverable name for "how do I connect to X?" |
+| `/add-datasource` | ✅ v0 | Intent-aware entry point for data/action integrations; asks full `/edit-app` integration vs implementation-only, then uses the approved Dataverse/SharePoint/connector leaf. |
 | `/add-sharepoint`, `/add-teams`, `/add-office365`, `/add-excel`, `/add-onedrive`, `/add-azuredevops` | 🟡 v1 | Pre-filled wrappers around `/add-connector` |
 | `/setup-offline-profile` | 🟡 v0.1 | Create a Dataverse Mobile Offline Profile for the app's tables. One consolidated configuration questionnaire (no per-step approval clicks), schema+screen-aware architect proposal, single `accept` confirm. Writes `offline-profile.json`; never mutates `power.config.json`. The bundled offline package is consumed by the native host for local storage, queued synchronization, reconnect handling, and status UX, so the skill configures the host runtime instead of generating duplicate app-owned offline infrastructure. Offered explicitly by `/create-mobile-app` after Dataverse materialization; connectivity wording in the initial prompt does not auto-enable it. Also runs standalone on existing apps. |
 | `/enable-tables-offline` | 🟡 v0.1 | Pre-flight pass — flip `IsAvailableOffline` + `ChangeTrackingEnabled` on selected tables' EntityMetadata, then `PublishAllXml`. Idempotent. Mostly a no-op for fresh scaffolds since `/add-dataverse` Step 5b now sets these flags at create time; primary use case is fixing legacy / imported tables. |

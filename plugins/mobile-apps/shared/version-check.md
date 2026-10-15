@@ -79,7 +79,7 @@ If the user asks how to run on a real device or simulator: point them at the Exp
 ## Resolve SDK and native package versions
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working_dir>"
+node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root '<working_dir>'
 ```
 
 Use only its sanitized tuple for the app's template, host, Expo, React Native,
@@ -118,7 +118,7 @@ node --version          # expect v22+
 
 # Project-local (only if inside a project)
 test -f power.config.json && echo "OK: code app project"
-node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working_dir>"
+node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root '<working_dir>'
 ```
 
 **Do NOT call `xcodebuild`, `java -version`, or check for Android Studio in any skill.** Local native compile is the user's choice, not a plugin concern.

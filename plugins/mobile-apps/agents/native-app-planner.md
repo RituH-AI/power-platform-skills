@@ -112,21 +112,14 @@ Read these references once before doing anything else:
 
 Do not assume scaffolding has completed or infer a runtime from plugin files.
 If the release context is missing, request it from the orchestrator or resolve
-read-only with `node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working_dir>"`.
+read-only with `node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root '<working_dir>'`.
 Unknown/missing records block native capability approval for implementation.
 Existing pure source/UI planning may continue explicitly unverified; do not
 turn a plan-only proposal into a native-readiness claim.
 
 From the planner prompt extract:
 - **Target platforms** — always iOS + Android. The foreground does not ask the user to choose a subset; retain platform-specific fallback behavior for both.
-- **Native capability hints** — capture/scan → camera; user-picked files →
-  document-picker or Dataverse host picker; generated reports → pdf-report;
-  open PDFs → pdf-viewer; signature/ink → pen-input; continuous route/worker
-  tracking → geolocation; a single coordinate → location; secrets →
-  secure-store; local sharing → sharing. Resolve these semantics against this
-  app's inventory using Step 3, not a hardcoded newest-template package list.
-  Missing support is a transparency note, never a silently approved capability.
-  PDF generation is not a substitute for arbitrary PDF viewing.
+- **Native capability hints** - photo/camera -> `camera` with `expo-image-picker`; scan/barcode/QR -> `barcode-scanner` with `expo-camera`; user-picked files -> document-picker or a Dataverse host picker; generated reports -> pdf-report; arbitrary HTTPS/local-file PDF viewing -> pdf-viewer; signature/ink -> pen-input; continuous route/worker tracking -> geolocation; a single coordinate -> location; secrets -> secure-store; local sharing -> sharing. Resolve these semantics against this app's native inventory and the version-conditional controls reference in Step 3, not a newest-template package list. Missing support is a transparency note, never a silently approved capability. PDF generation is not a substitute for arbitrary PDF viewing; generate reports only when the resolved runtime includes the required print/sharing APIs.
 - **Pure-JavaScript dependency hints** — pass any explicit JavaScript-library request, or any feature that may benefit from an established JS-only package instead of custom code, to `screen-planner`. These are app dependencies, not native capabilities. The screen planner reuses suitable installed packages first; otherwise it follows the canonical candidate-selection workflow and records the selected package with an exact version under `## Screens → ### JavaScript Dependencies`.
 - **Industry confirmed** — if the prompt contains a line `Industry confirmed: <slug>`, the orchestrator already ran the industry-confidence check (see Step 3c). Treat that slug as the locked industry for Step 3c — skip detection, skip the confidence check, jump straight to mapping the industry to aesthetic direction / palette / tone.
 
@@ -172,7 +165,7 @@ This restriction does not apply to verified pure-JavaScript dependencies.
 Do not infer native code from a package-name prefix.
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working_dir>"
+node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root '<working_dir>'
 ```
 
 Carry the sanitized resolved context unchanged to every architect, screen
@@ -189,8 +182,9 @@ condition below also requires matching versions and native support.
 
 | Capability | Module | Add via |
 |---|---|---|
-| `camera` | `expo-camera` | `/add-native camera` |
+| `camera` | `expo-image-picker` | `/add-native camera` |
 | `image-picker` | `expo-image-picker` | `/add-native image-picker` |
+| `barcode-scanner` | `expo-camera` | `/add-native barcode-scanner` |
 | `document-picker` | `expo-document-picker` | `/add-native document-picker` |
 | `pdf-report` | `expo-print` (+ `expo-sharing` when local share is needed and present) | `/add-native pdf-report` |
 | `native-pdf-viewer` | Resolved controls `/pdf` or matching legacy PDF leaf | `/add-native pdf-viewer` |
@@ -275,7 +269,7 @@ For each capability the app needs **AND is in the allowlist**:
 | Field | Example |
 |---|---|
 | Capability | `camera` |
-| Expo module | `expo-camera` |
+| Expo module | `expo-image-picker` |
 | Required by workflow | `Capture receipts`, `Update profile photo` |
 | Justification | One-sentence rationale tied to a user need ("Capture receipts attached to expense reports") |
 | Storage/output target | `n/a`, `Dataverse Image`, `Dataverse File`, `child Evidence table`, `connector-owned storage` (connector + operation + destination), `on-device/share-only`, `local file URI`, or `HTTPS URL` |
@@ -797,7 +791,7 @@ Reject loop = re-spawn data-model-architect in `mode: cross-entity-audit` with t
 Run the mobile changed-file dispatcher against every file this planner wrote or edited, including `native-app-plan.md` and temporary section files that remain in the project:
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/validate-mobile-files.js" --project-root "<working_dir>" --file "<changed-file>" [--file "<changed-file>" ...]
+node "${PLUGIN_ROOT}/scripts/validate-mobile-files.js" --project-root '<working_dir>' --file '<changed-file>' [--file '<changed-file>' ...]
 ```
 
 Repair reported violations and rerun until it exits `0`. Pass exact changed files, never the whole project root.
@@ -807,8 +801,8 @@ time:
 
 ```bash
 node "${PLUGIN_ROOT}/scripts/build-dataverse-operation-manifest.js" \
-  --normalize-contract "<working_dir>/.tmp/dataverse-schema-contract.json" \
-  --output "<working_dir>/.tmp/dataverse-schema-contract.json"
+  --normalize-contract '<working_dir>/.tmp/dataverse-schema-contract.json' \
+  --output '<working_dir>/.tmp/dataverse-schema-contract.json'
 ```
 
 The gate-owning planner must now finalize the pre-existing

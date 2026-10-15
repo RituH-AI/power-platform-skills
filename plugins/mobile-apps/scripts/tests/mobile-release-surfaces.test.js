@@ -10,7 +10,7 @@ const read = (file) => fs.readFileSync(path.join(pluginRoot, file), 'utf8');
 const entrySkills = ['add-native', 'deploy', 'edit-app', 'debug-app', 'report-issue'];
 const nativeHelpers = ['add-camera', 'add-geolocation', 'add-pdf-report', 'add-pdf-viewer', 'add-pen-input'];
 const agents = ['native-app-planner', 'screen-planner', 'screen-builder', 'data-model-architect', 'offline-profile-architect'];
-const resolver = 'node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working_dir>"';
+const resolver = 'node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root \'<working_dir>\'';
 
 function codeBlock(source, marker) {
   const blocks = [...source.matchAll(/```(?:ts|typescript|tsx)\r?\n([\s\S]*?)```/g)];

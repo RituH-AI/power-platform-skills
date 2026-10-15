@@ -41,7 +41,7 @@ Determine the working directory:
 Validate the project:
 
 ```text
-Glob pattern="power.config.json" path="<working_dir>"
+Glob pattern="power.config.json" path='<working_dir>'
 ```
 
 If missing, check for `package.json`. If neither exists, report the error and stop.
@@ -61,7 +61,7 @@ Fallback: read `name` from `package.json`.
 Find all TSX files under the app directory:
 
 ```text
-Glob pattern="app/**/*.tsx" path="<working_dir>"
+Glob pattern="app/**/*.tsx" path='<working_dir>'
 ```
 
 **Exclude** these patterns — they are not screens:
@@ -110,7 +110,7 @@ Internalize:
 Also check if the project has custom brand tokens:
 
 ```text
-Glob pattern="tamagui.config.ts" path="<working_dir>"
+Glob pattern="tamagui.config.ts" path='<working_dir>'
 ```
 
 If found, read it and extract any custom color tokens (look for `tokens: { color: { ... } }`). Add them as additional CSS custom properties in the generated HTML.
@@ -186,7 +186,7 @@ Print confirmation:
 Read the flag and act:
 
 ```bash
-grep -E "^visual_companion:[[:space:]]*(yes|no)" "<working_dir>/memory-bank.md" 2>/dev/null
+grep -E "^visual_companion:[[:space:]]*(yes|no)" '<working_dir>/memory-bank.md' 2>/dev/null
 ```
 
 | Flag | Action |
@@ -205,13 +205,17 @@ grep -E "^visual_companion:[[:space:]]*(yes|no)" "<working_dir>/memory-bank.md" 
 Then try OS-appropriate openers in sequence and fall back to printing the link if none work:
 
 ```bash
-open "<working_dir>/preview.html" 2>/dev/null \
-  || xdg-open "<working_dir>/preview.html" 2>/dev/null \
-  || powershell.exe -NoProfile -Command "Start-Process '<working_dir>\preview.html'" 2>/dev/null \
-  || echo "Could not auto-open. Open this URL in your browser: file://<working_dir>/preview.html"
+open '<working_dir>/preview.html' 2>/dev/null \
+  || xdg-open '<working_dir>/preview.html' 2>/dev/null \
+  || MOBILE_APP_PREVIEW_PATH='<working_dir>/preview.html' \
+     powershell.exe -NoProfile -Command 'Start-Process -FilePath $env:MOBILE_APP_PREVIEW_PATH' 2>/dev/null \
+  || printf '%s\n' 'Could not auto-open. Open this URL in your browser: file://<working_dir>/preview.html'
 ```
 
-`open` is macOS-only; the chain covers Linux (`xdg-open`) and Windows / WSL (`powershell.exe Start-Process`). On headless / SSH sessions all three fail silently and the user just opens the link they were already given.
+`open` is macOS-only; the chain also tries Linux (`xdg-open`) and Windows
+(`powershell.exe Start-Process`). The Windows path is passed as data, not
+PowerShell source. On headless or unsupported cross-host sessions, report the
+failed launch and manual link instead of claiming the browser opened.
 
 ---
 

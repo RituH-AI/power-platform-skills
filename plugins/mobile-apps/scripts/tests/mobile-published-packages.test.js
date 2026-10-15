@@ -9,7 +9,7 @@ const { createHash } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const {
   HOST, TEMPLATE, createSource, selectPublishedContract, selectTemplateContract,
-  readSourceRequirements, projectContract, planPublishedUpdate, npmInvocation,
+  readSourceRequirements, projectContract, planPublishedUpdate,
 } = require('../lib/mobile-published-packages');
 const { acquireHost } = require('../mobile-template-lifecycle');
 const { readProject, readPlatformContext, validateProjectAgainstRelease } = require('../lib/mobile-release');
@@ -297,22 +297,6 @@ test('selectors reject tags, prereleases, URLs and shell syntax before npm runs'
   for (const version of ['latest', '^1.0.0', '1.0.0-preview.1', 'https://example.com/package.tgz', '1.0.0;echo secret']) {
     assert.throws(() => source.read(HOST, version), /exact stable/);
   }
-});
-
-test('Windows npm invocation preserves paths and arguments without a command shell', (t) => {
-  const f = fixture(t);
-  const directory = path.join(f.directory, 'node & tools');
-  const node = path.join(directory, 'node.exe');
-  const cli = path.join(directory, 'node_modules/npm/bin/npm-cli.js');
-  fs.mkdirSync(path.dirname(cli), { recursive: true });
-  fs.writeFileSync(cli, '// fixture; never executed\n');
-  const args = ['pack', `${HOST}@1.0.0`, '--pack-destination', path.join(f.directory, 'space & destination')];
-  assert.deepEqual(npmInvocation(args, { platform: 'win32', nodeExecutable: node, npmExecPath: null, pathValue: '' }), {
-    command: node, args: [cli, ...args],
-  });
-  assert.throws(() => npmInvocation(args, {
-    platform: 'win32', nodeExecutable: path.join(f.directory, 'missing/node.exe'), npmExecPath: null, pathValue: '',
-  }), /Cannot locate/);
 });
 
 test('host acquisition is isolated, script-disabled, integrity-bound and cannot overwrite an app', (t) => {

@@ -10,7 +10,7 @@ player or wrapped binary contains the same native runtime.
 ## Resolve before native work
 
 ```bash
-node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working_dir>"
+node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root '<working_dir>'
 ```
 
 Only exit 0 authorizes using the returned release as a native dependency
@@ -67,7 +67,7 @@ node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --host-version "<exact-h
 
 For creation, inspect `--template-version "<exact-template-version>"` and acquire
 that immutable package only after approval. For an upgrade, use
-`mobile-template-lifecycle.js plan --project-root "<working_dir>" --host-version
+`mobile-template-lifecycle.js plan --project-root '<working_dir>' --host-version
 "<exact-host-version>"`, then acquire the approved host into a separate empty
 tooling directory. The host CLI, not the skill, owns migration writes and install
 validation. Never independently upgrade every native dependency to npm `latest`.
@@ -88,7 +88,7 @@ not prerequisites.
 ## Explicit local diagnostic artifacts (not a release)
 
 An explicitly requested, reviewed **online-only Android diagnostic** may select
-`--diagnostic-artifacts "<manifest.json>"` instead of a published release. This
+`--diagnostic-artifacts '<manifest.json>'` instead of a published release. This
 is a separate local test contract, never a catalogue entry, default promotion,
 publication claim, or deployment approval. Do not create production records or
 invent registry versions to make an unpublished package installable. Ordinary
@@ -191,11 +191,11 @@ archive declaration or selects a registry package.
 ```bash
 # After approval to inspect these exact local artifacts:
 node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" \
-  --diagnostic-artifacts "<manifest.json>"
+  --diagnostic-artifacts '<manifest.json>'
 
 # Read-only source/target planning; no migration, installation or customer copy:
 node "${PLUGIN_ROOT}/scripts/mobile-template-lifecycle.js" plan \
-  --project-root "<working_dir>" --diagnostic-artifacts "<manifest.json>"
+  --project-root '<working_dir>' --diagnostic-artifacts '<manifest.json>'
 ```
 
 Record the returned `manifestSha256` with the private approval. Changed
@@ -228,9 +228,9 @@ TypeScript configurations. Do not use target-reference `NODE_PATH` as a
 substitute for the source dependency context.
 After the helper confirms that CLI
 actually supports the diagnostic flag, preview one edge with
-`--project "<preview_dir>" --dry-run --diagnostic-artifacts "<manifest.json>"`;
+`--project '<preview_dir>' --dry-run --diagnostic-artifacts '<manifest.json>'`;
 apply a clean approved edge with
-`--project "<preview_dir>" --diagnostic-artifacts "<manifest.json>"` and its normal
+`--project '<preview_dir>' --diagnostic-artifacts '<manifest.json>'` and its normal
 validated installation. The target
 CLI must preserve the selected local archive declarations. If it does not, stop
 for a producer fix; do not fetch a nonexistent npm version or patch the host.
@@ -274,7 +274,7 @@ floating Expo checks/fixes or doctor recommendations. Report only checkpoints
 that actually ran; a separate read-only advisory audit does not authorize updates.
 
 Creation into a new/empty directory may use `mobile-template-lifecycle.js acquire
---destination "<working_dir>" --diagnostic-artifacts "<manifest.json>"` after
+--destination '<working_dir>' --diagnostic-artifacts '<manifest.json>'` after
 separate acquisition approval. It invokes the packed template CLI and stages its
 verified local packages/reference lock; it never installs dependencies. Approve
 `npm ci` separately. Existing customer apps never use acquisition.
@@ -296,7 +296,7 @@ After the user approves acquisition and installation, use:
 
 ```bash
 node "${PLUGIN_ROOT}/scripts/mobile-template-lifecycle.js" acquire \
-  --template-version "<exact-template-version>" --destination "<new-empty-directory>"
+  --template-version "<exact-template-version>" --destination '<new-empty-directory>'
 ```
 
 The helper installs the exact template package in a private temporary directory
@@ -320,7 +320,7 @@ decision helper runs even if `npm outdated` reports no host update:
 
 ```bash
 node "${PLUGIN_ROOT}/scripts/mobile-template-lifecycle.js" plan \
-  --project-root "<working_dir>" --host-version "<exact-host-version>"
+  --project-root '<working_dir>' --host-version "<exact-host-version>"
 ```
 
 An equal supported target is valid. A stale template still needs migrations
@@ -406,7 +406,7 @@ again before push if anything changed:
 
 ```bash
 node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" \
-  --project-root "<working_dir>" --platform android \
+  --project-root '<working_dir>' --platform android \
   --base-version "<actual-base-version>" --base-fingerprint "<actual-base-fingerprint>"
 ```
 

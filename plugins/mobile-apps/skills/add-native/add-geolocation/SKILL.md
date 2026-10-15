@@ -9,6 +9,11 @@ model: sonnet
 
 **Shared instructions: [shared-instructions.md](${PLUGIN_ROOT}/shared/shared-instructions.md)** — read first.
 
+**Working directory:** before any project read or command, execute
+[native-artifact-compatibility.md Step 0](${PLUGIN_ROOT}/shared/references/native-artifact-compatibility.md#0-bind-every-operation-to-the-app-root).
+Inherit `/add-native`'s resolved absolute `working_dir`; bind every shell call and
+file tool to it, even when this helper starts from another directory.
+
 # Add Geolocation
 
 Internal helper for `/add-native location` (one-shot), `/add-native geolocation`,
@@ -23,12 +28,13 @@ Do not substitute another library's `configureSync` / `HttpSyncContract` API.
 ## 1. Verify the app and resolved release
 
 ```bash
-test -f app.config.js && test -f power.config.json && test -f package.json && test -d src
-node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root "<working_dir>"
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
+test -f app.config.js && test -f power.config.json && test -f package.json && test -d src || { echo "BLOCKED: working_dir is not an initialized app" >&2; exit 1; }
+node "${PLUGIN_ROOT}/scripts/resolve-mobile-release.js" --project-root '<working_dir>'
 ```
 
 If the parent explicitly selected local diagnostic artifacts, append the same
-`--diagnostic-artifacts "<manifest.json>"` to resolution and package validation.
+`--diagnostic-artifacts '<manifest.json>'` to resolution and package validation.
 Keep the lifecycle reference's online-only Android/no-deployment limits.
 
 Unknown/missing records block native mutation. Do not install packages, edit
@@ -44,6 +50,12 @@ and `ConnectionType`. Controls 0.2.0 uses background-location 0.2.3; do not copy
 APIs from a newer leaf. Package facts are not evidence of a released player/base.
 
 ## 2. One-shot location — no tracking setup
+
+Before writing or reusing the one-shot artifact, execute the shared
+native-artifact compatibility contract's Steps 1-3 for the approved request.
+Inspect the actual requested location API, platform/error behavior and consumers;
+reuse a compatible wrapper or make only the approved scoped change. Do not turn
+an approved one-shot request into tracking, Dataverse setup or screen integration.
 
 For a single coordinate read, write `src/native/location.ts`. This path needs
 **no `app_id`, data source, target table, or `startTracking`**. Skip Steps 3–5.
@@ -107,6 +119,7 @@ map. Do not invent a custom table, create the table, or route missing-table
 provisioning through `/add-dataverse`.
 
 ```bash
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
 ENV_JSON=$(node "${PLUGIN_ROOT}/scripts/resolve-environment.js" "$(node -e "console.log(require('./power.config.json').environmentId)")")
 ENV_URL=$(node -e "const j=JSON.parse(process.argv[1]); process.stdout.write(j.environmentUrl || '')" "$ENV_JSON")
 node "${PLUGIN_ROOT}/scripts/dataverse-request.js" "$ENV_URL" GET \
@@ -119,6 +132,7 @@ node "${PLUGIN_ROOT}/scripts/dataverse-request.js" "$ENV_URL" GET \
 - Auth/environment failure: `UNVERIFIED (target table not checked)`. Stop.
 
 ```bash
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
 node "${PLUGIN_ROOT}/scripts/dataverse-request.js" "$ENV_URL" GET \
   "EntityDefinitions(LogicalName='<logicalName>')/Attributes?\$select=LogicalName,AttributeType"
 ```
@@ -133,10 +147,28 @@ msdyn_altitude, msdyn_accuracy, msdyn_heading, msdyn_speed, msdyn_timestamp
 Missing active columns block tracking. Do not report the target as ready or
 silently substitute another table.
 
+## 4a. Reconcile requested tracking artifacts
+
+Read and execute [native-artifact-compatibility.md](${PLUGIN_ROOT}/shared/references/native-artifact-compatibility.md)
+Steps 1–3 for the geolocation row before any writes or reuse. Inherit the current
+approval/mode from `/add-native`; do not repeat a valid scoped approval.
+Inspect `src/native/geolocation.ts` for all requested tracking/status/location
+exports, `GeoTrackingTarget`, MSAL-only `geoService`/`BgLocationClient`, required
+`connectionUrl`/`trackInBackground`/`persistAcrossRestarts`, durable storage, and
+Dataverse sync. Reuse Step 4's verified `msdyn_locationrecords` columns; one-shot
+location or a wrapper targeting another table is not compatible. An incompatible
+artifact outside approval returns `NEEDS_CONTEXT` to the owner, or asks standalone;
+missing table/columns remain `BLOCKED`, never a usable-control success.
+
 ## 5. Write the tracking wrapper from installed docs/types
 
-Create or patch `src/native/geolocation.ts` only after the preceding gates pass.
-Screens import the wrapper, not the control. Require a native platform guard
+Apply Step 4a's decision for `src/native/geolocation.ts`: create when requested
+and missing, reuse unchanged only if compatible, or make only the approved scoped
+update. Preserve custom code, exports, and callers; do not overwrite from the
+example. Screens import this wrapper, not the package directly.
+
+Only write the approved `src/native/geolocation.ts` changes after the preceding
+gates pass. Screens import the wrapper, not the control. Require a native platform guard
 before lazy imports inside `try`/`catch`; return discriminated results and never
 throw. Preserve native capture, durable pending storage, and native upload
 without depending on JavaScript being alive. Do not replace native behavior
@@ -147,11 +179,23 @@ Use only verified public methods from the installed version. Keep
 together; do not synthesize `stopTracking(app_id)` or `isTracking(app_id)`.
 Do not add data sources or tracking side effects to the one-shot wrapper.
 
+## 5a. Tracking integration guidance
+
+Integration guidance for the owner; do not edit screens in this helper. Preserve the installed version's `GeoTrackingTarget` and requested tracking/status/location exports. Screens pass `connectionUrl`, `trackInBackground`, and `persistAcrossRestarts`; do not add `tableName` or `fieldMap` because this control owns its default table/mapping. Use only optional interval/distance/notification properties supported by the installed types. Do not restore an unconditional top-level native import or copy an unverified tracking implementation across package versions.
+
 ## 6. Validate and summarize
 
 ```bash
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
 npx --no-install tsc --noEmit
 ```
+
+Execute the shared compatibility contract's Step 4 after type-checking. Recheck
+all requested tracking APIs/flags, MSAL auth, durable storage/sync, and failure
+paths. Type-check success alone is insufficient; do not fix screen/generated
+files. Only after the requested artifact contract, table + columns, and
+TypeScript all pass, return the shared compatibility result and actual
+created/updated/reused paths before reporting:
 
 Report the mode, resolved release/package version, wrapper path, permission
 requirements, ownership decision for tracking, and whether native device

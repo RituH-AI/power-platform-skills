@@ -6,17 +6,17 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebFetch, AskUserQuestion
 model: opus
 ---
 
-**Shared instructions: [shared-instructions.md](../../shared/shared-instructions.md)** - skip its version check and `memory-bank.md` handling because this skill performs its own plugin check and must not create unrelated project state.
+**Shared instructions: [shared-instructions.md](../../shared/shared-instructions.md)** - read first, then skip its version check and `memory-bank.md` handling because this skill performs its own plugin check and must not create unrelated project state.
 
 # Check Updates (`/check-updates`)
 
 Resolve `<working_dir>` from `--working-dir <path>` or use the current directory. Require `package.json` and `node_modules/`, then run on every invocation. Read [mobile-release-lifecycle.md](../../shared/references/mobile-release-lifecycle.md). If the user names one package, scope discovery to it; a native/runtime package still belongs to Step 2's coupled release, not an independent bump. Explain the coupled changes and ask permission; naming a package does not approve them. Otherwise run Steps 2-4 in order.
 
-An explicitly supplied `--diagnostic-artifacts "<manifest.json>"` selects the
+An explicitly supplied `--diagnostic-artifacts '<manifest.json>'` selects the
 lifecycle reference's immutable local **online-only Android test**, not a
 published release. Keep Step 1's plugin/version check and all approvals and
 checkpoints. In Step 2 use `mobile-template-lifecycle.js plan --project-root
-"<working_dir>" --diagnostic-artifacts "<manifest.json>"` instead of published
+'<working_dir>' --diagnostic-artifacts '<manifest.json>'` instead of published
 published-package selection. The packed migration identifies the old source;
 ordinary invocations never fall back to diagnostic archives. Review the
 returned manifest hash, major transition, known APK's supported counters, and
@@ -81,13 +81,14 @@ Before changing each **JavaScript-only** package in Steps 3-4, show a one-row ta
 
 **Telemetry checkpoint: `update_native_host_dependency`**
 
-Run this step even when the host is absent from `outdated.json`. A manual host update can leave an older template behind. Read the recorded source with `resolve-mobile-release.js --project-root "<working_dir>" --requirements-only`; this reads app state and the installed host without a catalogue or registry lookup and does not authorize native changes.
+Run this step even when the host is absent from `outdated.json`. A manual host update can leave an older template behind. Read the recorded source with `resolve-mobile-release.js --project-root '<working_dir>' --requirements-only`; this reads app state and the installed host without a catalogue or registry lookup and does not authorize native changes.
 
 Keep `npm outdated --json --depth=0` as discovery. Review its `current`, `wanted`, and `latest` host versions and the user's requested supported npm channel; do not update every runtime package independently. Select one **exact stable published host version**. If the installed host is already current, still inspect that version for a pending template migration. `resolve-mobile-release.js --default` can inspect npm's default host channel, but it is not proof of Player or Wrap availability. Then run:
 
 ```bash
+cd -- '<working_dir>' || { echo "BLOCKED: cannot enter working_dir" >&2; exit 1; }
 node "${PLUGIN_ROOT}/scripts/mobile-template-lifecycle.js" plan \
-  --project-root "<working_dir>" --host-version "<exact-host-version>"
+  --project-root '<working_dir>' --host-version "<exact-host-version>"
 ```
 
 Planning inspects published package archives with scripts disabled. It reads the host's compatibility profile/migration graph and finds the immutable template with matching recorded requirements and native fingerprints. It does not modify the app or execute package code. There is no separate hand-maintained release array.
@@ -123,7 +124,7 @@ Interpret the decision:
    reviewed install policy before resolving inherited TypeScript configuration.
    A missing source configuration is a preparation blocker; do not substitute
    target-reference `NODE_PATH` resolution for the source dependency context.
-4. Obtain the **exact reviewed target host** in a separate private tooling installation, not by installing it into the old app's dependency graph. Use `mobile-template-lifecycle.js acquire --destination "<reference_dir>" --host-version "<exact-host-version>"` with a new/empty directory. It installs the exact host with lifecycle scripts disabled and checks its npm lock integrity and contained upgrade CLI. Review any required lifecycle scripts separately before approving their execution. This tooling folder is not a scaffolded app; do not run app admission against it or copy its lock over the customer app. Diagnostic mode uses its already-verified reference instead. Read the installed host's actual `bin["upgrade-template"]` path and supported help; invoke that CLI with `--project "<preview_dir>" --dry-run` to preview one edge. The host owns the app's dependency edits and installation, including the section/spec recorded in the target's `managedDependencies`; an exact installed version does not authorize rewriting a reviewed range. Do not install a new host with incompatible peers into the old dependency set before previewing the coupled migration. Classify output: conflicts block application and need a reviewed resolution; other command failures block investigation. A nonzero preview is never automatically a clean plan.
+4. Obtain the **exact reviewed target host** in a separate private tooling installation, not by installing it into the old app's dependency graph. Use `mobile-template-lifecycle.js acquire --destination '<reference_dir>' --host-version "<exact-host-version>"` with a new/empty directory. It installs the exact host with lifecycle scripts disabled and checks its npm lock integrity and contained upgrade CLI. Review any required lifecycle scripts separately before approving their execution. This tooling folder is not a scaffolded app; do not run app admission against it or copy its lock over the customer app. Diagnostic mode uses its already-verified reference instead. Read the installed host's actual `bin["upgrade-template"]` path and supported help; invoke that CLI with `--project '<preview_dir>' --dry-run` to preview one edge. The host owns the app's dependency edits and installation, including the section/spec recorded in the target's `managedDependencies`; an exact installed version does not authorize rewriting a reviewed range. Do not install a new host with incompatible peers into the old dependency set before previewing the coupled migration. Classify output: conflicts block application and need a reviewed resolution; other command failures block investigation. A nonzero preview is never automatically a clean plan.
    Package override conflicts are blocking even when source patches apply. Show
    the retained override and proposed direct dependency, obtain approval for the
    exact resolution, and rerun the preview. Never silently remove customer pins
@@ -135,7 +136,7 @@ Interpret the decision:
    published host lacks a safe validated installation path, block and request a
    producer fix. Migration authoring, release tagging, runtime preparation and
    Player build scripts are maintainer tools, not customer upgrade steps.
-5. For a clean edge, apply it only to the disposable copy with `upgrade-template --project "<preview_dir>"`, including its validated install. Do not use `--no-install` to simulate state advancement. Record every changed/deleted/created file and dependency, plus the actual before/after protected metadata. Require progress without overshoot, then repeat dry-run and apply until the selected target is reached. No target migration is needed for host-only repair. Never reuse approval of one preview for unseen later edges.
+5. For a clean edge, apply it only to the disposable copy with `upgrade-template --project '<preview_dir>'`, including its validated install. Do not use `--no-install` to simulate state advancement. Record every changed/deleted/created file and dependency, plus the actual before/after protected metadata. Require progress without overshoot, then repeat dry-run and apply until the selected target is reached. No target migration is needed for host-only repair. Never reuse approval of one preview for unseen later edges.
 6. Resolve the disposable app against the selected release, run dependency admission, Expo check, type-check, changed-file validation, and target platform bundles. Preserve customer instructions/settings; review any customer-section conflict, never resolve by whole-file replacement. If the published tool cannot rehearse the full chain, return `BLOCKED` before touching the real app.
 7. Present the **aggregate full-chain diff**, each edge, conflicts/resolutions, install scripts, expected binaries, and rollback scope. Ask **Apply reviewed release** or **Skip native release** (recommended). Only explicit application approval authorizes real edits.
 
