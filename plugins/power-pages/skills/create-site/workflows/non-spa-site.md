@@ -105,8 +105,10 @@ Create all eight tasks before starting:
    ```
 
    The helper returns only non-secret context: environment URL, environment ID, Dataverse
-   organization ID, and cloud. If authentication is missing, guide the user through `pac auth
-   create` or `az login`, then retry.
+   organization ID, organization base-language LCID, and cloud. Store
+   `organizationBaseLanguageLcid` as `BASE_LANGUAGE_LCID`. The helper reads the authoritative
+   Dataverse organization language and fails explicitly rather than assuming English. If
+   authentication is missing, guide the user through `pac auth create` or `az login`, then retry.
 
 > 🚦 **Gate (consent · create-site:non-spa-1-confirm-environment):** Confirm the exact environment
 > before template selection and provisioning.
@@ -232,9 +234,20 @@ a recording failure. Existing default skill telemetry is unchanged.
 Use `AskUserQuestion` to collect:
 
 - Site name
-- Base language LCID; default to English `1033` unless the user requires another supported
-  language
 - Destination: current directory, a new child folder, or another directory
+
+Use `BASE_LANGUAGE_LCID` as `SELECTED_BASE_LANGUAGE` without asking a language question during the
+normal flow. It is the confirmed environment's Dataverse organization default and is already
+valid for that organization. Set `SELECTED_BASE_LANGUAGE_SOURCE` to `Organization default`. Do not
+silently replace it with English `1033`.
+
+If the user explicitly requested a different base language, handle that intent before the
+provisioning review. Ask for a human-readable language, not a raw LCID, and use only a language
+verified as enabled in the selected Dataverse organization. Store its LCID as
+`SELECTED_BASE_LANGUAGE` and set `SELECTED_BASE_LANGUAGE_SOURCE` to `User selected`. If the
+requested language cannot be verified, explain the problem and do not continue to the provisioning
+review until the user accepts the organization default or selects a verified alternative. Never
+guess an LCID.
 
 Generate the same random subdomain suggestion used by the SPA activation workflow:
 
@@ -279,7 +292,7 @@ Template requirements: <requirements, or "None listed">
 Template role: Data/domain and requirements reference; final visual design is customizable
 Template catalog revision: <owner/repo>@<commitSha> (<releaseName or resolvedRef>)
 Site name: <siteName>
-Language LCID: <lcid>
+Base language: <SELECTED_BASE_LANGUAGE_SOURCE> (LCID <SELECTED_BASE_LANGUAGE>)
 Subdomain: <subdomain>
 Website record ID: Assigned by Power Pages during provisioning
 Download destination: <resolved path>
@@ -299,7 +312,7 @@ Ask: **Create this site and download it?** Options: **Create site**, **Change se
 Before submitting the request, generate the browser status page:
 
 ```bash
-node "${PLUGIN_ROOT}/skills/create-site/scripts/render-non-spa-status.js" --templateName "<templateName>" --catalogOwner "<CATALOG_OWNER>" --catalogRepo "<CATALOG_REPO>" --catalogSha "<CATALOG_SHA>" --modelVersion "<MODEL_VERSION>" --status "provisioning" --siteName "<siteName>" --subdomain "<subdomain>" --language "<lcid>"
+node "${PLUGIN_ROOT}/skills/create-site/scripts/render-non-spa-status.js" --templateName "<templateName>" --catalogOwner "<CATALOG_OWNER>" --catalogRepo "<CATALOG_REPO>" --catalogSha "<CATALOG_SHA>" --modelVersion "<MODEL_VERSION>" --status "provisioning" --siteName "<siteName>" --subdomain "<subdomain>" --language "<SELECTED_BASE_LANGUAGE>"
 ```
 
 Store the returned `output` as `STATUS_PAGE_PATH` and `url` as `STATUS_PAGE_URL`. The renderer
@@ -341,7 +354,7 @@ Never show percentages, estimated completion times, or a working indicator while
 Run the shared provisioner:
 
 ```bash
-node "${PLUGIN_ROOT}/skills/activate-site/scripts/activate-site.js" --siteName "<siteName>" --subdomain "<subdomain>" --organizationId "<organizationId>" --environmentId "<environmentId>" --cloud "<cloud>" --templateName "<templateName>" --selectedBaseLanguage "<lcid>"
+node "${PLUGIN_ROOT}/skills/activate-site/scripts/activate-site.js" --siteName "<siteName>" --subdomain "<subdomain>" --organizationId "<organizationId>" --environmentId "<environmentId>" --cloud "<cloud>" --templateName "<templateName>" --selectedBaseLanguage "<SELECTED_BASE_LANGUAGE>"
 ```
 
 The documented Create Website request has no model or Bootstrap-version field. `MODEL_VERSION` is enforced by the
@@ -397,7 +410,7 @@ as creation failures. If recording fails, report the original creation error, no
 Update the status page before website identity lookup:
 
 ```bash
-node "${PLUGIN_ROOT}/skills/create-site/scripts/render-non-spa-status.js" --output "<statusPagePath>" --templateName "<templateName>" --catalogOwner "<CATALOG_OWNER>" --catalogRepo "<CATALOG_REPO>" --catalogSha "<CATALOG_SHA>" --modelVersion "<MODEL_VERSION>" --status "registration" --siteName "<siteName>" --subdomain "<subdomain>" --siteUrl "<siteUrl>" --language "<lcid>"
+node "${PLUGIN_ROOT}/skills/create-site/scripts/render-non-spa-status.js" --output "<statusPagePath>" --templateName "<templateName>" --catalogOwner "<CATALOG_OWNER>" --catalogRepo "<CATALOG_REPO>" --catalogSha "<CATALOG_SHA>" --modelVersion "<MODEL_VERSION>" --status "registration" --siteName "<siteName>" --subdomain "<subdomain>" --siteUrl "<siteUrl>" --language "<SELECTED_BASE_LANGUAGE>"
 ```
 
 1. If the terminal operation result did not include `websiteRecordId`, run this read-only lookup

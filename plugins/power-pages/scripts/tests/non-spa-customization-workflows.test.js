@@ -461,6 +461,16 @@ test('non-SPA creation uses verified Bootstrap 5 and image-rich design without S
   assert.match(workflow, /verifiedBootstrapMajor/);
   assert.match(workflow, /imageDelivery: "external-url"/);
   assert.match(workflow, /Skip image staging\/downloads/);
+  assert.match(workflow, /organizationBaseLanguageLcid/);
+  assert.match(workflow, /Use `BASE_LANGUAGE_LCID` as `SELECTED_BASE_LANGUAGE` without asking a language question/);
+  assert.match(workflow, /Ask for a human-readable language, not a raw LCID/);
+  assert.match(workflow, /SELECTED_BASE_LANGUAGE_SOURCE` to `Organization default`/);
+  assert.match(workflow, /Base language: <SELECTED_BASE_LANGUAGE_SOURCE> \(LCID <SELECTED_BASE_LANGUAGE>\)/);
+  assert.doesNotMatch(workflow, /--language "<lcid>"/);
+  assert.doesNotMatch(
+    workflow.split('## Phase 3:')[1].split('## Phase 4:')[0],
+    /Base language LCID; default to English/,
+  );
   assert.match(customization, /newSiteDesign/);
   assert.match(customization, /newSiteDesign\.imageDelivery: "external-url"/);
   assert.match(customization, /exact URL in the consumer's static/);

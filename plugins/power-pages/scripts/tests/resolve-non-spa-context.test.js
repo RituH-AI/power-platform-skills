@@ -14,23 +14,46 @@ function dependencies(overrides = {}) {
     getEnvironmentUrl: () => ENVIRONMENT_URL,
     getPacAuthInfo: () => ({ environmentId: ENVIRONMENT_ID, cloud: 'Public' }),
     getAuthToken: () => 'secret-token',
-    makeRequest: async () => ({
-      statusCode: 200,
-      body: JSON.stringify({ UserId: 'user-id', OrganizationId: ORGANIZATION_ID }),
-    }),
+    makeRequest: async ({ url }) => {
+      if (url.endsWith('/WhoAmI')) {
+        return {
+          statusCode: 200,
+          body: JSON.stringify({ UserId: 'user-id', OrganizationId: ORGANIZATION_ID }),
+        };
+      }
+      if (url.includes(`/organizations(${ORGANIZATION_ID})`)) {
+        return {
+          statusCode: 200,
+          body: JSON.stringify({ languagecode: 1033 }),
+        };
+      }
+      throw new Error(`Unexpected request URL: ${url}`);
+    },
     ...overrides,
   };
 }
 
 test('returns non-secret non-SPA creation context', async () => {
-  const result = await resolveNonSpaContext(dependencies());
+  const requests = [];
+  const deps = dependencies();
+  const request = deps.makeRequest;
+  deps.makeRequest = async (options) => {
+    requests.push(options);
+    return request(options);
+  };
+
+  const result = await resolveNonSpaContext(deps);
   assert.deepEqual(result, {
     environmentUrl: ENVIRONMENT_URL,
     environmentId: ENVIRONMENT_ID,
     organizationId: ORGANIZATION_ID,
+    organizationBaseLanguageLcid: 1033,
     cloud: 'Public',
   });
   assert.equal(JSON.stringify(result).includes('secret-token'), false);
+  assert.equal(requests.length, 2);
+  assert.match(requests[1].url, /organizations\(22222222-2222-2222-2222-222222222222\)/);
+  assert.match(requests[1].url, /\?\$select=languagecode$/);
 });
 
 test('fails when PAC does not resolve an environment', async () => {
@@ -68,5 +91,37 @@ test('fails when WhoAmI omits OrganizationId', async () => {
         }),
       ),
     /did not return OrganizationId/,
+  );
+});
+
+test('fails closed when the organization base language cannot be read', async () => {
+  const deps = dependencies();
+  const request = deps.makeRequest;
+  deps.makeRequest = async (options) => {
+    if (options.url.includes('/organizations(')) {
+      return { statusCode: 403, body: '{}' };
+    }
+    return request(options);
+  };
+
+  await assert.rejects(
+    () => resolveNonSpaContext(deps),
+    /organization language request returned HTTP 403/,
+  );
+});
+
+test('fails when the organization base language is missing or invalid', async () => {
+  const deps = dependencies();
+  const request = deps.makeRequest;
+  deps.makeRequest = async (options) => {
+    if (options.url.includes('/organizations(')) {
+      return { statusCode: 200, body: JSON.stringify({ languagecode: 0 }) };
+    }
+    return request(options);
+  };
+
+  await assert.rejects(
+    () => resolveNonSpaContext(deps),
+    /positive integer languagecode/,
   );
 });

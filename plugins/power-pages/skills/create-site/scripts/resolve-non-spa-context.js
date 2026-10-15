@@ -9,6 +9,7 @@ const {
   getAuthToken,
   makeRequest,
   validateDataverseEnvironmentUrl,
+  UUID_REGEX,
 } = require('../../../scripts/lib/validation-helpers');
 
 async function resolveNonSpaContext(dependencies = {}) {
@@ -56,11 +57,52 @@ async function resolveNonSpaContext(dependencies = {}) {
   if (!body.OrganizationId) {
     throw new Error('Dataverse WhoAmI did not return OrganizationId.');
   }
+  if (!UUID_REGEX.test(body.OrganizationId)) {
+    throw new Error('Dataverse WhoAmI returned an invalid OrganizationId.');
+  }
+
+  // The Create Website API requires selectedBaseLanguage. Use the Dataverse
+  // organization's authoritative base-language LCID instead of assuming English.
+  // See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/organization
+  const organizationResult = await request({
+    url:
+      `${environmentUrl}/api/data/v9.2/organizations(${body.OrganizationId})` +
+      '?$select=languagecode',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+    timeout: 15_000,
+  });
+
+  if (organizationResult.error) {
+    throw new Error(
+      `Dataverse organization language request failed: ${organizationResult.error}`,
+    );
+  }
+  if (organizationResult.statusCode !== 200) {
+    throw new Error(
+      `Dataverse organization language request returned HTTP ${organizationResult.statusCode}.`,
+    );
+  }
+
+  let organization;
+  try {
+    organization = JSON.parse(organizationResult.body);
+  } catch {
+    throw new Error('Dataverse organization language request returned invalid JSON.');
+  }
+  if (!Number.isInteger(organization.languagecode) || organization.languagecode <= 0) {
+    throw new Error(
+      'Dataverse organization language request did not return a positive integer languagecode.',
+    );
+  }
 
   return {
     environmentUrl,
     environmentId: pac.environmentId,
     organizationId: body.OrganizationId,
+    organizationBaseLanguageLcid: organization.languagecode,
     cloud: pac.cloud || 'Public',
   };
 }
