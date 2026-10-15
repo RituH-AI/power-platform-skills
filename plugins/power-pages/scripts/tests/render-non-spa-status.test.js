@@ -22,6 +22,9 @@ function options(overrides = {}) {
     siteName: 'Contoso Events',
     subdomain: 'contoso-events',
     language: '1033',
+    languageName: 'English (United States)',
+    languageCode: 'en-US',
+    cloud: 'Public',
     catalogOwner: 'microsoft',
     catalogRepo: 'power-pages-samples',
     catalogSha: CATALOG_SHA,
@@ -84,6 +87,12 @@ test('buildModel combines Event Portal metadata, embedded previews, and current 
   assert.equal(model.status.openWebsiteUrl, null);
   assert.equal(model.status.notification, null);
   assert.equal(model.site.modelVersion, 'Enhanced');
+  assert.deepEqual(model.site.language, {
+    source: 'Organization default',
+    name: 'English (United States)',
+    code: 'en-US',
+    lcid: '1033',
+  });
   assert.equal(model.template.catalog.sha, CATALOG_SHA);
   assert.equal(model.refresh, true);
 });
@@ -139,23 +148,41 @@ test('buildModel represents user-input pauses without implying active processing
 
 test('buildModel renders failed and canceled phases as terminal non-working states', () => {
   const failed = buildModel(
-    options({ status: 'download', activityState: 'failed' }),
+    options({
+      status: 'download',
+      activityState: 'failed',
+      terminalReason: 'PAC could not download the created site.',
+      nextAction: 'Repair PAC authentication, then retry the download for this site.',
+    }),
     template(),
   );
   assert.equal(failed.status.activityState, 'failed');
   assert.equal(failed.status.chip, 'Creation stopped');
   assert.equal(failed.status.terminal, true);
   assert.equal(failed.status.openWebsiteUrl, null);
+  assert.deepEqual(failed.status.result, {
+    title: 'Creation stopped',
+    message: 'PAC could not download the created site.',
+    nextAction: 'Repair PAC authentication, then retry the download for this site.',
+  });
+  assert.match(failed.status.footer, /before a usable local baseline/);
   assert.equal(failed.refresh, false);
 
   const canceled = buildModel(
-    options({ status: 'validation', activityState: 'canceled' }),
+    options({
+      status: 'validation',
+      activityState: 'canceled',
+      terminalReason: 'Creation was canceled before validation completed.',
+      nextAction: 'Resume validation later or keep the files already downloaded.',
+    }),
     template(),
   );
   assert.equal(canceled.status.activityState, 'canceled');
   assert.equal(canceled.status.chip, 'Canceled');
   assert.equal(canceled.status.terminal, true);
   assert.equal(canceled.status.openWebsiteUrl, null);
+  assert.equal(canceled.status.result.title, 'Creation canceled');
+  assert.match(canceled.status.footer, /already created are preserved/);
   assert.equal(canceled.refresh, false);
 });
 
@@ -220,6 +247,21 @@ test('buildModel embeds the Blank page desktop and mobile previews', () => {
   assert.match(model.template.previews[0].mobile, /^data:image\/png;base64,/);
 });
 
+test('buildModel uses the selected cloud for the provisional site URL', () => {
+  const domains = {
+    Public: 'powerappsportals.com',
+    UsGov: 'powerappsportals.us',
+    UsGovHigh: 'high.powerappsportals.us',
+    UsGovDod: 'appsplatform.us',
+    China: 'powerappsportals.cn',
+  };
+
+  for (const [cloud, domain] of Object.entries(domains)) {
+    const model = buildModel(options({ cloud }), template());
+    assert.equal(model.site.url, `https://contoso-events.${domain}`);
+  }
+});
+
 test('renderStatusPage creates a standalone page and overwrites it as status advances', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-non-spa-status-'));
   const output = path.join(tempDir, 'status.html');
@@ -244,9 +286,15 @@ test('renderStatusPage creates a standalone page and overwrites it as status adv
     );
     assert.match(
       acceptedHtml,
-      /id="openWebsite" target="_blank" rel="noopener noreferrer"/,
+      /id="openWebsite"[^>]*target="_blank" rel="noopener noreferrer"/,
     );
     assert.match(acceptedHtml, /prefers-reduced-motion: reduce/);
+    assert.match(acceptedHtml, /aria-pressed="true">Desktop/);
+    assert.match(acceptedHtml, /role="tabpanel"/);
+    assert.match(acceptedHtml, /ArrowRight/);
+    assert.match(acceptedHtml, /Pause auto-refresh/);
+    assert.match(acceptedHtml, /English \(United States\)/);
+    assert.match(acceptedHtml, /Organization default/);
     assert.match(acceptedHtml, />AI-generated content may be incorrect</);
     assert.doesNotMatch(acceptedHtml, /id="statusKicker"/);
     assert.doesNotMatch(acceptedHtml, /__JSON_MODEL__/);
@@ -351,6 +399,46 @@ test('buildModel rejects unknown templates and statuses', () => {
   assert.throws(
     () => buildModel(options({ templateName: 'UnknownTemplate' }), template()),
     /Catalog metadata does not match --templateName/,
+  );
+  for (const activityState of ['failed', 'canceled']) {
+    assert.throws(
+      () =>
+        buildModel(
+          options({
+            status: 'ready',
+            siteUrl: SITE_URL,
+            activityState,
+            terminalReason: 'Optional customization did not start.',
+            nextAction: 'Open the completed site.',
+          }),
+          template(),
+        ),
+      /completed site remains ready/,
+    );
+  }
+  assert.throws(
+    () => buildModel(options({ status: 'download', activityState: 'failed' }), template()),
+    /--terminalReason is required/,
+  );
+  assert.throws(
+    () =>
+      buildModel(
+        options({
+          status: 'download',
+          activityState: 'failed',
+          terminalReason: 'Download failed.',
+        }),
+        template(),
+      ),
+    /--nextAction is required/,
+  );
+  assert.throws(
+    () => buildModel(options({ cloud: 'Moon' }), template()),
+    /Unsupported --cloud/,
+  );
+  assert.throws(
+    () => buildModel(options({ language: 'English' }), template()),
+    /positive integer LCID/,
   );
   assert.throws(
     () => buildModel(options({ status: 'invented' }), template()),

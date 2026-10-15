@@ -14,6 +14,9 @@ const {
 const {
   loadNonSpaTemplatePresentation,
 } = require('../../../scripts/lib/non-spa-template-catalog');
+const {
+  CLOUD_TO_SITE_DOMAIN,
+} = require('../../../scripts/lib/validation-helpers');
 
 const ACTIVITY_STATES = new Set(['working', 'awaiting-input', 'failed', 'canceled']);
 
@@ -115,6 +118,22 @@ function validateWebsiteUrl(value) {
   return url.href;
 }
 
+function validatePlainTextOption(name, value, options = {}) {
+  const text = String(value || '').trim();
+  if (options.required && !text) {
+    throw new Error(`${name} is required`);
+  }
+  if (!text) return '';
+  if (/[\u0000-\u001f\u007f]/.test(text)) {
+    throw new Error(`${name} must be plain single-line text`);
+  }
+  const maxLength = options.maxLength || 500;
+  if (text.length > maxLength) {
+    throw new Error(`${name} must be ${maxLength} characters or fewer`);
+  }
+  return text;
+}
+
 function buildModel(options, template) {
   const modelVersion = normalizeNonSpaModelVersion(options.modelVersion);
   const actualModelVersion = options.actualModelVersion
@@ -128,9 +147,18 @@ function buildModel(options, template) {
   if (!status) {
     throw new Error(`Unsupported --status: ${options.status}`);
   }
+  const siteDomain = CLOUD_TO_SITE_DOMAIN[options.cloud];
+  if (!siteDomain) {
+    throw new Error(
+      `Unsupported --cloud: ${options.cloud}. Use ${Object.keys(CLOUD_TO_SITE_DOMAIN).join(', ')}.`,
+    );
+  }
   const explicitSiteUrl = options.siteUrl ? validateWebsiteUrl(options.siteUrl) : null;
   if (options.status === 'ready' && !explicitSiteUrl) {
     throw new Error('--siteUrl is required when --status is ready');
+  }
+  if (!Number.isInteger(Number(options.language)) || Number(options.language) <= 0) {
+    throw new Error('--language must be a positive integer LCID');
   }
   const resolvedStatus = {
     ...status,
@@ -169,6 +197,15 @@ function buildModel(options, template) {
   if (status.terminal && activityState === 'working') {
     throw new Error(`--status ${options.status} cannot use --activityState working`);
   }
+  if (
+    options.status === 'ready' &&
+    (activityState === 'failed' || activityState === 'canceled')
+  ) {
+    throw new Error(
+      `--status ready cannot use --activityState ${activityState}; ` +
+        'the completed site remains ready when optional follow-up work stops.',
+    );
+  }
   if (activityState === 'awaiting-input' && !String(options.requiredAction || '').trim()) {
     throw new Error('--requiredAction is required when --activityState is awaiting-input');
   }
@@ -184,6 +221,38 @@ function buildModel(options, template) {
   const awaitingInput = activityState === 'awaiting-input';
   const failed = activityState === 'failed';
   const canceled = activityState === 'canceled';
+  const genericTerminalActivity =
+    (failed || canceled) && options.status !== 'model-mismatch';
+  const terminalReason = validatePlainTextOption(
+    '--terminalReason',
+    options.terminalReason,
+    { required: genericTerminalActivity, maxLength: 500 },
+  );
+  const nextAction = validatePlainTextOption(
+    '--nextAction',
+    options.nextAction,
+    { required: genericTerminalActivity, maxLength: 300 },
+  );
+  if (!genericTerminalActivity && (terminalReason || nextAction)) {
+    throw new Error(
+      '--terminalReason and --nextAction are only valid with a generic failed or canceled activity',
+    );
+  }
+  if (genericTerminalActivity) {
+    resolvedStatus.result = {
+      title: failed ? 'Creation stopped' : 'Creation canceled',
+      message: terminalReason,
+      nextAction,
+    };
+    resolvedStatus.message = terminalReason;
+    resolvedStatus.error = failed;
+  } else if (options.status === 'model-mismatch') {
+    resolvedStatus.result = {
+      ...resolvedStatus.result,
+      nextAction:
+        'Confirm the environment data-model setting, then resume verification of this existing site.',
+    };
+  }
   const terminal = !awaitingInput && (status.terminal || failed || canceled);
   const activityChip = awaitingInput
     ? 'Input needed'
@@ -211,8 +280,18 @@ function buildModel(options, template) {
     },
     site: {
       name: options.siteName,
-      url: explicitSiteUrl || `https://${options.subdomain}.powerappsportals.com`,
-      language: options.language || '1033',
+      url: explicitSiteUrl || `https://${options.subdomain}.${siteDomain}`,
+      language: {
+        source: 'Organization default',
+        name: validatePlainTextOption('--languageName', options.languageName, {
+          required: true,
+          maxLength: 100,
+        }),
+        code: validatePlainTextOption('--languageCode', options.languageCode, {
+          maxLength: 35,
+        }),
+        lcid: String(options.language),
+      },
       websiteRecordId: options.websiteRecordId || '',
       modelVersion,
     },
@@ -223,6 +302,16 @@ function buildModel(options, template) {
       activityState,
       terminal,
       openWebsiteUrl: options.status === 'ready' ? explicitSiteUrl : null,
+      footer:
+        options.status === 'model-mismatch'
+          ? 'The cloud site is preserved. Resolve the data-model setting before resuming verification and download.'
+          : failed
+          ? 'Creation stopped before a usable local baseline was ready. Follow the next action above before retrying.'
+          : canceled
+            ? 'Creation was canceled. Any cloud resource or local files already created are preserved.'
+            : options.status === 'ready' && !awaitingInput
+                ? 'Creation is complete. You can keep this page open while you begin customizing the downloaded site.'
+                : null,
       notification: awaitingInput
         ? {
             title: 'Your input is needed',
@@ -247,16 +336,21 @@ async function renderStatusPage(options, deps = {}) {
     !options.modelVersion ||
     !options.status ||
     !options.siteName ||
-    !options.subdomain
+    !options.subdomain ||
+    !options.cloud ||
+    !options.language ||
+    !options.languageName
   ) {
     throw new Error(
       'Usage: render-non-spa-status.js [--output <path>] --templateName <name> ' +
       '--catalogOwner <owner> --catalogRepo <repo> --catalogSha <sha> ' +
       '--modelVersion <Enhanced|Standard> --status <status> ' +
-      '--siteName <name> --subdomain <subdomain> [--siteUrl <url>] [--language <lcid>] ' +
+      '--siteName <name> --subdomain <subdomain> --cloud <cloud> ' +
+      '--language <lcid> --languageName <name> [--languageCode <code>] [--siteUrl <url>] ' +
       '[--websiteRecordId <guid>] [--actualModelVersion <Enhanced|Standard>] ' +
       '[--activityState <working|awaiting-input|failed|canceled>] ' +
-      '[--requiredAction <text>] [--responseLocation <text>]',
+      '[--requiredAction <text>] [--responseLocation <text>] ' +
+      '[--terminalReason <text> --nextAction <text>]',
     );
   }
 
@@ -316,5 +410,6 @@ module.exports = {
   TIMELINE,
   buildModel,
   renderStatusPage,
+  validatePlainTextOption,
   validateWebsiteUrl,
 };

@@ -250,6 +250,7 @@
     }
 
     .template-meta { color: var(--muted); font-size: 13px; text-align: right; }
+    .template-meta-secondary { font-size: 12px; }
 
     .template-info {
       margin-top: 22px;
@@ -459,6 +460,7 @@
     }
 
     .footer-note { max-width: 470px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .footer-status { display: flex; align-items: center; gap: 12px; }
     .ai-disclaimer {
       flex: none;
       color: #50576b;
@@ -496,6 +498,7 @@
     .result-card.warning { background: #fff6e8; border-color: #f1d09d; }
     .result-card h4 { margin: 0 0 7px; }
     .result-card p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+    .result-card .next-action { margin-top: 10px; color: var(--ink); }
     .open-website {
       display: inline-flex;
       align-items: center;
@@ -525,6 +528,7 @@
       .preview-pane { min-height: 620px; border-right: 0; border-bottom: 1px solid var(--line); }
       .status-pane { padding: 34px; }
       .footer { align-items: flex-start; flex-direction: column; gap: 10px; }
+      .footer-status { align-items: flex-start; flex-direction: column; }
       .ai-disclaimer { text-align: left; }
       .open-website { width: 100%; }
       .preview-notice { padding-inline: 22px; }
@@ -558,17 +562,21 @@
         <p class="eyebrow">Your selected starting point</p>
         <h1 id="templateDisplayName"></h1>
         <p class="lede" id="templateDescription"></p>
-        <div class="preview-card" id="previewCard">
+        <div class="preview-card" id="previewCard" role="tabpanel" tabindex="0" data-focus-key="preview-panel">
           <img id="previewImage" alt="">
           <span class="preview-label" id="previewLabel"></span>
         </div>
         <div class="slide-controls" id="slideControls" role="tablist" aria-label="Template page preview"></div>
         <div class="preview-controls">
-          <div class="segmented" aria-label="Preview size">
-            <button class="active" data-view="desktop">Desktop</button>
-            <button data-view="mobile">Mobile</button>
+          <div class="segmented" role="group" aria-label="Preview size">
+            <button class="active" data-view="desktop" data-focus-key="view-desktop" aria-pressed="true">Desktop</button>
+            <button data-view="mobile" data-focus-key="view-mobile" aria-pressed="false">Mobile</button>
           </div>
-          <div class="template-meta"><span id="templateName"></span><br><span id="modelVersion"></span> model · Language <span id="language"></span></div>
+          <div class="template-meta">
+            <span id="templateName"></span><br>
+            <span id="modelVersion"></span> model · <span id="languageName"></span><br>
+            <span class="template-meta-secondary"><span id="languageSource"></span> · LCID <span id="languageLcid"></span></span>
+          </div>
         </div>
         <section class="template-info" aria-labelledby="templateInfoTitle">
           <h2 id="templateInfoTitle">About this template</h2>
@@ -602,13 +610,17 @@
         <div class="result-card" id="resultCard">
           <h4 id="resultTitle">Your site is ready</h4>
           <p id="resultMessage">The selected data model was verified, downloaded, and validated locally.</p>
-          <a class="open-website" id="openWebsite" target="_blank" rel="noopener noreferrer" aria-label="Open website in a new tab" hidden>
+          <p class="next-action" id="nextAction" hidden><strong>Next:</strong> <span id="nextActionText"></span></p>
+          <a class="open-website" id="openWebsite" data-focus-key="open-website" target="_blank" rel="noopener noreferrer" aria-label="Open website in a new tab" hidden>
             Open website <span aria-hidden="true">↗</span>
           </a>
         </div>
 
         <footer class="footer">
-          <div class="footer-note" id="refreshNote">This page refreshes automatically as Power Pages advances through provisioning, registration, download, and validation.</div>
+          <div class="footer-status">
+            <div class="footer-note" id="refreshNote">This page refreshes automatically as Power Pages advances through provisioning, registration, download, and validation.</div>
+            <button class="secondary" id="refreshToggle" type="button" data-focus-key="refresh-toggle" aria-pressed="false">Pause auto-refresh</button>
+          </div>
           <div class="ai-disclaimer">AI-generated content may be incorrect</div>
         </footer>
       </section>
@@ -620,9 +632,20 @@
     const storageKey = `power-pages-create-site:${location.pathname}`;
     const saved = JSON.parse(sessionStorage.getItem(storageKey) || "{}");
     let currentView = saved.view === "mobile" ? "mobile" : "desktop";
+    let autoRefreshPaused = saved.autoRefreshPaused === true;
+    let refreshTimer;
     let currentSlide = model.template.previews.some((preview) => preview.name === saved.slide)
       ? saved.slide
       : model.template.previews[0]?.name;
+
+    function saveState(overrides = {}) {
+      sessionStorage.setItem(storageKey, JSON.stringify({
+        view: currentView,
+        slide: currentSlide,
+        autoRefreshPaused,
+        ...overrides
+      }));
+    }
 
     function setText(id, value) {
       document.getElementById(id).textContent = value || "";
@@ -642,14 +665,20 @@
       setText("previewLabel", `${preview.displayName} · template preview`);
       document.getElementById("previewCard").classList.toggle("mobile", currentView === "mobile");
       document.querySelectorAll("[data-view]").forEach((button) => {
-        button.classList.toggle("active", button.dataset.view === currentView);
+        const selected = button.dataset.view === currentView;
+        button.classList.toggle("active", selected);
+        button.setAttribute("aria-pressed", String(selected));
       });
       document.querySelectorAll("[data-slide]").forEach((button) => {
         const selected = button.dataset.slide === currentSlide;
         button.classList.toggle("active", selected);
         button.setAttribute("aria-selected", String(selected));
+        button.tabIndex = selected ? 0 : -1;
+        if (selected) {
+          document.getElementById("previewCard").setAttribute("aria-labelledby", button.id);
+        }
       });
-      sessionStorage.setItem(storageKey, JSON.stringify({ view: currentView, slide: currentSlide }));
+      saveState();
     }
 
     setText("templateDisplayName", model.template.displayName);
@@ -657,7 +686,14 @@
     setText("aboutDescription", model.template.description);
     setText("templateName", model.template.name);
     setText("modelVersion", model.site.modelVersion);
-    setText("language", model.site.language);
+    setText(
+      "languageName",
+      model.site.language.code
+        ? `${model.site.language.name} (${model.site.language.code})`
+        : model.site.language.name
+    );
+    setText("languageSource", model.site.language.source);
+    setText("languageLcid", model.site.language.lcid);
     setText("siteName", model.site.name);
     setText("siteUrl", model.site.url);
     document.getElementById("brandIcon").src = model.brandIcon;
@@ -700,15 +736,32 @@
     document.getElementById("templateNotes").replaceChildren(...notes);
 
     const slideControls = document.getElementById("slideControls");
-    slideControls.replaceChildren(...model.template.previews.map((preview) => {
+    slideControls.replaceChildren(...model.template.previews.map((preview, index) => {
       const button = document.createElement("button");
       button.type = "button";
+      button.id = `previewTab-${index}`;
       button.dataset.slide = preview.name;
+      button.dataset.focusKey = `preview-tab-${index}`;
       button.setAttribute("role", "tab");
+      button.setAttribute("aria-controls", "previewCard");
       button.textContent = preview.displayName;
       button.addEventListener("click", () => {
         currentSlide = preview.name;
         updatePreview();
+      });
+      button.addEventListener("keydown", (event) => {
+        const tabs = [...slideControls.querySelectorAll("[role=tab]")];
+        const currentIndex = tabs.indexOf(event.currentTarget);
+        let nextIndex;
+        if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabs.length;
+        if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        if (event.key === "Home") nextIndex = 0;
+        if (event.key === "End") nextIndex = tabs.length - 1;
+        if (nextIndex === undefined) return;
+        event.preventDefault();
+        currentSlide = tabs[nextIndex].dataset.slide;
+        updatePreview();
+        tabs[nextIndex].focus();
       });
       return button;
     }));
@@ -768,6 +821,10 @@
       resultCard.className = `result-card visible${model.status.error ? " warning" : ""}`;
       setText("resultTitle", model.status.result.title);
       setText("resultMessage", model.status.result.message);
+      if (model.status.result.nextAction) {
+        setText("nextActionText", model.status.result.nextAction);
+        document.getElementById("nextAction").hidden = false;
+      }
     }
     if (model.status.openWebsiteUrl) {
       const openWebsite = document.getElementById("openWebsite");
@@ -775,16 +832,58 @@
       openWebsite.hidden = false;
     }
 
+    const refreshToggle = document.getElementById("refreshToggle");
+
+    function rememberFocusAndReload() {
+      const focusKey = document.activeElement?.dataset?.focusKey;
+      saveState(focusKey ? { focusKey } : {});
+      location.reload();
+    }
+
+    function scheduleRefresh() {
+      window.clearTimeout(refreshTimer);
+      if (model.refresh && !autoRefreshPaused) {
+        refreshTimer = window.setTimeout(rememberFocusAndReload, 5000);
+      }
+    }
+
+    function updateRefreshControl() {
+      refreshToggle.textContent = autoRefreshPaused ? "Resume auto-refresh" : "Pause auto-refresh";
+      refreshToggle.setAttribute("aria-pressed", String(autoRefreshPaused));
+      if (autoRefreshPaused) {
+        setText(
+          "refreshNote",
+          model.status.activityState === "awaiting-input"
+            ? "Creation is paused for your response. Auto-refresh is paused until you resume it."
+            : "Auto-refresh is paused. Resume it to keep this status page current."
+        );
+      } else if (model.status.activityState === "awaiting-input") {
+        setText("refreshNote", "Creation is paused for your response. This page will update automatically after you reply.");
+      } else {
+        setText("refreshNote", "This page refreshes automatically as Power Pages advances through provisioning, registration, download, and validation.");
+      }
+    }
+
+    refreshToggle.addEventListener("click", () => {
+      autoRefreshPaused = !autoRefreshPaused;
+      saveState();
+      updateRefreshControl();
+      scheduleRefresh();
+    });
+
     if (model.status.terminal) {
-      setText("refreshNote", "This status is final. You can keep this page open while you begin customizing the downloaded site.");
-    } else if (model.status.activityState === "awaiting-input") {
-      setText("refreshNote", "Creation is paused for your response. This page will update automatically after you reply.");
-      window.setTimeout(() => location.reload(), 5000);
-    } else if (model.refresh) {
-      window.setTimeout(() => location.reload(), 5000);
+      refreshToggle.hidden = true;
+      setText("refreshNote", model.status.footer || "This status is final.");
+    } else {
+      updateRefreshControl();
+      scheduleRefresh();
     }
 
     updatePreview();
+    if (saved.focusKey) {
+      document.querySelector(`[data-focus-key="${CSS.escape(saved.focusKey)}"]`)?.focus();
+      saveState({ focusKey: undefined });
+    }
   </script>
 </body>
 </html>

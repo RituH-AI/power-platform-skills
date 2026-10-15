@@ -98,11 +98,62 @@ async function resolveNonSpaContext(dependencies = {}) {
     );
   }
 
+  // LanguageLocale exposes the human-readable locale metadata for an LCID. Keep the
+  // numeric organization setting as the API value, but return its name/code so status
+  // surfaces do not expose an unexplained system identifier.
+  // See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/languagelocale
+  const languageLocaleResult = await request({
+    url:
+      `${environmentUrl}/api/data/v9.2/languagelocale` +
+      '?$select=localeid,name,code,language,region' +
+      `&$filter=localeid%20eq%20${organization.languagecode}%20and%20statecode%20eq%200`,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+    timeout: 15_000,
+  });
+
+  if (languageLocaleResult.error) {
+    throw new Error(
+      `Dataverse language locale request failed: ${languageLocaleResult.error}`,
+    );
+  }
+  if (languageLocaleResult.statusCode !== 200) {
+    throw new Error(
+      `Dataverse language locale request returned HTTP ${languageLocaleResult.statusCode}.`,
+    );
+  }
+
+  let languageLocales;
+  try {
+    languageLocales = JSON.parse(languageLocaleResult.body);
+  } catch {
+    throw new Error('Dataverse language locale request returned invalid JSON.');
+  }
+  const languageLocale = Array.isArray(languageLocales.value)
+    ? languageLocales.value.find(
+        (candidate) => candidate.localeid === organization.languagecode,
+      )
+    : null;
+  if (!languageLocale || !String(languageLocale.name || '').trim()) {
+    throw new Error(
+      `Dataverse language locale request did not return display metadata for LCID ${organization.languagecode}.`,
+    );
+  }
+
   return {
     environmentUrl,
     environmentId: pac.environmentId,
     organizationId: body.OrganizationId,
     organizationBaseLanguageLcid: organization.languagecode,
+    organizationBaseLanguage: {
+      lcid: languageLocale.localeid,
+      name: String(languageLocale.name).trim(),
+      code: String(languageLocale.code || '').trim(),
+      language: String(languageLocale.language || '').trim(),
+      region: String(languageLocale.region || '').trim(),
+    },
     cloud: pac.cloud || 'Public',
   };
 }

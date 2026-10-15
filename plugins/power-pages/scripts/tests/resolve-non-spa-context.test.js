@@ -27,6 +27,20 @@ function dependencies(overrides = {}) {
           body: JSON.stringify({ languagecode: 1033 }),
         };
       }
+      if (url.includes('/languagelocale?')) {
+        return {
+          statusCode: 200,
+          body: JSON.stringify({
+            value: [{
+              localeid: 1033,
+              name: 'English (United States)',
+              code: 'en-US',
+              language: 'English',
+              region: 'United States',
+            }],
+          }),
+        };
+      }
       throw new Error(`Unexpected request URL: ${url}`);
     },
     ...overrides,
@@ -48,12 +62,21 @@ test('returns non-secret non-SPA creation context', async () => {
     environmentId: ENVIRONMENT_ID,
     organizationId: ORGANIZATION_ID,
     organizationBaseLanguageLcid: 1033,
+    organizationBaseLanguage: {
+      lcid: 1033,
+      name: 'English (United States)',
+      code: 'en-US',
+      language: 'English',
+      region: 'United States',
+    },
     cloud: 'Public',
   });
   assert.equal(JSON.stringify(result).includes('secret-token'), false);
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 3);
   assert.match(requests[1].url, /organizations\(22222222-2222-2222-2222-222222222222\)/);
   assert.match(requests[1].url, /\?\$select=languagecode$/);
+  assert.match(requests[2].url, /\/languagelocale\?/);
+  assert.match(requests[2].url, /localeid%20eq%201033/);
 });
 
 test('fails when PAC does not resolve an environment', async () => {
@@ -123,5 +146,37 @@ test('fails when the organization base language is missing or invalid', async ()
   await assert.rejects(
     () => resolveNonSpaContext(deps),
     /positive integer languagecode/,
+  );
+});
+
+test('fails closed when language locale display metadata cannot be read', async () => {
+  const deps = dependencies();
+  const request = deps.makeRequest;
+  deps.makeRequest = async (options) => {
+    if (options.url.includes('/languagelocale?')) {
+      return { statusCode: 403, body: '{}' };
+    }
+    return request(options);
+  };
+
+  await assert.rejects(
+    () => resolveNonSpaContext(deps),
+    /language locale request returned HTTP 403/,
+  );
+});
+
+test('fails when the base LCID has no named active language locale', async () => {
+  const deps = dependencies();
+  const request = deps.makeRequest;
+  deps.makeRequest = async (options) => {
+    if (options.url.includes('/languagelocale?')) {
+      return { statusCode: 200, body: JSON.stringify({ value: [] }) };
+    }
+    return request(options);
+  };
+
+  await assert.rejects(
+    () => resolveNonSpaContext(deps),
+    /did not return display metadata for LCID 1033/,
   );
 });

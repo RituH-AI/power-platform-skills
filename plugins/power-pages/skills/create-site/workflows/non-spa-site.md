@@ -105,10 +105,13 @@ Create all eight tasks before starting:
    ```
 
    The helper returns only non-secret context: environment URL, environment ID, Dataverse
-   organization ID, organization base-language LCID, and cloud. Store
-   `organizationBaseLanguageLcid` as `BASE_LANGUAGE_LCID`. The helper reads the authoritative
-   Dataverse organization language and fails explicitly rather than assuming English. If
-   authentication is missing, guide the user through `pac auth create` or `az login`, then retry.
+   organization ID, organization base-language LCID and display metadata, and cloud. Store
+   `organizationBaseLanguageLcid` as `BASE_LANGUAGE_LCID`, plus
+   `organizationBaseLanguage.name` as `BASE_LANGUAGE_NAME` and
+   `organizationBaseLanguage.code` as `BASE_LANGUAGE_CODE`. The helper reads the authoritative
+   Dataverse organization language and its active LanguageLocale row, and fails explicitly rather
+   than assuming English or displaying a raw LCID. If authentication is missing, guide the user
+   through `pac auth create` or `az login`, then retry.
 
 > 🚦 **Gate (consent · create-site:non-spa-1-confirm-environment):** Confirm the exact environment
 > before template selection and provisioning.
@@ -312,7 +315,7 @@ Ask: **Create this site and download it?** Options: **Create site**, **Change se
 Before submitting the request, generate the browser status page:
 
 ```bash
-node "${PLUGIN_ROOT}/skills/create-site/scripts/render-non-spa-status.js" --templateName "<templateName>" --catalogOwner "<CATALOG_OWNER>" --catalogRepo "<CATALOG_REPO>" --catalogSha "<CATALOG_SHA>" --modelVersion "<MODEL_VERSION>" --status "provisioning" --siteName "<siteName>" --subdomain "<subdomain>" --language "<SELECTED_BASE_LANGUAGE>"
+node "${PLUGIN_ROOT}/skills/create-site/scripts/render-non-spa-status.js" --templateName "<templateName>" --catalogOwner "<CATALOG_OWNER>" --catalogRepo "<CATALOG_REPO>" --catalogSha "<CATALOG_SHA>" --modelVersion "<MODEL_VERSION>" --status "provisioning" --siteName "<siteName>" --subdomain "<subdomain>" --cloud "<cloud>" --language "<SELECTED_BASE_LANGUAGE>" --languageName "<BASE_LANGUAGE_NAME>" --languageCode "<BASE_LANGUAGE_CODE>"
 ```
 
 Store the returned `output` as `STATUS_PAGE_PATH` and `url` as `STATUS_PAGE_URL`. The renderer
@@ -332,8 +335,10 @@ After the status page exists, keep its activity state aligned with the agent:
 
 - Normal processing uses the lifecycle `--status` alone; nonterminal phases default to the
   animated `working` state.
-- Every rewrite includes the original `--catalogOwner`, `--catalogRepo`, and `--catalogSha`.
-  Never replace the pinned SHA with a release name, branch, or `latest-release`.
+- Every rewrite includes the original `--catalogOwner`, `--catalogRepo`, and `--catalogSha`, plus
+  the resolved `--cloud`, `--language`, `--languageName`, and `--languageCode`. Never replace the
+  pinned SHA with a release name, branch, or `latest-release`. The cloud value ensures the
+  pre-registration URL uses the correct sovereign-cloud site domain.
 - Immediately before any `AskUserQuestion`, rewrite the same page with the current lifecycle
   status plus `--activityState "awaiting-input"`, `--requiredAction "<specific action>"`, and
   `--responseLocation "Return to the site creation conversation and provide your response."`
@@ -343,10 +348,15 @@ After the status page exists, keep its activity state aligned with the agent:
   `--activityState`; this clears the notification and restores normal processing. Do this before
   starting the next command.
 - If the user cancels after the page exists, rewrite the current lifecycle status with
-  `--activityState "canceled"`.
+  `--activityState "canceled"`, `--terminalReason "<safe plain-text explanation>"`, and
+  `--nextAction "<specific recovery or preservation guidance>"`. The exception is `ready`: site
+  creation is already complete, so declining or canceling optional customization must rewrite
+  `ready` without an activity override.
 - If creation cannot continue, rewrite the current lifecycle status with
-  `--activityState "failed"` unless a more specific terminal status such as `model-mismatch`
-  applies.
+  `--activityState "failed"`, `--terminalReason "<safe plain-text failure summary>"`, and
+  `--nextAction "<specific recovery guidance>"` unless a more specific terminal status such as
+  `model-mismatch` applies. Summarize the reason for the user; do not pass tokens, raw command
+  output, environment identifiers, local paths, or other sensitive details.
 
 Queued steps remain `Waiting`; only the current blocked step is labeled `Your input needed`.
 Never show percentages, estimated completion times, or a working indicator while awaiting input.
@@ -410,7 +420,7 @@ as creation failures. If recording fails, report the original creation error, no
 Update the status page before website identity lookup:
 
 ```bash
-node "${PLUGIN_ROOT}/skills/create-site/scripts/render-non-spa-status.js" --output "<statusPagePath>" --templateName "<templateName>" --catalogOwner "<CATALOG_OWNER>" --catalogRepo "<CATALOG_REPO>" --catalogSha "<CATALOG_SHA>" --modelVersion "<MODEL_VERSION>" --status "registration" --siteName "<siteName>" --subdomain "<subdomain>" --siteUrl "<siteUrl>" --language "<SELECTED_BASE_LANGUAGE>"
+node "${PLUGIN_ROOT}/skills/create-site/scripts/render-non-spa-status.js" --output "<statusPagePath>" --templateName "<templateName>" --catalogOwner "<CATALOG_OWNER>" --catalogRepo "<CATALOG_REPO>" --catalogSha "<CATALOG_SHA>" --modelVersion "<MODEL_VERSION>" --status "registration" --siteName "<siteName>" --subdomain "<subdomain>" --siteUrl "<siteUrl>" --cloud "<cloud>" --language "<SELECTED_BASE_LANGUAGE>" --languageName "<BASE_LANGUAGE_NAME>" --languageCode "<BASE_LANGUAGE_CODE>"
 ```
 
 1. If the terminal operation result did not include `websiteRecordId`, run this read-only lookup
@@ -542,8 +552,10 @@ Use `AskUserQuestion`:
 Before this question, rewrite the `ready` status with `--activityState "awaiting-input"` and
 `--requiredAction "Choose whether to customize the downloaded template now or keep it unchanged."`
 Retain the same verified `--siteUrl` so the completed-site action remains available. After
-receiving either answer, rewrite `ready` without an activity override, again retaining
-`--siteUrl`, so the notification clears and the page returns to its completed state.
+receiving either answer, declining the question, or canceling it, rewrite `ready` without an
+activity override, again retaining `--siteUrl`, so the notification clears and the page returns
+to its completed state. Never mark the completed creation as failed or canceled because optional
+customization did not start.
 
 On **Customize now**, tell the user:
 
