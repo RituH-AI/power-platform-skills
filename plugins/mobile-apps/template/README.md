@@ -150,6 +150,24 @@ connector wiring.
 	- App store: https://apps.apple.com/us/app/power-apps-developer/id6753083462
 	- Play store: https://play.google.com/store/apps/details?id=com.microsoft.PreviewApp
 
+## Push notifications
+
+The app ships Firebase Cloud Messaging with placeholder configuration in
+`firebase/`. While the placeholders remain, Firebase stays off and the app runs
+normally. To send push notifications to the wrapped app:
+
+1. In the Firebase console, register an Android app and an iOS app with the
+   bundle ID you wrap the app with, and connect Firebase to APNs.
+2. Run `/add-native push-notifications`. It places the app's
+   `google-services.json` and `GoogleService-Info.plist` in `firebase/` and
+   registers each signed-in device.
+3. Deploy the app. The deployment publishes the Firebase client files, and the
+   wrap injects them when push notifications are turned on for the platform in
+   the wrap wizard. You can upload the files in the wrap wizard instead.
+
+The Firebase client files are not secrets, but never add Firebase server
+credentials, such as a service account key, to the app.
+
 ## Upgrade the Native Host
 
 From the app directory, preview the next template upgrade:
