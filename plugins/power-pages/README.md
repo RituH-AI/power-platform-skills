@@ -43,7 +43,7 @@ This keeps hook behavior in one place and avoids relying on skill-frontmatter ho
 
 ## Skills
 
-The plugin provides 37 skills that cover the full lifecycle of a Power Pages site — scaffolding, deployment, declarative-site customization, classic-site authoring and styling, data modeling, backend integration, authentication, ALM and CI/CD, security review, testing, auditing, and platform migrations. Each skill is invoked conversationally — just describe what you want to do.
+The plugin provides 37 skills that cover the full lifecycle of a Power Pages site — scaffolding, deployment, declarative-site customization, classic-site authoring and styling, data modeling, backend integration, authentication, ALM and CI/CD, security review, testing, auditing, and platform migrations. These include 36 user-invocable skills and one model-only worker. Invoke the user-facing workflows conversationally — just describe what you want to do.
 
 The `/practice-site-check` and `/add-button` descriptions below are retained for reference, but these skills are not bundled with the plugin and are excluded from this count.
 
@@ -176,7 +176,10 @@ autonomy, dependency loading, local-only boundaries, and final verification. New
 navigation by default unless you explicitly ask not to. Coordinated asset planning retains provenance, placement,
 accessibility, secure explicit Web File imports, and direct HTTPS imagery for new-site design.
 
-#### `/author-webpage-content`
+#### `author-webpage-content`
+
+Model-only worker invoked by `edit-site` or `integrate-webapi` with a resolved page-content
+specification, not a direct user command. Use `/edit-site` for page-authoring requests.
 
 Composes or modifies one localized `.webpage.copy.html` file from a resolved page design,
 using Design Studio-compatible sections, columns, text, images, buttons, videos, iframes,

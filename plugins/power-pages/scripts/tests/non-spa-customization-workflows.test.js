@@ -55,6 +55,22 @@ test('classic component authoring uses references without extra skill registrati
   }
 });
 
+test('localized content authoring remains model-invocable without a direct user entry point', () => {
+  const content = read(path.join('skills', 'author-webpage-content', 'SKILL.md'));
+  const customization = read(path.join('skills', 'edit-site', 'SKILL.md'));
+  const integration = read(path.join('skills', 'integrate-webapi', 'references',
+    'non-spa-site-workflow.md'));
+  const readme = read('README.md');
+
+  assert.match(content, /^user-invocable: false$/m);
+  assert.doesNotMatch(content, /^disable-model-invocation:\s*true\b/m);
+  assert.match(customization, /^user-invocable: true$/m);
+  assert.match(customization, /Invoke only `author-webpage-content` through the `Skill` tool/);
+  assert.match(integration, /Invoke `author-webpage-content` with the exact existing localized body target/);
+  assert.match(readme, /36 user-invocable skills and one model-only worker/);
+  assert.doesNotMatch(readme, /^#### `\/author-webpage-content`/m);
+});
+
 test('reference dispatch preserves the coordinator phases and local authoring boundaries', () => {
   const skill = read(path.join('skills', 'edit-site', 'SKILL.md'));
   const shared = read(path.join('skills', 'edit-site', 'references', 'classic-site-authoring.md'));
@@ -229,7 +245,6 @@ test('all declarative preview entry points disclose once and propagate the hando
 
   for (const skillPath of coveredSkills) {
     const skill = read(skillPath);
-    assert.match(skill, /user-invocable: true/, skillPath);
     assert.match(skill, /references\/non-spa-preview\.md/, skillPath);
     assert.match(skill, /\*\*Customization notice\*\*/, skillPath);
     assert.match(

@@ -13,7 +13,7 @@ description: >-
   reference workflow owns discovery, records, metadata, languages, routes, templates,
   navigation, and companion-file creation. Do not use for React, Angular, Vue,
   or Astro SPA sites.
-user-invocable: true
+user-invocable: false
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash, TaskCreate, TaskUpdate, TaskList
 model: sonnet
 ---

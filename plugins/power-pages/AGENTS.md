@@ -112,7 +112,9 @@ Page-element markup and composition instructions live under `skills/author-webpa
 Use the shared authoring reference's dispatch table to select component workflows.
 Identifiers in that table select references, not `Skill` invocations. Preserve approved
 `operation.skill`, `ownerSkill`, hashes, receipts, and actual output bindings.
-`author-webpage-content` owns localized body HTML; the `style-site` reference workflow owns guarded styling.
+`author-webpage-content` is a model-only skill (`user-invocable: false`) that owns localized body HTML.
+Keep it callable by `edit-site` and `integrate-webapi` with resolved page, locale, and target-file inputs.
+The `style-site` reference workflow owns guarded styling.
 Reference workflows own PAC serialization, stable identities, locale/dependency scope, and
 verification; callers must not duplicate those rules.
 
