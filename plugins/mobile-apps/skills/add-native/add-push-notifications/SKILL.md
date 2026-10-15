@@ -27,7 +27,7 @@ How push notifications reach a wrapped app:
 
 Hard rules:
 - Do not install packages or edit `app.config.js` or native config. The template already ships `@react-native-firebase/app`, `@react-native-firebase/messaging`, `expo-notifications`, and the placeholder files, and `@microsoft/power-apps-native-host` configures them.
-- Call Firebase only through `src/native/pushNotifications.ts`, which checks for a Firebase app first. Never call Firebase at module scope, in an entry file, or in a screen.
+- Use Firebase and `expo-notifications` only through `src/native/pushNotifications.ts`, which loads them after checking for a Firebase app. Never import them anywhere else: `expo-notifications` loads its native modules on import, so a static import crashes host apps built without them (for example an older preview app or wrap base) at startup.
 - The Firebase client files are the only Firebase files the app holds. They are not secrets (every app binary embeds them), but never add a service account key, server key, or other Firebase Admin credential to the app.
 - Do not schedule local notifications or call `Notifications.setNotificationHandler` for push messages: on iOS, Firebase Messaging owns foreground presentation, so the wrapper shows open-app messages itself.
 
@@ -93,10 +93,11 @@ Steps 1–3 for the push notifications row before any writes or reuse. Inherit t
 approval/mode from `/add-native`; do not repeat a valid scoped approval.
 Inspect `src/native/pushNotifications.ts` for `isPushNotificationsAvailable`,
 `registerForPushNotifications`, `showPushMessage`, `usePushNotifications`,
-`ALL_USERS_TOPIC`, `PushMessage`, and `PushResult`, the `getApps()` check before
-any Firebase call, and the foreground and token-refresh handling. Inspect
+`ALL_USERS_TOPIC`, `PushMessage`, and `PushResult`, the Firebase app check before
+the push modules load, and the foreground and token-refresh handling. Inspect
 `app/(app)/_layout.tsx` for one unconditional `usePushNotifications` call. A
-wrapper that calls Firebase without the check is not compatible. An incompatible
+wrapper that imports Firebase or `expo-notifications` statically, or calls
+Firebase without the check, is not compatible. An incompatible
 artifact outside approval returns `NEEDS_CONTEXT` to the owner, or asks standalone.
 
 ## 3. Write `src/native/pushNotifications.ts`
@@ -110,18 +111,12 @@ example. Screens and layouts import this wrapper, not Firebase directly.
 // src/native/pushNotifications.ts
 import { useEffect, useRef } from 'react';
 import { Alert, Platform } from 'react-native';
-import { getApps } from '@react-native-firebase/app';
-import {
-  getMessaging,
-  getToken,
-  isDeviceRegisteredForRemoteMessages,
-  onMessage,
-  onTokenRefresh,
-  registerDeviceForRemoteMessages,
-  subscribeToTopic,
-  type RemoteMessage,
-} from '@react-native-firebase/messaging';
-import * as Notifications from 'expo-notifications';
+import type { Messaging, RemoteMessage } from '@react-native-firebase/messaging';
+
+declare const require: (id: string) => unknown;
+
+type FirebaseMessaging = typeof import('@react-native-firebase/messaging');
+type ExpoNotifications = typeof import('expo-notifications');
 
 /** Every signed-in device subscribes to this topic, so a notification sent to it reaches all users. */
 export const ALL_USERS_TOPIC = 'allUsers';
@@ -132,21 +127,33 @@ export type PushResult<T> =
   | { ok: true; value: T }
   | { ok: false; reason: 'UNAVAILABLE' | 'PERMISSION_DENIED' | 'PUSH_FAILED'; message?: string };
 
+interface Push {
+  fcm: FirebaseMessaging;
+  messaging: Messaging;
+  notifications: ExpoNotifications;
+}
+
 /**
- * Firebase Messaging, or null when this build has no Firebase app: on web, in a wrap with push
- * notifications turned off, and with the template's placeholder Firebase files.
+ * Firebase Messaging and the notification permission API, or null where push notifications can't
+ * work: on web, in a host app without their native modules, in a wrap with push notifications turned
+ * off, and with the template's placeholder Firebase files. The modules load only after the Firebase
+ * app check, because expo-notifications fails on import in a host without its native modules.
  */
-function firebaseMessaging() {
+function loadPush(): Push | null {
   if (Platform.OS === 'web') return null;
   try {
-    return getApps().length > 0 ? getMessaging() : null;
+    const { getApps } = require('@react-native-firebase/app') as typeof import('@react-native-firebase/app');
+    if (getApps().length === 0) return null;
+    const fcm = require('@react-native-firebase/messaging') as FirebaseMessaging;
+    const notifications = require('expo-notifications') as ExpoNotifications;
+    return { fcm, messaging: fcm.getMessaging(), notifications };
   } catch {
-    return null; // Firebase isn't linked into this build.
+    return null;
   }
 }
 
 export function isPushNotificationsAvailable(): boolean {
-  return firebaseMessaging() !== null;
+  return loadPush() !== null;
 }
 
 /**
@@ -156,16 +163,17 @@ export function isPushNotificationsAvailable(): boolean {
 export async function registerForPushNotifications(
   topic: string = ALL_USERS_TOPIC,
 ): Promise<PushResult<string>> {
-  const messaging = firebaseMessaging();
-  if (!messaging) return { ok: false, reason: 'UNAVAILABLE' };
+  const push = loadPush();
+  if (!push) return { ok: false, reason: 'UNAVAILABLE' };
+  const { fcm, messaging, notifications } = push;
   try {
-    const { granted } = await Notifications.requestPermissionsAsync();
+    const { granted } = await notifications.requestPermissionsAsync();
     if (!granted) return { ok: false, reason: 'PERMISSION_DENIED' };
-    if (!isDeviceRegisteredForRemoteMessages(messaging)) {
-      await registerDeviceForRemoteMessages(messaging);
+    if (!fcm.isDeviceRegisteredForRemoteMessages(messaging)) {
+      await fcm.registerDeviceForRemoteMessages(messaging);
     }
-    const token = await getToken(messaging);
-    await subscribeToTopic(messaging, topic);
+    const token = await fcm.getToken(messaging);
+    await fcm.subscribeToTopic(messaging, topic);
     return { ok: true, value: token };
   } catch (error) {
     return { ok: false, reason: 'PUSH_FAILED', message: error instanceof Error ? error.message : String(error) };
@@ -194,14 +202,15 @@ export function usePushNotifications(
   }, [onForegroundMessage]);
 
   useEffect(() => {
-    const messaging = enabled ? firebaseMessaging() : null;
-    if (!messaging) return undefined;
+    const push = enabled ? loadPush() : null;
+    if (!push) return undefined;
+    const { fcm, messaging } = push;
     void registerForPushNotifications(topic).then((result) => {
       if (__DEV__) console.log('[push] registration', result.ok ? 'succeeded' : result.reason, result.ok ? '' : result.message ?? '');
     });
-    const stopMessages = onMessage(messaging, (message) => foregroundHandler.current(message));
-    const stopTokenRefresh = onTokenRefresh(messaging, () => {
-      subscribeToTopic(messaging, topic).catch(() => undefined);
+    const stopMessages = fcm.onMessage(messaging, (message) => foregroundHandler.current(message));
+    const stopTokenRefresh = fcm.onTokenRefresh(messaging, () => {
+      fcm.subscribeToTopic(messaging, topic).catch(() => undefined);
     });
     return () => {
       stopMessages();
@@ -242,7 +251,7 @@ npx --no-install tsc --noEmit
 ```
 
 Execute the shared compatibility contract's Step 4 after type-checking. Recheck
-the `getApps()` check, every export, the foreground and token-refresh handling,
+the Firebase app check before the push modules load, every export, the foreground and token-refresh handling,
 and the layout call. Type-check success alone is insufficient; do not fix
 screen/generated files. Only after the requested artifact contract and
 TypeScript both pass, return the shared compatibility result and actual
