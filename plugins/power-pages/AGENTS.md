@@ -106,7 +106,7 @@ Keep this extension in the non-SPA authoring path; SPA/shared design references 
 
 `edit-site` authors pages and components and coordinates broader site customization.
 Coordinated work uses seven phases and explicit approval gates. Individual page or component edits follow
-`skills/edit-site/references/classic-site-authoring.md` and only relevant component references.
+`skills/edit-site/references/non-spa-site-authoring.md` and only relevant component references.
 Component instructions live under `skills/edit-site/references/`.
 Page-element markup and composition instructions live under `skills/author-webpage-content/references/`.
 

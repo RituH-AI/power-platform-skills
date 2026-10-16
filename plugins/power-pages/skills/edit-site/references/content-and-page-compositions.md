@@ -222,7 +222,7 @@ a supported alternative rather than inventing a serialization.
 
 ## Minimal operation selection
 
-Use the dispatch in `${PLUGIN_ROOT}/skills/edit-site/references/classic-site-authoring.md`.
+Use the dispatch in `${PLUGIN_ROOT}/skills/edit-site/references/non-spa-site-authoring.md`.
 Execute only reference workflows required by the resolved structure:
 
 - page metadata, route, template, localized shells, navigation: `author-webpage`;

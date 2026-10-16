@@ -1,4 +1,4 @@
-# Classic Site Authoring
+# Non-SPA Site Authoring
 
 Shared routing and execution contract for local PAC-downloaded declarative Power Pages
 authoring. `/edit-site` supports individual page or component edits and
@@ -134,5 +134,5 @@ Reading another reference is not another preview entry or skill invocation.
 Record successful entry-point usage through
 `${PLUGIN_ROOT}/references/skill-tracking-reference.md` as `EditSite`.
 Record only skill invocations, not reference reads. Preserve existing tracking records;
-never create a tracking directory merely to record classic authoring.
+never create a tracking directory merely to record non-SPA authoring.
 Report any supported tracking diff separately from authored site changes.

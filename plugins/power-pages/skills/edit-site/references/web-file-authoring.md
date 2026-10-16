@@ -9,7 +9,7 @@ A web file represents a site-served asset such as an image, stylesheet, script, 
 or text file. The local PAC representation contains both the asset and an adjacent YAML
 record that describes the web file and its Dataverse note attachment.
 
-Authoring callers first follow [shared routing and execution](classic-site-authoring.md). This reference owns
+Authoring callers first follow [shared routing and execution](non-spa-site-authoring.md). This reference owns
 the asset/YAML pair, attachment identity, metadata, and exact URL migrations. Importing or
 creating an asset does not authorize a page layout, template composition, or CSS redesign.
 For a small caller migration, read [webpages](webpage-authoring.md),

@@ -48,6 +48,7 @@ test('classic component authoring uses references without extra skill registrati
     assert.match(filename, /-authoring\.md$/);
     const reference = readClassicReference(owner);
     assert.match(reference, /^# Design Studio /, owner);
+    assert.match(reference, /\[shared routing and execution\]\(non-spa-site-authoring\.md\)/, owner);
     assert.match(reference, /^## Contents$/m, owner);
     assert.match(reference, /^## Verification checklist$/m, owner);
     assert.match(reference, /^## Prohibited shortcuts$/m, owner);
@@ -73,7 +74,8 @@ test('localized content authoring remains model-invocable without a direct user 
 
 test('reference dispatch preserves the coordinator phases and local authoring boundaries', () => {
   const skill = read(path.join('skills', 'edit-site', 'SKILL.md'));
-  const shared = read(path.join('skills', 'edit-site', 'references', 'classic-site-authoring.md'));
+  const shared = read(path.join('skills', 'edit-site', 'references', 'non-spa-site-authoring.md'));
+  assert.match(shared, /^# Non-SPA Site Authoring$/m);
   assert.match(skill, /Apply \*\*Request routing\*\* before creating coordination tasks/);
   assert.match(skill, /For an individual page or component request, follow the shared authoring reference and\s+finish/);
   assert.match(skill, /For coordinated work, create these tasks before starting/);
@@ -138,7 +140,7 @@ test('new classic pages default to navigation with explicit opt-out and resolved
   for (const relativePath of [
     'AGENTS.md',
     'README.md',
-    path.join('skills', 'edit-site', 'references', 'classic-site-authoring.md'),
+    path.join('skills', 'edit-site', 'references', 'non-spa-site-authoring.md'),
   ]) {
     assert.match(read(relativePath), /[Nn]ew pages update\s+navigation by default unless (?:the user|you) explicitly asks? not to/,
       relativePath);
@@ -148,9 +150,10 @@ test('new classic pages default to navigation with explicit opt-out and resolved
   assert.match(compositions, /including default\s+navigation or its explicit opt-out/);
 });
 
-test('classic authoring links and contents resolve within the installed plugin', () => {
+test('non-SPA authoring links and contents resolve within the installed plugin', () => {
   const skills = ['edit-site', 'author-webpage-content'];
   const documents = [
+    path.join('skills', 'integrate-webapi', 'references', 'non-spa-site-workflow.md'),
     ...skills.map((skill) => path.join('skills', skill, 'SKILL.md')),
     ...skills.flatMap((skill) => {
       const directory = path.join('skills', skill, 'references');
@@ -377,7 +380,7 @@ test('edit-site executes authoring references without changing approved-plan con
   assert.match(skill, /author-webpage-content/);
   assert.match(skill, /execute the `style-site` reference workflow last/);
   assert.match(skill, /authors webpage, snippet, web-file, web-template, and page-template records only through/);
-  assert.match(skill, /references\/classic-site-authoring\.md/);
+  assert.match(skill, /references\/non-spa-site-authoring\.md/);
   assert.match(skill, /Execute reference workflows directly; invoke only/);
   assert.match(skill, /current-plan\.json/);
   assert.match(skill, /current-execution\.json/);

@@ -11,7 +11,7 @@ explicitly asks not to add the page to navigation. Apply
 the complete workflow below so the local files preserve the relationships expected by
 Power Pages and remain compatible with PAC CLI upload and download.
 
-Authoring callers first follow [shared routing and execution](classic-site-authoring.md). Classify page creation,
+Authoring callers first follow [shared routing and execution](non-spa-site-authoring.md). Classify page creation,
 shared metadata, localized content, route/rename/move, template assignment, and navigation
 separately. Resolve the root identity first, then selected localized identities and content
 ownership. Use the uniquely established current/default language for an unspecified content

@@ -172,7 +172,7 @@ and do not apply to React, Angular, Vue, or Astro SPA sites.
 | Liquid/HTML fragments, inherited layouts, and explicitly requested callers or bindings | [Web templates](skills/edit-site/references/web-template-authoring.md) |
 | Page-template metadata, web-template-backed layouts, rewrite templates, and requested page assignments | [Page templates](skills/edit-site/references/page-template-authoring.md) |
 
-The [shared authoring contract](skills/edit-site/references/classic-site-authoring.md) owns routing,
+The [shared authoring contract](skills/edit-site/references/non-spa-site-authoring.md) owns routing,
 autonomy, dependency loading, local-only boundaries, and final verification. New pages update
 navigation by default unless you explicitly ask not to. Coordinated asset planning retains provenance, placement,
 accessibility, secure explicit Web File imports, and direct HTTPS imagery for new-site design.

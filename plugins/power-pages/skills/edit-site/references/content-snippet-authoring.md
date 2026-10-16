@@ -14,7 +14,7 @@ HTML, Liquid, or a combination of HTML and Liquid. They are appropriate for
 maker-managed content such as labels, messages, logos, headings, and shared header or
 footer regions.
 
-Authoring callers first follow [shared routing and execution](classic-site-authoring.md). Classify record/value
+Authoring callers first follow [shared routing and execution](non-spa-site-authoring.md). Classify record/value
 creation, localized edits, translations, logical/display-name changes, Text/HTML conversion,
 Liquid changes, neutral/localized scope migration, caller migration, or deletion.
 Resolve targets by logical name, language scope, and `adx_contentsnippetid`, not directory name.
