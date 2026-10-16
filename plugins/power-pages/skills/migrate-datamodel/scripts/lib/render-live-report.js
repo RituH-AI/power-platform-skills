@@ -23,7 +23,7 @@ const {
   PROMPT_STATUS,
 } = require('./migration-state-schema');
 const {
-  NONCONFIGURATION_TABLES,
+  NONCONFIGURATION_CATEGORIES,
   isReportExcludedCategory,
   getCategoryMetadata,
 } = require('./edm-table-classification');
@@ -252,23 +252,6 @@ function sumMetadataCounts(counts) {
   return total;
 }
 
-function renderFeatureCompatibility(sdmSnapshot) {
-  const counts = (sdmSnapshot && sdmSnapshot.counts) || {};
-  const rows = NONCONFIGURATION_TABLES.map(({ category, label, table }) => {
-    const count = counts[category] || 0;
-    const metadata = getCategoryMetadata(category);
-    const status = count > 0
-      ? `${count} detected in the SDM snapshot`
-      : 'not detected in the downloaded site source';
-    return `<li><strong>${escapeHtml(label)} (${escapeHtml(table)}):</strong> ${status}. ${escapeHtml(metadata.reason)} Runtime compatibility should be validated separately after activation.</li>`;
-  });
-  return `<div class="card warning-card">
-  <div class="card-title">Feature compatibility</div>
-  <div class="empty-body">The enhanced data model documentation defines the following as nonconfiguration tables. They are outside the SDM to EDM metadata comparison. Detected file-backed categories remain in the raw snapshot evidence; categories not represented by the site download are shown for completeness and are not treated as absent Dataverse data.</div>
-  <ul class="bullet-list">${rows.join('')}</ul>
-</div>`;
-}
-
 function renderConfidenceStat(sdmSnapshot, edmSnapshot) {
   if (!sdmSnapshot) {
     return `<div class="card confidence-card empty">
@@ -388,8 +371,6 @@ ${renderSiteCard(state)}
 
 ${renderConfidenceStat(snapshots.sdmSnapshot, snapshots.edmSnapshot)}
 
-${renderFeatureCompatibility(snapshots.sdmSnapshot)}
-
 ${renderApprovalBanner(state)}
 </div>`;
 }
@@ -491,6 +472,12 @@ function renderPagesComponentsSection({ sdmSnapshot, edmSnapshot }) {
   const edmCounts = (edmSnapshot && edmSnapshot.counts) || {};
   const sdmInventory = sdmSnapshot.inventory || {};
   const edmInventory = (edmSnapshot && edmSnapshot.inventory) || {};
+  const excludedDifferences = [...NONCONFIGURATION_CATEGORIES]
+    .filter((category) => (sdmCounts[category] || 0) > 0 && (edmCounts[category] || 0) === 0)
+    .map((category) => {
+      const metadata = getCategoryMetadata(category);
+      return `${metadata.label} (${sdmCounts[category]})`;
+    });
 
   // Union of categories from both sides — covers SDM-only (tags) and any new
   // categories on EDM. Non-metadata categories (polls, ads, forums, blogs,
@@ -652,6 +639,10 @@ ${items.map((i) => i.html).join('\n')}
   </div>`;
   }
 
+  const excludedDifferenceNote = excludedDifferences.length === 0
+    ? ''
+    : `<div class="comp-summary pending"><strong>Expected excluded differences:</strong> ${escapeHtml(excludedDifferences.join(', '))} are nonconfiguration tables and are not included in the SDM to EDM metadata comparison. See <a href="https://learn.microsoft.com/en-us/power-pages/admin/enhanced-data-model#nonconfiguration-tables" target="_blank" rel="noopener noreferrer">Enhanced data model nonconfiguration tables</a>.</div>`;
+
   const sdmCap = formatTimestamp(sdmSnapshot.capturedAt);
   const edmCap = edmSnapshot ? formatTimestamp(edmSnapshot.capturedAt) : '— pending —';
   const totalEdmDisplay = edmSnapshot ? edmTotal : '?';
@@ -661,6 +652,8 @@ ${items.map((i) => i.html).join('\n')}
   <p class="section-desc">Side-by-side inventory of your site's components — captured before migration (SDM) and after (EDM) so you can verify every record made it across.</p>
 
   ${summary}
+
+  ${excludedDifferenceNote}
 
   <div class="snapshot-meta">
     <div class="kv-item"><div class="kv-label">SDM captured</div><div class="kv-value">${escapeHtml(sdmCap)}</div></div>
