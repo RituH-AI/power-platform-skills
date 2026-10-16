@@ -1,0 +1,261 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+
+const { buildTemplateOutcomeEvent, emitTemplateOutcome, normalizeBool, sanitizeTemplateOutcomeInfo } = require('../lib/create-site-template-telemetry');
+const { parseArgs, toCliResult } = require('../emit-create-site-template-outcome');
+
+test('buildTemplateOutcomeEvent emits non-PII template eventInfo through the existing skill event shape', () => {
+  const event = buildTemplateOutcomeEvent({
+    eventName: 'template_used',
+    templateId: 'company-portal',
+    templateKind: 'spa',
+    framework: 'react',
+    audience: 'internal',
+    correlationId: 'corr',
+    sessionId: 'session',
+    osName: 'darwin',
+    osVersion: '1',
+    nodeVersion: 'v24',
+  }, {
+    readPacAuth: () => ({ orgId: 'org', tenantId: 'tenant' }),
+    readAgentInfo: () => ({ aiAgentName: 'Copilot CLI', aiAgentVersion: '1.0.76-0', pacCliVersion: '2.10.1' }),
+    pluginVersion: '2.7.0',
+    randomUUID: () => 'ignored',
+  });
+
+  assert.equal(event.name, 'PagesAIPluginEvent');
+  assert.equal(event.data.eventName, 'template_used');
+  assert.equal(event.data.skillName, 'create-site');
+  assert.equal(event.data.pluginVersion, '2.7.0');
+  assert.equal(event.data.sessionId, 'session');
+  assert.equal(event.data.aiAgentName, 'Copilot CLI');
+  assert.equal(event.data.aiAgentVersion, '1.0.76-0');
+  assert.equal(event.data.pacCliVersion, '2.10.1');
+  assert.deepEqual(event.data.eventInfo, {
+    framework: 'react',
+    audience: 'internal',
+    templateId: 'company-portal',
+    templateKind: 'spa',
+  });
+  assert.equal('siteUrl' in event.data.eventInfo, false);
+});
+
+test('buildTemplateOutcomeEvent emits import result details separately from template selection', () => {
+  const success = buildTemplateOutcomeEvent({
+    eventName: 'template_import_success',
+    templateId: 'company-portal',
+    templateKind: 'spa',
+    framework: 'react',
+    audience: 'internal',
+    seedApplied: 'true',
+    correlationId: 'corr',
+  }, {
+    readPacAuth: () => null,
+    readAgentInfo: () => ({}),
+    randomUUID: () => 'corr',
+  });
+  assert.equal(success.data.eventName, 'template_import_success');
+  assert.deepEqual(success.data.eventInfo, {
+    framework: 'react',
+    audience: 'internal',
+    templateId: 'company-portal',
+    templateKind: 'spa',
+    seedApplied: true,
+  });
+
+  const failure = buildTemplateOutcomeEvent({
+    eventName: 'template_import_failure',
+    templateId: 'company-portal',
+    templateKind: 'spa',
+    framework: 'react',
+    audience: 'internal',
+    outcome: 'failure',
+    errorClass: 'PacSolutionImport',
+    errorDescription: 'https://example.crm.dynamics.com/private/path',
+    correlationId: 'corr',
+  }, {
+    readPacAuth: () => null,
+    readAgentInfo: () => ({}),
+    randomUUID: () => 'corr',
+  });
+  assert.equal(failure.data.eventName, 'template_import_failure');
+  assert.equal(failure.data.outcome, 'failure');
+  assert.equal(failure.data.errorClass, 'PacSolutionImport');
+  assert.equal('errorDescription' in failure.data, false);
+  assert.equal(failure.data.severity, 'Error');
+});
+
+test('buildTemplateOutcomeEvent emits clone result events separately from import events', () => {
+  const success = buildTemplateOutcomeEvent({
+    eventName: 'template_clone_success',
+    templateId: 'supplier-portal',
+    templateKind: 'spa',
+    framework: 'vue',
+    audience: 'external',
+    correlationId: 'corr',
+  }, {
+    readPacAuth: () => null,
+    readAgentInfo: () => ({}),
+    randomUUID: () => 'corr',
+  });
+
+  assert.equal(success.data.eventName, 'template_clone_success');
+  assert.deepEqual(success.data.eventInfo, {
+    framework: 'vue',
+    audience: 'external',
+    templateId: 'supplier-portal',
+    templateKind: 'spa',
+  });
+
+  const failure = buildTemplateOutcomeEvent({
+    eventName: 'template_clone_failure',
+    templateId: 'supplier-portal',
+    templateKind: 'spa',
+    framework: 'vue',
+    audience: 'external',
+    outcome: 'failure',
+    errorClass: 'PacPagesClone',
+    errorDescription: '/Users/example/private/template',
+    correlationId: 'corr',
+  }, {
+    readPacAuth: () => null,
+    readAgentInfo: () => ({}),
+    randomUUID: () => 'corr',
+  });
+
+  assert.equal(failure.data.eventName, 'template_clone_failure');
+  assert.equal(failure.data.outcome, 'failure');
+  assert.equal(failure.data.errorClass, 'PacPagesClone');
+  assert.equal('errorDescription' in failure.data, false);
+  assert.equal(failure.data.severity, 'Error');
+});
+
+test('buildTemplateOutcomeEvent drops unapproved error classes', () => {
+  const failure = buildTemplateOutcomeEvent({
+    eventName: 'template_clone_failure',
+    outcome: 'failure',
+    errorClass: 'Error at /private/path',
+    correlationId: 'corr',
+  }, {
+    readPacAuth: () => null,
+    readAgentInfo: () => ({}),
+    randomUUID: () => 'corr',
+  });
+
+  assert.equal('errorClass' in failure.data, false);
+});
+
+test('buildTemplateOutcomeEvent emits scratch branch adoption signal', () => {
+  const event = buildTemplateOutcomeEvent({
+    eventName: 'create_site_from_scratch',
+    framework: 'vue',
+    audience: 'external',
+    correlationId: 'corr',
+  }, {
+    readPacAuth: () => null,
+    readAgentInfo: () => ({}),
+    randomUUID: () => 'corr',
+    env: { COPILOT_AGENT_SESSION_ID: 'copilot-session' },
+    pluginVersion: '2.7.0',
+  });
+
+  assert.equal(event.data.eventName, 'create_site_from_scratch');
+  assert.deepEqual(event.data.eventInfo, { framework: 'vue', audience: 'external' });
+  assert.equal(event.data.sessionId, 'copilot-session');
+});
+
+test('emitTemplateOutcome is fail-closed and delegates to telemetry dispatcher seam', () => {
+  const emitted = [];
+  const opts = [];
+  const result = emitTemplateOutcome({ eventName: 'create_site_from_scratch', framework: 'react', audience: 'internal' }, {
+    readPacAuth: () => ({ cloud: 'Public' }),
+    readAgentInfo: () => ({}),
+    randomUUID: () => 'corr',
+    fireAndForget: (event, options) => {
+      emitted.push(event);
+      opts.push(options);
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(emitted.length, 1);
+  assert.equal(opts[0].cloud, 'Public');
+
+  const failure = emitTemplateOutcome({}, { readPacAuth: () => null, fireAndForget: () => { throw new Error('nope'); } });
+  assert.equal(failure.ok, false);
+});
+
+test('parseArgs and normalizeBool handle CLI values', () => {
+  assert.deepEqual(parseArgs(['--eventName', 'template_import_success', '--templateKind', 'spa', '--seedApplied', '1']), { eventName: 'template_import_success', templateKind: 'spa', seedApplied: '1' });
+  assert.equal(normalizeBool('1'), true);
+  assert.equal(normalizeBool('false'), false);
+});
+
+test('telemetry CLI output excludes the emitted event and organization identifiers', () => {
+  assert.deepEqual(toCliResult({
+    ok: true,
+    event: {
+      data: {
+        orgId: 'organization-guid',
+        tenantId: 'tenant-guid',
+      },
+    },
+  }), { ok: true });
+  assert.deepEqual(toCliResult({ ok: false, error: 'private failure details' }), { ok: false });
+  assert.deepEqual(toCliResult(null), { ok: false });
+});
+
+test('template telemetry CLI exits 0 when its optional module cannot load', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ppskills-template-load-'));
+  const preload = path.join(tempDir, 'block-template-telemetry-load.js');
+  fs.writeFileSync(
+    preload,
+    [
+      "'use strict';",
+      "const Module = require('node:module');",
+      'const originalLoad = Module._load;',
+      'Module._load = function (request, parent, isMain) {',
+      "  if (String(request).includes('create-site-template-telemetry')) {",
+      "    throw new Error('simulated template telemetry load failure');",
+      '  }',
+      '  return originalLoad.call(this, request, parent, isMain);',
+      '};',
+      '',
+    ].join('\n'),
+    'utf8'
+  );
+
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--require',
+      preload,
+      path.resolve(__dirname, '../emit-create-site-template-outcome.js'),
+      '--eventName',
+      'create_site_from_scratch',
+    ],
+    { encoding: 'utf8', timeout: 30_000 }
+  );
+
+  assert.equal(result.status, 0);
+  assert.doesNotMatch(result.stderr, /simulated template telemetry load failure/);
+});
+
+test('sanitizeTemplateOutcomeInfo drops invalid dynamic telemetry values', () => {
+  assert.deepEqual(sanitizeTemplateOutcomeInfo({
+    eventName: 'template_used',
+    templateId: 'Company Portal',
+    templateKind: 'liquid',
+    framework: 'nextjs',
+    audience: 'everyone',
+    importOutcome: 'maybe',
+    activationOutcome: 'pending',
+    seedApplied: '0',
+    siteUrl: 'https://example.test',
+  }), {});
+});
