@@ -1,9 +1,9 @@
 # Deploy a Non-SPA Power Pages Site
 
 Follow this workflow only after `deploy-site` routes the request to a PAC CLI-downloaded
-non-SPA site. It supports Enhanced and Standard sites when their model can be verified, but it
-never guesses a model or uses PAC's default implicitly. When the website does not yet exist in the
-selected environment, it requires the user to choose the first-upload model explicitly.
+non-SPA site. It supports updates to existing Enhanced and Standard sites when their model can be
+verified, but it never guesses a model or uses PAC's default implicitly. When the website does not
+yet exist in the selected environment, first-upload creation supports only Enhanced.
 
 ## Invariants
 
@@ -13,7 +13,8 @@ selected environment, it requires the user to choose the first-upload model expl
 - Do not modify blocked JavaScript attachment settings.
 - Do not invoke `activate-site` from this workflow.
 - Match existing sites only by the exact local website record ID; never substitute a name match.
-- For a first upload, require an explicit Standard or Enhanced selection with no default.
+- For a first upload that creates website records, require Enhanced; never create a new Standard
+  site. This restriction does not affect uploads to an existing verified Standard site.
 - A customization-plan approval is not deployment consent.
 
 ## Progress tracking
@@ -37,8 +38,8 @@ Create these tasks:
 3. Read the exact website record ID and site name from the downloaded metadata. Stop if identity
    is absent or conflicting.
 4. Do not infer the data model from the customization plan or downloaded directory shape. Leave it
-   unresolved until Phase 3 obtains it from an exact PAC site-list match or an explicit first-upload
-   selection.
+   unresolved until Phase 3 obtains it from an exact PAC site-list match or applies the Enhanced-only
+   first-upload creation policy.
 5. Run the non-SPA validator when the website ID is available:
 
    ```bash
@@ -115,26 +116,18 @@ If no row matches:
 1. Check whether the environment contains a different website record with the same site name. If
    so, stop and report both identities; never overwrite or adopt it by name.
 2. Set deployment mode to **First upload — create site records**.
-3. Explain that the target environment has no website with the local record ID and that the local
-   files do not reliably reveal Standard versus Enhanced.
+3. Explain that the target environment has no website with the local record ID, so upload would
+   create new website records. New non-SPA website records can be created only with the Enhanced
+   data model; existing verified Standard sites remain deployable.
+4. Set the model to `Enhanced` and record its source as **EDM-only first-upload policy**. Do not
+   infer that the local files are Enhanced and do not offer Standard creation.
 
-   <!-- not-a-gate: first-upload model selection is required data gathering; the Phase 5 final gate approves the cloud mutation -->
-
-4. Use `AskUserQuestion`:
-
-   | Question | Header | Options |
-   |---|---|---|
-   | This website does not exist in the selected environment. Which data model should be used for the first upload? | Site data model | Enhanced, Standard, Cancel |
-
-   Do not recommend, preselect, or silently default either model. On **Cancel**, stop without
-   uploading. Record the answer as **user-selected**, not environment-authoritative.
-
-After this lookup or selection, show the resolved deployment summary again with:
+After this lookup or policy resolution, show the resolved deployment summary again with:
 
 ```text
 Deployment mode: <Update existing site|First upload — create site records>
 Data model: <Enhanced|Standard>
-Model source: <Existing website record|Explicit first-upload selection>
+Model source: <Existing website record|EDM-only first-upload policy>
 ```
 
 Use that resolved summary for change review and final upload approval.
@@ -216,9 +209,8 @@ When no permission-sensitive surface changed, skip this gate without mentioning 
 For **Update existing site**, ask: **Upload these non-SPA changes to this site?** Options:
 **Upload changes**, **Review again**, **Cancel**.
 
-For **First upload — create site records**, ask: **Create this non-SPA site in the selected
-environment using the chosen data model?** Options: **Create and upload**, **Review again**,
-**Cancel**.
+For **First upload — create site records**, ask: **Create this Enhanced data model non-SPA site
+in the selected environment?** Options: **Create and upload**, **Review again**, **Cancel**.
 
 Before executing, verify the installed `pac pages upload --help` output supports the arguments below.
 Use the installed CLI's equivalent spelling only when needed; never omit the explicit model:
@@ -229,6 +221,9 @@ pac pages upload --path "<DECLARATIVE_SITE_ROOT>" \
   --modelVersion "<Enhanced|Standard>"
 ```
 
+Replace the model placeholder with the existing website's authoritative model for an update, or
+with `Enhanced` for a first upload.
+
 On failure, show the PAC error and leave local state intact. Do not retry against another
 environment, model, or site without returning through identity verification and final approval.
 
@@ -237,7 +232,7 @@ environment, model, or site without returning through identity verification and 
 1. Require a successful PAC exit and success output.
 2. Rerun `pac pages list -v`; confirm exactly one row now matches the website record ID, site name,
    and expected model. For a first upload, this is the required proof that the new site records
-   were created with the user-selected model.
+   were created with the required Enhanced model.
 3. Rerun the local non-SPA validator.
 4. Record successful usage as `DeploySite`.
 5. Report the environment, deployment mode, website ID, model and model source, uploaded root,

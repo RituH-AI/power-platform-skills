@@ -4,7 +4,7 @@ Create and deploy Power Pages sites using modern frontend frameworks or first-pa
 templates. This plugin provides a complete workflow—from site creation to deployment, data
 modeling, authentication, Web API integration, and ALM—through conversational AI skills.
 
-**Supported creation models**: Standard and Enhanced data model non-SPA sites; React, Angular,
+**Supported creation models**: Enhanced data model non-SPA sites; React, Angular,
 Vue, and Astro SPA sites
 
 For an existing **non-SPA, server-rendered Power Pages site**, `/edit-site` provides a local Desktop styling workflow; it does not create a SPA or deploy changes.
@@ -53,7 +53,7 @@ The `/practice-site-check` and `/add-button` descriptions below are retained for
 
 > "Create a Power Pages site with React for a job board"
 
-Creates either an SPA site from a framework template or a Standard/Enhanced data model non-SPA
+Creates either an SPA site from a framework template or an Enhanced data model non-SPA
 site from a template accepted by the documented Power Platform Create Website API.
 
 - **SPA sites (code sites):** choose React, Vue, Angular, or Astro; scaffold the complete SPA; apply a
@@ -87,9 +87,10 @@ Routes by project type and deploys either a SPA site or a PAC-downloaded non-SPA
 - Confirms target environment before deploying
 - SPA sites retain the existing build, `pac pages upload-code-site`, blocked-JavaScript, and
   activation workflow
-- Non-SPA sites validate website identity and model, or require an explicit Standard/Enhanced
-  choice when the website is absent for a first upload; they summarize local component changes,
-  obtain final upload approval, and use `pac pages upload` with an explicit model
+- Non-SPA sites validate website identity and model, or require Enhanced when the website is
+  absent for a first upload; existing verified Standard sites remain deployable. They summarize
+  local component changes, obtain final upload approval, and use `pac pages upload` with an
+  explicit model
 
 #### `/edit-site`
 

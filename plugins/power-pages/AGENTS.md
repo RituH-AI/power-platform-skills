@@ -45,9 +45,10 @@ presence alone does not make a component mandatory. Keep removal rationale in ex
 summaries/inputs, preserve required dependencies and explicit exceptions, and verify source
 removal rather than CSS hiding. Removing a placement does not delete its backing records or data.
 
-New non-SPA creation recommends Enhanced with Bootstrap 5, with explicit model/admin approval,
+New non-SPA creation requires Enhanced with Bootstrap 5, with explicit model/admin approval,
 the helper's Bootstrap-filtered template catalog, and downloaded Bootstrap verification using
-the shared inspector. Preserve an explicit Standard/Bootstrap 3 compatibility choice. Never add
+the shared inspector. Existing Standard and Enhanced sites remain customizable and deployable, but
+new Standard website records must not be created through create-site or deploy-site. Never add
 an undocumented Create Website property, change environment flags, silently migrate, or recreate
 an accepted site to resolve a mismatch.
 The creation validator accepts PAC `website.yml` identities as either `id` or `adx_websiteid`;
@@ -222,7 +223,7 @@ references/                    ← Shared reference docs used by multiple skills
   design-critique.md           ← Capture, two-pass critique, 10-category rubric, compact scorecard (create-site Phases 5.2/5.7, exceptional-web-design)
 skills/
   create-site/
-    SKILL.md                   ← Routes SPA and Standard/Enhanced non-SPA creation
+    SKILL.md                   ← Routes SPA and Enhanced-only non-SPA creation
     workflows/non-spa-site.md ← Environment-backed non-SPA provisioning and download workflow
     assets/{react,vue,angular,astro}/  ← Framework templates with __PLACEHOLDER__ tokens
     references/design-aesthetics.md  ← Compatibility pointer to the shared principles and SPA adapter
@@ -331,8 +332,8 @@ User-invocable via `/power-pages:<skill-name>`:
   discovery, early React/Vue/Angular/Astro scaffolding, component and design planning, implementation
   with live Playwright preview, experience brief, narrative blueprints, batched visual critique,
   validation, review, Git checkpoints, and deployment handoff. The
-  non-SPA path selects Standard or Enhanced, confirms the environment and administrator-verified
-  EDM toggle state (disabled for Standard, enabled for Enhanced), selects a supported template
+  non-SPA path confirms Enhanced with Bootstrap 5, confirms the environment and
+  administrator-verified enabled EDM toggle state, selects a supported template
   identifier, provisions through the Power Platform API, verifies the resulting model, downloads
   with the explicit `--modelVersion`, validates identity/assets, and creates a Git baseline. After
   a successful non-SPA baseline it can optionally hand off to `edit-site`.
@@ -363,9 +364,9 @@ User-invocable via `/power-pages:<skill-name>`:
 - `deploy-site`: Routes by project type. SPA sites retain the 6-step build,
   `pac pages upload-code-site`, blocked-JavaScript, verification, and activation workflow.
   Non-SPA sites use an isolated no-build workflow that validates local identity, confirms an
-  exact environment and website match when one exists, or asks for an explicit Standard/Enhanced
-  model with no default on first upload. It reviews component changes, obtains final upload
-  consent, and runs `pac pages upload` with an explicit model.
+  exact environment and website match when one exists, or requires Enhanced for first-upload
+  creation. Existing verified Standard sites remain uploadable. It reviews component changes,
+  obtains final upload consent, and runs `pac pages upload` with an explicit model.
 - `setup-datamodel`: 8-phase workflow for SPA and non-SPA sites — verify authentication and
   resolve site context, choose an uploaded or agent-derived model, analyze framework source or
   active non-SPA components, review the evidence-backed reuse/extend/create proposal,

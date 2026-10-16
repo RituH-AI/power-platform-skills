@@ -1,8 +1,8 @@
 ---
 name: edit-site
 description: >-
-  Plans, coordinates and customizes PAC CLI-downloaded non-SPA Power Pages sites, including Enhanced data model
-  sites created from Microsoft templates or manually in Design Studio. Use for
+  Plans, coordinates and customizes PAC CLI-downloaded Standard or Enhanced data model non-SPA
+  Power Pages sites created from Microsoft templates or manually in Design Studio. Use for
   requests involving pages, localized content, navigation, assets, snippets,
   Liquid/web templates, page layouts, or styling. Coordinated work produces an approved
   browser-viewable plan, executes changes in dependency order, verifies the local result,

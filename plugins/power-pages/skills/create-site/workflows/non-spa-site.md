@@ -1,7 +1,7 @@
 # Create a Non-SPA Power Pages Site
 
-Follow this workflow only after `create-site` routes the request to a Standard or Enhanced data
-model non-SPA site. The platform creates the baseline from a documented first-party template;
+Follow this workflow only after `create-site` routes the request to an Enhanced data model
+non-SPA site. The platform creates the baseline from a documented first-party template;
 the skill downloads that baseline rather than generating Power Pages metadata.
 Use the selected template for data-model/domain context and requirements interpretation only,
 not as a constraint on visual design, page composition, layout, branding, or modern presentation.
@@ -24,17 +24,16 @@ carry `previewNoticeShown: true` through this workflow and every covered-skill h
 
 ## Invariants
 
-- Require an explicit `MODEL_VERSION` of `Enhanced` or `Standard`; never choose a default.
-- Recommend **Enhanced with Bootstrap 5** for new sites. Set `BOOTSTRAP_VERSION=5` for this path.
-  Preserve an explicit Standard request as a Bootstrap 3 compatibility path
-  (`BOOTSTRAP_VERSION=3`); explain the tradeoff rather than silently changing the model.
+- New non-SPA site creation supports only **Enhanced with Bootstrap 5**. After confirmation, set
+  `MODEL_VERSION=Enhanced` and `BOOTSTRAP_VERSION=5`; never offer or create a Standard baseline.
+- An explicit Standard/SDM creation request is not consent to create Enhanced. Explain the
+  creation limitation and let the user choose Enhanced non-SPA creation, the SPA route, or cancel.
 - Bootstrap 5 creation requires Enhanced and a documented supported template. Follow
   [Microsoft's Bootstrap 5 creation guidance](https://learn.microsoft.com/power-pages/configure/bootstrap-version-5).
   Verify the actual downloaded Bootstrap assets before version-specific authoring.
 - The environment EDM toggle has no documented public read or write API.
-- An environment administrator must verify **Switch to enhanced data model** is enabled for
-  Enhanced creation or disabled for Standard creation. The skill never automates that shared
-  environment change.
+- An environment administrator must verify **Switch to enhanced data model** is enabled. The
+  skill never automates that shared environment change.
 - Non-SPA template discovery uses the release-pinned
   `microsoft/power-pages-samples` manifest. It is not presented as an environment-specific
   catalog because no public API reports which templates are enabled in a specific environment.
@@ -66,28 +65,30 @@ Create all eight tasks before starting:
 | Validate the non-SPA baseline | Validating the non-SPA baseline | Validate downloaded artifacts and initialize Git |
 | Complete non-SPA site setup | Completing non-SPA site setup | Present the baseline and continue into approved image-rich design unless the user opts out |
 
-## Phase 1: Select the Model and Verify Prerequisites
+## Phase 1: Confirm the Model and Verify Prerequisites
 
-1. If the initial request explicitly says Standard/SDM or Enhanced/EDM, set `MODEL_VERSION` to
-   `Standard` or `Enhanced` respectively. Otherwise ask:
+1. Always confirm the Enhanced-only creation model before continuing. If the request explicitly
+   asks for Standard/SDM, first explain that new non-SPA creation does not support Standard; do
+   not silently reinterpret the request as Enhanced.
 
    <!-- gate: create-site:non-spa-1-select-model | category=plan | cancel-leaves=nothing -->
 
-   > 🚦 **Gate (plan · create-site:non-spa-1-select-model):** Select the data model that the
-   > environment toggle and post-provision verification must enforce.
+   > 🚦 **Gate (plan · create-site:non-spa-1-select-model):** Confirm the supported Enhanced data
+   > model and Bootstrap 5 creation path.
    >
-   > **Trigger:** The request selected non-SPA creation without specifying Standard or Enhanced.
-   > **Why we ask:** The Create Website request relies on an environment-level toggle, and the
-   > resulting model controls the explicit PAC download mode.
+   > **Trigger:** The request selected non-SPA creation.
+   > **Why we ask:** New non-SPA creation is Enhanced-only, and the Create Website request relies
+   > on an environment-level toggle rather than carrying a model field.
    > **Cancel leaves:** Nothing — no cloud resource or local project exists.
 
    | Question | Header | Options |
    |---|---|---|
-   | Which data model should the new non-SPA site use? | Data model | Enhanced with Bootstrap 5 (Recommended), Standard with Bootstrap 3 compatibility, Cancel |
+   | New non-SPA site creation uses the Enhanced data model with Bootstrap 5. Continue? | Data model | Continue with Enhanced (Recommended), Create an SPA site instead, Cancel |
 
-   Explain the Bootstrap 5 prerequisites; recommend Enhanced, but do not preselect or silently
-   override the user's model. An explicit Standard request is not consent to migrate or change
-   the environment toggle. Set the corresponding `BOOTSTRAP_VERSION` from the confirmed choice.
+   On **Continue with Enhanced**, set `MODEL_VERSION=Enhanced` and `BOOTSTRAP_VERSION=5`. On
+   **Create an SPA site instead**, return to the parent SPA workflow before creating any non-SPA
+   task or resource. Explain the Bootstrap 5 prerequisites. An explicit Standard request is not
+   consent to migrate, change the environment toggle, or create an Enhanced site.
 
 2. Run the plugin version check from the parent skill.
 3. Verify:
@@ -133,7 +134,7 @@ Create all eight tasks before starting:
    The expected capability status is `indeterminate` because no documented API reads the toggle.
 
 > 🚦 **Gate (progress · create-site:non-spa-1-confirm-capability):** Require administrator
-> confirmation that **Switch to enhanced data model** matches the selected model.
+> confirmation that **Switch to enhanced data model** is enabled.
 >
 > **Trigger:** Public API capability result is `indeterminate`.
 > **Why we ask:** Existing sites and Dataverse tables do not prove the environment toggle state
@@ -142,17 +143,9 @@ Create all eight tasks before starting:
 
 7. Explain how to verify the toggle in Power Platform admin center.
 
-   For `MODEL_VERSION=Enhanced`, use `AskUserQuestion`:
-
    | Question | Header | Options |
    |---|---|---|
    | Has an environment administrator verified that **Switch to enhanced data model** is enabled for this environment? | EDM availability | Yes, it is enabled, Open Power Platform admin center, Choose another environment, Cancel |
-
-   For `MODEL_VERSION=Standard`, use `AskUserQuestion`:
-
-   | Question | Header | Options |
-   |---|---|---|
-   | Has an environment administrator verified that **Switch to enhanced data model** is disabled for this environment? | SDM availability | Yes, it is disabled, Open Power Platform admin center, Choose another environment, Cancel |
 
 8. On **Open Power Platform admin center**, open `https://aka.ms/ppac`, wait for the user to
    verify or change the setting, and ask again. On **Choose another environment**, return to step
@@ -287,7 +280,7 @@ Show:
 Site type: Non-SPA Power Pages site
 Data model: <MODEL_VERSION>
 Bootstrap target: <BOOTSTRAP_VERSION> (verified after download)
-Toggle confirmation: Switch to enhanced data model is <enabled for Enhanced|disabled for Standard>
+Toggle confirmation: Switch to enhanced data model is enabled
 Environment URL: <environmentUrl>
 Environment ID: <environmentId>
 Template: <template display name> (<templateName>)
@@ -582,8 +575,7 @@ Then invoke `/edit-site` through the `Skill` tool and provide:
 - native-editing requirements: known layout recipes are defaults, not an exhaustive list.
   Explicit broader safe local geometry carries a Studio-editing-unverified warning through
   planning, authoring and verification; no automatic deployment or preview-component creation;
-- `creationIntent: "new-site"` and `verifiedBootstrapMajor: <BOOTSTRAP_VERSION>` with the inspected
-  evidence; for the Standard path, include the user's explicit compatibility choice;
+- `creationIntent: "new-site"` and `verifiedBootstrapMajor: 5` with the inspected evidence;
 - `previewNoticeShown: true` and `invocationSource: create-site`;
 - the requirement to include header branding, navigation styling and mobile treatment in the
   existing customization plan, including an explicit website-appropriate logo or wordmark

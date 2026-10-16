@@ -40,13 +40,15 @@ function buildResult({
 } = {}) {
   const selectedModel = normalizeNonSpaModelVersion(modelVersion);
   const selectedBootstrap = bootstrapVersion === null ? null : normalizeBootstrapVersion(bootstrapVersion);
-  if (selectedBootstrap === 5 && selectedModel !== 'Enhanced') {
-    throw new Error('New Bootstrap 5 sites require --modelVersion Enhanced');
+  if (selectedModel !== 'Enhanced' || selectedBootstrap !== 5) {
+    throw new Error(
+      'New non-SPA site creation supports only --modelVersion Enhanced with --bootstrapVersion 5',
+    );
   }
   if (!catalogResult?.ok) {
     throw new Error(`Non-SPA template catalog unavailable: ${catalogResult?.error || 'unknown error'}`);
   }
-  const requiredToggleState = selectedModel === 'Enhanced' ? 'enabled' : 'disabled';
+  const requiredToggleState = 'enabled';
   const discoveredTemplates = catalogResult.catalog.templates
     .filter(isCreateWebsiteApiTemplate)
     .map((template) => normalizeNonSpaTemplate(template, catalogResult));

@@ -3,8 +3,8 @@ name: create-site
 description: >-
   Creates a new Power Pages site. For SPA (code) sites using React, Angular, Vue, or Astro, guides
   the full process from requirements discovery through scaffolding, component planning, design,
-  implementation, validation, and deployment. For Standard or Enhanced data model non-SPA
-  (classic) sites, provisions a documented Microsoft template, verifies the selected model, downloads the
+  implementation, validation, and deployment. For Enhanced data model non-SPA
+  (classic) sites, provisions a documented Microsoft template, verifies the required model, downloads the
   site, validates its identity and Bootstrap assets, and coordinates approved image-rich design.
   Use when the user wants to create, build, or
   scaffold a new Power Pages website or portal.
@@ -61,7 +61,7 @@ If the request is ambiguous, use `AskUserQuestion`:
 
 | Question | Header | Options |
 |---|---|---|
-| Which type of Power Pages site should I create? | Site type | Non-SPA site from a Microsoft template (Preview), SPA site using React/Vue/Angular/Astro |
+| Which type of Power Pages site should I create? | Site type | Non-SPA site from a Microsoft template — Enhanced data model with Bootstrap 5 (Preview), SPA site using React/Vue/Angular/Astro |
 
 After the route is known:
 
@@ -77,8 +77,8 @@ load-bearing non-SPA question paired with the repository gate catalog.
 
 <!-- gate: create-site:non-spa-1-select-model | category=plan | cancel-leaves=nothing -->
 
-> 🚦 **Gate (plan · create-site:non-spa-1-select-model):** Select Standard or Enhanced when
-> the request did not already specify the non-SPA model.
+> 🚦 **Gate (plan · create-site:non-spa-1-select-model):** Confirm Enhanced data model with
+> Bootstrap 5 before continuing with non-SPA creation.
 
 <!-- gate: create-site:non-spa-1-confirm-environment | category=consent | cancel-leaves=nothing -->
 
@@ -88,7 +88,7 @@ load-bearing non-SPA question paired with the repository gate catalog.
 <!-- gate: create-site:non-spa-1-confirm-capability | category=progress | cancel-leaves=nothing -->
 
 > 🚦 **Gate (progress · create-site:non-spa-1-confirm-capability):** Require administrator
-> confirmation that the environment EDM toggle is enabled for Enhanced or disabled for Standard.
+> confirmation that the environment EDM toggle is enabled.
 
 <!-- gate: create-site:non-spa-2-select-template | category=plan | cancel-leaves=nothing -->
 

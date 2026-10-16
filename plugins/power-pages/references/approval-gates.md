@@ -480,9 +480,9 @@ When **removing** a gate, also remove its catalog row in the same PR.
 | `create-site:5.7.critique-blocked` | gate | progress | 5.7 | A critical design gate still fails after three critique rounds - *"Keep fixing / Continue and record it as a known issue / Stop here"* | nothing |
 | `create-site:7.review` | gate | plan | 7 | Live site ready — *"Would you like any changes?"* | nothing |
 | `create-site:8.deploy` | gate | plan | 8 | *"Deploy now (Recommended) / Skip for now"* — invokes `/deploy-site` on Yes; remaining `SAMPLE CONTENT` is listed and counted first, with Skip recommended | nothing |
-| `create-site:non-spa-1-select-model` | gate | plan | Non-SPA 1 | Non-SPA model unspecified — select Enhanced or Standard with no default | nothing |
+| `create-site:non-spa-1-select-model` | gate | plan | Non-SPA 1 | Confirm Enhanced data model with Bootstrap 5; Standard new-site creation is unavailable | nothing |
 | `create-site:non-spa-1-confirm-environment` | gate | consent | Non-SPA 1 | Confirm the exact Dataverse environment before non-SPA planning or provisioning | nothing |
-| `create-site:non-spa-1-confirm-capability` | gate | progress | Non-SPA 1 | Administrator confirms **Switch to enhanced data model** is enabled for Enhanced or disabled for Standard because no public read API exists | nothing |
+| `create-site:non-spa-1-confirm-capability` | gate | progress | Non-SPA 1 | Administrator confirms **Switch to enhanced data model** is enabled because no public read API exists | nothing |
 | `create-site:non-spa-2-select-template` | gate | plan | Non-SPA 2 | Select an exact supported non-SPA template identifier | nothing |
 | `create-site:non-spa-4-provision` | gate | final | Non-SPA 4 | Final consent immediately before Create Website creates the cloud resource | nothing |
 | `create-site:non-spa-8-customize` | gate | plan | Non-SPA 8 | Verified explicit-model baseline — *"Customize now / Keep the template unchanged"* | non-spa-baseline |
@@ -510,7 +510,6 @@ When **removing** a gate, also remove its catalog row in the same PR.
 | `deploy-site:5.5.1.activate` | gate | plan | 5.5.1 | Site not yet activated — *"Activate now / Skip"* | nothing |
 | `deploy-site:5.6.restart-cache` | gate | plan | 5.6 | Site activated — *"Restart site to flush cache? (brief downtime) / Skip"* | nothing |
 | `deploy-site:6.2.unblock-js` | gate | consent | 6.2 | Upload failed because `.js` is blocked — *"Remove .js block from `blockedattachments`? / No"*. Modifies tenant-wide env setting — destructive shared state. | `attachment-block-modified` |
-| Non-SPA Phase 3 model selection | not-a-gate | — | Non-SPA 3 | Exact website ID is absent in the target environment — select Enhanced or Standard for the first upload, with no default; Phase 5 separately approves creation | — |
 | `deploy-site:non-spa-4.permissions-audit` | gate | plan | Non-SPA 4 | Permission-sensitive Form/List/Liquid/Web API/settings/role/permission/page-rule diff — *"Run permissions audit / Continue without audit / Cancel"* | local-customization |
 | `deploy-site:non-spa-5.upload` | gate | final | Non-SPA 5 | Exact root/environment/deployment mode/website/model/diff confirmed — *"Upload changes" or "Create and upload" / Review again / Cancel* | local-customization |
 

@@ -214,11 +214,11 @@ test('all declarative preview entry points disclose once and propagate the hando
 
   assert.match(
     createSkill,
-    /Non-SPA site from a Microsoft template \(Preview\)/,
+    /Non-SPA site from a Microsoft template — Enhanced data model with Bootstrap 5 \(Preview\)/,
   );
   assert.match(
     createSkill,
-    /Which type of Power Pages site should I create\?[\s\S]*Non-SPA site from a Microsoft template \(Preview\), SPA site using React\/Vue\/Angular\/Astro/,
+    /Which type of Power Pages site should I create\?[\s\S]*Non-SPA site from a Microsoft template — Enhanced data model with Bootstrap 5 \(Preview\), SPA site using React\/Vue\/Angular\/Astro/,
   );
   const codeSiteWorkflow = createSkill.split('## SPA-Site Workflow')[1];
   assert.doesNotMatch(codeSiteWorkflow, /non-spa-preview\.md|Preview experience/);
@@ -327,16 +327,25 @@ test('every non-SPA header update includes a website-appropriate logo decision a
   assert.doesNotMatch(customization, /<!-- gate: [^\n]*logo/);
 });
 
-test('create-site can hand a Standard or Enhanced baseline to non-SPA customization', () => {
+test('new non-SPA creation is Enhanced-only while customization remains model-neutral', () => {
   const skill = read(path.join('skills', 'create-site', 'SKILL.md'));
   const workflow = read(path.join('skills', 'create-site', 'workflows', 'non-spa-site.md'));
+  const customization = read(path.join('skills', 'edit-site', 'SKILL.md'));
+  const contract = read(
+    path.join('skills', 'edit-site', 'references', 'customization-plan-contract.md'),
+  );
 
   assert.match(skill, /allowed-tools: [^\n]*\bSkill\b/);
   assert.match(skill, /create-site:non-spa-1-select-model/);
   assert.match(skill, /create-site:non-spa-8-customize/);
-  assert.match(workflow, /Which data model should the new non-SPA site use\?/);
+  assert.match(skill, /Enhanced data model with Bootstrap 5 \(Preview\)/);
+  assert.match(workflow, /Continue with Enhanced \(Recommended\)/);
+  assert.match(workflow, /MODEL_VERSION=Enhanced/);
+  assert.match(workflow, /BOOTSTRAP_VERSION=5/);
+  assert.match(workflow, /explicit Standard\/SDM creation request is not consent/);
   assert.match(workflow, /enabled for this environment\?/);
-  assert.match(workflow, /disabled for this environment\?/);
+  assert.doesNotMatch(workflow, /disabled for this environment\?/);
+  assert.doesNotMatch(workflow, /Standard with Bootstrap 3 compatibility/);
   assert.match(workflow, /--modelVersion "<MODEL_VERSION>"/);
   assert.match(workflow, /verify the site reports `MODEL_VERSION`/);
   assert.match(workflow, /Would you like to customize the downloaded non-SPA template now\?/);
@@ -347,6 +356,8 @@ test('create-site can hand a Standard or Enhanced baseline to non-SPA customizat
   assert.match(workflow, /Never suggest `\/add-sample-data` for a non-SPA site/);
   assert.match(workflow, /Suggest `\/create-webroles` only when/);
   assert.match(workflow, /Suggest `\/integrate-webapi` only when/);
+  assert.match(customization, /Standard or Enhanced data model non-SPA/);
+  assert.match(contract, /customization plan is data-model-neutral/);
 });
 
 test('edit-site executes authoring references without changing approved-plan contracts', () => {
@@ -442,10 +453,14 @@ test('deploy-site keeps code and declarative upload commands isolated', () => {
   assert.match(nonSpa, /--modelVersion "<Enhanced\|Standard>"/);
   assert.match(nonSpa, /Data model: Pending verification/);
   assert.match(nonSpa, /First upload — create site records/);
-  assert.match(nonSpa, /Which data model should be used for the first upload\?/);
-  assert.match(nonSpa, /Do not recommend, preselect, or silently default either model/);
+  assert.match(nonSpa, /first-upload creation supports only Enhanced/);
+  assert.match(nonSpa, /existing verified Standard sites remain deployable/);
+  assert.match(nonSpa, /EDM-only first-upload policy/);
+  assert.match(nonSpa, /existing website's authoritative model for an update/);
+  assert.match(nonSpa, /with `Enhanced` for a first upload/);
+  assert.doesNotMatch(nonSpa, /Which data model should be used for the first upload\?/);
   assert.match(nonSpa, /different website record with the same site name/);
-  assert.match(nonSpa, /Create this non-SPA site in the selected\s+environment using the chosen data model\?/);
+  assert.match(nonSpa, /Create this Enhanced data model non-SPA site\s+in the selected environment\?/);
   assert.match(nonSpa, /--websiteRecordId "<WEBSITE_RECORD_ID>"/);
   assert.match(nonSpa, /--siteRoot "<PROJECT_RELATIVE_SITE_ROOT>"/);
   assert.match(nonSpa, /Do not invoke `activate-site`/);
@@ -465,8 +480,9 @@ test('non-SPA creation uses verified Bootstrap 5 and image-rich design without S
   assert.match(common, /references\/site-design-quality\.md/);
   assert.match(common, /Non-SPA sites need no dev server or live preview/);
   assert.doesNotMatch(common, /dev server MUST|scaffold-status\.json|images\.unsplash\.com\/photo-/);
-  assert.match(workflow, /Enhanced with Bootstrap 5 \(Recommended\)/);
-  assert.match(workflow, /Standard with Bootstrap 3 compatibility/);
+  assert.match(workflow, /Enhanced with Bootstrap 5/);
+  assert.match(workflow, /Continue with Enhanced \(Recommended\)/);
+  assert.doesNotMatch(workflow, /Standard with Bootstrap 3 compatibility/);
   assert.match(workflow, /--bootstrapVersion "<BOOTSTRAP_VERSION>"/);
   assert.match(workflow, /filtered `catalog\.templates`/);
   assert.match(workflow, /catalog\.bootstrapCompatibility/);

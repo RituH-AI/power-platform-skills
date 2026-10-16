@@ -73,10 +73,10 @@ test('samples manifest contract rejects malformed non-SPA provisioning metadata'
   );
 });
 
-test('returns non-SPA samples metadata with immutable preview URLs', () => {
+test('returns Enhanced Bootstrap 5 samples metadata with immutable preview URLs', () => {
   const result = buildResult({
-    modelVersion: 'Standard',
-    bootstrapVersion: 3,
+    modelVersion: 'Enhanced',
+    bootstrapVersion: 5,
     catalogResult: catalogResult(),
   });
 
@@ -84,7 +84,7 @@ test('returns non-SPA samples metadata with immutable preview URLs', () => {
   assert.equal(result.catalog.commitSha, SHA);
   assert.deepEqual(
     result.catalog.templates.map((template) => template.name),
-    ['StarterLayout1', 'EventPortal'],
+    ['StarterLayout1'],
   );
   assert.equal(
     result.catalog.templates[0].previews[0].desktop,
@@ -117,23 +117,29 @@ test('fails closed when the samples catalog is unavailable or contains no non-SP
   );
   assert.throws(
     () => buildResult({
-      modelVersion: 'Standard',
-      bootstrapVersion: 3,
+      modelVersion: 'Enhanced',
+      bootstrapVersion: 5,
       catalogResult: catalogResult([]),
     }),
     /contains no templates/,
   );
 });
 
-test('rejects Bootstrap 5 with Standard before template selection', () => {
-  assert.throws(
-    () => buildResult({
-      modelVersion: 'Standard',
-      bootstrapVersion: 5,
-      catalogResult: catalogResult(),
-    }),
-    /Bootstrap 5 sites require --modelVersion Enhanced/,
-  );
+test('rejects every new-site model and Bootstrap combination except Enhanced with Bootstrap 5', () => {
+  for (const [modelVersion, bootstrapVersion] of [
+    ['Standard', 3],
+    ['Standard', 5],
+    ['Enhanced', 3],
+  ]) {
+    assert.throws(
+      () => buildResult({
+        modelVersion,
+        bootstrapVersion,
+        catalogResult: catalogResult(),
+      }),
+      /supports only --modelVersion Enhanced with --bootstrapVersion 5/,
+    );
+  }
 });
 
 test('run fetches the production catalog and preserves administrator confirmation', async () => {
@@ -149,11 +155,11 @@ test('run fetches the production catalog and preserves administrator confirmatio
 
 test('parseArgs accepts supported spellings', () => {
   assert.deepEqual(
-    parseArgs(['--model-version', 'Standard', '--bootstrap-version=3', '--administrator-confirmed']),
+    parseArgs(['--model-version', 'Enhanced', '--bootstrap-version=5', '--administrator-confirmed']),
     {
       administratorConfirmed: true,
-      modelVersion: 'Standard',
-      bootstrapVersion: 3,
+      modelVersion: 'Enhanced',
+      bootstrapVersion: 5,
     },
   );
 });
