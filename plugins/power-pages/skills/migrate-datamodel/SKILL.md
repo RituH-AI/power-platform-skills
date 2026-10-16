@@ -64,9 +64,14 @@ After init, each sub-step below ends with a **→ Update report** callout. Execu
 | `--approve-and-start <phaseId>` | Atomic: clear approval gate + mark phase in-progress in one render. Use this whenever the user answers a `phase-start` AskUserQuestion approval — avoids the transient "Awaiting Approval" pill that would otherwise flash between `--clear-approval` and `--set-phase`. |
 | `--set-prompt <plugin\|dme> --status ready --path "<file>" --summary "<text>"` | Show augmented-prompt card |
 | `--set-operation '<json>'` / `--clear-operation` | Structured "now running" card (`label`, `detail`, `expectedDurationSec`, `poll`) for long-running ops — drives the always-visible banner + live elapsed ticker + estimate bar |
+| `--add-decision '<json>'` | Record a major migration decision (`id`, `label`, `choice`, `rationale`) in the **Decisions & Rationale** review (Migration & Review tab). Upserts by `id`. |
 | `--render-only` | Re-render HTML from existing state (rare) |
 
 > **Best-effort:** if any `update-state.js` call fails (e.g., node missing), log a warning and continue — the live report is informational, never a blocker for migration work.
+
+> **Record major decisions.** Whenever the user makes a consequential **migration** choice — environment type, migration mode, derived track, a package install/skip, a customization-remediation approach, a reset, a rollback, or the EDM activation/restart — also record it with `--add-decision` so it lands in the **Decisions & Rationale** review (Migration & Review tab). Concrete calls are wired into the steps below; follow the same pattern for any other consequential migration choice. **Do not** record file create/update/read permission prompts or other tool-consent prompts — only migration-substance choices.
+
+> **Show what's running.** Wrap every notable **agent-run** operation with the now-running banner so the user always sees what's executing: call `--set-operation '{"label":"<present-tense description>"}'` immediately **before** the operation and `--clear-operation` immediately **after** (and before any user prompt/gate). For these single-shot operations **omit** `poll` and `expectedDurationSec` — the live elapsed clock alone conveys progress (the `attempt N/30` counter is only for the two polled migrations, 2.2 and 3.2). Wrap: SDM & EDM downloads; remediated upload; customization-report generation; EDM activation; rollback. **Caveat:** the banner needs the initialized report, so it only works from the **end of step 1.3 onward** — the pre-init discovery steps (1.1 CLI context, 1.3 site listing) can't show it, so don't wrap those. Package installs, the metadata **solution import**, and the manual **site restart** are user-run or intentionally left unwrapped. Explicit calls are wired at the steps below.
 
 > **Use the `Bash` tool for `update-state.js` calls, not `PowerShell`.** PowerShell parses `(...)` as subexpression syntax inside double-quoted strings, so JSON values containing parens — e.g., `"currentDataModel":"Standard (SDM)"` — error out with `'SDM' is not recognized as a name of a cmdlet`. The `Bash` tool runs through sh, which doesn't have this gotcha; single-quoted JSON works cleanly. The `update-state.js` script itself is pure Node and runs identically from either shell.
 >
@@ -190,6 +195,8 @@ The skill-level approval prompt that follows (via AskUserQuestion) is for the **
 
    Capture both `<SITE_ROOT>` and `<PARENT_OUTPUT_DIR>` as durable values. The actual per-migration subfolder `<MIGRATION_OUTPUT_DIR>` is computed in step 1.3 and is used throughout the rest of the skill. Create `<PARENT_OUTPUT_DIR>` if it doesn't exist yet.
 
+   > **`<PARENT_OUTPUT_DIR>` is always exactly `migration-reports` (or `..\migration-reports` when cwd is the site) — never a timestamped or `fresh-*` variant.** Re-runs must resume in the **same** folder: step 1.3's `update-state.js --init` already reuses an existing `<env>--<slug>` subfolder unless `--force` is passed. Do **not** invent a new parent (e.g., `migration-reports/fresh-<timestamp>/`) to "keep prior files" — doing so silently re-downloads the site and strands the user's working copy. If the user wants a clean slate, pass `--force` to `--init` in the **same** folder rather than creating a new tree.
+
 2. **Use website.yml if present**
 
    If a `website.yml` exists at `<SITE_ROOT>`, parse it and extract:
@@ -202,8 +209,21 @@ The skill-level approval prompt that follows (via AskUserQuestion) is for the **
    |----------|--------|---------|
    | Found local website.yml for site: `<SITE_NAME>` (ID: `<WEBSITEID>`) at `<SITE_ROOT>`. Use this site? | Use Local Context | Yes, use this site, No, specify different site |
 
-   - If "Yes": use extracted values; continue to step 1.3.
+   - If "Yes": use extracted values. Then make the **reuse-vs-fresh source decision** below, and continue to step 1.3.
    - If "No": treat as if no website.yml; proceed to step 3.
+
+   **Reuse-vs-fresh source decision (only when the user confirmed a local site above).** The user may be sitting in their own working copy. Ask once — reusing it is faster and avoids a second download, but it has real consequences:
+
+   | Question | Header | Options |
+   |----------|--------|---------|
+   | Use your local copy at `<SITE_ROOT>` as the migration source, or download a fresh SDM copy? **Reuse** is faster and keeps your folder, but any local edits you've made will be included when the skill uploads remediated source in Phase 2.4, and server-side changes made since you downloaded won't be reflected. **Fresh** is a pristine copy matching the current server state and leaves your working copy untouched. | Site Source | Reuse my local copy, Download a fresh SDM copy |
+
+   - **Reuse my local copy**: set `<SITE_SOURCE_MODE> = reuse-local`; keep `<SITE_ROOT>` as resolved; step 2.1 **skips** the download.
+   - **Download a fresh SDM copy**: set `<SITE_SOURCE_MODE> = fresh-download`; step 2.1 downloads to `<MIGRATION_OUTPUT_DIR>/site-sdm/<auto-slug>`; the user's working copy is left untouched.
+
+   Record the choice once the live report is initialized (end of step 1.3): `--add-decision '{"id":"site-source","label":"Site source","choice":"<Reuse local copy | Fresh SDM download>","rationale":"<reused local working copy | downloaded a pristine copy to match server state>"}'`.
+
+   When **no** local site was found (the step 3 path, where the user supplies a site ID), there is nothing to reuse: `<SITE_SOURCE_MODE>` is `fresh-download` and step 2.1 downloads the SDM source — no prompt needed.
 
 3. **Get site identification from user**
 
@@ -395,7 +415,7 @@ The skill-level approval prompt that follows (via AskUserQuestion) is for the **
      |----------|--------|---------|
      | Previous migration failed at step `<currentStep>`. Retry from the migration phase, or stop and investigate? | Failed Migration | Retry migration, Stop and investigate |
 
-     - **Retry**: Proceed to step 1.5 (full pre-checks still run).
+     - **Retry**: Proceed to step 1.5 (full pre-checks still run). Reuse the `<SITE_ROOT>`, `<SITE_SOURCE_MODE>`, and output folder already resolved in step 1.2 — honor the reuse-vs-fresh decision; do **not** re-download the site or create a new `migration-reports` tree.
      - **Stop**: Halt. Direct user to verbose status output and Microsoft Learn for diagnostics.
 
     - **Running with `currentStep = ConfigurationDataCompleted`**: Configuration metadata finished, but the tracker remains `Running` until the references phase finishes. This is an expected handoff, not evidence that metadata migration is stuck. **Do not show the generic in-flight prompt, do not ask whether to proceed, and do not offer reset.** Proceed through steps 1.5–1.7 to recover the intended mode:
@@ -440,6 +460,8 @@ The skill-level approval prompt that follows (via AskUserQuestion) is for the **
 **Output**: Migration history known; skill either short-circuits to the appropriate phase or proceeds normally with a clean tracker state
 
 > **→ Update report:** `--set-step 1.4 --status completed --output "Status: <STATUS> · <NOTES>"`. If the skill is short-circuiting (in-flight or previously-completed migration), also `--set-phase 1 --status completed`, `--set-phase 2 --status completed` (Phase 2 setup work is skipped), and skip the Phase 2 approval gate — the user has effectively already approved this path by responding to the in-flight prompt.
+>
+> If the user confirmed a **reset** at this step, also record it: `--add-decision '{"id":"reset-migration","label":"Reset in-flight migration","choice":"Yes, reset","rationale":"Marked the prior tracker Failed to start fresh; does not undo already-migrated records"}'`.
 
 ---
 
@@ -511,6 +533,8 @@ The skill-level approval prompt that follows (via AskUserQuestion) is for the **
 **Output**: Both required first-party packages verified at or above the minimum version, installed/upgraded via `pac application install`, or explicitly acknowledged as skipped by the user.
 
 > **→ Update report:** `--set-step 1.5 --status completed --output "CDSBasePortal <state> · PowerPages_Core <state>"` where `<state>` is one of `v<X> OK`, `installed via pac application install (v<X> → v<Y>)`, `upgraded via pac application install (v<X> → v<Y>)`, or `user skipped — proceeding at user's risk`. Capturing the install method explicitly so the user can audit afterwards.
+>
+> Record each package decision: `--add-decision '{"id":"pkg-CDSBasePortal","label":"Package: CDSBasePortal","choice":"<state>","rationale":"Base portal components the migration utility depends on"}'` and the same for `PowerPages_Core` (id `pkg-PowerPages_Core`, rationale "EDM / Power Pages runtime components the migrated site runs on").
 
 ---
 
@@ -550,6 +574,8 @@ The skill-level approval prompt that follows (via AskUserQuestion) is for the **
 **Output**: The detected template's V2 package is installed (or confirmed already present), or the site was low-complexity and no template package was needed. `PowerPages_Core` was already verified in step 1.5.
 
 > **→ Update report:** `--set-step 1.6 --status completed --output "<TEMPLATE_V2_PACKAGE> <state>"` where `<state>` is one of `already installed`, `installed via pac application install`, or `low-complexity — no template package needed`.
+>
+> Record the decision: `--add-decision '{"id":"pkg-template-v2","label":"Package: <TEMPLATE_V2_PACKAGE>","choice":"<state>","rationale":"EDM version of the template-specific schema; for D365 templates it carries the EDM relationship changes the migrate precheck requires"}'`.
 
 ---
 
@@ -611,6 +637,8 @@ The skill-level approval prompt that follows (via AskUserQuestion) is for the **
 > --set-site '{"environment":"<DEV|TEST|UAT|PROD|SINGLE>","migrationMode":"<MODE>"}'
 > --set-step 1.7 --status completed --output "Env: <ENV_TYPE> · mode=<MODE> · Track <A|B>"
 > --set-track <A|B>
+> --add-decision '{"id":"env-type","label":"Environment type","choice":"<ENV_TYPE>","rationale":"<why this environment was selected>"}'
+> --add-decision '{"id":"migration-mode","label":"Migration mode","choice":"<MODE>","rationale":"<env rationale; if mode=all, note the no-adx_* customizations risk was acknowledged>"}'
 > --set-phase 1 --status completed
 > --set-approval 2 phase-start
 > ```
@@ -652,23 +680,28 @@ This phase has **two completely different shapes** depending on the migration tr
 
 ### 2.1 Capture SDM Snapshot
 
-**Goal**: Download the SDM source and snapshot it **before** the migration runs, so the live report's "Migration totals" and "Pages & Components" cards reflect the pre-migration baseline from the start of Phase 2. This also provides `<SITE_ROOT>` for the FetchXML/Liquid rewriters in step 2.4.
+**Goal**: Ensure the SDM source is available — downloaded fresh, or reused from the user's local copy per the step 1.2 decision — and snapshot it **before** the migration runs, so the live report's "Migration totals" and "Pages & Components" cards reflect the pre-migration baseline from the start of Phase 2. This also provides `<SITE_ROOT>` for the FetchXML/Liquid rewriters in step 2.4.
 
 **Actions**:
 
-1. **Download SDM source (reuse if already local)**
+1. **Provide SDM source (honor the step 1.2 reuse-vs-fresh decision)**
 
-   Step 1.3.4 already established a local SDM copy at `<SITE_ROOT>` — either the reused cwd/site folder or a fresh download to `<PARENT_OUTPUT_DIR>/site-sdm`. **If `<SITE_ROOT>` is already set and still present, reuse it and skip the download.** Only download when no local copy exists:
+   Branch on `<SITE_SOURCE_MODE>` resolved in step 1.2:
+
+   - **`reuse-local`** (user chose to reuse their local copy and `<SITE_ROOT>` is still present): **skip the download entirely** — `<SITE_ROOT>` already points at the source. Do not run `pac pages download`.
+   - **`fresh-download`** (user chose fresh, or no local copy existed): download the SDM source now (then capture the nested inner folder as `<SITE_ROOT>`):
 
    ```powershell
+   node update-state.js --output-dir "<OUTPUT_DIR>" --set-operation '{"label":"Downloading SDM site source"}'
    pac pages download --webSiteId "<WEBSITE_ID>" --modelVersion 1 --path "<MIGRATION_OUTPUT_DIR>/site-sdm"
+   node update-state.js --output-dir "<OUTPUT_DIR>" --clear-operation
    ```
 
    > **Important — nested folder quirk:** `pac pages download --path <MIGRATION_OUTPUT_DIR>/site-sdm` creates a slug-named child folder (e.g., `<MIGRATION_OUTPUT_DIR>/site-sdm/site-1---site-k5s85/website.yml`). Capture the inner folder as `<SITE_ROOT>` via `Get-ChildItem "<MIGRATION_OUTPUT_DIR>/site-sdm" -Directory`. Subsequent migrate, rewrite, and upload steps must use `<SITE_ROOT>` (the inner path), not the `site-sdm` wrapper.
    >
    > **`--modelVersion 1`** explicitly requests SDM data. The site's activation is still SDM at this point (step 3.3 hasn't run yet), so this is the live source of truth for the baseline.
 
-2. **Snapshot the downloaded source**
+2. **Snapshot the SDM source**
 
    ```powershell
    node "${CLAUDE_PLUGIN_ROOT}/skills/migrate-datamodel/scripts/snapshot-site.js" `
@@ -715,6 +748,7 @@ This phase has **two completely different shapes** depending on the migration tr
    ```powershell
    $webSiteId = "<WEBSITE_ID>"
     $mode = "<MODE>"
+    $outputDir = "<OUTPUT_DIR>"
     $stepOutcome = "TimedOut"
    for ($i = 1; $i -le 30; $i++) {
        $statusOutput = pac pages migrate-datamodel --webSiteId $webSiteId --checkMigrationStatus --verbose 2>&1 | Out-String
@@ -731,18 +765,19 @@ This phase has **two completely different shapes** depending on the migration tr
           $stepOutcome = "Completed"
           break
        }
+     # Refresh the live "now running" banner each iteration so the report's elapsed
+     # clock + indeterminate bar stay alive while this loop blocks. This call is part
+     # of the loop — do not skip it as "optional report generation". (No chunk-level
+     # progress here: configurationData reports step-level status only; per-chunk /
+     # per-record progress is a Phase 3.2 transactional-references signal.)
+     $op = @{ label = 'Migrating configuration metadata to EDM'; detail = "mode=$mode"; poll = @{ attempt = $i; max = 30 } } | ConvertTo-Json -Compress
+     node update-state.js --output-dir $outputDir --set-operation $op
+
      Write-Host "Attempt $i/30 — still running, sleeping 60s..."
      Start-Sleep -Seconds 60
    }
 
     Write-Host "Step outcome: $stepOutcome"
-   ```
-
-   Between iterations, refresh the "now running" banner (run inside the poll loop so `$i` / `$mode` are in scope):
-
-   ```powershell
-   $op = @{ label = 'Migrating configuration metadata to EDM'; detail = "mode=$mode"; poll = @{ attempt = $i; max = 30 } } | ConvertTo-Json -Compress
-   node update-state.js --output-dir "<OUTPUT_DIR>" --set-operation $op
    ```
 
    - **`$stepOutcome` is `ConfigurationDataCompleted` or `Completed`**: automatically clear the now-running banner (`--clear-operation`), mark step 2.2 completed, and immediately execute step 2.3. **This transition has no approval gate: do not ask the user whether to proceed and do not describe the migration as stuck.**
@@ -777,7 +812,9 @@ This phase has **two completely different shapes** depending on the migration tr
 2. **Fallback if not found**
 
    ```powershell
+   node update-state.js --output-dir "<OUTPUT_DIR>" --set-operation '{"label":"Generating customization report"}'
    pac pages migrate-datamodel --webSiteId "<WEBSITE_ID>" --siteCustomizationReportPath "<OUTPUT_DIR>"
+   node update-state.js --output-dir "<OUTPUT_DIR>" --clear-operation
    ```
 
    Then re-glob.
@@ -957,7 +994,9 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/migrate-datamodel/scripts/apply-remediation.j
   --output-dir "<OUTPUT_DIR>" `
   --site-root "<SITE_ROOT>"
 
+node update-state.js --output-dir "<OUTPUT_DIR>" --set-operation '{"label":"Uploading remediated site source"}'
 pac pages upload --path "<SITE_ROOT>" --modelVersion 1
+node update-state.js --output-dir "<OUTPUT_DIR>" --clear-operation
 ```
 
 `apply-remediation.js` reads `remediation-diff.json`, copies each staged file over its live counterpart, and deletes the `remediation-staged/` directory on success. Pass `--dry-run` first if you want to print the planned copies without executing.
@@ -1181,7 +1220,9 @@ Phase 3 has **two different shapes** depending on the migration track. The Autho
 1. **Re-download the migrated site as EDM**
 
    ```powershell
+   node update-state.js --output-dir "<OUTPUT_DIR>" --set-operation '{"label":"Downloading EDM site source"}'
    pac pages download --webSiteId "<WEBSITE_ID>" --modelVersion 2 --path "<MIGRATION_OUTPUT_DIR>/site-edm"
+   node update-state.js --output-dir "<OUTPUT_DIR>" --clear-operation
    ```
 
    Site root lives one level deeper than `--path` (e.g., `<MIGRATION_OUTPUT_DIR>/site-edm/<slug>/website.yml`). Capture inner path as `<SITE_ROOT_EDM>` via `Get-ChildItem "<MIGRATION_OUTPUT_DIR>/site-edm" -Directory`.
@@ -1402,7 +1443,9 @@ Phase 3 has **two different shapes** depending on the migration track. The Autho
 3. **Execute Update Command**
 
    ```powershell
+   node update-state.js --output-dir "<OUTPUT_DIR>" --set-operation '{"label":"Activating Enhanced Data Model"}'
    pac pages migrate-datamodel --webSiteId "<WEBSITE_ID>" --updateDatamodelVersion --portalId "<PORTAL_ID>"
+   node update-state.js --output-dir "<OUTPUT_DIR>" --clear-operation
    ```
 
 4. **Confirm Switch**
@@ -1491,8 +1534,12 @@ Phase 3 has **two different shapes** depending on the migration track. The Autho
 
 1. **Capture SDM snapshot** (Downstream Track specific — the Authoring Track captures this in 2.1)
 
+   Honor `<SITE_SOURCE_MODE>` from step 1.2: if **`reuse-local`** and `<SITE_ROOT>` is present, **skip this download** and snapshot the existing `<SITE_ROOT>`. Otherwise (**`fresh-download`**) download the SDM source:
+
    ```powershell
+   node update-state.js --output-dir "<OUTPUT_DIR>" --set-operation '{"label":"Downloading SDM site source"}'
    pac pages download --webSiteId "<WEBSITE_ID>" --modelVersion 1 --path "<MIGRATION_OUTPUT_DIR>/site-sdm"
+   node update-state.js --output-dir "<OUTPUT_DIR>" --clear-operation
    ```
 
    > **Nested-folder quirk** applies — actual site root is one level deeper. Capture inner path as `<SITE_ROOT>` via `Get-ChildItem "<MIGRATION_OUTPUT_DIR>/site-sdm" -Directory`.
@@ -1509,7 +1556,9 @@ Phase 3 has **two different shapes** depending on the migration track. The Autho
 2. **Re-download the migrated site as EDM**
 
    ```powershell
+   node update-state.js --output-dir "<OUTPUT_DIR>" --set-operation '{"label":"Downloading EDM site source"}'
    pac pages download --webSiteId "<WEBSITE_ID>" --modelVersion 2 --path "<MIGRATION_OUTPUT_DIR>/site-edm"
+   node update-state.js --output-dir "<OUTPUT_DIR>" --clear-operation
    ```
 
    Site root lives one level deeper than `--path`. Capture inner path as `<SITE_ROOT_EDM>` via `Get-ChildItem "<MIGRATION_OUTPUT_DIR>/site-edm" -Directory`.
@@ -1817,7 +1866,9 @@ Identical to the Authoring Track's step 3.4 — print restart instructions, wait
    If "No": ask user to paste the correct Portal ID directly (don't try to construct the site URL — same reasoning as Authoring Track step 3.3 / Downstream Track step 3.5).
 
    ```powershell
+   node update-state.js --output-dir "<OUTPUT_DIR>" --set-operation '{"label":"Rolling back to Standard Data Model"}'
    pac pages migrate-datamodel --webSiteId "<WEBSITE_ID>" --revertToStandardDataModel --portalId "<PORTAL_ID>"
+   node update-state.js --output-dir "<OUTPUT_DIR>" --clear-operation
    ```
 
    Inform user: "Site reverted to SDM. EDM record deactivated, SDM record reactivated."

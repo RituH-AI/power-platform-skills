@@ -66,6 +66,13 @@
  *       '{"label":"Migrating configuration metadata to EDM","detail":"mode=configurationData","expectedDurationSec":600,"poll":{"attempt":3,"max":30}}'
  *   node update-state.js --output-dir <DIR> --clear-operation
  *
+ *   # record a major migration DECISION for later review (Migration & Review tab).
+ *   # Upserts by `id` so re-running a decision point updates in place. Record only
+ *   # migration-substance choices (env type, mode, track, package install/skip,
+ *   # remediation, reset, rollback, restart) — NOT file create/update/read prompts.
+ *   node update-state.js --output-dir <DIR> --add-decision \
+ *       '{"id":"migration-mode","label":"Migration mode","choice":"configurationData → Authoring Track","rationale":"Dev env — migrate metadata locally; allows remediation before refs"}'
+ *
  *   # set migration track (called at end of step 1.7 once env type + mode known)
  *   # A = Authoring Track  (mode configurationData|all — Dev/Test/UAT/Single env)
  *   # B = Downstream Track (mode configurationDataReferences — Prod, ALM assumed)
@@ -532,6 +539,45 @@ function cmdClearOperation(args) {
   console.log('✓ Operation cleared');
 }
 
+function cmdAddDecision(args) {
+  const outputDir = args['output-dir'];
+  if (!outputDir) throw new Error('--add-decision requires --output-dir');
+  const raw = args['add-decision'];
+  if (typeof raw !== 'string') throw new Error('--add-decision requires a JSON string value');
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`--add-decision requires valid JSON: ${e.message}`);
+  }
+  if (!payload || typeof payload.label !== 'string' || payload.label.trim() === '') {
+    throw new Error('--add-decision JSON must include a non-empty "label" string');
+  }
+  if (typeof payload.choice !== 'string' || payload.choice.trim() === '') {
+    throw new Error('--add-decision JSON must include a non-empty "choice" string');
+  }
+  const state = loadState(outputDir);
+  if (!Array.isArray(state.decisions)) state.decisions = [];
+  const entry = {
+    id: typeof payload.id === 'string' && payload.id.trim() ? payload.id.trim() : null,
+    label: payload.label,
+    choice: payload.choice,
+    rationale: typeof payload.rationale === 'string' ? payload.rationale : null,
+    at: new Date().toISOString(),
+  };
+  // Upsert by id when provided, so re-running the same decision point (e.g. the user
+  // changes the migration mode, or a package install is retried) updates the existing
+  // entry instead of appending a duplicate. Without an id, always append.
+  const existingIdx = entry.id ? state.decisions.findIndex((d) => d.id === entry.id) : -1;
+  if (existingIdx >= 0) {
+    state.decisions[existingIdx] = entry;
+  } else {
+    state.decisions.push(entry);
+  }
+  persist(state, outputDir);
+  console.log(`✓ Decision: ${entry.label} → ${entry.choice}`);
+}
+
 function cmdSetTrack(args) {
   const outputDir = args['output-dir'];
   const track = args['set-track'];
@@ -572,6 +618,7 @@ function main() {
     if (args['set-refs-migration'] !== undefined) return cmdSetRefsMigration(args);
     if (args['set-operation'] !== undefined) return cmdSetOperation(args);
     if (args['clear-operation']) return cmdClearOperation(args);
+    if (args['add-decision'] !== undefined) return cmdAddDecision(args);
     if (args['set-track'] !== undefined) return cmdSetTrack(args);
     if (args['render-only']) return cmdRenderOnly(args);
     console.error('No command given. Run with --help-ish docs at top of update-state.js');

@@ -301,62 +301,6 @@ function renderConfidenceStat(sdmSnapshot, edmSnapshot) {
 </div>`;
 }
 
-function renderTrackExplainerCard(state) {
-  // Treat the track as confirmed only once step 1.7 has set both the track and
-  // the migration mode. Until then `state.track` is the default placeholder
-  // ('A') that buildInitialState() seeds so Phase 2/3 cards can render before
-  // 1.7 runs — it isn't a user-chosen value yet.
-  const trackConfirmed = !!(state.track && state.site.migrationMode);
-  const isAuthoring = trackConfirmed && state.track === 'A';
-  const isDownstream = trackConfirmed && state.track === 'B';
-  const isUnknown = !isAuthoring && !isDownstream;
-
-  const authoringCard = `<div class="track-card${isAuthoring ? ' active ctx-info' : ''}">
-      <div class="track-card-head">
-        <span class="track-card-name">Authoring Track</span>
-        ${isAuthoring ? '<span class="track-card-badge">Your track</span>' : ''}
-      </div>
-      <div class="track-card-desc">Metadata is migrated <strong>here</strong>. The skill runs <code>pac pages migrate-datamodel --mode configurationData</code> (or <code>--mode all</code>) locally, then handles customization remediation in Phase 2 itself before moving transactional references and activating EDM.</div>
-      <div class="track-card-when">
-        <div class="track-card-when-label">Use when</div>
-        <ul class="track-card-when-list">
-          <li><strong>Dev</strong> environment — the source-of-truth for your site source</li>
-          <li><strong>Single environment</strong> setups with no upstream ALM source</li>
-        </ul>
-      </div>
-      <div class="track-card-mode"><span class="track-card-mode-label">Mode:</span> <code>configurationData</code> · <code>all</code></div>
-    </div>`;
-
-  const downstreamCard = `<div class="track-card${isDownstream ? ' active ctx-info' : ''}">
-      <div class="track-card-head">
-        <span class="track-card-name">Downstream Track</span>
-        ${isDownstream ? '<span class="track-card-badge">Your track</span>' : ''}
-      </div>
-      <div class="track-card-desc">Metadata is <strong>assumed already in EDM</strong> via ALM solution import from an upstream Dev. The skill verifies metadata is present, then runs <code>pac pages migrate-datamodel --mode configurationDataReferences</code> to move transactional references only.</div>
-      <div class="track-card-when">
-        <div class="track-card-when-label">Use when</div>
-        <ul class="track-card-when-list">
-          <li><strong>Test / UAT</strong> environments fed by ALM from Dev</li>
-          <li><strong>Production</strong> environments fed by ALM from Dev</li>
-        </ul>
-      </div>
-      <div class="track-card-mode"><span class="track-card-mode-label">Mode:</span> <code>configurationDataReferences</code></div>
-    </div>`;
-
-  const lead = isUnknown
-    ? `<p class="track-explainer-lead">The skill derives a <strong>migration track</strong> in step 1.7 based on your environment type. The track controls the shape of Phase 2 (configuration setup) and Phase 3 (migration execution) — same end state, different path depending on whether metadata is being migrated locally or arriving via ALM.</p>`
-    : `<p class="track-explainer-lead">This migration uses the <strong>${isAuthoring ? 'Authoring' : 'Downstream'} Track</strong> (derived in step 1.7 from your environment type and migration mode). Track shapes Phase 2 and Phase 3 — same end state, different path.</p>`;
-
-  return `<div class="card track-explainer-card">
-  <div class="card-title">Migration Track</div>
-  ${lead}
-  <div class="track-cards-grid">
-    ${authoringCard}
-    ${downstreamCard}
-  </div>
-</div>`;
-}
-
 function renderOverviewSection(state, snapshots) {
   const pct = overallPercent(state);
   const completed = countCompleted(state);
@@ -428,8 +372,6 @@ function renderOverviewSection(state, snapshots) {
     <div class="stat-card"><div class="stat-num">${escapeHtml(elapsed)}</div><div class="stat-label">Elapsed</div></div>
     <div class="stat-card"><div class="stat-num">${phasesDone} / ${state.phases.length}</div><div class="stat-label">Phases done</div></div>
   </div>
-
-${renderTrackExplainerCard(state)}
 
 ${renderSiteCard(state)}
 
@@ -834,6 +776,39 @@ function describeRecord(rec, category) {
   return JSON.stringify(rec).slice(0, 120);
 }
 
+// Decisions & Rationale: the major migration CHOICES the user made, recorded live via
+// update-state.js --add-decision. Lives in the Migration & Review tab (after the phase
+// cards) so it reads as a durable, after-the-fact review of every consequential choice.
+function renderDecisionRow(d) {
+  const label = escapeHtml(d.label || d.id || 'Decision');
+  const choice = escapeHtml(d.choice || '');
+  const rationale = d.rationale
+    ? `\n      <div class="decision-rationale">${escapeHtmlAllowingInline(d.rationale)}</div>`
+    : '';
+  const at = d.at ? `<span class="decision-at">${escapeHtml(formatTimestamp(d.at))}</span>` : '';
+  return `    <div class="decision-row">
+      <div class="decision-head">
+        <span class="decision-label">${label}</span>
+        <span class="decision-choice">${choice}</span>
+        ${at}
+      </div>${rationale}
+    </div>`;
+}
+
+function renderDecisionsSection(state) {
+  const decisions = Array.isArray(state.decisions) ? state.decisions : [];
+  const body = decisions.length === 0
+    ? `<p class="decisions-empty">No migration decisions recorded yet. Major choices you make in the terminal — environment type, migration mode, package installs, remediation, reset, rollback, restart — appear here as you make them.</p>`
+    : `<div class="decisions-list">
+${decisions.map(renderDecisionRow).join('\n')}
+  </div>`;
+  return `<div class="card decisions-card" id="decisions">
+  <div class="card-title">Decisions &amp; Rationale</div>
+  <p class="decisions-desc">The major migration choices made during this run, for later review. Updates live as you respond in the terminal.</p>
+  ${body}
+</div>`;
+}
+
 function renderMigrationReviewSection(state, snapshots) {
   const hasLaterActive = (idx) =>
     state.phases.slice(idx + 1).some(
@@ -855,6 +830,8 @@ function renderMigrationReviewSection(state, snapshots) {
 ${renderRemediationDiffCard(snapshots && snapshots.remediationDiff)}
 
 ${phaseCards}
+
+${renderDecisionsSection(state)}
 
 ${renderPromptsSection(state)}
 </div>`;
@@ -1364,7 +1341,7 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text); font-si
 
 /* Now running banner — always-visible pointer for the active long-running step.
    Elapsed clock + estimate bar are advanced client-side every second so they keep
-   moving between the 3s auto-refreshes, even while a blocking pac call stops the
+   moving between the 60s auto-refreshes, even while a blocking pac call stops the
    agent from writing new state. */
 .now-running { background:var(--accent-bg); border-bottom:1px solid var(--accent-border); padding:12px 28px; display:flex; flex-direction:column; gap:8px; }
 .now-running-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
@@ -1384,6 +1361,16 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text); font-si
 .refs-progress { height:6px; background:var(--surface3); border-radius:3px; overflow:hidden; margin-top:4px; }
 .refs-progress-fill { height:100%; background:var(--pass); border-radius:3px; transition:width 0.4s ease; }
 .refs-progress-fill.has-fail { background:linear-gradient(90deg,var(--pass),var(--warning)); }
+/* Decisions & Rationale (Migration & Review tab) */
+.decisions-desc { font-size:12.5px; color:var(--text-dim); margin-bottom:12px; }
+.decisions-empty { font-size:13px; color:var(--text-dim); font-style:italic; }
+.decisions-list { display:flex; flex-direction:column; gap:8px; }
+.decision-row { border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:var(--radius-sm); padding:10px 12px; background:var(--surface); }
+.decision-head { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.decision-label { font-weight:700; color:var(--text-bright); font-size:13px; }
+.decision-choice { font-family:var(--mono); font-size:12.5px; color:var(--accent); font-weight:600; }
+.decision-at { margin-left:auto; font-size:11px; color:var(--text-dim); font-variant-numeric:tabular-nums; }
+.decision-rationale { font-size:12px; color:var(--text-dim); margin-top:4px; }
 
 /* Topbar */
 .topbar { z-index:100; background:var(--surface); box-shadow:var(--shadow-4); padding:14px 28px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; position:sticky; top:0; }
@@ -1447,31 +1434,6 @@ h3 { font-size:15px; font-weight:700; color:var(--text-bright); margin-top:24px;
 .summary-box li { margin:0 0 7px; line-height:1.6; }
 .summary-box li:last-child { margin-bottom:0; }
 
-/* Track explainer card (Overview) */
-.track-explainer-card { }
-.track-explainer-lead { font-size:13px; color:var(--text); line-height:1.65; margin:0 0 14px; }
-.track-explainer-lead strong { color:var(--text-bright); }
-.track-cards-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-.track-card { background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius); padding:14px 16px; display:flex; flex-direction:column; gap:10px; opacity:0.85; }
-.track-card.active { background:var(--info-bg); border-color:var(--info-border); opacity:1; box-shadow:var(--shadow-4); }
-.track-card-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
-.track-card-name { font-size:13.5px; font-weight:700; color:var(--text-bright); }
-.track-card.active .track-card-name { color:var(--info); }
-.track-card-badge { font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px; background:var(--info); color:#fff; text-transform:uppercase; letter-spacing:0.5px; }
-.track-card-desc { font-size:12.5px; color:var(--text); line-height:1.6; }
-.track-card-desc code { font-family:var(--mono); font-size:11.5px; background:var(--surface); padding:1px 5px; border-radius:3px; color:var(--text-bright); }
-.track-card-desc strong { color:var(--text-bright); }
-.track-card-when { background:var(--surface); border:1px dashed var(--border); border-radius:var(--radius-sm); padding:8px 12px; }
-.track-card-when-label { font-size:10px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; }
-.track-card-when-list { margin:0; padding-left:18px; font-size:12px; color:var(--text); line-height:1.55; }
-.track-card-when-list li { margin-bottom:2px; }
-.track-card-when-list strong { color:var(--text-bright); }
-.track-card-mode { font-size:11px; color:var(--text-dim); font-family:var(--mono); }
-.track-card-mode code { background:var(--surface); padding:1px 5px; border-radius:3px; color:var(--text); }
-.track-card-mode-label { font-weight:700; color:var(--text); margin-right:4px; font-family:inherit; text-transform:uppercase; font-size:10px; letter-spacing:0.5px; }
-@media (max-width:900px) {
-  .track-cards-grid { grid-template-columns:1fr; }
-}
 .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:18px 20px; margin-bottom:16px; box-shadow:var(--shadow-4); }
 .card-title { font-size:14px; font-weight:700; color:var(--text-bright); margin-bottom:12px; }
 
@@ -1819,11 +1781,10 @@ function renderTopbar(state) {
 
   // Each context entry: { label, value, cls, href? }. `cls` drives the pill
   // background color so the user can scan the top bar at a glance.
-  // Order: Env → Site → Portal URL → Track → Env type → Template → (status pill is rendered separately, last).
+  // Order: Env → Site → Portal URL → Env type → Template → (status pill is rendered separately, last).
   //   - env name: accent (blue)    Dataverse environment display name
   //   - site: accent (blue)        primary identity
   //   - portal: accent (blue)      hyperlinked when URL is present
-  //   - track: info (blue)         Authoring/Downstream
   //   - env type: severity-colored Dev/Single → info, Test/UAT → warning, Prod → critical
   //   - template: pass (green)     site-defined fact
   const contextItems = [];
@@ -1838,11 +1799,6 @@ function renderTopbar(state) {
 
   if (site.portalUrl) {
     contextItems.push({ label: 'Portal', value: site.portalUrl, cls: 'ctx-accent', href: site.portalUrl });
-  }
-
-  if (state.track) {
-    const trackLabel = state.track === 'A' ? 'Authoring' : state.track === 'B' ? 'Downstream' : state.track;
-    contextItems.push({ label: 'Track', value: trackLabel, cls: 'ctx-info' });
   }
 
   if (site.environment) {
@@ -1885,7 +1841,7 @@ function renderTopbar(state) {
 // (package install, metadata / refs migration polling). Rendered only when
 // state.currentOperation is set. The elapsed figure and estimate-bar width are
 // seeded here from server time but then advanced every second by the inline
-// now-running ticker script — so the clock keeps moving between the 3s
+// now-running ticker script — so the clock keeps moving between the 60s
 // auto-refreshes, even while a blocking `pac` call stops the agent from writing new
 // state. data-op-expected-sec, when present, drives a determinate bar that eases
 // toward the estimate; without it the bar is indeterminate.
@@ -1983,7 +1939,7 @@ ${renderMigrationReviewSection(state, snapshots)}
 </div>
 
 <div class="footer">
-  Generated by <strong>migrate-datamodel</strong> skill · Last updated <span data-live-updated-at>${escapeHtml(formatTimestamp(state.lastUpdatedAt))}</span> · <span id="live-refresh-status">Auto-refreshing every 3s</span> · AI-generated content may be incorrect
+  Generated by <strong>migrate-datamodel</strong> skill · Last updated <span data-live-updated-at>${escapeHtml(formatTimestamp(state.lastUpdatedAt))}</span> · <span id="live-refresh-status">Auto-refreshing every 60s</span> · AI-generated content may be incorrect
 </div>
 
 <script>
@@ -1991,7 +1947,7 @@ ${TAB_JS}
 </script>
 <script>
 // Now-running live ticker: advance the elapsed clock and estimate bar every second
-// from data attributes on the banner, independent of the 3s auto-refresh — so
+// from data attributes on the banner, independent of the 60s auto-refresh — so
 // progress stays visibly moving even while a blocking pac call prevents the agent
 // from writing new state.
 (function () {
@@ -2077,12 +2033,31 @@ ${TAB_JS}
 (function () {
   var CURRENT_UPDATED_AT = ${JSON.stringify(state.lastUpdatedAt || '')};
   var TOKEN = 'data-live-updated-at-token="';
-  var POLL_MS = 3000;
+  var POLL_MS = 60000;
   var SCROLL_KEY = 'sdmEdmReport:scrollY';
   var TAB_KEY = 'sdmEdmReport:activeTab';
+  var DETAILS_KEY = 'sdmEdmReport:openDetails';
   var statusEl = document.getElementById('live-refresh-status');
 
-  // Restore scroll + active tab from previous reload (if any).
+  // Stable key for a <details> card so its open/closed state survives a reload even
+  // when a count in the summary ticks up ("Show 7 chunks" -> "Show 9 chunks"). Key on
+  // id, else class + digit-normalized summary text + an ordinal among identical
+  // siblings — not raw DOM index, so small structural changes don't misalign it.
+  function detailsSignature(d, seen) {
+    var key;
+    if (d.id) {
+      key = '#' + d.id;
+    } else {
+      var cls = (d.className || '').trim();
+      var sum = d.querySelector(':scope > summary');
+      var sumText = sum ? (sum.textContent || '').trim().replace(/\\d+/g, '#').slice(0, 80) : '';
+      key = cls + '|' + sumText;
+    }
+    var n = seen[key] = (seen[key] || 0) + 1;
+    return key + '~' + n;
+  }
+
+  // Restore scroll + active tab + expanded cards from the previous reload (if any).
   try {
     var savedScroll = sessionStorage.getItem(SCROLL_KEY);
     if (savedScroll !== null) {
@@ -2095,6 +2070,14 @@ ${TAB_JS}
       if (btn && typeof btn.click === 'function') btn.click();
       sessionStorage.removeItem(TAB_KEY);
     }
+    var savedOpen = JSON.parse(sessionStorage.getItem(DETAILS_KEY) || '[]');
+    if (savedOpen && savedOpen.length) {
+      var seenR = {};
+      document.querySelectorAll('details').forEach(function (d) {
+        if (savedOpen.indexOf(detailsSignature(d, seenR)) !== -1) d.open = true;
+      });
+      sessionStorage.removeItem(DETAILS_KEY);
+    }
   } catch (_) { /* sessionStorage may be blocked — best-effort only */ }
 
   // Capture active tab whenever the user clicks one so we can restore it.
@@ -2106,11 +2089,32 @@ ${TAB_JS}
 
   function reloadPreservingScroll() {
     try { sessionStorage.setItem(SCROLL_KEY, String(window.scrollY || 0)); } catch (_) {}
+    try {
+      var seenS = {};
+      var open = [];
+      document.querySelectorAll('details').forEach(function (d) {
+        var sig = detailsSignature(d, seenS);
+        if (d.open) open.push(sig);
+      });
+      sessionStorage.setItem(DETAILS_KEY, JSON.stringify(open));
+    } catch (_) {}
     if (statusEl) statusEl.textContent = 'Updating…';
     location.reload();
   }
 
+  // When the report is opened as a local file:// URL (the common case — the skill
+  // tells the user to open the HTML file directly), browsers BLOCK fetch() of that
+  // file, so the change-detecting poll can never read it to compare tokens and the
+  // page would never auto-update. Detect that and fall back to a plain timed reload
+  // (scroll + active tab are preserved across reloads via the sessionStorage handling
+  // above). Over http(s):// we keep the smarter poll that only reloads when the
+  // embedded token actually changed, so an idle served report doesn't flash.
+  var isFile = location.protocol === 'file:';
+
   function poll() {
+    // Don't reload a backgrounded tab — wait until the user is looking at it again.
+    if (document.visibilityState === 'hidden') return;
+    if (isFile) { reloadPreservingScroll(); return; }
     fetch(location.pathname + '?_=' + Date.now(), { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.text() : null; })
       .then(function (html) {
@@ -2124,7 +2128,11 @@ ${TAB_JS}
           reloadPreservingScroll();
         }
       })
-      .catch(function () { /* transient fetch errors are fine — try again next tick */ });
+      .catch(function () {
+        // fetch blocked/unavailable even though protocol wasn't file: (some sandboxed
+        // contexts) — degrade to a timed reload so updates still surface.
+        reloadPreservingScroll();
+      });
   }
   setInterval(poll, POLL_MS);
 })();

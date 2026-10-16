@@ -194,6 +194,12 @@ function buildInitialState({ webSiteId, outputDir, track = DEFAULT_TRACK, starte
     },
     customizationReport: null,
     refsMigration: null,
+    // Append-only log of the major migration CHOICES the user makes (env type, mode,
+    // track, package install/skip, remediation, reset, rollback, restart). Rendered in
+    // the Migration & Review tab for later review. Entries upsert by `id` so re-running
+    // a decision point updates in place instead of duplicating. Permission / file
+    // create-update-read prompts are intentionally NOT recorded here.
+    decisions: [],
     // Structured "now running" pointer for long-running steps (package installs,
     // metadata/refs migration polling). null when idle. When set:
     //   { label, detail, startedAt, expectedDurationSec, poll: { attempt, max } }
