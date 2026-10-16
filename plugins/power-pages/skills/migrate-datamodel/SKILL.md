@@ -743,7 +743,7 @@ This phase has **two completely different shapes** depending on the migration tr
 
     Poll every 1 minute, up to 30 attempts (30 minutes total). **Use this exact PowerShell loop** — don't improvise a Bash equivalent. Bash subshells can silently fail if `pac` isn't on the Bash `$PATH` (different PATH from PowerShell on many Windows installs), which makes the `until / sleep` pattern spin forever without ever detecting completion.
 
-    PAC keeps the top-level tracker `Running` after a metadata-only `configurationData` run because Phase 3 still needs to migrate configuration-data references. For that mode, `Current Step: ConfigurationDataCompleted` is the authoritative completion milestone for **this sub-step**. For `all`, the top-level tracker must reach `Completed`. Always match the labeled fields instead of searching the whole response for `Completed`, because step names and step history also contain that word.
+   PAC keeps the top-level tracker `Running` after a metadata-only `configurationData` run because Phase 3 still needs to migrate configuration-data references. For that mode, `Current Step: ConfigurationDataCompleted` means **metadata migration is finished**. For `all`, wait until the top-level tracker reaches `Completed`. Always match the labeled fields instead of searching the whole response for `Completed`, because step names and step history also contain that word. When naming this check in the terminal, use the plain-language heading **"Check metadata migration status"**.
 
    ```powershell
    $webSiteId = "<WEBSITE_ID>"
