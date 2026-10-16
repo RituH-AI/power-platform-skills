@@ -20,6 +20,10 @@ const BOOTSTRAP_5_DOCUMENTATION_URL =
 // See: https://learn.microsoft.com/en-us/power-pages/configure/bootstrap-version-5
 const BOOTSTRAP_5_TEMPLATE_NAMES = Object.freeze([
   'StarterLayout1',
+  'StarterLayout2',
+  'StarterLayout3',
+  'StarterLayout4',
+  'StarterLayout5',
   'BlankPage',
   'ProgramRegistration',
   'PowerPortals_ProgramRegistration',
@@ -29,6 +33,10 @@ const BOOTSTRAP_5_TEMPLATE_NAMES = Object.freeze([
 
 const CREATE_WEBSITE_TEMPLATE_NAMES = new Set([
   'StarterLayout1',
+  'StarterLayout2',
+  'StarterLayout3',
+  'StarterLayout4',
+  'StarterLayout5',
   'BlankPage',
   'ProgramRegistration',
   'EventPortal',

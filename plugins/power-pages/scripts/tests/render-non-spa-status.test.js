@@ -203,30 +203,38 @@ test('buildModel retains the completed website link while awaiting customization
   assert.equal(ready.refresh, true);
 });
 
-test('buildModel embeds Starter Layout 1 previews and capabilities', () => {
-  const model = buildModel(
-    options({ templateName: 'StarterLayout1' }),
-    template({
-      name: 'StarterLayout1',
-      displayName: 'Starter Layout 1',
-      capabilities: ['Home page', 'Subpages', 'Contact us', 'Search results'],
-      previews: [
-        { name: 'home', displayName: 'Home page', desktop: PNG_DATA_URL, mobile: PNG_DATA_URL },
-        { name: 'subpage-1', displayName: 'Sub page 1', desktop: PNG_DATA_URL, mobile: PNG_DATA_URL },
-        { name: 'subpage-2', displayName: 'Sub page 2', desktop: PNG_DATA_URL, mobile: PNG_DATA_URL },
-      ],
-    }),
-  );
+test('buildModel embeds Starter Layout previews and capabilities', () => {
+  for (const [name, displayName] of [
+    ['StarterLayout1', 'Starter Layout 1'],
+    ['StarterLayout2', 'Starter Layout 2'],
+    ['StarterLayout3', 'Starter Layout 3'],
+    ['StarterLayout4', 'Starter Layout 4'],
+    ['StarterLayout5', 'Starter Layout 5'],
+  ]) {
+    const model = buildModel(
+      options({ templateName: name }),
+      template({
+        name,
+        displayName,
+        capabilities: ['Home page', 'Subpages', 'Contact us', 'Search results'],
+        previews: [
+          { name: 'home', displayName: 'Home page', desktop: PNG_DATA_URL, mobile: PNG_DATA_URL },
+          { name: 'subpage-1', displayName: 'Sub page 1', desktop: PNG_DATA_URL, mobile: PNG_DATA_URL },
+          { name: 'subpage-2', displayName: 'Sub page 2', desktop: PNG_DATA_URL, mobile: PNG_DATA_URL },
+        ],
+      }),
+    );
 
-  assert.equal(model.template.displayName, 'Starter Layout 1');
-  assert.equal(model.template.previews.length, 3);
-  assert.deepEqual(
-    model.template.capabilities,
-    ['Home page', 'Subpages', 'Contact us', 'Search results'],
-  );
-  for (const preview of model.template.previews) {
-    assert.match(preview.desktop, /^data:image\/png;base64,/);
-    assert.match(preview.mobile, /^data:image\/png;base64,/);
+    assert.equal(model.template.displayName, displayName);
+    assert.equal(model.template.previews.length, 3);
+    assert.deepEqual(
+      model.template.capabilities,
+      ['Home page', 'Subpages', 'Contact us', 'Search results'],
+    );
+    for (const preview of model.template.previews) {
+      assert.match(preview.desktop, /^data:image\/png;base64,/);
+      assert.match(preview.mobile, /^data:image\/png;base64,/);
+    }
   }
 });
 

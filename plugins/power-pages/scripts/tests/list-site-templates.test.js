@@ -42,6 +42,26 @@ function nonSpaTemplate({
 function catalogResult(templates = [
   nonSpaTemplate(),
   nonSpaTemplate({
+    id: 'starter-layout-2',
+    templateName: 'StarterLayout2',
+    displayName: 'Starter Layout 2',
+  }),
+  nonSpaTemplate({
+    id: 'starter-layout-3',
+    templateName: 'StarterLayout3',
+    displayName: 'Starter Layout 3',
+  }),
+  nonSpaTemplate({
+    id: 'starter-layout-4',
+    templateName: 'StarterLayout4',
+    displayName: 'Starter Layout 4',
+  }),
+  nonSpaTemplate({
+    id: 'starter-layout-5',
+    templateName: 'StarterLayout5',
+    displayName: 'Starter Layout 5',
+  }),
+  nonSpaTemplate({
     id: 'event-portal',
     templateName: 'EventPortal',
     displayName: 'Event Portal',
@@ -84,7 +104,13 @@ test('returns Enhanced Bootstrap 5 samples metadata with immutable preview URLs'
   assert.equal(result.catalog.commitSha, SHA);
   assert.deepEqual(
     result.catalog.templates.map((template) => template.name),
-    ['StarterLayout1'],
+    [
+      'StarterLayout1',
+      'StarterLayout2',
+      'StarterLayout3',
+      'StarterLayout4',
+      'StarterLayout5',
+    ],
   );
   assert.equal(
     result.catalog.templates[0].previews[0].desktop,
@@ -101,7 +127,13 @@ test('retains documented Bootstrap 5 filtering while metadata comes from samples
 
   assert.deepEqual(
     result.catalog.templates.map((template) => template.name),
-    ['StarterLayout1'],
+    [
+      'StarterLayout1',
+      'StarterLayout2',
+      'StarterLayout3',
+      'StarterLayout4',
+      'StarterLayout5',
+    ],
   );
   assert.deepEqual(result.catalog.bootstrapCompatibility.omittedTemplateNames, ['EventPortal']);
 });

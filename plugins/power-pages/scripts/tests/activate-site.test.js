@@ -47,6 +47,18 @@ test('normalizeOptions accepts the Blank page template identifier', () => {
   assert.equal(result.templateName, 'BlankPage');
 });
 
+test('normalizeOptions accepts the additional Starter Layout template identifiers', () => {
+  for (const templateName of [
+    'StarterLayout2',
+    'StarterLayout3',
+    'StarterLayout4',
+    'StarterLayout5',
+  ]) {
+    const result = normalizeOptions(validOptions({ templateName }));
+    assert.equal(result.templateName, templateName);
+  }
+});
+
 test('normalizeOptions keeps the legacy documented default for SPA activation', () => {
   const result = normalizeOptions(validOptions({ templateName: undefined }));
   assert.equal(result.templateName, 'DefaultPortalTemplate');
