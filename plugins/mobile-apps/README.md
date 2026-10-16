@@ -253,7 +253,7 @@ For other capabilities (only those actually shipped by the template):
 > /add-native sharing           # expo-sharing wrapper
 > /add-native haptics           # expo-haptics impact, selection, and notification wrapper
 > /add-native push-notifications  # Firebase Cloud Messaging registration + the app's Firebase client files
-> /add-native scheduled-notifications  # notifications at times in the app's data (reminders), scheduled on the device
+> /add-native scheduled-notifications  # notifications at times the app defines (due dates, appointments, daily check-ins), scheduled on the device
 ```
 
 Native modules are allowlist-bound by the current template `package.json`. If the relevant package is present, `/add-native` can use it through the proper wrapper or host control. If the package is absent, the skill does not install it or fake support; it adds a transparency note and stops for that capability. For example, push notifications require `@react-native-firebase/messaging` and `expo-notifications`; an app created from a template without them cannot add push notifications.

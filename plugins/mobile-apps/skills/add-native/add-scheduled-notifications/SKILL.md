@@ -1,6 +1,6 @@
 ---
 name: add-scheduled-notifications
-description: Internal implementation skill invoked by /add-native for notifications the device schedules itself at times in the app's data (reminders, due dates, appointments), using the template's expo-notifications, with no Firebase or backend.
+description: Internal implementation skill invoked by /add-native for notifications the device schedules itself at times the app defines (a date-time in its data, such as a due date, appointment or shift start, or a repeating daily or weekly time), using the template's expo-notifications, with no Firebase or backend.
 user-invocable: false
 disable-model-invocation: true
 allowed-tools: Read, Edit, Write, Grep, Glob, Bash, AskUserQuestion
@@ -16,22 +16,27 @@ file tool to it, even when this helper starts from another directory.
 
 # Add Scheduled Notifications
 
-Internal helper for `/add-native scheduled-notifications`, `/add-native local-notifications`, `/add-native reminder-notifications`, `/add-native reminders`, `/add-native due-date-reminders`, and `/add-native expo-notifications`.
+Internal helper for `/add-native scheduled-notifications`, `/add-native local-notifications`, `/add-native recurring-notifications`, `/add-native reminder-notifications`, `/add-native reminders`, `/add-native due-date-reminders`, and `/add-native expo-notifications`.
 
-The device schedules one notification per record at the record's time, such as an open reminder at its due time. The OS shows it at that time even when the app is closed, and it looks like a push notification. No Firebase or backend is involved, so it works on Android and iOS whether or not the app has push notifications.
+The device shows notifications on its own at times the app defines:
 
-It is not push: a device schedules only the records it has loaded, so a change made elsewhere reaches a device the next time that device loads the records. A notification that must reach users when something happens elsewhere (another user's action, a server event) is `push-notifications`, sent by Firebase or a backend.
+- **once**, at a date-time from the app's data: a task's due date, an appointment, a shift start, an inspection deadline, a booking, an expiry date;
+- **repeating**, daily or weekly at a time of day: a daily check-in, a weekly report.
+
+The OS shows each at its time even when the app is closed, and it looks like a push notification. No Firebase or backend is involved, so it works on Android and iOS whether or not the app has push notifications.
+
+It is not push: a device schedules only what it has loaded, so a change made elsewhere reaches a device the next time that device loads it. A notification that must reach users when something happens elsewhere (another user's action, a server event) is `push-notifications`, sent by Firebase or a backend.
 
 Limits to state in the plan and summary:
-- Android may deliver late: the wrap base package has no exact-alarm permission, so Android can delay a notification by up to 75% of the time between scheduling and the due time (at most an hour, longer in Doze).
-- Only the 48 soonest are pending at a time (iOS keeps at most 64 per app); later ones are scheduled by a later sync.
+- Android may deliver a one-off notification late: the wrap base package has no exact-alarm permission, so Android can delay it by up to 75% of the time between scheduling and the time (at most an hour, longer in Doze).
+- At most the 48 soonest are pending at a time across the app (iOS keeps at most 64 per app); later ones are scheduled by a later sync.
 - Android 13 and later show notifications only with the Notifications permission: it must stay selected in the wrap wizard's permissions step.
 
 Hard rules:
 - Do not install packages or edit `app.config.js` or native config. The template already ships `expo-notifications`.
 - Use `expo-notifications` only through `src/native/scheduledNotifications.ts`, which loads it lazily. Never import it anywhere else: it loads its native modules on import, so a static import crashes host apps built without them (for example an older preview app or wrap base) at startup.
 - Do not call `Notifications.setNotificationHandler`: on iOS, Firebase Messaging owns foreground presentation, so the wrapper shows notifications that come due with the app open as an in-app alert.
-- Never schedule a notification from a screen directly; screens pass their records to `useScheduledNotifications`.
+- Never schedule or cancel a notification from a screen directly; screens pass their source's notifications to `useScheduledNotifications`.
 
 ## 1. Verify app and package
 
@@ -45,13 +50,19 @@ If the package is missing, stop: the app was created from a template without not
 
 ## 2. Identify what is scheduled
 
-Resolve from the approved plan, or ask once when standalone:
+Resolve from the approved plan, or ask once when standalone. An app can have several **sources** of notifications, for example appointments from Dataverse and a daily check-in time from a settings screen. For each source, record:
 
-- **Records:** which records get a notification (for example open reminders: not done, not deleted). Completed or deleted records must drop out, which cancels their notification.
-- **Time and text:** the field holding each record's date and time, and the notification title (usually the record's name) and optional body.
-- **Screen:** the screen that loads those records and keeps the schedule in sync. A device schedules only after that screen has loaded them.
+- **Group:** a short name, such as `appointments` or `check-in`. Each source keeps its own group in sync, so one source's sync never cancels another's notifications.
+- **Notifications:** which records or settings produce one, for example open tasks (not done, not deleted). Something that drops out of the list has its notification cancelled.
+- **When:**
+  - Once, at a date-time field. To notify before it, subtract the lead time when mapping (for example 15 minutes before an appointment).
+  - For several notices per record, use one notification per notice with distinct ids, such as `<id>:day-before` and `<id>:hour-before`.
+  - A date-only field (Dataverse returns it as `YYYY-MM-DD`, which parses as UTC midnight) needs an explicit local time: build a `Date` for that day at the planned hour.
+  - Repeating at a time of day: `daily: { hour, minute }`, or `weekly: { weekday, hour, minute }`, where weekday 1 is Sunday, in the device's time zone.
+- **Text:** the title (usually the record's name) and optional body.
+- **Owner:** the screen that loads the source (a list screen, or the settings screen for a user-set time) and keeps its group in sync. A device schedules only after that screen has loaded it.
 
-Each record maps to `{ id, title, body?, date }`, where `date` is an ISO 8601 date-time or a `Date`. Dataverse returns date-times in UTC, which is what the schedule needs.
+Also record what users call these notifications (for example Reminders, Appointments, Shift alerts): it becomes the Android channel name in Step 3.
 
 ## 2a. Reconcile requested artifacts
 
@@ -61,14 +72,15 @@ approval/mode from `/add-native`; do not repeat a valid scoped approval.
 Inspect `src/native/scheduledNotifications.ts` for `syncScheduledNotifications`,
 `clearScheduledNotifications`, `requestScheduledNotificationPermission`,
 `useScheduledNotifications`, `useScheduledNotificationSession`,
-`ScheduledNotification`, and `ScheduledNotificationsResult`; the lazy
-`expo-notifications` load; identifier-based reconciliation that cancels only its
-own notifications; the 48-notification cap; and serialized syncs. Inspect
-`app/(app)/_layout.tsx` for one unconditional `useScheduledNotificationSession`
-call, and the records screen for `useScheduledNotifications`. A wrapper that
-imports `expo-notifications` statically or cancels every scheduled notification
-is not compatible. An incompatible artifact outside approval returns
-`NEEDS_CONTEXT` to the owner, or asks standalone.
+`ScheduledNotification`, `TimeOfDay`, and `ScheduledNotificationsResult`; the lazy
+`expo-notifications` load; one-off, daily and weekly times; groups that reconcile
+only their own notifications; the app-wide 48-notification cap; and serialized
+syncs. Inspect `app/(app)/_layout.tsx` for one unconditional
+`useScheduledNotificationSession` call, and each owner screen for its
+`useScheduledNotifications` call. A wrapper that imports `expo-notifications`
+statically, cancels notifications outside its group, or calls
+`setNotificationHandler` is not compatible. An incompatible artifact outside
+approval returns `NEEDS_CONTEXT` to the owner, or asks standalone.
 
 ## 3. Write `src/native/scheduledNotifications.ts`
 
@@ -76,25 +88,36 @@ Apply Step 2a's decision for `src/native/scheduledNotifications.ts`: create when
 and missing, reuse unchanged only if compatible, or make only the approved scoped
 update. Preserve custom code, exports, and callers; do not overwrite from the
 example. Screens and layouts import this wrapper, not `expo-notifications` directly.
+Set `ANDROID_CHANNEL_NAME` to what users call these notifications (Step 2).
 
 ```ts
 // src/native/scheduledNotifications.ts
 import { useEffect, useRef } from 'react';
 import { Alert, AppState, Platform } from 'react-native';
+import type { NotificationTriggerInput } from 'expo-notifications';
 
 declare const require: (id: string) => unknown;
 
 type ExpoNotifications = typeof import('expo-notifications');
 
-/** Something the device announces at `date`, such as an open reminder at its due time. */
-export interface ScheduledNotification {
-  /** Stable id of the record the notification belongs to. */
-  id: string;
-  title: string;
-  body?: string;
-  /** ISO 8601 date-time (Dataverse returns UTC, e.g. "2026-10-16T05:10:00Z") or a Date. */
-  date: string | Date;
+/** A time of day in the device's time zone. */
+export interface TimeOfDay {
+  /** 0–23. */
+  hour: number;
+  /** 0–59. */
+  minute: number;
 }
+
+/**
+ * A notification the device shows on its own: once at `date`, or repeating `daily` or `weekly`.
+ * `id` is unique within its group: the record id, or `<id>:<notice>` for several notices per record.
+ * `date` is an ISO 8601 date-time (Dataverse returns UTC) or a Date; `weekday` 1 is Sunday.
+ */
+export type ScheduledNotification = { id: string; title: string; body?: string } & (
+  | { date: string | Date }
+  | { daily: TimeOfDay }
+  | { weekly: TimeOfDay & { weekday: number } }
+);
 
 export type ScheduledNotificationsResult =
   | { ok: true; scheduled: number }
@@ -102,19 +125,39 @@ export type ScheduledNotificationsResult =
 
 /**
  * Every notification this module schedules has the identifier
- * `scheduled_<id>_<date in epoch ms>_<hash of title and body>`, so a record whose time or text
- * changes gets a new identifier, and the schedule reconciles from identifiers alone (they round-trip
- * on both platforms, unlike custom content fields).
+ * `scheduled_<group>_<id>_<when>_<hash of title and body>`: a notification whose time or text
+ * changes gets a new identifier, so each group reconciles from identifiers alone (they round-trip on
+ * both platforms, unlike custom content fields). Group names never contain `_`, so one group's
+ * prefix never matches another's.
  */
 const IDENTIFIER_PREFIX = 'scheduled_';
+const DEFAULT_GROUP = 'default';
+const ALL_GROUPS = '*';
 const ANDROID_CHANNEL_ID = 'scheduled';
+/** What users call these notifications; Android lists it in the app's notification settings. */
+const ANDROID_CHANNEL_NAME = 'Scheduled notifications';
 /**
  * iOS keeps at most 64 pending local notifications per app and silently drops the rest, so only the
- * soonest are scheduled. Later ones are scheduled by a later sync, once earlier ones have passed.
+ * soonest 48 across all groups are scheduled. Later ones are scheduled by a later sync.
  */
 const MAX_SCHEDULED = 48;
-/** Times sooner than this aren't newly scheduled: the alarm could land in the past. */
+/** One-off times sooner than this aren't newly scheduled: the alarm could land in the past. */
 const MIN_LEAD_MS = 5_000;
+
+type When =
+  | { kind: 'once'; ms: number }
+  | { kind: 'daily'; hour: number; minute: number }
+  | { kind: 'weekly'; weekday: number; hour: number; minute: number };
+
+interface ScheduleEntry {
+  identifier: string;
+  id: string;
+  title: string;
+  body?: string;
+  when: When;
+  /** Next time it shows, to choose the soonest under the cap. */
+  nextMs: number;
+}
 
 /**
  * expo-notifications, or null where on-device notifications can't work: on web, and in a host app
@@ -130,6 +173,10 @@ function loadNotifications(): ExpoNotifications | null {
   }
 }
 
+function normalizeGroup(group: string): string {
+  return group.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-') || DEFAULT_GROUP;
+}
+
 /** 32-bit FNV-1a, so changed text produces a new identifier without putting the text in it. */
 function hashText(text: string): string {
   let hash = 0x811c9dc5;
@@ -140,25 +187,64 @@ function hashText(text: string): string {
   return (hash >>> 0).toString(36);
 }
 
-interface ScheduleEntry {
-  identifier: string;
-  id: string;
-  title: string;
-  body?: string;
-  dateMs: number;
+const isInRange = (value: number, min: number, max: number) => Number.isInteger(value) && value >= min && value <= max;
+const isTimeOfDay = ({ hour, minute }: TimeOfDay) => isInRange(hour, 0, 23) && isInRange(minute, 0, 59);
+
+function toWhen(item: ScheduledNotification): When | null {
+  if ('date' in item) {
+    const ms = item.date instanceof Date ? item.date.getTime() : Date.parse(item.date);
+    return Number.isFinite(ms) ? { kind: 'once', ms } : null;
+  }
+  if ('daily' in item) {
+    return isTimeOfDay(item.daily) ? { kind: 'daily', hour: item.daily.hour, minute: item.daily.minute } : null;
+  }
+  const { weekday, hour, minute } = item.weekly;
+  return isTimeOfDay(item.weekly) && isInRange(weekday, 1, 7) ? { kind: 'weekly', weekday, hour, minute } : null;
 }
 
-function toEntry(item: ScheduledNotification): ScheduleEntry | null {
-  const dateMs = item.date instanceof Date ? item.date.getTime() : Date.parse(item.date);
-  if (!item.id || !Number.isFinite(dateMs)) return null;
-  const title = String(item.title ?? '').trim() || 'Reminder';
+/** The next time `when` shows after `now`, in the device's time zone. */
+function nextOccurrence(when: When, now: number): number {
+  if (when.kind === 'once') return when.ms;
+  const next = new Date(now);
+  next.setHours(when.hour, when.minute, 0, 0);
+  if (when.kind === 'weekly') next.setDate(next.getDate() + ((when.weekday - 1 - next.getDay() + 7) % 7));
+  if (next.getTime() <= now) next.setDate(next.getDate() + (when.kind === 'daily' ? 1 : 7));
+  return next.getTime();
+}
+
+function whenKey(when: When): string {
+  if (when.kind === 'once') return String(when.ms);
+  if (when.kind === 'daily') return `d${when.hour}-${when.minute}`;
+  return `w${when.weekday}-${when.hour}-${when.minute}`;
+}
+
+function toEntry(item: ScheduledNotification, prefix: string, now: number): ScheduleEntry | null {
+  const when = toWhen(item);
+  if (!item.id || !when) return null;
+  const title = String(item.title ?? '').trim() || 'Notification';
   const body = String(item.body ?? '').trim() || undefined;
   return {
-    identifier: `${IDENTIFIER_PREFIX}${item.id}_${dateMs}_${hashText(`${title}\n${body ?? ''}`)}`,
+    identifier: `${prefix}${item.id}_${whenKey(when)}_${hashText(`${title}\n${body ?? ''}`)}`,
     id: item.id,
     title,
     body,
-    dateMs,
+    when,
+    nextMs: nextOccurrence(when, now),
+  };
+}
+
+function toTrigger(notifications: ExpoNotifications, when: When): NotificationTriggerInput {
+  const types = notifications.SchedulableTriggerInputTypes;
+  if (when.kind === 'once') return { type: types.DATE, date: when.ms, channelId: ANDROID_CHANNEL_ID };
+  if (when.kind === 'daily') {
+    return { type: types.DAILY, hour: when.hour, minute: when.minute, channelId: ANDROID_CHANNEL_ID };
+  }
+  return {
+    type: types.WEEKLY,
+    weekday: when.weekday,
+    hour: when.hour,
+    minute: when.minute,
+    channelId: ANDROID_CHANNEL_ID,
   };
 }
 
@@ -178,37 +264,45 @@ let androidChannelReady = false;
 async function ensureAndroidChannel(notifications: ExpoNotifications): Promise<void> {
   if (Platform.OS !== 'android' || androidChannelReady) return;
   await notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
-    name: 'Reminders',
-    description: 'Alerts at the times set in the app',
+    name: ANDROID_CHANNEL_NAME,
     importance: notifications.AndroidImportance.HIGH,
     enableVibrate: true,
   });
   androidChannelReady = true;
 }
 
+/** Makes `group`'s pending notifications match `items`; group null cancels every group's. */
 async function reconcile(
   notifications: ExpoNotifications,
+  group: string | null,
   items: readonly ScheduledNotification[],
 ): Promise<ScheduledNotificationsResult> {
   const now = Date.now();
+  const prefix = group === null ? IDENTIFIER_PREFIX : `${IDENTIFIER_PREFIX}${group}_`;
   const wantedEntries = new Map<string, ScheduleEntry>();
   for (const item of items) {
-    const entry = toEntry(item);
+    const entry = toEntry(item, prefix, now);
     if (entry) wantedEntries.set(entry.identifier, entry);
   }
+
+  const pending = await notifications.getAllScheduledNotificationsAsync();
+  const pendingInOtherGroups = pending.filter(
+    ({ identifier }) => identifier.startsWith(IDENTIFIER_PREFIX) && !identifier.startsWith(prefix),
+  ).length;
   const upcoming = [...wantedEntries.values()]
-    .filter((entry) => entry.dateMs - now >= MIN_LEAD_MS)
-    .sort((a, b) => a.dateMs - b.dateMs)
-    .slice(0, MAX_SCHEDULED);
+    .filter((entry) => entry.when.kind !== 'once' || entry.nextMs - now >= MIN_LEAD_MS)
+    .sort((a, b) => a.nextMs - b.nextMs)
+    .slice(0, Math.max(0, MAX_SCHEDULED - pendingInOtherGroups));
   const wanted = new Set(upcoming.map((entry) => entry.identifier));
 
   const kept = new Set<string>();
-  for (const { identifier } of await notifications.getAllScheduledNotificationsAsync()) {
-    if (!identifier.startsWith(IDENTIFIER_PREFIX)) continue; // not ours; leave it alone
+  for (const { identifier } of pending) {
+    if (!identifier.startsWith(prefix)) continue; // another group's, or not this module's
     const entry = wantedEntries.get(identifier);
-    // Keep a pending notification whose time has already passed while its record is unchanged:
+    // Keep a pending one-off notification whose time has already passed while it's unchanged:
     // Android may deliver an inexact alarm late, and cancelling it now would lose it entirely.
-    if (entry && (wanted.has(identifier) || entry.dateMs - now < MIN_LEAD_MS)) {
+    const isLate = entry?.when.kind === 'once' && entry.nextMs - now < MIN_LEAD_MS;
+    if (entry && (wanted.has(identifier) || isLate)) {
       kept.add(identifier);
     } else {
       await notifications.cancelScheduledNotificationAsync(identifier);
@@ -223,63 +317,75 @@ async function reconcile(
     await notifications.scheduleNotificationAsync({
       identifier: entry.identifier,
       content: { title: entry.title, body: entry.body, sound: 'default', data: { id: entry.id } },
-      trigger: {
-        type: notifications.SchedulableTriggerInputTypes.DATE,
-        date: entry.dateMs,
-        channelId: ANDROID_CHANNEL_ID,
-      },
+      trigger: toTrigger(notifications, entry.when),
     });
   }
   return { ok: true, scheduled: kept.size + missing.length };
 }
 
-async function reconcileSafely(items: readonly ScheduledNotification[]): Promise<ScheduledNotificationsResult> {
+async function reconcileSafely(
+  group: string | null,
+  items: readonly ScheduledNotification[],
+): Promise<ScheduledNotificationsResult> {
   const notifications = loadNotifications();
   if (!notifications) return { ok: false, reason: 'UNAVAILABLE' };
   try {
-    return await reconcile(notifications, items);
+    return await reconcile(notifications, group, items);
   } catch (error) {
     return { ok: false, reason: 'SCHEDULE_FAILED', message: error instanceof Error ? error.message : String(error) };
   }
 }
 
-let queued: readonly ScheduledNotification[] | null = null;
-let running: Promise<ScheduledNotificationsResult> | null = null;
+type Waiter = (result: ScheduledNotificationsResult) => void;
+/** Pending work by group, in order: a group's newer call replaces its waiting one and moves last. */
+const queue = new Map<string, { items: readonly ScheduledNotification[]; waiters: Waiter[] }>();
+let draining = false;
 
-async function drain(): Promise<ScheduledNotificationsResult> {
-  let result: ScheduledNotificationsResult = { ok: true, scheduled: 0 };
+async function drain(): Promise<void> {
+  draining = true;
   try {
-    while (queued) {
-      const next = queued;
-      queued = null;
-      result = await reconcileSafely(next);
+    while (queue.size > 0) {
+      const [key, { items, waiters }] = [...queue][0];
+      queue.delete(key);
+      const result = await reconcileSafely(key === ALL_GROUPS ? null : key, items);
+      waiters.forEach((resolve) => resolve(result));
     }
   } finally {
-    // Cleared right after the queue empties, so a later sync starts a new drain instead of joining
-    // one that has already finished.
-    running = null;
+    draining = false;
   }
-  return result;
+}
+
+function enqueue(key: string, items: readonly ScheduledNotification[]): Promise<ScheduledNotificationsResult> {
+  return new Promise((resolve) => {
+    const waiters: Waiter[] = [resolve];
+    // A clear replaces everything waiting before it; a group's call replaces that group's.
+    for (const superseded of key === ALL_GROUPS ? [...queue.keys()] : [key]) {
+      const entry = queue.get(superseded);
+      if (entry) waiters.push(...entry.waiters);
+      queue.delete(superseded);
+    }
+    queue.set(key, { items, waiters });
+    if (!draining) void drain();
+  });
 }
 
 /**
- * Makes the device's scheduled notifications match `items`, which must be every record that should
- * be announced (for example every open reminder the user can see). Each one in the future gets one
- * notification at its time; notifications for records that were completed, deleted, retitled, or
- * moved are cancelled or rescheduled. Asks for notification permission only when something new needs
- * scheduling. Calls are serialized, and a call made while one runs replaces any call still waiting.
+ * Makes `group`'s scheduled notifications match `items`, which must be every notification that
+ * source wants (for example one per open task). New ones are scheduled; ones that dropped out,
+ * changed time or changed text are cancelled or rescheduled; other groups are left alone. Asks for
+ * notification permission only when something new needs scheduling. Calls are serialized, and a
+ * call made while one runs replaces the same group's call still waiting.
  */
 export function syncScheduledNotifications(
   items: readonly ScheduledNotification[],
+  group: string = DEFAULT_GROUP,
 ): Promise<ScheduledNotificationsResult> {
-  queued = items;
-  running ??= drain();
-  return running;
+  return enqueue(normalizeGroup(group), items);
 }
 
-/** Cancels every notification this module scheduled, for example after the user signs out. */
+/** Cancels every notification this module scheduled, in every group, for example on sign-out. */
 export function clearScheduledNotifications(): Promise<ScheduledNotificationsResult> {
-  return syncScheduledNotifications([]);
+  return enqueue(ALL_GROUPS, []);
 }
 
 /** Asks for permission to show notifications if it hasn't been decided yet; true when granted. */
@@ -293,40 +399,43 @@ export async function requestScheduledNotificationPermission(): Promise<boolean>
   }
 }
 
-function syncAndReport(items: readonly ScheduledNotification[]): void {
-  void syncScheduledNotifications(items).then((result) => {
-    if (__DEV__ && !result.ok) console.log('[scheduled-notifications]', result.reason, result.message ?? '');
+function syncAndReport(items: readonly ScheduledNotification[], group: string): void {
+  void syncScheduledNotifications(items, group).then((result) => {
+    if (__DEV__ && !result.ok) console.log('[scheduled-notifications]', group, result.reason, result.message ?? '');
   });
 }
 
 /**
- * Keeps the device's scheduled notifications in step with `items`: the records the screen has
- * loaded that should be announced, or undefined while they load (nothing changes until they arrive).
- * Pass a memoized array, and mount it once, on the screen that loads the records. Returning to the
- * app re-syncs: permission may have been granted meanwhile (Android denies a request made while
- * another prompt shows, such as the push notifications one), and passed times free room under the cap.
+ * Keeps `group`'s scheduled notifications in step with `items`: every notification the screen's
+ * source wants, or undefined while it loads (nothing changes until it arrives). Pass a memoized
+ * array, and mount it once per source, on the screen that loads it. Returning to the app re-syncs:
+ * permission may have been granted meanwhile (Android denies a request made while another prompt
+ * shows, such as the push notifications one), and passed times free room under the cap.
  */
-export function useScheduledNotifications(items: readonly ScheduledNotification[] | undefined): void {
+export function useScheduledNotifications(
+  items: readonly ScheduledNotification[] | undefined,
+  group: string = DEFAULT_GROUP,
+): void {
   const latest = useRef(items);
 
   useEffect(() => {
     latest.current = items;
-    if (items) syncAndReport(items);
-  }, [items]);
+    if (items) syncAndReport(items, group);
+  }, [items, group]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && latest.current) syncAndReport(latest.current);
+      if (state === 'active' && latest.current) syncAndReport(latest.current, group);
     });
     return () => subscription.remove();
-  }, []);
+  }, [group]);
 }
 
 /**
  * Mount once, in the signed-in layout. While the user is signed in, a scheduled notification that
  * comes due with the app open is shown as an in-app alert, the same way open-app push messages are:
  * expo-notifications doesn't present it then, and on iOS Firebase Messaging owns foreground
- * presentation, so no notification handler is set. Signing out cancels the schedule.
+ * presentation, so no notification handler is set. Signing out cancels every group's notifications.
  */
 export function useScheduledNotificationSession(isSignedIn: boolean): void {
   const wasSignedIn = useRef(isSignedIn);
@@ -342,7 +451,7 @@ export function useScheduledNotificationSession(isSignedIn: boolean): void {
     try {
       subscription = loadNotifications()?.addNotificationReceivedListener(({ request }) => {
         if (request.identifier.startsWith(IDENTIFIER_PREFIX)) {
-          Alert.alert(request.content.title ?? 'Reminder', request.content.body ?? undefined);
+          Alert.alert(request.content.title ?? 'Notification', request.content.body ?? undefined);
         }
       });
     } catch {
@@ -355,7 +464,7 @@ export function useScheduledNotificationSession(isSignedIn: boolean): void {
 
 ## 4. Mount it
 
-Apply Step 2a's decision for `app/(app)/_layout.tsx` and the records screen: add the calls
+Apply Step 2a's decision for `app/(app)/_layout.tsx` and each owner screen: add the calls
 when missing, reuse unchanged only if compatible, or make only the approved scoped update.
 
 In `app/(app)/_layout.tsx`, call the session hook once, unconditionally, right after `useAuth()` and before any early return:
@@ -370,19 +479,28 @@ export default function AppLayout() {
 }
 ```
 
-On the screen that loads the records, pass the ones to announce, memoized:
+On each owner screen, pass that source's notifications, memoized, with its group. For example, a task list notifying at each open task's due time, and a settings screen with a user-set daily check-in time:
 
 ```tsx
 import { useScheduledNotifications } from '../../src/native/scheduledNotifications';
 
-const scheduled = useMemo(
-  () => openReminders?.map((reminder) => ({ id: reminder.id, title: reminder.title, date: reminder.dueDate })),
-  [openReminders],
+const taskNotifications = useMemo(
+  () => openTasks?.map((task) => ({ id: task.id, title: task.name, body: 'Due now', date: task.dueDate })),
+  [openTasks],
 );
-useScheduledNotifications(scheduled);
+useScheduledNotifications(taskNotifications, 'tasks');
+
+const checkInNotifications = useMemo(
+  () =>
+    settings
+      ? [{ id: 'check-in', title: 'Daily check-in', daily: { hour: settings.checkInHour, minute: 0 } }]
+      : undefined,
+  [settings],
+);
+useScheduledNotifications(checkInNotifications, 'check-in');
 ```
 
-During `/create-mobile-app`, this helper runs before the screens exist: add the layout call now, and return the records-screen call to the owner, which records it in that screen's spec for the screen builder. Step 10b rewrites only the layout's `return`, so the layout call stays.
+During `/create-mobile-app`, this helper runs before the screens exist: add the layout call now, and return each owner screen's call to the owner, which records it in that screen's spec for the screen builder. Step 10b rewrites only the layout's `return`, so the layout call stays.
 
 ## 5. Type-check and summary
 
@@ -392,21 +510,21 @@ npx --no-install tsc --noEmit
 ```
 
 Execute the shared compatibility contract's Step 4 after type-checking. Recheck
-the lazy load, every export, identifier-based reconciliation of only this
-module's notifications, the cap, the layout call, and the records-screen call.
-Type-check success alone is insufficient; do not fix screen/generated files.
-Only after the requested artifact contract and TypeScript both pass, return the
-shared compatibility result and actual created/updated/reused paths before reporting:
+the lazy load, every export, one-off and repeating times, group isolation, the
+cap, the layout call, and each owner screen's call. Type-check success alone is
+insufficient; do not fix screen/generated files. Only after the requested
+artifact contract and TypeScript both pass, return the shared compatibility
+result and actual created/updated/reused paths before reporting:
 
 ```text
 Scheduled notifications : READY
 Package present         : expo-notifications
-Wrapper                 : src/native/scheduledNotifications.ts
-Mounted in              : app/(app)/_layout.tsx (session), <records screen> (sync)
-Scheduled records       : <records> at <time field>, titled <title field>
+Wrapper                 : src/native/scheduledNotifications.ts (Android channel "<name>")
+Mounted in              : app/(app)/_layout.tsx (session); <owner screen> (<group>) for each source
+Sources                 : <group>: <what> at <when>, titled <title>
 Native config           : not changed
-Limits                  : schedules after the device loads the records; Android may deliver late; 48 soonest pending
+Limits                  : a device schedules after it loads each source; Android may deliver one-off notifications late; 48 soonest pending
 Wrap note               : keep the Notifications permission selected in the wrap wizard
 ```
 
-Record the scheduled records, their time field, and the records screen in `memory-bank.md`.
+Record each source (group, what, when, owner screen) in `memory-bank.md`.

@@ -2464,7 +2464,7 @@ Arguments:
   --capability <name>
 ```
 
-Run sequentially. Each writes a single file under `src/native/` and does not touch `package.json` or `app.config.js`, so they could in principle run in parallel — but sequential keeps the orchestration log readable. `push-notifications` also mounts its hook in `app/(app)/_layout.tsx` and asks for the app's Firebase client files; without them it still wires the app and reports push notifications as not configured. `scheduled-notifications` mounts its session hook there and returns the records-screen call, which the screen spec carries to the screen builder.
+Run sequentially. Each writes a single file under `src/native/` and does not touch `package.json` or `app.config.js`, so they could in principle run in parallel — but sequential keeps the orchestration log readable. `push-notifications` also mounts its hook in `app/(app)/_layout.tsx` and asks for the app's Firebase client files; without them it still wires the app and reports push notifications as not configured. `scheduled-notifications` mounts its session hook there and returns each owner screen's call, which the screen specs carry to the screen builder.
 
 If the plan says "None — this app uses only standard React Native components and Power Platform connectors", skip only the native-capability invocation above and continue to Step 9a. Do NOT skip Step 9a or Step 9b; an app can need a pure-JavaScript library without any native capability, and Tamagui aliases/brand tokens are always required.
 
