@@ -16,7 +16,7 @@ file tool to it, even when this helper starts from another directory.
 
 # Add Push Notifications
 
-Internal helper for `/add-native push-notifications`, `/add-native push`, `/add-native notifications`, `/add-native remote-notifications`, `/add-native fcm`, `/add-native firebase-messaging`, `/add-native @react-native-firebase/messaging`, and `/add-native expo-notifications`.
+Internal helper for `/add-native push-notifications`, `/add-native push`, `/add-native remote-notifications`, `/add-native fcm`, `/add-native firebase-messaging`, and `/add-native @react-native-firebase/messaging`.
 
 How push notifications reach a wrapped app:
 
@@ -24,6 +24,7 @@ How push notifications reach a wrapped app:
 - The app's own `firebase/google-services.json` (Android) and `firebase/GoogleService-Info.plist` (iOS) replace the placeholders. `/deploy` publishes them with the app, and the Power Apps wrap injects them when push notifications are turned on for the platform in the wrap wizard. Makers can upload the files in the wrap wizard instead.
 - Notifications are sent from Firebase, by the Firebase console (Messaging) or by a backend using the Firebase Admin SDK, never by the app. Every signed-in device subscribes to the `allUsers` topic.
 - The OS shows notifications that arrive while the app is in the background. The app shows the ones that arrive while it is open.
+- Push delivers only what a sender sends. A notification at a time in the app's data (a reminder's due time) is `/add-native scheduled-notifications`, which the device schedules itself with no sender.
 
 Hard rules:
 - Do not install packages or edit `app.config.js` or native config. The template already ships `@react-native-firebase/app`, `@react-native-firebase/messaging`, `expo-notifications`, and the placeholder files, and `@microsoft/power-apps-native-host` configures them.

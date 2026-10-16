@@ -168,6 +168,11 @@ normally. To send push notifications to the wrapped app:
 The Firebase client files are not secrets, but never add Firebase server
 credentials, such as a service account key, to the app.
 
+Push delivers only what Firebase or a backend sends. For notifications at times
+in the app's data, such as a reminder's due time, run
+`/add-native scheduled-notifications`: the device schedules them itself, with no
+Firebase or backend.
+
 ## Upgrade the Native Host
 
 From the app directory, preview the next template upgrade:
