@@ -297,6 +297,7 @@ Bundle path   : dist/
 
 Local dev:    npm run dev  (writes .powernative logs for /debug-app)
 Re-deploy:    /deploy
+Wrapped app:  re-wrap it (/open-wrap-url) to ship this deploy; installed apps keep the bundle they were wrapped with
 List conns:   /list-connections
 ─────────────────────────────────────────────
 ```

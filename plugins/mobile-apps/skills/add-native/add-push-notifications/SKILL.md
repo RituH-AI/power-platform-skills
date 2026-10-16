@@ -30,7 +30,7 @@ Hard rules:
 - Do not install packages or edit `app.config.js` or native config. The template already ships `@react-native-firebase/app`, `@react-native-firebase/messaging`, `expo-notifications`, and the placeholder files, and `@microsoft/power-apps-native-host` configures them.
 - Use Firebase and `expo-notifications` only through `src/native/pushNotifications.ts`, which loads them after checking for a Firebase app. Never import them anywhere else: `expo-notifications` loads its native modules on import, so a static import crashes host apps built without them (for example an older preview app or wrap base) at startup.
 - The Firebase client files are the only Firebase files the app holds. They are not secrets (every app binary embeds them), but never add a service account key, server key, or other Firebase Admin credential to the app.
-- Do not schedule local notifications or call `Notifications.setNotificationHandler` for push messages: on iOS, Firebase Messaging owns foreground presentation, so the wrapper shows open-app messages itself.
+- Do not schedule local notifications for push messages, and never call `Notifications.setNotificationHandler` on iOS: there Firebase Messaging owns foreground presentation, so the wrapper shows open-app messages itself. An Android-only handler, such as the one scheduled notifications set, doesn't affect push: on Android, Firebase Messaging's own service handles push messages.
 
 ## 1. Verify app and packages
 

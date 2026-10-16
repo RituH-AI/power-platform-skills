@@ -28,14 +28,14 @@ The OS shows each at its time even when the app is closed, and it looks like a p
 It is not push: a device schedules only what it has loaded, so a change made elsewhere reaches a device the next time that device loads it. A notification that must reach users when something happens elsewhere (another user's action, a server event) is `push-notifications`, sent by Firebase or a backend.
 
 Limits to state in the plan and summary:
-- Android may deliver a one-off notification late: the wrap base package has no exact-alarm permission, so Android can delay it by up to 75% of the time between scheduling and the time (at most an hour, longer in Doze).
+- Android timing: the wrap base package has no exact-alarm permission, so Android delivers alarms within a window that can end up to an hour after their trigger time. The wrapper schedules each one early enough that its window ends at the intended time: it arrives by that time, never after it, and at most an hour early (at the time itself on an idle device). If the base package gains an exact-alarm permission, the wrapper detects it and schedules exactly. iOS is always exact.
 - At most the 48 soonest are pending at a time across the app (iOS keeps at most 64 per app); later ones are scheduled by a later sync.
 - Android 13 and later show notifications only with the Notifications permission: it must stay selected in the wrap wizard's permissions step.
 
 Hard rules:
 - Do not install packages or edit `app.config.js` or native config. The template already ships `expo-notifications`.
 - Use `expo-notifications` only through `src/native/scheduledNotifications.ts`, which loads it lazily. Never import it anywhere else: it loads its native modules on import, so a static import crashes host apps built without them (for example an older preview app or wrap base) at startup.
-- Do not call `Notifications.setNotificationHandler`: on iOS, Firebase Messaging owns foreground presentation, so the wrapper shows notifications that come due with the app open as an in-app alert.
+- The wrapper sets the app's only notification handler, on Android only: expo-notifications hands a notification it judges to arrive with the app open to the handler instead of posting it, and it can judge a wrapped app open while the app is in the background or the phone is locked. Without the handler, such notifications never reach the lock screen. Never set a handler on iOS, where Firebase Messaging owns foreground presentation: there the wrapper shows notifications that come due with the app open as an in-app alert.
 - Never schedule or cancel a notification from a screen directly; screens pass their source's notifications to `useScheduledNotifications`.
 
 ## 1. Verify app and package
@@ -74,12 +74,14 @@ Inspect `src/native/scheduledNotifications.ts` for `syncScheduledNotifications`,
 `useScheduledNotifications`, `useScheduledNotificationSession`,
 `ScheduledNotification`, `TimeOfDay`, and `ScheduledNotificationsResult`; the lazy
 `expo-notifications` load; one-off, daily and weekly times; groups that reconcile
-only their own notifications; the app-wide 48-notification cap; and serialized
-syncs. Inspect `app/(app)/_layout.tsx` for one unconditional
+only their own notifications; the app-wide 48-notification cap; serialized
+syncs; the Android-only handler that presents this module's notifications; and
+the Android inexact-window adjustment with exact-alarm detection. Inspect `app/(app)/_layout.tsx` for one unconditional
 `useScheduledNotificationSession` call, and each owner screen for its
 `useScheduledNotifications` call. A wrapper that imports `expo-notifications`
-statically, cancels notifications outside its group, or calls
-`setNotificationHandler` is not compatible. An incompatible artifact outside
+statically, cancels notifications outside its group, sets a notification handler
+on iOS, or leaves Android presentation and timing to expo-notifications' defaults
+is not compatible. An incompatible artifact outside
 approval returns `NEEDS_CONTEXT` to the owner, or asks standalone.
 
 ## 3. Write `src/native/scheduledNotifications.ts`
@@ -93,7 +95,7 @@ Set `ANDROID_CHANNEL_NAME` to what users call these notifications (Step 2).
 ```ts
 // src/native/scheduledNotifications.ts
 import { useEffect, useRef } from 'react';
-import { Alert, AppState, Platform } from 'react-native';
+import { Alert, AppState, PermissionsAndroid, Platform, type Permission } from 'react-native';
 import type { NotificationTriggerInput } from 'expo-notifications';
 
 declare const require: (id: string) => unknown;
@@ -125,12 +127,14 @@ export type ScheduledNotificationsResult =
 
 /**
  * Every notification this module schedules has the identifier
- * `scheduled_<group>_<id>_<when>_<hash of title and body>`: a notification whose time or text
- * changes gets a new identifier, so each group reconciles from identifiers alone (they round-trip on
- * both platforms, unlike custom content fields). Group names never contain `_`, so one group's
- * prefix never matches another's.
+ * `scheduled_<group>_<id>_<when>_<hash>`, where the hash covers the title, body, and how it is
+ * scheduled: a notification whose time, text, or scheduling changes gets a new identifier, so each
+ * group reconciles from identifiers alone (they round-trip on both platforms, unlike custom content
+ * fields). Group names never contain `_`, so one group's prefix never matches another's.
  */
 const IDENTIFIER_PREFIX = 'scheduled_';
+/** Bump when the way notifications are scheduled changes, so updated apps replace older schedules. */
+const SCHEDULE_VERSION = 1;
 const DEFAULT_GROUP = 'default';
 const ALL_GROUPS = '*';
 const ANDROID_CHANNEL_ID = 'scheduled';
@@ -143,6 +147,9 @@ const ANDROID_CHANNEL_NAME = 'Scheduled notifications';
 const MAX_SCHEDULED = 48;
 /** One-off times sooner than this aren't newly scheduled: the alarm could land in the past. */
 const MIN_LEAD_MS = 5_000;
+/** Android delivers an inexact alarm within a window of 75% of the time until it, at most an hour. */
+const INEXACT_WINDOW_FRACTION = 0.75;
+const MAX_INEXACT_WINDOW_MS = 60 * 60 * 1000;
 
 type When =
   | { kind: 'once'; ms: number }
@@ -171,6 +178,28 @@ function loadNotifications(): ExpoNotifications | null {
   } catch {
     return null;
   }
+}
+
+let exactAlarms: Promise<boolean> | undefined;
+
+/**
+ * Whether the device delivers this app's alarms exactly. iOS does. expo-notifications uses exact
+ * alarms on Android below 12, or with an exact-alarm permission, which the wrap base package doesn't
+ * declare today: USE_EXACT_ALARM, or SCHEDULE_EXACT_ALARM on Android 12 (granted by default there).
+ */
+function hasExactAlarms(): Promise<boolean> {
+  exactAlarms ??= (async () => {
+    if (Platform.OS !== 'android') return true;
+    const sdk = Number(Platform.Version);
+    if (sdk < 31) return true;
+    try {
+      if (await PermissionsAndroid.check('android.permission.USE_EXACT_ALARM' as Permission)) return true;
+      return sdk <= 32 && (await PermissionsAndroid.check('android.permission.SCHEDULE_EXACT_ALARM' as Permission));
+    } catch {
+      return false;
+    }
+  })();
+  return exactAlarms;
 }
 
 function normalizeGroup(group: string): string {
@@ -218,13 +247,14 @@ function whenKey(when: When): string {
   return `w${when.weekday}-${when.hour}-${when.minute}`;
 }
 
-function toEntry(item: ScheduledNotification, prefix: string, now: number): ScheduleEntry | null {
+function toEntry(item: ScheduledNotification, prefix: string, now: number, exact: boolean): ScheduleEntry | null {
   const when = toWhen(item);
   if (!item.id || !when) return null;
   const title = String(item.title ?? '').trim() || 'Notification';
   const body = String(item.body ?? '').trim() || undefined;
+  const hash = hashText(`${SCHEDULE_VERSION}|${exact ? 'exact' : 'inexact'}|${title}\n${body ?? ''}`);
   return {
-    identifier: `${prefix}${item.id}_${whenKey(when)}_${hashText(`${title}\n${body ?? ''}`)}`,
+    identifier: `${prefix}${item.id}_${whenKey(when)}_${hash}`,
     id: item.id,
     title,
     body,
@@ -233,19 +263,35 @@ function toEntry(item: ScheduledNotification, prefix: string, now: number): Sche
   };
 }
 
-function toTrigger(notifications: ExpoNotifications, when: When): NotificationTriggerInput {
+/**
+ * Where to trigger a one-off alarm for `dueMs` without exact alarms: Android delivers it anywhere
+ * from its trigger time to the end of its window, and an idle device at the end, so the window must
+ * end at the due time. The notification then arrives by the due time, never after it (at most an
+ * hour early).
+ */
+function inexactTriggerMs(dueMs: number, now: number): number {
+  const lead = dueMs - now;
+  const trigger = lead / (1 + INEXACT_WINDOW_FRACTION);
+  return now + (trigger * INEXACT_WINDOW_FRACTION <= MAX_INEXACT_WINDOW_MS ? trigger : lead - MAX_INEXACT_WINDOW_MS);
+}
+
+function toTrigger(
+  notifications: ExpoNotifications,
+  when: When,
+  now: number,
+  exact: boolean,
+): NotificationTriggerInput {
   const types = notifications.SchedulableTriggerInputTypes;
-  if (when.kind === 'once') return { type: types.DATE, date: when.ms, channelId: ANDROID_CHANNEL_ID };
-  if (when.kind === 'daily') {
-    return { type: types.DAILY, hour: when.hour, minute: when.minute, channelId: ANDROID_CHANNEL_ID };
+  const channelId = ANDROID_CHANNEL_ID;
+  if (when.kind === 'once') {
+    return { type: types.DATE, date: exact ? when.ms : inexactTriggerMs(when.ms, now), channelId };
   }
-  return {
-    type: types.WEEKLY,
-    weekday: when.weekday,
-    hour: when.hour,
-    minute: when.minute,
-    channelId: ANDROID_CHANNEL_ID,
-  };
+  // Without exact alarms, a repeating time triggers an hour early, so its window ends on time.
+  const earlier = exact ? 0 : 1;
+  const hour = (when.hour - earlier + 24) % 24;
+  if (when.kind === 'daily') return { type: types.DAILY, hour, minute: when.minute, channelId };
+  const weekday = when.hour - earlier < 0 ? ((when.weekday + 5) % 7) + 1 : when.weekday;
+  return { type: types.WEEKLY, weekday, hour, minute: when.minute, channelId };
 }
 
 async function ensurePermission(notifications: ExpoNotifications): Promise<boolean> {
@@ -255,20 +301,30 @@ async function ensurePermission(notifications: ExpoNotifications): Promise<boole
   return (await notifications.requestPermissionsAsync()).granted;
 }
 
-let androidChannelReady = false;
+let androidReady = false;
 
 /**
- * Android 8+ shows a notification only through a channel. High importance shows it as a heads-up
- * banner instead of arriving silently in the shade.
+ * Android only. A notification shows only through a channel; high importance shows it as a heads-up
+ * banner. expo-notifications posts a notification itself only when it judges the app to be in the
+ * background, and otherwise leaves it to the app's handler; a wrapped app can be judged open while
+ * it is in the background or the screen is locked, so the handler presents this module's
+ * notifications either way. It doesn't affect push, which Firebase Messaging's own service handles
+ * on Android, and it isn't set on iOS, where Firebase Messaging owns foreground presentation.
  */
-async function ensureAndroidChannel(notifications: ExpoNotifications): Promise<void> {
-  if (Platform.OS !== 'android' || androidChannelReady) return;
+async function ensureAndroidSetup(notifications: ExpoNotifications): Promise<void> {
+  if (Platform.OS !== 'android' || androidReady) return;
+  notifications.setNotificationHandler({
+    handleNotification: async ({ request }) => {
+      const isOwn = request.identifier.startsWith(IDENTIFIER_PREFIX);
+      return { shouldShowBanner: isOwn, shouldShowList: isOwn, shouldPlaySound: isOwn, shouldSetBadge: false };
+    },
+  });
   await notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
     name: ANDROID_CHANNEL_NAME,
     importance: notifications.AndroidImportance.HIGH,
     enableVibrate: true,
   });
-  androidChannelReady = true;
+  androidReady = true;
 }
 
 /** Makes `group`'s pending notifications match `items`; group null cancels every group's. */
@@ -278,10 +334,11 @@ async function reconcile(
   items: readonly ScheduledNotification[],
 ): Promise<ScheduledNotificationsResult> {
   const now = Date.now();
+  const exact = await hasExactAlarms();
   const prefix = group === null ? IDENTIFIER_PREFIX : `${IDENTIFIER_PREFIX}${group}_`;
   const wantedEntries = new Map<string, ScheduleEntry>();
   for (const item of items) {
-    const entry = toEntry(item, prefix, now);
+    const entry = toEntry(item, prefix, now, exact);
     if (entry) wantedEntries.set(entry.identifier, entry);
   }
 
@@ -300,7 +357,7 @@ async function reconcile(
     if (!identifier.startsWith(prefix)) continue; // another group's, or not this module's
     const entry = wantedEntries.get(identifier);
     // Keep a pending one-off notification whose time has already passed while it's unchanged:
-    // Android may deliver an inexact alarm late, and cancelling it now would lose it entirely.
+    // its alarm may still be in its delivery window, and cancelling it now would lose it entirely.
     const isLate = entry?.when.kind === 'once' && entry.nextMs - now < MIN_LEAD_MS;
     if (entry && (wanted.has(identifier) || isLate)) {
       kept.add(identifier);
@@ -312,12 +369,12 @@ async function reconcile(
   const missing = upcoming.filter((entry) => !kept.has(entry.identifier));
   if (missing.length === 0) return { ok: true, scheduled: kept.size };
   if (!(await ensurePermission(notifications))) return { ok: false, reason: 'PERMISSION_DENIED' };
-  await ensureAndroidChannel(notifications);
+  await ensureAndroidSetup(notifications);
   for (const entry of missing) {
     await notifications.scheduleNotificationAsync({
       identifier: entry.identifier,
       content: { title: entry.title, body: entry.body, sound: 'default', data: { id: entry.id } },
-      trigger: toTrigger(notifications, entry.when),
+      trigger: toTrigger(notifications, entry.when, now, exact),
     });
   }
   return { ok: true, scheduled: kept.size + missing.length };
@@ -432,10 +489,11 @@ export function useScheduledNotifications(
 }
 
 /**
- * Mount once, in the signed-in layout. While the user is signed in, a scheduled notification that
- * comes due with the app open is shown as an in-app alert, the same way open-app push messages are:
- * expo-notifications doesn't present it then, and on iOS Firebase Messaging owns foreground
- * presentation, so no notification handler is set. Signing out cancels every group's notifications.
+ * Mount once, in the signed-in layout. While the user is signed in, a notification from this module
+ * that comes due with the app open shows like any other: on Android as a banner (its handler is in
+ * place from the start of the session), and on iOS as an in-app alert, the same way open-app push
+ * messages are, because Firebase Messaging owns foreground presentation there. Signing out cancels
+ * every group's notifications.
  */
 export function useScheduledNotificationSession(isSignedIn: boolean): void {
   const wasSignedIn = useRef(isSignedIn);
@@ -446,10 +504,15 @@ export function useScheduledNotificationSession(isSignedIn: boolean): void {
   }, [isSignedIn]);
 
   useEffect(() => {
-    if (!isSignedIn) return undefined;
+    const notifications = isSignedIn ? loadNotifications() : null;
+    if (!notifications) return undefined;
+    if (Platform.OS === 'android') {
+      ensureAndroidSetup(notifications).catch(() => undefined);
+      return undefined;
+    }
     let subscription: { remove: () => void } | undefined;
     try {
-      subscription = loadNotifications()?.addNotificationReceivedListener(({ request }) => {
+      subscription = notifications.addNotificationReceivedListener(({ request }) => {
         if (request.identifier.startsWith(IDENTIFIER_PREFIX)) {
           Alert.alert(request.content.title ?? 'Notification', request.content.body ?? undefined);
         }
@@ -511,7 +574,8 @@ npx --no-install tsc --noEmit
 
 Execute the shared compatibility contract's Step 4 after type-checking. Recheck
 the lazy load, every export, one-off and repeating times, group isolation, the
-cap, the layout call, and each owner screen's call. Type-check success alone is
+cap, the Android handler and timing adjustment, the layout call, and each owner
+screen's call. Type-check success alone is
 insufficient; do not fix screen/generated files. Only after the requested
 artifact contract and TypeScript both pass, return the shared compatibility
 result and actual created/updated/reused paths before reporting:
@@ -523,7 +587,7 @@ Wrapper                 : src/native/scheduledNotifications.ts (Android channel 
 Mounted in              : app/(app)/_layout.tsx (session); <owner screen> (<group>) for each source
 Sources                 : <group>: <what> at <when>, titled <title>
 Native config           : not changed
-Limits                  : a device schedules after it loads each source; Android may deliver one-off notifications late; 48 soonest pending
+Limits                  : a device schedules after it loads each source; Android delivers within the hour before each time (exact once the base has an exact-alarm permission); 48 soonest pending
 Wrap note               : keep the Notifications permission selected in the wrap wizard
 ```
 
