@@ -26,6 +26,11 @@
 
 const fs = require('fs');
 const path = require('path');
+const {
+  NONCONFIGURATION_CATEGORIES,
+  SDM_ONLY_CATEGORIES,
+  getCategoryMetadata,
+} = require('./lib/edm-table-classification');
 
 function parseArgs(argv) {
   const out = {};
@@ -81,20 +86,6 @@ const VALUE_FIELDS = {
   siteSettings: 'value',
 };
 
-// Categories that don't appear in `pac pages download --modelVersion 2` output.
-// Their records still exist as `powerpagecomponent` rows in Dataverse on EDM,
-// but the EDM YAML format doesn't surface them as standalone files. So a clean
-// SDM→EDM migration legitimately shows "SDM has N, EDM has 0" for these
-// categories — they should NOT be classified as `fail`. Surface as `warn`
-// instead so the user sees it without panicking.
-//
-// Identified empirically from real migration test sessions. Add to this list
-// as additional categories are confirmed to follow the same pattern.
-const SDM_ONLY_CATEGORIES = new Set([
-  'tags',
-  'websiteBindings',
-]);
-
 function makeKey(rec, fields) {
   return fields.map((f) => String(rec[f] ?? '')).join('|');
 }
@@ -108,6 +99,23 @@ function normalizeStateCode(v) {
 }
 
 function diffCategory(category, sdmInventory, edmInventory) {
+  if (NONCONFIGURATION_CATEGORIES.has(category)) {
+    const metadata = getCategoryMetadata(category);
+    return {
+      status: 'excluded',
+      scope: 'nonconfiguration',
+      reason: metadata.reason,
+      sdmCount: sdmInventory.length,
+      edmCount: edmInventory.length,
+      missingInEdm: [],
+      extraInEdm: [],
+      stateChanged: [],
+      contentChanged: [],
+      valueChanged: [],
+      sdmOnlyCategory: false,
+    };
+  }
+
   const keyFields = KEY_FIELDS[category] || ['name'];
   const valueField = VALUE_FIELDS[category];
 
@@ -172,6 +180,7 @@ function diffCategory(category, sdmInventory, edmInventory) {
 
   return {
     status,
+    scope: SDM_ONLY_CATEGORIES.has(category) ? 'sdm-only-download' : 'metadata',
     sdmCount,
     edmCount,
     missingInEdm,
@@ -186,6 +195,7 @@ function diffCategory(category, sdmInventory, edmInventory) {
 function summarize(diff) {
   let totalSdm = 0, totalEdm = 0, totalMissing = 0, totalExtra = 0, totalStateChanged = 0, totalContentChanged = 0, totalValueChanged = 0;
   for (const c of Object.values(diff.categories)) {
+    if (c.status === 'excluded') continue;
     totalSdm += c.sdmCount;
     totalEdm += c.edmCount;
     totalMissing += c.missingInEdm.length;
@@ -205,6 +215,7 @@ function describeRecord(rec, keyFields) {
 function statusGlyph(status) {
   if (status === 'pass') return '✓';
   if (status === 'warn') return '⚠';
+  if (status === 'excluded') return '–';
   return '✗';
 }
 
@@ -262,10 +273,16 @@ function main() {
   for (const [cat, c] of Object.entries(diff.categories)) {
     if (c.sdmCount === 0 && c.edmCount === 0) continue;
     const notes = [];
+    if (c.status === 'excluded') {
+      notes.push(c.reason);
+    }
     // SDM-only categories: when the whole category is "missing", phrase it as
     // an expected-format-difference instead of a failure.
     const isSdmOnlyDifference = c.sdmOnlyCategory && c.edmCount === 0 && c.sdmCount > 0 && c.extraInEdm.length === 0;
-    if (isSdmOnlyDifference) {
+    if (c.status === 'excluded') {
+      // Excluded nonconfiguration categories are intentionally outside the
+      // metadata diff; retain their counts for auditability but not totals.
+    } else if (isSdmOnlyDifference) {
       notes.push(`SDM-only category (not in EDM YAML format; records still in Dataverse)`);
     } else {
       if (c.missingInEdm.length) notes.push(`${c.missingInEdm.length} missing in EDM`);

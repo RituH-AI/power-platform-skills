@@ -160,7 +160,7 @@ The skill-level approval prompt that follows (via AskUserQuestion) is for the **
 4. **Inform About Requirements** (user must verify manually):
    - Role: System Administrator, Dynamics 365 Admin, or Power Platform Admin
    - Dataverse base portal package: 9.3.2307.x+
-   - Power Pages Core package: 1.0.2309.63+
+   - Power Pages Core package: 1.1.2602.230+
    - Environment mode: If admin mode, background operations must be enabled (warning only)
 
 **Output**: PAC CLI installed/verified, authenticated to correct environment
@@ -483,7 +483,7 @@ The skill-level approval prompt that follows (via AskUserQuestion) is for the **
 
    Search the output for:
    - `CDSBasePortal` — Dataverse base portal package (required: **9.3.2307.x+**)
-   - `PowerPages_Core` — Power Pages Core package (required: **1.0.2309.63+**)
+   - `PowerPages_Core` — Power Pages Core package (required: **1.1.2602.230+**)
 
    Capture both the **installed version** (or `not found`) and present them to the user.
 
@@ -525,7 +525,7 @@ The skill-level approval prompt that follows (via AskUserQuestion) is for the **
 
    | Question | Header | Options |
    |----------|--------|---------|
-   | Unable to verify packages automatically. Can you confirm both Dataverse base portal package (9.3.2307.x+) and Power Pages Core (1.0.2309.63+) are installed? | Deps Confirmed | Yes, confirmed, Not sure — help me check |
+   | Unable to verify packages automatically. Can you confirm both Dataverse base portal package (9.3.2307.x+) and Power Pages Core (1.1.2602.230+) are installed? | Deps Confirmed | Yes, confirmed, Not sure — help me check |
 
    - If "Not sure": guide user to Power Platform admin center → Resources → Dynamics 365 apps to verify package versions.
    - If "Yes": proceed to step 1.6.
@@ -1253,6 +1253,8 @@ Phase 3 has **two different shapes** depending on the migration track. The Autho
    - **pass** — same identity set, no differences
    - **warn** — identity match but some records changed statecode/value, OR an SDM-only category (e.g., `tags`, `websiteBindings`) shows 0 records in EDM (expected — EDM YAML format doesn't surface those; records still in `powerpagecomponent`)
    - **fail** — records actually missing/extra (excluding SDM-only categories)
+
+   **Nonconfiguration feature handling:** The Microsoft EDM documentation defines Ad, Poll, Poll Option, Poll Submission, External Identity, Portal comment, Invitation, Invitation Redemption, Setting, and WebFormSession as nonconfiguration tables. These categories are outside the SDM↔EDM metadata comparison and do not affect the diff status or migration totals. File-backed categories remain in the raw snapshots for audit evidence, while the live report lists the complete documented set and distinguishes detected data from categories not represented by the site download. `pollPlacements` remains in the metadata comparison because it is virtual configuration represented by the EDM component model; a missing placement is still a migration finding.
 
 4. **Surface the diff and gate refs migration**
 

@@ -22,6 +22,11 @@ const {
   APPROVAL_KIND,
   PROMPT_STATUS,
 } = require('./migration-state-schema');
+const {
+  NONCONFIGURATION_TABLES,
+  isReportExcludedCategory,
+  getCategoryMetadata,
+} = require('./edm-table-classification');
 
 // ── HTML escaping ──────────────────────────────────────────────────────────
 
@@ -237,25 +242,31 @@ ${renderSiteRow('Output directory', s.outputDir, true)}
 // completeness but excluded from the live report's Overview totals and the
 // Pages & Components groups so users don't see misleading "missing record"
 // flags for content that legitimately doesn't migrate.
-const NON_METADATA_CATEGORIES = new Set([
-  'polls',
-  'pollPlacements',
-  'ads',
-  'adPlacements',
-  'forums',
-  'blogs',
-  'ideas',
-  'websiteBindings',
-]);
-
 function sumMetadataCounts(counts) {
   if (!counts) return 0;
   let total = 0;
   for (const [cat, n] of Object.entries(counts)) {
-    if (NON_METADATA_CATEGORIES.has(cat)) continue;
+    if (isReportExcludedCategory(cat)) continue;
     total += n || 0;
   }
   return total;
+}
+
+function renderFeatureCompatibility(sdmSnapshot) {
+  const counts = (sdmSnapshot && sdmSnapshot.counts) || {};
+  const rows = NONCONFIGURATION_TABLES.map(({ category, label, table }) => {
+    const count = counts[category] || 0;
+    const metadata = getCategoryMetadata(category);
+    const status = count > 0
+      ? `${count} detected in the SDM snapshot`
+      : 'not detected in the downloaded site source';
+    return `<li><strong>${escapeHtml(label)} (${escapeHtml(table)}):</strong> ${status}. ${escapeHtml(metadata.reason)} Runtime compatibility should be validated separately after activation.</li>`;
+  });
+  return `<div class="card warning-card">
+  <div class="card-title">Feature compatibility</div>
+  <div class="empty-body">The enhanced data model documentation defines the following as nonconfiguration tables. They are outside the SDM to EDM metadata comparison. Detected file-backed categories remain in the raw snapshot evidence; categories not represented by the site download are shown for completeness and are not treated as absent Dataverse data.</div>
+  <ul class="bullet-list">${rows.join('')}</ul>
+</div>`;
 }
 
 function renderConfidenceStat(sdmSnapshot, edmSnapshot) {
@@ -377,6 +388,8 @@ ${renderSiteCard(state)}
 
 ${renderConfidenceStat(snapshots.sdmSnapshot, snapshots.edmSnapshot)}
 
+${renderFeatureCompatibility(snapshots.sdmSnapshot)}
+
 ${renderApprovalBanner(state)}
 </div>`;
 }
@@ -485,10 +498,10 @@ function renderPagesComponentsSection({ sdmSnapshot, edmSnapshot }) {
   // so the grouped view stays focused on what's actually migrating.
   const allCats = new Set();
   for (const k of Object.keys(sdmCounts)) {
-    if (sdmCounts[k] > 0 && !NON_METADATA_CATEGORIES.has(k)) allCats.add(k);
+    if (sdmCounts[k] > 0 && !isReportExcludedCategory(k)) allCats.add(k);
   }
   for (const k of Object.keys(edmCounts)) {
-    if (edmCounts[k] > 0 && !NON_METADATA_CATEGORIES.has(k)) allCats.add(k);
+    if (edmCounts[k] > 0 && !isReportExcludedCategory(k)) allCats.add(k);
   }
   const categories = [...allCats].sort();
 
