@@ -121,7 +121,8 @@ function findProjectRoot(dir) {
   let current = path.resolve(dir);
   while (true) {
     if (fs.existsSync(path.join(current, 'powerpages.config.json')) ||
-        fs.existsSync(path.join(current, '.powerpages-site'))) {
+        fs.existsSync(path.join(current, '.powerpages-site')) ||
+        isNonSpaSiteRoot(current)) {
       return current;
     }
 
@@ -136,7 +137,35 @@ function findProjectRoot(dir) {
   const fallbackConfigPath = findPath(dir, 'powerpages.config.json');
   if (fallbackConfigPath) return path.dirname(fallbackConfigPath);
   const fallbackSiteDir = findPath(dir, '.powerpages-site');
-  return fallbackSiteDir ? path.dirname(fallbackSiteDir) : null;
+  if (fallbackSiteDir) return path.dirname(fallbackSiteDir);
+  const fallbackPortalConfig = findPath(dir, '.portalconfig');
+  if (fallbackPortalConfig) {
+    const candidate = path.dirname(fallbackPortalConfig);
+    if (isNonSpaSiteRoot(candidate)) return candidate;
+  }
+  return null;
+}
+
+function isNonSpaSiteRoot(dir) {
+  return fs.existsSync(path.join(dir, '.portalconfig')) &&
+    fs.existsSync(path.join(dir, 'website.yml'));
+}
+
+function resolvePowerPagesSiteRoot(projectRoot) {
+  if (!projectRoot) return null;
+  const resolvedProjectRoot = path.resolve(projectRoot);
+  const nested = path.join(resolvedProjectRoot, '.powerpages-site');
+  const nestedHasSiteMarkers = fs.existsSync(path.join(nested, '.portalconfig')) ||
+    fs.existsSync(path.join(nested, 'website.yml'));
+  if (nestedHasSiteMarkers || (
+    fs.existsSync(path.join(resolvedProjectRoot, 'powerpages.config.json')) &&
+    fs.existsSync(nested)
+  )) {
+    return nested;
+  }
+  if (isNonSpaSiteRoot(resolvedProjectRoot)) return resolvedProjectRoot;
+  if (fs.existsSync(nested)) return nested;
+  return null;
 }
 
 /**
@@ -560,6 +589,8 @@ module.exports = {
   readDeferralMarker,
   findPath,
   findProjectRoot,
+  isNonSpaSiteRoot,
+  resolvePowerPagesSiteRoot,
   findPowerPagesSiteDir,
   UUID_REGEX,
   validateDataverseEnvironmentUrl,

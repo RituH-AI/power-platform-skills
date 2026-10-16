@@ -25,7 +25,7 @@ telemetry for this plugin. Default to `status` when no argument is given.
   is signed in.
   Power Pages can also include the signed-in user's Entra object ID as
   `eventInfo.aadObjectId` when PAC exposes it, and the SPA framework of the
-  Power Pages code site being worked in (`react`, `vue`, `angular`, or `astro`)
+  Power Pages SPA site being worked in (`react`, `vue`, `angular`, or `astro`)
   as `eventInfo.framework`. The framework name describes the scaffold only —
   it is never a site name or path.
   Power Pages also records approved create-site/localization choices, canonical
@@ -34,6 +34,16 @@ telemetry for this plugin. Default to `status` when no argument is given.
   When plugin telemetry is enabled, the local diagnostic mirror retains the same
   event fields even when transmission is off.
   A plugin whose committed telemetry config has `disabled: true` writes no mirror.
+- Power Pages non-SPA creation records `template_used` and
+  `non_spa_creation_success`/`non_spa_creation_failure` using one creation
+  `correlationId`, public catalog `eventInfo.templateId`, `eventInfo.templateKind`
+  (`non-spa`), optional already-known `eventInfo.audience` (`internal`/`external`),
+  and a fixed failure category. Success is a validated, committed downloaded baseline,
+  before optional customization. Private correlation receipts under the config
+  directory's `telemetry/power-pages/non-spa-creations/` retain selected catalog
+  revision/common context and outcome markers even when transmission is off.
+  Old receipts are pruned best-effort after 14 days on a later selection; hard-off
+  writes none. No additional question, catalog fetch, or per-poll event is needed.
 - Events do not include file paths, prompts, tool inputs, site names, Dataverse
   URLs, credentials, usernames, hostnames, free-text requirements, private-use
   locale subtags, evidence URLs, or raw errors.

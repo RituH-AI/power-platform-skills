@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 
-// Updates skill usage tracking site settings for Power Pages code sites.
+// Updates skill usage tracking site settings for Power Pages SPA or non-SPA sites.
 // Creates/increments a per-skill counter and records the authoring tool.
 // Self-contained — no external dependencies required.
 //
 // Usage:
 //   node update-skill-tracking.js --projectRoot <path> --skillName <PascalCase> --authoringTool <value>
 //
-// Exits silently (code 0) if .powerpages-site/site-settings/ does not exist.
+// Exits silently (code 0) if the resolved site-settings directory does not exist.
 
 const fs = require('fs');
 const path = require('path');
 const generateUuid = require('./generate-uuid');
 const { loadSiteSettings, SITE_SETTING_FILE_SUFFIX } = require('./lib/powerpages-config');
+const { resolvePowerPagesSiteRoot } = require('./lib/validation-helpers');
 
 // --- CLI arg parsing ---
 
@@ -44,9 +45,10 @@ const normalizedAuthoringTool = normalizeAuthoringTool(authoringTool);
 
 // --- Check for site-settings directory ---
 
-const siteSettingsDir = path.join(projectRoot, '.powerpages-site', 'site-settings');
-if (!fs.existsSync(siteSettingsDir)) {
-  // Site has not been deployed yet — nothing to do
+const siteRoot = resolvePowerPagesSiteRoot(projectRoot);
+const siteSettingsDir = siteRoot && path.join(siteRoot, 'site-settings');
+if (!siteSettingsDir || !fs.existsSync(siteSettingsDir)) {
+  // Site metadata is not available yet — nothing to do
   process.exit(0);
 }
 

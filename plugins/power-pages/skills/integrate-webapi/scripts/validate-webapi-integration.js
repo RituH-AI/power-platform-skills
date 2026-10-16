@@ -1,17 +1,33 @@
 #!/usr/bin/env node
 
-// Validates that Web API integration code was created for a Power Pages code site.
+// Validates Web API integration for Power Pages SPA and non-SPA sites.
 // Runs as a PostToolUse(Skill) hook to verify the skill produced output.
 
 const fs = require('fs');
 const path = require('path');
-const { approve, block, runValidation, findProjectRoot } = require('../../../scripts/lib/validation-helpers');
+const {
+  approve,
+  block,
+  runValidation,
+  findProjectRoot,
+  resolvePowerPagesSiteRoot,
+} = require('../../../scripts/lib/validation-helpers');
 const { validatePowerPagesSchema } = require('../../../scripts/lib/powerpages-schema-validator');
 
 runValidation((cwd) => {
   const projectRoot = findProjectRoot(cwd);
   if (!projectRoot) approve(); // Not a Power Pages project, skip
 
+  if (!fs.existsSync(path.join(projectRoot, 'powerpages.config.json'))) {
+    validateNonSpaIntegration(projectRoot);
+    approve();
+  }
+
+  validateSpaIntegration(projectRoot);
+  approve();
+});
+
+function validateSpaIntegration(projectRoot) {
   // Check if any Web API integration files exist — if none, this wasn't an integration session
   const apiClientExists = findApiClient(projectRoot);
   const serviceFiles = findServiceFiles(projectRoot);
@@ -40,6 +56,38 @@ runValidation((cwd) => {
     errors.push('No type definition files found in src/types/ — services should have corresponding type definitions');
   }
 
+  addSchemaErrors(projectRoot, errors);
+
+  if (errors.length > 0) {
+    block('Web API integration validation failed:\n- ' + errors.join('\n- '));
+  }
+}
+
+function validateNonSpaIntegration(projectRoot) {
+  const siteRoot = resolvePowerPagesSiteRoot(projectRoot);
+  if (!siteRoot) return;
+
+  const apiFiles = findNonSpaApiFiles(siteRoot);
+  if (apiFiles.length === 0) return;
+
+  const errors = [];
+  for (const filePath of apiFiles) {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const hasSupportedTokenPattern = content.includes('webapi.safeAjax')
+      || content.includes('shell.getTokenDeferred')
+      || content.includes('__RequestVerificationToken');
+    if (!hasSupportedTokenPattern) {
+      errors.push(`${path.relative(siteRoot, filePath)}: /_api/ call is missing a supported anti-forgery token pattern`);
+    }
+  }
+
+  addSchemaErrors(projectRoot, errors);
+  if (errors.length > 0) {
+    block('Non-SPA Web API integration validation failed:\n- ' + errors.join('\n- '));
+  }
+}
+
+function addSchemaErrors(projectRoot, errors) {
   const schemaValidation = validatePowerPagesSchema(projectRoot);
   const schemaErrors = schemaValidation.findings
     .filter(finding => finding.severity === 'error')
@@ -48,13 +96,33 @@ runValidation((cwd) => {
   if (schemaErrors.length > 0) {
     errors.push('Invalid Power Pages permissions/site-settings schema:\n  - ' + schemaErrors.join('\n  - '));
   }
+}
 
-  if (errors.length > 0) {
-    block('Web API integration validation failed:\n- ' + errors.join('\n- '));
+function findNonSpaApiFiles(siteRoot) {
+  const roots = ['web-files', 'web-pages', 'web-templates']
+    .map(relativePath => path.join(siteRoot, relativePath))
+    .filter(candidate => fs.existsSync(candidate));
+  const files = [];
+
+  for (const root of roots) {
+    walkTextFiles(root, files);
   }
 
-  approve();
-});
+  return files.filter(filePath => fs.readFileSync(filePath, 'utf8').includes('/_api/'));
+}
+
+function walkTextFiles(dirPath, files) {
+  for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+    const entryPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      walkTextFiles(entryPath, files);
+      continue;
+    }
+    if (entry.isFile() && /\.(?:js|html?)$/i.test(entry.name)) {
+      files.push(entryPath);
+    }
+  }
+}
 
 function findApiClient(projectRoot) {
   const candidates = [

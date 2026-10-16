@@ -33,9 +33,6 @@ function previewImageUrl(input, index, outputDir) {
   try {
     sourcePath = input.startsWith('file://') ? fileURLToPath(input) : path.resolve(input);
   } catch {
-    // A manifest or test fixture can contain a file URL that is not valid for the
-    // current OS, e.g. `file:///tmp/a.png` when running on Windows. Leave it as-is
-    // instead of failing the render; valid local file URLs are still copied below.
     return input;
   }
   if (!fs.existsSync(sourcePath)) return input;
@@ -62,9 +59,7 @@ function previewImageUrl(input, index, outputDir) {
   const destPath = path.join(previewsDir, destName);
   fs.mkdirSync(previewsDir, { recursive: true });
   // The status page is served over localhost so it can poll status.json. Browsers
-  // do not reliably load file:// or absolute filesystem image paths from that
-  // HTTP origin, so copy local preview assets beside the page and reference them
-  // by relative URL instead.
+  // cannot reliably load file URLs or absolute paths from that HTTP origin.
   fs.copyFileSync(sourcePath, destPath);
   return `preview-images/${destName}`;
 }
@@ -76,8 +71,82 @@ function localizePreviewImages(previewImages, outputPath) {
     .filter(Boolean);
 }
 
-function jsonForScript(value) {
-  return JSON.stringify(value).replace(/</g, '\\u003c');
+function toDataUrl(filePath) {
+  return `data:image/png;base64,${fs.readFileSync(filePath).toString('base64')}`;
+}
+
+function buildModel({ templateName, statusPath, outputPath, previewImages, solutionCount }) {
+  const statusUrl = path.dirname(path.resolve(statusPath)) === path.dirname(path.resolve(outputPath))
+    ? path.basename(statusPath)
+    : pathToFileURL(path.resolve(statusPath)).href;
+  const previews = localizePreviewImages(previewImages, outputPath).map((url, index) => ({
+    name: `preview-${index + 1}`,
+    displayName: `Preview ${index + 1}`,
+    desktop: url,
+    mobile: url,
+  }));
+  const pluralSolutions = solutionCount > 1;
+  const pluginRoot = path.resolve(__dirname, '..');
+
+  return {
+    brandIcon: toDataUrl(
+      path.join(pluginRoot, 'skills', 'create-site', 'assets', 'shared', 'power-pages-icon.png'),
+    ),
+    presentation: {
+      notice: 'This SPA template is being installed, built, uploaded, and activated. Review the live-site link when setup completes.',
+      templateEyebrow: 'Your selected SPA template',
+      siteEyebrow: 'Creating your SPA site',
+      templateCategory: 'SPA',
+      statusBadge: 'Live creation status',
+      refreshNote: 'This page updates automatically as Power Pages installs, creates, seeds, and activates the SPA template.',
+    },
+    template: {
+      name: templateName,
+      displayName: templateName,
+      description: 'A packaged Power Pages SPA template with local source and cloud provisioning.',
+      capabilities: [
+        pluralSolutions ? 'Supporting solutions included' : 'Supporting solution included',
+        'Local SPA source',
+        'Power Pages code-site upload',
+      ],
+      requirements: [],
+      warning: '',
+      previews,
+      catalog: {},
+    },
+    site: {
+      name: templateName,
+      url: '',
+      language: { source: '', name: '', code: '', lcid: '' },
+      websiteRecordId: '',
+      modelVersion: 'SPA',
+    },
+    status: {
+      key: 'solution',
+      step: 0,
+      chip: 'Installing',
+      title: 'Installing template dependencies',
+      message: pluralSolutions ? 'Installing supporting solutions.' : 'Installing the supporting solution.',
+      activityState: 'working',
+      terminal: false,
+      result: null,
+      error: false,
+      openWebsiteUrl: null,
+      footer: null,
+      notification: null,
+    },
+    timeline: [
+      [pluralSolutions ? 'Install supporting solutions' : 'Install supporting solution', 'Preparing Dataverse dependencies'],
+      ['Create SPA site', 'Cloning, building, and uploading the packaged code site'],
+      ['Apply seed data', 'Adding optional template records'],
+      ['Activate site', 'Publishing the site address'],
+    ],
+    refresh: false,
+    statusFeed: {
+      url: statusUrl,
+      intervalMs: 1500,
+    },
+  };
 }
 
 function renderTemplateImportStatus({
@@ -94,31 +163,23 @@ function renderTemplateImportStatus({
   if (!Number.isSafeInteger(solutionCount) || solutionCount < 1) {
     throw new Error('solutionCount must be a positive integer');
   }
-  const pluralSolutions = solutionCount > 1;
-  const templatePath = path.join(__dirname, '..', 'skills', 'create-site', 'assets', 'template-import-status.html');
-  const statusUrl = path.dirname(path.resolve(statusPath)) === path.dirname(path.resolve(outputPath))
-    ? path.basename(statusPath)
-    : pathToFileURL(path.resolve(statusPath)).href;
+  const templatePath = path.join(
+    __dirname,
+    '..',
+    'skills',
+    'create-site',
+    'assets',
+    'non-spa-creation-status-template.html',
+  );
   renderTemplate({
     templatePath,
     outputPath,
     dataObject: {
-      TEMPLATE_NAME: templateName,
-      STATUS_URL: statusUrl,
-      PREVIEW_IMAGES: localizePreviewImages(previewImages, outputPath),
-      SOLUTION_INSTALLING_LABEL: pluralSolutions ? 'Installing solutions' : 'Installing solution',
-      SOLUTION_INSTALLED_LABEL: pluralSolutions ? 'Solutions installed' : 'Solution installed',
-      SOLUTION_NOUN: pluralSolutions ? 'solutions' : 'solution',
+      MODEL: buildModel({ templateName, statusPath, outputPath, previewImages, solutionCount }),
     },
-    requiredKeys: [
-      'TEMPLATE_NAME',
-      'STATUS_URL',
-      'PREVIEW_IMAGES',
-      'SOLUTION_INSTALLING_LABEL',
-      'SOLUTION_INSTALLED_LABEL',
-      'SOLUTION_NOUN',
-    ],
+    requiredKeys: ['MODEL'],
     emitStatus: false,
+    copyIcon: false,
   });
   if (open) {
     try {
@@ -139,4 +200,9 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { jsonForScript, localizePreviewImages, parseArgs, renderTemplateImportStatus };
+module.exports = {
+  buildModel,
+  localizePreviewImages,
+  parseArgs,
+  renderTemplateImportStatus,
+};
