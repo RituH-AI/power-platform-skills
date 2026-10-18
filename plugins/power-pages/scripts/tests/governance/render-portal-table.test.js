@@ -3,6 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const scriptsDir = path.join(
   __dirname,
@@ -114,7 +115,7 @@ test('empty portal list still renders header + borders', () => {
   assert.strictEqual(out.split('\n').length, 4, 'top border + header + separator + bottom border');
 });
 
-// --- render-portal-table.js Unicode box mode (governance STATUS format) ---
+// --- render-portal-table.js optional terminal Unicode box mode ---
 
 test('unicode mode emits box-drawing frame with a rule between every row', () => {
   const out = renderPortalTable(
@@ -189,4 +190,38 @@ test('renderPortalTableMarkdown --no-icons drops the emoji', () => {
 test('renderPortalTableMarkdown escapes a literal pipe in a cell', () => {
   const out = renderPortalTableMarkdown([{ name: 'A|B', url: 'https://x', portalId: 'p1', state: true }]);
   assert.match(out, /\| A\\\|B \|/, 'a literal pipe is backslash-escaped');
+});
+
+test('Markdown rows flatten line separators without losing cells or long IDs', () => {
+  const out = renderPortalTableMarkdown([{
+    name: 'A|B\rC\nD\r\nE\u2028F\u2029G',
+    url: `https://${'long-site-'.repeat(8)}.example.com`,
+    portalId: '11111111-2222-3333-4444-555555555555',
+    state: false,
+  }]);
+  const lines = out.split('\n');
+  assert.equal(lines.length, 3);
+  assert.match(lines[2], /\| A\\\|B C D E F G \|/);
+  assert.ok(lines[2].includes('11111111-2222-3333-4444-555555555555'));
+  assert.ok(lines[2].endsWith('| 🔴 Disabled |'));
+});
+
+test('Markdown CLI preserves every status row without fences, boxes, or forced ANSI', () => {
+  const input = Array.from({ length: 13 }, (_, index) => ({
+    name: `Test site ${index + 1}`,
+    url: `https://site-${index + 1}.example.com`,
+    portalId: `site-id-${index + 1}`,
+    state: index % 2 === 0,
+  }));
+  const result = spawnSync(process.execPath, [
+    path.join(scriptsDir, 'render-portal-table.js'), '--markdown', '--no-color',
+  ], {
+    input: JSON.stringify({ portals: input }),
+    encoding: 'utf8',
+    env: { ...process.env, FORCE_COLOR: '1' },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trimEnd(), renderPortalTableMarkdown(input));
+  assert.equal(result.stdout.trimEnd().split('\n').length, 15);
+  assert.ok(!/[\u001b┌│]|```/.test(result.stdout));
 });

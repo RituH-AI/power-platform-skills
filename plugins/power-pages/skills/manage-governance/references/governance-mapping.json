@@ -234,7 +234,7 @@
         "message": "Disabling this turns off all external (social / federated) identity providers on the affected sites; users who sign in through them will be signed out until it's re-enabled."
       },
       "cascadeOnDisable": {
-        "heading": "Below Setting will get Disable",
+        "heading": "Disabling external authentication providers will disable these sign-in methods:",
         "items": [
           "Authentication Using OpenID Connect (OIDC) Protocol",
           "Authentication Using SAML 2.0 Protocol",
@@ -249,7 +249,7 @@
         ]
       },
       "cascadeOnEnable": {
-        "heading": "Below authentication Protocol/IDPs become available:",
+        "heading": "Enabling external authentication providers makes these sign-in methods available:",
         "items": [
           "Authentication Using OpenID Connect (OIDC) Protocol",
           "Authentication Using SAML 2.0 Protocol",
@@ -547,10 +547,10 @@
   ],
 
   "effectLineTemplates": [
-    { "intentDirection": "enable",  "scope": "all",      "template": "{Subject} will be enabled on all portals in {EnvDisplay}." },
-    { "intentDirection": "enable",  "scope": "specific", "template": "{Subject} will be enabled on the listed portals in {EnvDisplay}: {SiteNameList}." },
-    { "intentDirection": "disable", "scope": "all",      "template": "{Subject} will be disabled on all portals in {EnvDisplay}." },
-    { "intentDirection": "disable", "scope": "specific", "template": "{Subject} will be disabled on the listed portals in {EnvDisplay}: {SiteNameList}." }
+    { "intentDirection": "enable",  "scope": "all",      "template": "{Subject} will be enabled on all sites in {EnvDisplay}." },
+    { "intentDirection": "enable",  "scope": "specific", "template": "{Subject} will be enabled on the listed sites in {EnvDisplay}: {SiteNameList}." },
+    { "intentDirection": "disable", "scope": "all",      "template": "{Subject} will be disabled on all sites in {EnvDisplay}." },
+    { "intentDirection": "disable", "scope": "specific", "template": "{Subject} will be disabled on the listed sites in {EnvDisplay}: {SiteNameList}." }
   ],
 
   "scopePicker": [

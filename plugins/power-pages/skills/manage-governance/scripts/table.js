@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-// table.js — Shared fixed-width table-drawing primitives used by the render-*
+// table.js — Shared fixed-width and Markdown table primitives used by the render-*
 // scripts (render-env-table.js, render-portal-table.js). These two helpers were
 // previously copy-pasted verbatim into each renderer; keeping one definition
 // avoids the two drifting apart (a padding/border off-by-one in one but not the
 // other would silently misalign only some tables).
 //
-// Both helpers assume the cell text is ASCII / single-width. ANSI color escapes
+// The fixed-width helpers assume ASCII / single-width cells. ANSI color escapes
 // are zero-width, so callers must compute widths on the *visible* (uncolored)
 // text and apply color AFTER padding — see render-portal-table.js.
 
@@ -28,4 +28,21 @@ function border(widths, left, mid, right, fill) {
   return left + widths.map((w) => f.repeat(w + 2)).join(mid) + right;
 }
 
-module.exports = { pad, border };
+// GFM rows cannot span physical lines, and a literal pipe starts another
+// column. For example, "A|B\r\nPreview" must become "A\\|B Preview".
+function markdownCell(value) {
+  return String(value == null ? '' : value)
+    .replace(/\r\n|[\r\n\u2028\u2029]/g, ' ')
+    .replace(/\|/g, '\\|');
+}
+
+function renderMarkdownTable(headers, rows) {
+  const row = (cells) => '| ' + cells.map(markdownCell).join(' | ') + ' |';
+  return [
+    row(headers),
+    row(headers.map(() => '---')),
+    ...rows.map(row),
+  ].join('\n');
+}
+
+module.exports = { pad, border, renderMarkdownTable };

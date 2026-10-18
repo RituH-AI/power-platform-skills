@@ -33,6 +33,7 @@ const {
 } = require('../../../scripts/lib/power-platform-api');
 const { SUPPORTED_POLICIES, assertPolicy, classifyStatus, toWritePolicyValue, normalizeEnvValue } = require('./policies');
 const { callGovernance } = require('./governance-transport');
+const { resolveGovernanceContext } = require('./governance-context');
 
 const DEFAULT_TIMEOUT_MIN = 15;
 const POLL_INTERVAL_MS = 30_000;
@@ -57,6 +58,21 @@ function describeFetchError(r) {
   }
   if (code) return code;
   return 'status endpoint returned an unparseable response';
+}
+
+function failOnAuthError(response, operation) {
+  if (response.error?.code === 'ContextError') {
+    fail(`${operation}: ${describeFetchError(response)}`, 2);
+  }
+  // Authentication/authorization failures cannot be fixed by the poll delay.
+  // Exit here so neither state-based recovery nor a stale final status can
+  // overwrite them. HTTP semantics: https://www.rfc-editor.org/rfc/rfc9110#section-15.5.2
+  if (response.statusCode === 401) {
+    fail(`${operation}: HTTP 401 - ${describeFetchError(response)}. Authentication failed; sign in again for the configured governance ring and rerun the command.`, 2);
+  }
+  if (response.statusCode === 403) {
+    fail(`${operation}: HTTP 403 - ${describeFetchError(response)}. Access denied; check the account's admin role, delegated permissions, and access policies for this environment.`, 1);
+  }
 }
 
 const HELP = `set-governance.js — Applies a governance policy and watches the roll-out.
@@ -181,6 +197,15 @@ async function main() {
     fail(`--policyValue must be one of: ${VALID_POLICY_VALUES.join(', ')}`, 1);
   }
 
+  // Context resolution can spawn the token helper. Reuse this invocation's
+  // environment-scoped context for the POST, polls, and fallback reads rather
+  // than spawning it again for each request. Expired/rejected auth stops below;
+  // this command does not silently reauthenticate or replay a governance POST.
+  const context = resolveGovernanceContext(args.envId);
+  if (context.error) {
+    fail(`Failed to resolve governance context: ${context.error}`, 2);
+  }
+
   const transportLabel = 'gateway';
   const scopeLabel = portalIds.length > 0
     ? `${portalIds.length} portal(s)`
@@ -200,32 +225,33 @@ async function main() {
     policyValueOverride ||
     (portalIds.length > 0 || removePortalIds.length > 0 ? 'Include' : 'All');
   const start = await callGovernance({
+    context,
     op: 'apply',
     envId: args.envId,
     policy: args.policy,
     portalId: portalIds[0] || null,
     body,
   });
+  failOnAuthError(start, 'POST governance failed');
+  // Existing scope is not evidence that this POST succeeded: an Include
+  // membership edit may be rejected while the environment remains Include.
+  // Never let state-based recovery override a definite HTTP error response.
+  if (start.statusCode >= 400 && start.statusCode <= 599) {
+    fail(`POST governance failed (HTTP ${start.statusCode}): ${describeFetchError(start)}`, 1);
+  }
 
-  // If the POST didn't come back with a clean 2xx, don't bail immediately —
-  // the response parsing can produce undefined statusCode for transient blips
-  // even when the gateway accepted the upsert. Verify against the ACTUAL
-  // env-level state (getEnv), NOT the status endpoint. The status endpoint
-  // reflects the LAST rollout and can report "Succeeded" from a previous apply
-  // even when THIS POST was rejected (e.g. the gateway returns
-  // "Website id cannot be null or empty" for a malformed body) — trusting it
-  // masks a real failure as success. getEnv reads the live policy value, so if
-  // the POST was rejected the env still shows the OLD scope and we fail loudly.
+  // Preserve the existing fallback for an uncertain/unexpected response.
+  // This compares only environment scope, not membership additions/removals;
+  // full uncertain-delivery verification is separate from rejecting HTTP errors.
   if (start.statusCode !== 200 && start.statusCode !== 202 && start.statusCode !== 204) {
-    if (start.error?.code === 'ContextError') {
-      fail(`POST governance failed: ${describeFetchError(start)}`, 2);
-    }
     // Live-state reality check: does the env now reflect the scope we asked for?
     const envCheck = await callGovernance({
+      context,
       op: 'getEnv',
       envId: args.envId,
       policy: args.policy,
     });
+    failOnAuthError(envCheck, 'Governance recovery read failed');
     const envValue = envCheck.ok ? normalizeEnvValue(envCheck.body) : null;
     if (envValue && envValue === requestedCanonical) {
       // POST landed (env reflects the requested scope) even though our parsing
@@ -245,10 +271,12 @@ async function main() {
   const poll = await pollUntil({
     fetchStatus: async () => {
       const r = await callGovernance({
+        context,
         op: 'getStatus',
         envId: args.envId,
         policy: args.policy,
       });
+      failOnAuthError(r, 'Governance status poll failed');
       if (!r.ok) {
         // Transient failure on the status endpoint — retry on the next tick
         // unless we've hit the consecutive-error ceiling. Reports each retry
@@ -288,10 +316,12 @@ async function main() {
   // real state has already flipped.
   if (!poll.ok) {
     const finalCheck = await callGovernance({
+      context,
       op: 'getStatus',
       envId: args.envId,
       policy: args.policy,
     });
+    failOnAuthError(finalCheck, 'Final governance status read failed');
     if (finalCheck.ok) {
       const raw = finalCheck.body;
       const value =

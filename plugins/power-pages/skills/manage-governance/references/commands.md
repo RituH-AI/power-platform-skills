@@ -39,9 +39,18 @@ calling the API.
 
 The **plain-language meaning, user shorthands, availability dependencies, and
 cascade data for each policy live in `references/governance-mapping.json`**
-(and are surfaced to the user via the SKILL.md policy table). This file
+(and are surfaced through the skill's mapping-driven prompts and renderers). This file
 deliberately does **not** re-list them — read the JSON so there is one source
 of truth rather than a third copy that can drift.
+
+`render-impact-summary.js` expands cascade items in mapping order. Items may be
+plain labels, `{ "label": "...", "note": "...", "state": "Enabled" }` entries,
+or grouped objects such as `{ "OAuth 2.0": ["Facebook", "Google"] }`. A group
+renders its label followed by all descendants, preserving notes and explicit
+states. Disable cascades mark each entry Disabled; enable cascades describe
+availability without claiming a child is enabled unless its item declares that
+state. Malformed items fail with an explicit error rather than omitting impact
+or rendering `undefined`.
 
 All policies share the **same API contract** regardless of what they govern:
 uniform governance with the canonical `policyValue` vocabulary
@@ -246,9 +255,9 @@ Backed by `pac admin list --json` via the shared `pac-bap-shim.js`.
 ### Usage
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/list-envs.js" \
+node "${PLUGIN_ROOT}/skills/manage-governance/scripts/list-envs.js" \
   [--type <Production|Sandbox|Trial|Developer|Default>] \
-  | node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/render-env-table.js" --markdown
+  | node "${PLUGIN_ROOT}/skills/manage-governance/scripts/render-env-table.js" --markdown
 ```
 
 Every invocation fetches the current environment inventory from the configured
@@ -284,7 +293,7 @@ emits a flat list.
 ### Usage
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/list-portals.js" \
+node "${PLUGIN_ROOT}/skills/manage-governance/scripts/list-portals.js" \
   [--envId <guid>]
 ```
 
@@ -344,7 +353,7 @@ state. The POST body shape (policyValue + ToBeAdded list) is built from
 ### Usage
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/set-governance.js" \
+node "${PLUGIN_ROOT}/skills/manage-governance/scripts/set-governance.js" \
   --policy <name> [--envId <guid>] \
   [--policyValue All|None|Include|Exclude] \
   [--portalIds "<id>,<id>,…"] [--portalId <guid>] \
@@ -386,6 +395,28 @@ The skill orchestrator runs this script with `run_in_background: true` so the
 polling does not block the conversation. Progress lines are written to
 `stderr` ("Applying \<policy\>...") at start and at every poll attempt.
 
+The Apply invocation resolves its environment/auth context once and shares it
+across the POST, status polls, and any fallback reads. It does not silently
+reauthenticate or automatically replay the POST.
+
+Context failures and HTTP `401` stop immediately with exit `2` (sign-in
+required). HTTP `403` stops immediately with exit `1`, retaining the upstream
+error and advising the operator to check admin roles, delegated permissions,
+and access policies. These failures never enter transient retries or get
+overridden by a later status check, including when a fallback read fails.
+
+A definite HTTP `4xx`/`5xx` POST response fails immediately, retaining the
+status and error message, without recovery reads or polling. The auth-specific
+exit codes above take precedence; other HTTP errors exit `1`. Existing scope
+cannot override a rejected write, and the POST is not automatically replayed.
+The legacy uncertain-response fallback is unchanged: it compares environment
+scope only, not membership additions/removals. Full verification of uncertain
+delivery remains separate work.
+
+Polling intentionally retains the fixed 30-second delay between completed
+nonterminal checks and tolerated transient failures. Exponential backoff and
+`Retry-After` handling remain deferred; this change does not introduce them.
+
 ---
 
 ## `get-status.js`
@@ -395,7 +426,7 @@ One-shot read of `GET /governance/status/{policy}`.
 ### Usage
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/get-status.js" \
+node "${PLUGIN_ROOT}/skills/manage-governance/scripts/get-status.js" \
   --policy <name> [--envId <guid>]
 ```
 
@@ -422,7 +453,7 @@ Reads `GET /governance/{policy}`.
 ### Usage
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/get-env.js" \
+node "${PLUGIN_ROOT}/skills/manage-governance/scripts/get-env.js" \
   --policy <name> [--envId <guid>]
 ```
 
@@ -456,7 +487,7 @@ Reads `GET /websites/{portalId}/governance/{policy}`.
 ### Usage
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/get-portal.js" \
+node "${PLUGIN_ROOT}/skills/manage-governance/scripts/get-portal.js" \
   --policy <name> --portalId <guid> [--envId <guid>]
 ```
 
@@ -498,7 +529,7 @@ That is **2 network calls per policy**, flat — vs `1 + N` for the loop.
 ### Usage
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/get-details.js" \
+node "${PLUGIN_ROOT}/skills/manage-governance/scripts/get-details.js" \
   --policy <name> [--envId <guid>]
 ```
 
@@ -578,8 +609,8 @@ a subset) as Disabled env-wide — so every eligible site was wrongly hidden.
 ### Usage
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/list-portals.js" --envId <guid> \
-  | node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/resolve-portal-availability.js" \
+node "${PLUGIN_ROOT}/skills/manage-governance/scripts/list-portals.js" --envId <guid> \
+  | node "${PLUGIN_ROOT}/skills/manage-governance/scripts/resolve-portal-availability.js" \
       --policy <childPolicy> [--envId <guid>] [--markdown] [--available-only]
 ```
 
@@ -681,7 +712,7 @@ protocol, **7** for a social IdP — all issued in parallel.
 ### Usage
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/fetch-env-status.js" \
+node "${PLUGIN_ROOT}/skills/manage-governance/scripts/fetch-env-status.js" \
   --policy <name> \
   [--envId <guid>]
 ```
@@ -719,7 +750,7 @@ this straight into it:
 - `envValue` — the **policy's own** env-level value (`All` / `None` / `Include` /
   `Exclude`) for the plain-language env summary.
 - `state` — the **effective** boolean (own AND every parent) — the value the
-  5-column Unicode status box renders.
+  5-column Markdown status table renders.
 - `headline` — the pre-computed Phase 4.3.1 headline (green when at least one
   site is effectively Enabled, red when off everywhere / zero sites).
 - `apiCalls` — `1 + policies × 2`, **all issued in parallel**.
@@ -734,9 +765,9 @@ render.
 Pipe `.portals` into the status render:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/fetch-env-status.js" \
+node "${PLUGIN_ROOT}/skills/manage-governance/scripts/fetch-env-status.js" \
   --policy "<POLICY>" --envId "<ENV_ID>" \
-  | node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/render-portal-table.js" --unicode --no-color
+  | node "${PLUGIN_ROOT}/skills/manage-governance/scripts/render-portal-table.js" --markdown --no-color
 ```
 
 Fail-closed posture: a failed `getDetails` degrades to an empty membership list;
@@ -782,8 +813,8 @@ effective state (2 calls).
 ### Usage
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/list-portals.js" --envId <guid> \
-  | node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/get-effective-status.js" \
+node "${PLUGIN_ROOT}/skills/manage-governance/scripts/list-portals.js" --envId <guid> \
+  | node "${PLUGIN_ROOT}/skills/manage-governance/scripts/get-effective-status.js" \
       --policy <name> [--envId <guid>]
 ```
 
@@ -814,7 +845,7 @@ The shape is what `render-portal-table.js` consumes directly (it reads
 ```
 
 - `state` — the **effective** boolean (own AND every parent) — the value the
-  5-column Unicode status box renders.
+  5-column Markdown status table renders.
 - `own` — the child's own setting on that portal.
 - `parents` — each gating parent's state on that portal.
 - `apiCalls` — policies × 2, **all issued in parallel**.
@@ -822,10 +853,10 @@ The shape is what `render-portal-table.js` consumes directly (it reads
 Pipe `.portals` into the status render:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/list-portals.js" --envId "<ENV_ID>" \
-  | node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/get-effective-status.js" \
+node "${PLUGIN_ROOT}/skills/manage-governance/scripts/list-portals.js" --envId "<ENV_ID>" \
+  | node "${PLUGIN_ROOT}/skills/manage-governance/scripts/get-effective-status.js" \
       --policy "<POLICY>" --envId "<ENV_ID>" \
-  | node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/render-portal-table.js" --unicode --no-color
+  | node "${PLUGIN_ROOT}/skills/manage-governance/scripts/render-portal-table.js" --markdown --no-color
 ```
 
 Fail-closed posture: a failed `getDetails` degrades to an empty membership list;
@@ -876,8 +907,8 @@ use the plain `render-portal-table.js` table instead.
 ### Usage
 
 ```bash
-echo '<JSON>' | node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/render-status-table.js" [--no-icons]
-node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/render-status-table.js" --file <path>
+echo '<JSON>' | node "${PLUGIN_ROOT}/skills/manage-governance/scripts/render-status-table.js" [--no-icons]
+node "${PLUGIN_ROOT}/skills/manage-governance/scripts/render-status-table.js" --file <path>
 ```
 
 ### Input JSON
@@ -946,8 +977,8 @@ Pipe the user's reply to stdin and reference the `list-portals.js` output for
 validation:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/list-portals.js" --envId "<ENV_ID>" \
-  | node "${CLAUDE_PLUGIN_ROOT}/skills/manage-governance/scripts/parse-portal-input.js" \
+node "${PLUGIN_ROOT}/skills/manage-governance/scripts/list-portals.js" --envId "<ENV_ID>" \
+  | node "${PLUGIN_ROOT}/skills/manage-governance/scripts/parse-portal-input.js" \
       --portalsStdin --input "<USER_REPLY>"
 ```
 

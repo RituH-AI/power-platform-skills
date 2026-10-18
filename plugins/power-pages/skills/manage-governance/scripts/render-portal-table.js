@@ -11,7 +11,7 @@
 // whether or not color is on.
 
 const { foregroundColor, shouldColor } = require('./colors');
-const { pad, border } = require('./table');
+const { pad, border, renderMarkdownTable } = require('./table');
 
 // Normalize a state value to the canonical 'Enabled' / 'Disabled' label.
 // Accepts booleans (true=Enabled), or strings like 'enabled'/'disabled'/
@@ -40,13 +40,6 @@ function iconForState(label) {
   return '';
 }
 
-// Escape a cell for a GitHub-flavored Markdown table: a literal `|` would be
-// read as a column separator and shift every following cell, so backslash it;
-// newlines are flattened because a Markdown cell can't span physical lines.
-function mdCell(s) {
-  return String(s == null ? '' : s).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
-}
-
 // GitHub-flavored Markdown version of the per-site state table. This is the
 // chat-safe renderer: the ASCII box (renderPortalTable) misaligns on chat
 // surfaces because the State column carries a double-width 🟢/🔴 emoji while the
@@ -70,10 +63,7 @@ function renderPortalTableMarkdown(portals, opts = {}) {
       state,
     ];
   });
-  const head = '| ' + headers.map(mdCell).join(' | ') + ' |';
-  const sep = '| ' + headers.map(() => '---').join(' | ') + ' |';
-  const body = rows.map((r) => '| ' + r.map(mdCell).join(' | ') + ' |');
-  return [head, sep, ...body].join('\n');
+  return renderMarkdownTable(headers, rows);
 }
 
 /**
@@ -93,8 +83,8 @@ function renderPortalTable(portals, opts = {}) {
   const colorOn = shouldColor(colorOpts);
   const icons = Boolean(opts.icons);
   // Unicode box-drawing style (│ ┌ ┬ ┐ ├ ┼ ┤ └ ┴ ┘) with a horizontal rule
-  // between EVERY data row. This is the mandated "governance status" render
-  // format (Fetch Env / Fetch Site) — see SKILL.md Phase 4.3.1 / 4.4.3. ASCII
+  // between EVERY data row. This remains available for terminal callers;
+  // skill status responses use Markdown so chat clients size the columns. ASCII
   // mode (default, `unicode` falsy) keeps the legacy +---+ box with no
   // inter-row rules for backward compatibility (and the empty-list test that
   // asserts a 4-line frame).
@@ -183,8 +173,8 @@ Flags:
   --icons       Prefix the State cell with 🟢 / 🔴 (default: on).
   --no-icons    Omit the state icons (plain "Enabled" / "Disabled").
   --unicode     Render the fixed-width Unicode box (┌─┬─┐ │ ├─┼─┤ └─┴─┘) with a
-                rule between every row. This is the mandated governance STATUS
-                format (Fetch Env / Fetch Site). Use --no-color with it so the
+                rule between every row for terminal callers. Skill status
+                responses use --markdown. Use --no-color with the box so the
                 ANSI escapes don't clutter the box. Ignored when --markdown set.
   --portalsFile Read JSON from a file instead of stdin.
   --help        Show this help.

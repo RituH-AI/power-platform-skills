@@ -2,16 +2,14 @@
 
 // render-impact-summary.js — Deterministically render the Phase 2.2 / 4.2.3
 // consent-gate "impact summary" block from governance-mapping.json data plus a
-// resolved request. This is an ADDITIVE helper: the consent-gate format is
-// already specified in SKILL.md ("Consent gate (always before POST)"), but the
-// orchestrator hand-builds it today and can drift. Feeding the same inputs
-// through one renderer keeps the Action / Environment / Scope / Sites / Effect
+// resolved request. Feeding the same inputs through one renderer keeps the
+// Action / Environment / Scope / Sites / Effect
 // rows — and the sign-out Side-effect line — consistent with the committed spec
 // and the per-policy `subject` / `effectLineTemplates` / `sideEffectCallout`
 // data. It mirrors the render-env-table.js / render-portal-table.js pattern:
 // pure data-in → text-out, no network, no writes.
 //
-// The rendered block intentionally starts at the `Action:` line with NO lead-in
+// The rendered block intentionally starts at the `**Action:**` line with NO lead-in
 // heading — SKILL.md forbids prepending "Impact summary:" or any label before
 // the Action row, so callers must emit this output verbatim.
 
@@ -21,6 +19,7 @@ const path = require('path');
 // Reuse the committed ANSI helper so the state cells can be colorized in a real
 // terminal, but stay plain (emoji-only) for chat surfaces that strip ANSI.
 const { green, red } = require('./colors');
+const { renderMarkdownTable } = require('./table');
 
 const MAPPING_PATH = path.join(__dirname, '..', 'references', 'governance-mapping.json');
 
@@ -65,41 +64,11 @@ function stateCell(state, colorOpts) {
   return '⚪ Unknown';
 }
 
-// Emoji-only state label for the Sites BOX table. The bordered box computes
-// column widths on the visible text and wraps cells, so the state cell must be
-// ANSI-free (an escape sequence is zero-width and would desync width math and
-// corrupt a wrapped line). The 🟢 / 🔴 emoji already carry the green/red cue on
-// every surface — including chat that strips ANSI — so no color is applied here.
-// (ANSI color still applies to the Action / Effect rows, which are single-line.)
+// Markdown cells stay ANSI-free; emoji carry the state cue in chat.
 function plainStateCell(state) {
   if (state === 'Enabled') return '🟢 Enabled';
   if (state === 'Disabled') return '🔴 Disabled';
   return '⚪ Unknown';
-}
-
-// Escape a cell value for a GitHub-flavored Markdown table: a literal `|` would
-// otherwise be read as a column separator and shift every following cell, so
-// backslash-escape it. Newlines are flattened to spaces because a Markdown table
-// cell cannot span physical lines. (URLs/GUIDs/emoji need no other escaping.)
-function mdCell(s) {
-  return String(s == null ? '' : s).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
-}
-
-// Render a GitHub-flavored Markdown pipe table (header row + `---` delimiter +
-// one line per data row). We deliberately DROPPED the fixed-width Unicode box
-// (┌─┐ borders) here: admins reported it "breaks" in chat because the state
-// emoji (🟢/🔴) are double-width glyphs while the box padding math counts them
-// as their JS string length, so the columns never line up on a proportional or
-// emoji-aware surface. A Markdown table delegates column sizing to the chat
-// client's own renderer, so each row renders on ONE line and the emoji can be
-// any width without corrupting alignment. `headers` is a string[]; `rows` is
-// string[][] (already emoji-decorated, no ANSI). Returns the joined lines with
-// no trailing newline.
-function renderMarkdownTable(headers, rows) {
-  const head = '| ' + headers.map(mdCell).join(' | ') + ' |';
-  const sep = '| ' + headers.map(() => '---').join(' | ') + ' |';
-  const body = rows.map((r) => '| ' + r.map(mdCell).join(' | ') + ' |');
-  return [head, sep, ...body].join('\n');
 }
 
 // Plain-language scope line for the Scope row. Never leaks the internal
@@ -147,7 +116,7 @@ function sideEffectLine(policy, policyValue) {
 // admin needs to see that ripple at the consent gate — it isn't obvious from the
 // single-policy table. Both directions get a checklist under the summary:
 //
-//   * disable -> "Below Setting will get Disable": the downstream methods that
+//   * disable -> the downstream methods that
 //     this parent turns OFF (OAuth 2.0 -> Facebook/Google/Microsoft; External
 //     Auth -> every protocol + social IdP), each marked red "🔴 Disabled".
 //   * enable  -> an informational list of the methods that become AVAILABLE
@@ -159,7 +128,9 @@ function sideEffectLine(policy, policyValue) {
 //
 // Both are data-driven from governance-mapping.json policies[].cascadeOnDisable /
 // cascadeOnEnable so adding/removing a downstream method never touches this file.
-// Items may be a bare string (label only) or { label, note } — normalized here.
+// Items may be strings, { label, note, state } leaves, or grouped objects such
+// as { "OAuth 2.0": ["Facebook", "Google"] }. Keep the group followed by its
+// children so the consent summary never omits a downstream provider.
 // Returns the ready-to-emit lines (blank separator + heading + rows + optional
 // footer) or [] when the policy has no cascade for that direction.
 function cascadeLines(policy, direction, colorOpts) {
@@ -171,20 +142,14 @@ function cascadeLines(policy, direction, colorOpts) {
   // Normalize each item to { label, note, state } so string and object forms
   // coexist. `state` (e.g. 'Enabled') is optional and only used on the enable side
   // to render a green "🟢 Enabled" marker mirroring the disable side's red one.
-  const items = cascade.items.map((it) =>
-    typeof it === 'string'
-      ? { label: it }
-      : { label: it.label, note: it.note, state: it.state }
-  );
+  const items = flattenCascadeItems(cascade.items);
   const lines = [];
   lines.push('');
-  lines.push(cascade.heading || (isDisable ? 'Below Setting will get Disable' : 'When enabled, the following become available:'));
-  // Left-align the labels into one column so the trailing markers/notes line up,
-  // matching the approved mock. Width is computed on the visible label text.
-  const labelWidth = items.reduce((w, it) => Math.max(w, String(it.label).length), 0);
+  lines.push(`**${cascade.heading || (isDisable ? 'The following sign-in methods will be disabled:' : 'When enabled, the following become available:')}**`);
+  lines.push('');
   items.forEach((it, i) => {
     const num = `${i + 1}.`;
-    const label = String(it.label).padEnd(labelWidth, ' ');
+    const label = String(it.label);
     let marker;
     if (isDisable) {
       // Render the state marker through the SAME stateCell() convention the Sites
@@ -193,27 +158,46 @@ function cascadeLines(policy, direction, colorOpts) {
       // drop the escape codes but keep the red circle); the ANSI red still applies
       // in a real terminal. Green ("🟢 Enabled") is the symmetric marker for any
       // enable-side row that declares an explicit `state` (see below).
-      marker = '  ' + stateCell('Disabled', colorOpts);
+      marker = ' — ' + stateCell('Disabled', colorOpts);
     } else if (it.state) {
       // Enable rows may opt into an explicit state marker (data-driven via the
       // item's `state` field). "Enabled" renders green "🟢 Enabled" — the mirror
       // of the disable side — followed by the note when present.
-      marker = '  ' + stateCell(it.state, colorOpts) + (it.note ? ' - ' + it.note : '');
+      marker = ' — ' + stateCell(it.state, colorOpts) + (it.note ? ' - ' + it.note : '');
     } else {
       // Default enable rows only annotate the provider-controlled entries; protocol
       // rows (OpenID Connect, SAML 2.0, ...) have no note and render as label-only.
       // No green "Enabled" marker here because enabling a parent does NOT force the
       // child on — its real state is unchanged by this apply.
-      marker = it.note ? '  - ' + it.note : '';
+      marker = it.note ? ' — ' + it.note : '';
     }
     // Trim trailing whitespace so label-only enable rows don't carry padding.
     lines.push(`${num} ${label}${marker}`.replace(/\s+$/, ''));
   });
   if (cascade.footer) {
     lines.push('');
-    lines.push(`Note: ${cascade.footer}`);
+    lines.push(`**Note:** ${cascade.footer}`);
   }
   return lines;
+}
+
+function flattenCascadeItems(items) {
+  return items.flatMap((item) => {
+    if (typeof item === 'string' && item.trim()) return [{ label: item }];
+    if (item && typeof item === 'object' && !Array.isArray(item)) {
+      if (typeof item.label === 'string' && item.label.trim()) {
+        return [{ label: item.label, note: item.note, state: item.state }];
+      }
+      const groups = Object.entries(item);
+      if (groups.length && groups.every(([label, children]) => label.trim() && Array.isArray(children))) {
+        return groups.flatMap(([label, children]) => [
+          { label },
+          ...flattenCascadeItems(children),
+        ]);
+      }
+    }
+    throw new Error('render-impact-summary: invalid cascade item; expected a label, labeled item, or group of items');
+  });
 }
 
 // Resolve the internal policyValue that the apply will POST, so the consent gate
@@ -266,11 +250,11 @@ function actionCell(direction, action, colorOpts) {
  * @param {object} [opts]
  * @param {object} [opts.mapping]   - preloaded mapping (defaults to the committed JSON).
  * @param {boolean} [opts.color]    - force ANSI color on the state cells.
- * @returns {string} the rendered block (no trailing newline, starts at `Action:`).
+ * @returns {string} the rendered block (no trailing newline, starts at `**Action:**`).
  */
 function renderImpactSummary(req, opts = {}) {
   const mapping = opts.mapping || loadMapping();
-  const colorOpts = { enabled: opts.color === true ? true : null };
+  const colorOpts = { enabled: opts.color === true };
 
   const policy = (mapping.policies || []).find((p) => p.policyName === req.policy);
   if (!policy) {
@@ -288,9 +272,12 @@ function renderImpactSummary(req, opts = {}) {
   const newState = newStateFor(direction);
 
   const out = [];
-  out.push(`Action:        ${actionCell(direction, action, colorOpts)}`);
-  out.push(`Environment:   ${envLine}`);
-  out.push(`Scope:         ${scopeLine(scope, siteNames)}`);
+  out.push(`**Action:** ${actionCell(direction, action, colorOpts)}`);
+  out.push('');
+  out.push(`**Environment:** ${envLine}`);
+  out.push('');
+  out.push(`**Scope:** ${scopeLine(scope, siteNames)}`);
+  out.push('');
 
   // Sites table with the required Current State / New State columns, rendered as
   // a GitHub-flavored Markdown table (NOT a fixed-width Unicode box — see
@@ -298,10 +285,10 @@ function renderImpactSummary(req, opts = {}) {
   // actually flips is tagged '← CHANGED' in its New State cell per the
   // consentGate rules ("Rows where the per-site state changes MUST be marked
   // CHANGED"). The chat client sizes the columns, so each site is one line.
-  const sitesLabel = scope === 'specific' ? 'Sites covered:' : 'Sites in env:';
+  const sitesLabel = scope === 'specific' ? '**Sites covered:**' : '**Sites in environment:**';
   out.push(sitesLabel);
   out.push('');
-  const tableHeaders = ['Portal Name', 'Portal URL', 'Portal ID', 'Current State', 'New State'];
+  const tableHeaders = ['Site Name', 'URL', 'Site ID', 'Current State', 'New State'];
   const tableRows = sites.map((s) => {
     const cur = normalizeState(s && s.currentState);
     // Only flag a change when we actually know the current state and it differs.
@@ -327,16 +314,20 @@ function renderImpactSummary(req, opts = {}) {
   // close it so the following prose renders below the table, not inside it.
   out.push('');
 
-  out.push(`Effect:        ${effectLine(mapping, policy, direction, scope, envDisplay, siteNames)}`);
+  out.push(`**Effect:** ${effectLine(mapping, policy, direction, scope, envDisplay, siteNames)}`);
+  out.push('');
 
   // Technical companion to the Effect line: the exact internal value + ToBeAdded
   // list this apply will POST. Resolved once here so the side-effect check below
   // uses the same value even when the caller omitted req.policyValue.
   const policyValue = resolvePolicyValue(direction, scope, req.policyValue);
-  out.push(`Policy value:  ${policyValueLine(policyValue, sites)}`);
+  out.push(`**Policy value:** ${policyValueLine(policyValue, sites)}`);
 
   const se = sideEffectLine(policy, policyValue);
-  if (se) out.push(`Side effect:   ${se}`);
+  if (se) {
+    out.push('');
+    out.push(`> **Side effect:** ${se}`);
+  }
 
   // Downstream policies the admin should know about: on disable, the methods
   // this parent turns off; on enable, the methods it makes available again
@@ -375,10 +366,11 @@ Input JSON shape:
 
 Flags:
   --reqFile <path>  Read the request JSON from a file instead of stdin.
-  --color           Force ANSI color on the state cells (default: auto/off).
+  --color           Force ANSI color for terminal callers (default: off for Markdown).
   --help            Show this help.
 
-Output starts at the 'Action:' line with no lead-in — emit it verbatim.
+Output is Markdown starting at '**Action:**' with no lead-in.
+Emit it verbatim without code fences; preserve blank lines and single-line table rows.
 `;
 
 function parseFlags(argv) {
