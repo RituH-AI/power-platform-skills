@@ -472,6 +472,8 @@ separate consent for the existing migration workflow.
 Initialize Git only after the downloaded identity is confirmed:
 
 Update the status page with `--status "git"` immediately before Git initialization.
+This continues UI Step 06, **Local validation**, which includes saving the Git baseline;
+it does not add a separate timeline row. Keep the Git operation and final validation below.
 
 ```bash
 git init

@@ -59,13 +59,13 @@ const STATUSES = Object.freeze({
     message: 'The downloaded identity, non-SPA assets, and project structure are being checked.',
   },
   git: {
-    step: 6,
+    step: 5,
     chip: 'Saving baseline',
     title: 'Saving a clean starting point',
     message: 'The validated template is being recorded as the initial Git baseline.',
   },
   ready: {
-    step: 7,
+    step: 6,
     chip: 'Ready',
     title: 'Your site is ready',
     message: 'The downloaded baseline and cloud site are ready for customization.',
@@ -95,8 +95,7 @@ const TIMELINE = Object.freeze([
   ['Website registration', 'Waiting for the service-assigned website ID'],
   ['Data model verification', 'Checking the site with PAC'],
   ['Template download', 'Downloading non-SPA site assets'],
-  ['Local validation', 'Checking identity, assets, and project structure'],
-  ['Git baseline', 'Saving the downloaded starting point'],
+  ['Local validation', 'Checking identity, assets, and project structure; saving the Git baseline'],
 ]);
 
 function toDataUrl(filePath) {
