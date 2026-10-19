@@ -58,6 +58,12 @@ const STATUSES = Object.freeze({
     title: 'Validating the downloaded baseline',
     message: 'The downloaded identity, non-SPA assets, and project structure are being checked.',
   },
+  git: {
+    step: 5,
+    chip: 'Saving baseline',
+    title: 'Saving a clean starting point',
+    message: 'The validated template is being recorded as the initial Git baseline.',
+  },
   ready: {
     step: 6,
     chip: 'Ready',
@@ -66,7 +72,7 @@ const STATUSES = Object.freeze({
     terminal: true,
     result: {
       title: 'Creation complete',
-      message: 'Data model verified · Site downloaded · Validation passed',
+      message: 'Data model verified · Site downloaded · Validation passed · Git baseline created',
     },
   },
   'model-mismatch': {
@@ -89,7 +95,7 @@ const TIMELINE = Object.freeze([
   ['Website registration', 'Waiting for the service-assigned website ID'],
   ['Data model verification', 'Checking the site with PAC'],
   ['Template download', 'Downloading non-SPA site assets'],
-  ['Local validation', 'Checking identity, assets, and project structure'],
+  ['Local validation', 'Checking identity, assets, and project structure; saving the Git baseline'],
 ]);
 
 function toDataUrl(filePath) {
@@ -166,7 +172,8 @@ function buildModel(options, template) {
           ...status.result,
           message:
             options.status === 'ready'
-              ? `${modelVersion} model verified · Site downloaded · Validation passed`
+              ? `${modelVersion} model verified · Site downloaded · Validation passed · ` +
+                'Git baseline created'
               : status.result.message,
         }
       : undefined,

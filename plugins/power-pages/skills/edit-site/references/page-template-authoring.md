@@ -11,7 +11,7 @@ Power Pages renders through a web template or a supported ASP.NET rewrite target
 content table the layout supports, and whether the website header and footer wrap the
 rendered output.
 
-Authoring callers first follow [shared routing and execution](classic-site-authoring.md). Distinguish a
+Authoring callers first follow [shared routing and execution](non-spa-site-authoring.md). Distinguish a
 metadata-only create/edit/rename/rebind/type migration from an end-to-end custom layout,
 requested webpage assignment, or deletion. This workflow owns the complete custom-layout
 sequence; execute [web templates](web-template-authoring.md)

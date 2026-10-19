@@ -11,7 +11,7 @@ explicitly asks not to add the page to navigation. Apply
 the complete workflow below so the local files preserve the relationships expected by
 Power Pages and remain compatible with PAC CLI upload and download.
 
-Authoring callers first follow [shared routing and execution](classic-site-authoring.md). Classify page creation,
+Authoring callers first follow [shared routing and execution](non-spa-site-authoring.md). Classify page creation,
 shared metadata, localized content, route/rename/move, template assignment, and navigation
 separately. Resolve the root identity first, then selected localized identities and content
 ownership. Use the uniquely established current/default language for an unspecified content
@@ -33,6 +33,10 @@ For an existing body-only request, resolve its exact root/locale/file and hand o
 New pages update navigation by default unless the user explicitly asks not to.
 Resolve the target web link set and label before writing; body-only edits leave navigation unchanged.
 For an approved operation, apply only its approved navigation scope.
+
+For named page bindings, follow [site markers](site-marker-authoring.md) after the page
+identity is verified. Creating or moving a page does not authorize creating, retargeting,
+or renaming a marker. Preserve existing marker bindings when the page ID stays unchanged.
 
 ## Contents
 

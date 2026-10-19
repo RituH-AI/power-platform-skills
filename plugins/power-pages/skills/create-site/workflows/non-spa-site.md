@@ -141,23 +141,20 @@ Create all eight tasks before starting:
 > that controls which model a newly created site will use.
 > **Cancel leaves:** Nothing — no site or local project exists.
 
-7. Build and show the selected environment's direct Power Platform admin URL:
+7. Explain how to verify the toggle in Power Platform admin center. Open the direct environment
+   URL below. Open the direct settings URL and ask the administrator to check whether **Switch to Enhanced Data Model** is on:
 
-   ```text
-   https://admin.powerplatform.microsoft.com/manage/environments/<org-id>/<env-name>/portals?geo=<env-geo>
-   ```
+   `https://admin.powerplatform.microsoft.com/manage/environments/<org-id>/<env-name>/portals?geo=<env-geo>`
 
-   Replace `<org-id>`, `<env-name>`, and `<env-geo>` with the selected environment's values.
-   Do not send the user to the generic admin center landing page. If any value cannot be resolved,
-   stop and explain which value is missing instead of guessing or opening a different environment.
+   Replace the placeholders with the resolved environment organization ID, name, and geo.
 
    | Question | Header | Options |
    |---|---|---|
-   | Open `<EDM_SETTINGS_URL>` and check whether **Switch to Enhanced Data Model** is on. Is it on? | EDM availability | Yes, it is on, Open the direct settings URL, Choose another environment, Cancel |
+   | Has an environment administrator verified that **Switch to Enhanced Data Model** is on for this environment? | EDM availability | Yes, it is enabled, Open the direct environment settings, Choose another environment, Cancel |
 
-8. On **Open the direct settings URL**, open `EDM_SETTINGS_URL`, wait for the user to check the
-   setting, and ask again. On **Choose another environment**, return to step 5. Never toggle the
-   setting through browser automation.
+8. On **Open the direct environment settings**, open the URL above, wait for the user to verify or
+   change the setting, and ask again. On **Choose another environment**, return to step 5.
+   Never toggle the setting through browser automation.
 9. After confirmation, rerun:
 
    ```bash
@@ -186,9 +183,7 @@ model or weakening platform contracts. Honor explicit user preservation preferen
 > **Why we ask:** Display names must never be guessed or converted into API identifiers.
 > **Cancel leaves:** Nothing — no site or local project exists.
 
-If `PRESELECTED_NON_SPA_TEMPLATE_NAME` is set, validate that exact `name` is still present in the
-helper's filtered `catalog.templates`, select it without another template question, and continue.
-Otherwise, build `AskUserQuestion` choices from the helper's filtered `catalog.templates`, plus Cancel. Show
+Build `AskUserQuestion` choices from the helper's filtered `catalog.templates`, plus Cancel. Show
 the `catalog.bootstrapCompatibility` disclosure when present, including the source and omitted
 template names. Do not
 offer the unfiltered catalog on the Bootstrap 5 path: not every template supports Bootstrap 5
@@ -481,8 +476,9 @@ separate consent for the existing migration workflow.
 
 Initialize Git only after the downloaded identity is confirmed:
 
-Keep the status page on `--status "validation"` during Git initialization. The Git baseline remains
-part of validation but is not shown as a separate provisioning step.
+Update the status page with `--status "git"` immediately before Git initialization.
+This continues UI Step 06, **Local validation**, which includes saving the Git baseline;
+it does not add a separate timeline row. Keep the Git operation and final validation below.
 
 ```bash
 git init

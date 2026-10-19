@@ -10,9 +10,12 @@ Liquid, text, or another text-based response format. Web templates can serve as 
 fragments, inherited layouts, complete page layouts, or the site's global header and
 footer.
 
-Authoring callers first follow [shared routing and execution](classic-site-authoring.md). Classify the request
+Authoring callers first follow [shared routing and execution](non-spa-site-authoring.md). Classify the request
 as create, source edit, rename, refactor, rebind, or delete, and resolve existing records by
 both `adx_name` and `adx_webtemplateid`, not directory name alone.
+
+Resolve required named page bindings through [site markers](site-marker-authoring.md).
+Reading `sitemarkers` in Liquid does not authorize changing the marker or its target page.
 
 Default to a reusable fragment for shared markup/logic, a page-layout source for webpage
 rendering, a base layout only when derived layouts need stable overridable blocks, and a

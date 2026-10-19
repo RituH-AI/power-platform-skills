@@ -250,7 +250,7 @@ Capabilities describe readiness observed in the downloaded files:
 `status` is `ready`, `blocked`, or `not-requested`. A blocked capability must name the missing
 prerequisite and a local remediation; it is not a permanent template limitation.
 `ownerSkill` selects the operation workflow defined in
-`${PLUGIN_ROOT}/skills/edit-site/references/classic-site-authoring.md`.
+`${PLUGIN_ROOT}/skills/edit-site/references/non-spa-site-authoring.md`.
 Component reference identifiers are not `Skill` tool names.
 
 ## Visual asset records
@@ -360,8 +360,9 @@ Rules:
 
 - `id` is unique kebab-case.
 - `skill` is one supported authoring operation identifier. `author-web-file`,
-  `author-content-snippet`, `author-web-template`, `author-page-template`, `author-webpage`, and `style-site`
-  execute the corresponding classic-authoring reference workflow in the coordinator.
+  `author-content-snippet`, `author-web-template`, `author-page-template`, `author-webpage`,
+  `author-site-marker`, and `style-site`
+  execute the corresponding non-SPA authoring reference workflow in the coordinator.
   Only `author-webpage-content` is a skill invocation.
 - `action` uses the owning workflow's terminology.
 - Existing targets include stable IDs and exact paths when available.

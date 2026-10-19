@@ -138,6 +138,41 @@ errors keep affected locales unavailable. Only usable review-severity
 limitations can be enabled after the maker sees the exact impact and evidence;
 that approval is recorded in the localization manifest.
 
+#### `/practice-site-check`
+
+> "Show me how a simple Power Pages skill works"
+
+Provides a small, read-only example for learning skill development. It recognizes both SPA sites and PAC-downloaded non-SPA sites, reports their local identity, and checks framework and compiled output details when they apply.
+
+### Non-SPA site authoring
+
+Use `/edit-site` to customize local PAC CLI-downloaded non-SPA
+Power Pages sites. The following capabilities are reference workflows, not separate slash commands,
+and do not apply to React, Angular, Vue, or Astro SPA sites.
+
+| Capability | Reference |
+|---|---|
+| Root/localized webpages, routes, parents, template assignments, content shells, and navigation | [Webpages](skills/edit-site/references/webpage-authoring.md) |
+| Localized/neutral snippets, translations, Text/HTML values, Liquid, and exact caller migrations | [Content snippets](skills/edit-site/references/content-snippet-authoring.md) |
+| Site-served images, CSS, JavaScript, fonts, documents, and adjacent PAC metadata | [Web files](skills/edit-site/references/web-file-authoring.md) |
+| Liquid/HTML fragments, inherited layouts, and explicitly requested callers or bindings | [Web templates](skills/edit-site/references/web-template-authoring.md) |
+| Page-template metadata, web-template-backed layouts, rewrite templates, and requested page assignments | [Page templates](skills/edit-site/references/page-template-authoring.md) |
+| Named webpage bindings, exact-name Liquid lookups, retargeting, and dependency-safe marker changes | [Site markers](skills/edit-site/references/site-marker-authoring.md) |
+
+The [shared authoring contract](skills/edit-site/references/non-spa-site-authoring.md) owns routing,
+autonomy, dependency loading, local-only boundaries, and final verification. New pages update
+navigation by default unless you explicitly ask not to. Coordinated asset planning retains provenance,
+placement, accessibility, secure explicit Web File imports, and direct HTTPS imagery for new-site design.
+
+#### `author-webpage-content`
+
+Model-only worker invoked by `edit-site` or `integrate-webapi` with a resolved page-content
+specification, not a direct user command. Use `/edit-site` for page-authoring requests.
+
+Composes or modifies one localized `.webpage.copy.html` file from a resolved page design,
+using Design Studio-compatible sections, columns, text, images, buttons, videos, iframes,
+Generative AI Search components, Flex Containers, and spacers.
+
 ### Data modeling
 
 #### `/setup-datamodel`

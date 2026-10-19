@@ -222,19 +222,20 @@ a supported alternative rather than inventing a serialization.
 
 ## Minimal operation selection
 
-Use the dispatch in `${PLUGIN_ROOT}/skills/edit-site/references/classic-site-authoring.md`.
+Use the dispatch in `${PLUGIN_ROOT}/skills/edit-site/references/non-spa-site-authoring.md`.
 Execute only reference workflows required by the resolved structure:
 
 - page metadata, route, template, localized shells, navigation: `author-webpage`;
 - imported local assets: `author-web-file`;
 - reusable text or Liquid values: `author-content-snippet`;
 - Liquid source or reusable layout logic: `author-web-template`;
-- a new page-template binding: `author-page-template`.
+- a new page-template binding: `author-page-template`;
+- an explicitly requested named webpage binding: `author-site-marker`.
 
 Invoke `author-webpage-content` for localized section/column/element composition and
 execute [the styling workflow](style-site-workflow.md) for local visual treatment.
 
 A straightforward new page normally needs the webpage reference workflow, including default
 navigation or its explicit opt-out, followed by `author-webpage-content` with the resolved
-composition. Do not add assets, snippets, templates, extra navigation placements, or styling
+composition. Do not add assets, snippets, templates, site markers, extra navigation placements, or styling
 merely because those capabilities are available.

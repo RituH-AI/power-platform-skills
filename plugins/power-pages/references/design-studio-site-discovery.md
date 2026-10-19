@@ -4,7 +4,7 @@ Shared site-location contract for workflows that create or modify components in 
 CLI-downloaded non-SPA Power Pages site.
 
 Use this reference before reading or writing webpages, web templates, page templates,
-web files, content snippets, or other Design Studio metadata. Component-specific
+web files, content snippets, site markers, or other Design Studio metadata. Component-specific
 references define which additional directories and files must exist after the site root
 is found.
 
@@ -58,6 +58,7 @@ Pass the paths required by the operation into the discovery check:
 | Page template | `page-templates/`; also `web-templates/` when creating, inspecting, or binding a Web Template-type record |
 | Web file | `web-files/`, `web-pages/` |
 | Content snippet | `content-snippets/`, `websitelanguage.yml` |
+| Site marker | `web-pages/` and root-level `sitemarker.yml`; preserve its YAML sequence and existing records |
 | Localized webpage component | `web-pages/` |
 
 Additional metadata can be required later by the component workflow. For example,

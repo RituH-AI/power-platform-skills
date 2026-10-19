@@ -118,7 +118,7 @@ or Dataverse writes occur before approval.
 Apply only the approved implementation:
 
 The component identifiers in
-`${PLUGIN_ROOT}/skills/edit-site/references/classic-site-authoring.md` select reference workflows,
+`${PLUGIN_ROOT}/skills/edit-site/references/non-spa-site-authoring.md` select reference workflows,
 not `Skill` invocations. Keep each authoring handoff within the approved integration scope,
 preserving component approvals and verification; do not request a site-wide redesign, unrelated
 commits, or deployment.

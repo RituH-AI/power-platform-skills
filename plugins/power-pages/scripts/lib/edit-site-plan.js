@@ -6,12 +6,13 @@ const { compositionLayouts } = require('./non-spa-native-layout');
 
 const PLAN_SCHEMA_VERSION = 1;
 const EXECUTION_SCHEMA_VERSION = 1;
-const ALLOWED_SKILLS = new Set([
+const ALLOWED_OPERATIONS = new Set([
   'author-web-file',
   'author-content-snippet',
   'author-web-template',
   'author-page-template',
   'author-webpage',
+  'author-site-marker',
   'author-webpage-content',
   'style-site',
 ]);
@@ -420,8 +421,8 @@ function validateCustomizationPlan(plan) {
     if (operationIds.has(operation.id)) {
       throw new Error(`duplicate operation id ${operation.id}`);
     }
-    if (!ALLOWED_SKILLS.has(operation.skill)) {
-      throw new Error(`unsupported operation skill ${operation.skill}`);
+    if (!ALLOWED_OPERATIONS.has(operation.skill)) {
+      throw new Error(`unsupported operation identifier ${operation.skill}`);
     }
     assertString(operation.action, `operation ${operation.id}.action`);
     for (const key of ['target', 'inputs', 'outputBindings']) {
@@ -560,7 +561,7 @@ function writeJsonAtomic(filePath, value) {
 }
 
 module.exports = {
-  ALLOWED_SKILLS,
+  ALLOWED_OPERATIONS,
   ASSET_KINDS,
   ASSET_ROLES,
   ASSET_SOURCE_TYPES,

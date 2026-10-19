@@ -97,6 +97,43 @@ test('buildModel combines Event Portal metadata, embedded previews, and current 
   assert.equal(model.refresh, true);
 });
 
+test('buildModel tracks validation and Git baseline in the same sixth UI step', () => {
+  for (const status of ['validation', 'git']) {
+    const model = buildModel(options({ status }), template());
+    assert.equal(model.timeline.length, 6);
+    assert.equal(model.status.step, 5);
+    assert.equal(model.timeline[5][0], 'Local validation');
+    assert.match(model.timeline[5][1], /Git baseline/);
+    assert.ok(model.timeline.every(([title]) => title !== 'Git baseline'));
+    assert.equal(model.status.key, status);
+    assert.equal(model.status.activityState, 'working');
+    assert.equal(model.status.terminal, false);
+    assert.equal(model.refresh, true);
+  }
+  const git = buildModel(options({ status: 'git' }), template());
+  assert.match(git.status.message, /initial Git baseline/);
+});
+
+test('buildModel keeps Git pauses and failures on the sixth UI step', () => {
+  for (const activityState of ['awaiting-input', 'failed', 'canceled']) {
+    const model = buildModel(options({
+      status: 'git',
+      activityState,
+      ...(activityState === 'awaiting-input'
+        ? { requiredAction: 'Configure Git author information.' }
+        : {
+            terminalReason: 'The baseline commit was not completed.',
+            nextAction: 'Configure Git and retry the baseline commit.',
+          }),
+    }), template());
+    assert.equal(model.status.step, 5);
+    assert.equal(model.timeline.length, 6);
+    assert.equal(model.status.activityState, activityState);
+    assert.equal(model.status.terminal, activityState !== 'awaiting-input');
+    assert.equal(model.status.openWebsiteUrl, null);
+  }
+});
+
 test('buildModel renders Standard completion and model-mismatch details', () => {
   const ready = buildModel(
     options({ modelVersion: 'Standard', status: 'ready', siteUrl: SITE_URL }),
@@ -106,6 +143,9 @@ test('buildModel renders Standard completion and model-mismatch details', () => 
   assert.equal(ready.status.activityState, 'complete');
   assert.equal(ready.status.terminal, true);
   assert.equal(ready.status.openWebsiteUrl, SITE_URL);
+  assert.equal(ready.timeline.length, 6);
+  assert.equal(ready.status.step, ready.timeline.length);
+  assert.match(ready.status.result.message, /Git baseline created/);
   assert.equal(ready.refresh, false);
 
   const mismatch = buildModel(

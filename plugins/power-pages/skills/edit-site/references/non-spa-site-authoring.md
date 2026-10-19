@@ -1,4 +1,4 @@
-# Classic Site Authoring
+# Non-SPA Site Authoring
 
 Shared routing and execution contract for local PAC-downloaded declarative Power Pages
 authoring. `/edit-site` supports individual page or component edits and
@@ -19,6 +19,7 @@ Select the primary workflow from the requested outcome:
 | `author-web-template` | Create or modify Liquid/HTML source, fragments, inherited layouts, or header/footer source | [Web templates](web-template-authoring.md) |
 | `author-page-template` | Create or modify rendering metadata, an end-to-end custom layout, or associated webpage assignments | [Page templates](page-template-authoring.md) |
 | `author-webpage` | Create or modify root/localized records, routes, parents, template assignments, shells, or navigation | [Webpages](webpage-authoring.md) |
+| `author-site-marker` | Create, retarget, rename, or locally remove a named same-site webpage binding with verified caller scope | [Site markers](site-marker-authoring.md) |
 | `style-site` | Apply guarded CSS/source styling without changing native component structure | [Styling](style-site-workflow.md) |
 
 `operation.skill` and `capabilities[].ownerSkill` use the identifiers in this table to
@@ -117,6 +118,7 @@ recording the stable keys required by
 | Webpage | `websitePageId`, `route`, exact `localizedTargetFile` for a resolved locale |
 | Web/page template | Stable template identity, source/metadata paths, actual bindings |
 | Content snippet | Stable record identities, logical name, type, and language scope |
+| Site marker | `siteMarkerId`, exact `name`, target `pageId`, and site-relative `metadataPath` |
 
 The approved operation defines the output keys; these examples do not change its contract.
 Do not predict generated IDs or URLs, substitute unresolved tokens, or manufacture a missing
@@ -134,5 +136,5 @@ Reading another reference is not another preview entry or skill invocation.
 Record successful entry-point usage through
 `${PLUGIN_ROOT}/references/skill-tracking-reference.md` as `EditSite`.
 Record only skill invocations, not reference reads. Preserve existing tracking records;
-never create a tracking directory merely to record classic authoring.
+never create a tracking directory merely to record non-SPA authoring.
 Report any supported tracking diff separately from authored site changes.
