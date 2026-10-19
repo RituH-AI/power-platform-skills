@@ -17,6 +17,8 @@ const { getAuthToken } = require('../../../scripts/lib/validation-helpers');
 const { listEnvsViaPac } = require('../../../scripts/lib/pac-bap-shim');
 const { resolveRing, getRing } = require('./governance-context');
 
+const BAP_REQUEST_TIMEOUT_MS = 60_000;
+
 const HELP = `list-envs.js — Lists Power Platform environments visible to the signed-in PAC profile.
 
 Routing follows the manage-governance ring switch from app-settings.json activeRing:
@@ -24,6 +26,7 @@ Routing follows the manage-governance ring switch from app-settings.json activeR
   TIP ring   → direct BAP REST GET against the ring's bapHost
                (tip1.api.bap.microsoft.com) with an az token — PAC cannot reach
                the Preprod BAP without a separate sign-in.
+               The REST request has a 60-second total timeout.
 
 Usage:
   node list-envs.js [--type <Production|Sandbox|Trial|Developer|Default>]
@@ -66,12 +69,14 @@ function fetchEnvsViaBapRest(bapHost, token) {
   const url =
     `${bapHost.replace(/\/+$/, '')}` +
     '/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments?api-version=2020-10-01';
+  let timer;
   return new Promise((resolve, reject) => {
     const req = https.get(
       url,
       { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
       (res) => {
         let data = '';
+        res.on('error', reject);
         res.on('data', (c) => (data += c));
         res.on('end', () => {
           if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -89,7 +94,14 @@ function fetchEnvsViaBapRest(bapHost, token) {
       }
     );
     req.on('error', reject);
-  });
+    // A total deadline also bounds DNS/TLS setup and a response that keeps
+    // trickling data; a socket inactivity timeout alone would not cover both.
+    timer = setTimeout(() => {
+      const error = new Error('BAP environment-list request timed out after 60 seconds.');
+      req.destroy(error);
+      reject(error);
+    }, BAP_REQUEST_TIMEOUT_MS);
+  }).finally(() => clearTimeout(timer));
 }
 
 // Fetch the raw BAP-shaped env list using the strategy the active ring dictates

@@ -250,7 +250,12 @@ node get-env.js --policy EnableProtocolSAML20 --envId <guid>
 ## `list-envs.js`
 
 Lists Power Platform environments the signed-in PAC profile can administer.
-Backed by `pac admin list --json` via the shared `pac-bap-shim.js`.
+Prod uses `pac admin list --json` via the shared `pac-bap-shim.js`; TIP uses
+the configured BAP REST endpoint with an Azure CLI token. The TIP REST
+request has a **60-second total timeout**, including connection setup and
+response-body reads. On timeout the request is aborted and the command exits
+`1` with an explicit error, not an empty environment list. Prod/PAC discovery
+and governance rollout polling are unchanged.
 
 ### Usage
 
@@ -970,6 +975,10 @@ admins don't have to paste full UUIDs for common cases.
 | `not <id>, <id>` (also `except <id>`) | `policyValue=Exclude`, `portalIds=[…]` |
 
 Separator can be commas, newlines, or both.
+After trimming surrounding whitespace, each token must be a complete UUID
+or an exact case-insensitive site name from the supplied site list. UUIDs
+embedded in prose, braces, or other extra text are not extracted. Any invalid
+token rejects the entire selection with errors and no selected IDs.
 
 ### Usage
 

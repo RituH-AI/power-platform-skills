@@ -35,7 +35,7 @@
 
 const path = require('path');
 
-const { assertPolicy, normalizeEnvValue } = require('./policies');
+const { SUPPORTED_POLICIES, assertPolicy, normalizeEnvValue } = require('./policies');
 const { callGovernance } = require('./governance-transport');
 const { resolveGovernanceContext } = require('./governance-context');
 const {
@@ -63,8 +63,8 @@ Usage:
     node get-effective-status.js --policy <name> [--envId <guid>] [--json]
 
 Flags:
-  --policy       Governance policy name (any of the ten). Leaf policies with no
-                 parents report their own state as the effective state.
+  --policy       Governance policy name (${SUPPORTED_POLICIES.length} supported policies). Policies
+                 without parents report their own state as the effective state.
   stdin          list-portals.js output ({ portals: [...] } or a bare array).
                  This script does NOT re-page /websites.
   --portalsFile  Backward-compatible alternative to stdin.

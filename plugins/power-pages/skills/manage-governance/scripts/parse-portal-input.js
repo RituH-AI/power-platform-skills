@@ -28,7 +28,7 @@
 
 'use strict';
 
-const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NOT_RE = /^\s*(not|except)\b\s*/i;
 
 /**
@@ -75,7 +75,7 @@ function parsePortalInput(input, opts = {}) {
     const isUuid = UUID_RE.test(tok);
 
     if (isUuid) {
-      const id = (tok.match(UUID_RE) || [''])[0];
+      const id = tok;
       const lower = id.toLowerCase();
       if (seen.has(lower)) continue;
       seen.add(lower);
