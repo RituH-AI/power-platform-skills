@@ -73,9 +73,10 @@ Inspect `src/native/scheduledNotifications.ts` for `syncScheduledNotifications`,
 `clearScheduledNotifications`, `requestScheduledNotificationPermission`,
 `useScheduledNotifications`, `useScheduledNotificationSession`,
 `ScheduledNotification`, `TimeOfDay`, and `ScheduledNotificationsResult`; the lazy
-`expo-notifications` load; one-off, daily and weekly times; groups that reconcile
-only their own notifications; the app-wide 48-notification cap; serialized
-syncs; the Android-only handler that presents this module's notifications; and
+`expo-notifications` load; one-off, daily and weekly times; groups that preserve
+each source's desired entries while allocating the app-wide 48-notification cap
+by next occurrence; retained late entries; delivered one-off occurrence state;
+serialized syncs; the Android-only handler that presents this module's notifications; and
 the Android inexact-window adjustment with exact-alarm detection. Inspect `app/(app)/_layout.tsx` for one unconditional
 `useScheduledNotificationSession` call, and each owner screen for its
 `useScheduledNotifications` call. A wrapper that imports `expo-notifications`
@@ -101,6 +102,7 @@ import type { NotificationTriggerInput } from 'expo-notifications';
 declare const require: (id: string) => unknown;
 
 type ExpoNotifications = typeof import('expo-notifications');
+type AsyncStorageModule = typeof import('@react-native-async-storage/async-storage');
 
 /** A time of day in the device's time zone. */
 export interface TimeOfDay {
@@ -156,15 +158,31 @@ type When =
   | { kind: 'daily'; hour: number; minute: number }
   | { kind: 'weekly'; weekday: number; hour: number; minute: number };
 
-interface ScheduleEntry {
-  identifier: string;
+/** A notification as its group asked for it, normalized. */
+interface Requested {
   id: string;
   title: string;
   body?: string;
   when: When;
+}
+
+interface ScheduleEntry extends Requested {
+  identifier: string;
   /** Next time it shows, to choose the soonest under the cap. */
   nextMs: number;
 }
+
+/**
+ * Kept across launches: each group's latest notifications, so the cap goes to the soonest across
+ * every group whichever one syncs, and the one-off notifications this module scheduled, so one the
+ * OS showed early (Android may show an inexact one up to an hour early) isn't scheduled again.
+ */
+interface StoredState {
+  groups: Record<string, Requested[]>;
+  scheduledOnce: string[];
+}
+
+const STORAGE_KEY = 'powerapps.scheduledNotifications';
 
 /**
  * expo-notifications, or null where on-device notifications can't work: on web, and in a host app
@@ -178,6 +196,33 @@ function loadNotifications(): ExpoNotifications | null {
   } catch {
     return null;
   }
+}
+
+function loadStorage(): AsyncStorageModule['default'] | null {
+  try {
+    return (require('@react-native-async-storage/async-storage') as AsyncStorageModule).default;
+  } catch {
+    return null;
+  }
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+async function readState(): Promise<StoredState> {
+  try {
+    const stored: unknown = JSON.parse((await loadStorage()?.getItem(STORAGE_KEY)) ?? 'null');
+    if (isRecord(stored) && isRecord(stored.groups) && Array.isArray(stored.scheduledOnce)) {
+      return stored as unknown as StoredState;
+    }
+  } catch {
+    // Unreadable state is rebuilt as the groups sync.
+  }
+  return { groups: {}, scheduledOnce: [] };
+}
+
+async function writeState(state: StoredState): Promise<void> {
+  await loadStorage()?.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
 let exactAlarms: Promise<boolean> | undefined;
@@ -247,20 +292,33 @@ function whenKey(when: When): string {
   return `w${when.weekday}-${when.hour}-${when.minute}`;
 }
 
-function toEntry(item: ScheduledNotification, prefix: string, now: number, exact: boolean): ScheduleEntry | null {
+function toRequested(item: ScheduledNotification): Requested | null {
   const when = toWhen(item);
   if (!item.id || !when) return null;
   const title = String(item.title ?? '').trim() || 'Notification';
-  const body = String(item.body ?? '').trim() || undefined;
+  return { id: item.id, title, body: String(item.body ?? '').trim() || undefined, when };
+}
+
+function toEntry(group: string, { id, title, body }: Requested, when: When, nextMs: number, exact: boolean): ScheduleEntry {
   const hash = hashText(`${SCHEDULE_VERSION}|${exact ? 'exact' : 'inexact'}|${title}\n${body ?? ''}`);
-  return {
-    identifier: `${prefix}${item.id}_${whenKey(when)}_${hash}`,
-    id: item.id,
-    title,
-    body,
-    when,
-    nextMs: nextOccurrence(when, now),
-  };
+  return { identifier: `${IDENTIFIER_PREFIX}${group}_${id}_${whenKey(when)}_${hash}`, id, title, body, when, nextMs };
+}
+
+/**
+ * What to schedule for `requested`. Without exact alarms a repeating time triggers an hour early
+ * (see toTrigger), so within that hour its next trigger is a whole period away: the imminent
+ * occurrence is then scheduled as a one-off of its own, and the repeating one covers the rest.
+ */
+function toEntries(group: string, requested: Requested, now: number, exact: boolean): ScheduleEntry[] {
+  const { when } = requested;
+  const dueMs = nextOccurrence(when, now);
+  if (when.kind === 'once' || exact || dueMs - MAX_INEXACT_WINDOW_MS > now) {
+    return [toEntry(group, requested, when, dueMs, exact)];
+  }
+  return [
+    toEntry(group, requested, { kind: 'once', ms: dueMs }, dueMs, exact),
+    toEntry(group, requested, when, nextOccurrence(when, dueMs), exact),
+  ];
 }
 
 /**
@@ -327,57 +385,78 @@ async function ensureAndroidSetup(notifications: ExpoNotifications): Promise<voi
   androidReady = true;
 }
 
-/** Makes `group`'s pending notifications match `items`; group null cancels every group's. */
+/**
+ * Makes `group`'s notifications match `items` (group null cancels every group's), then keeps the
+ * soonest MAX_SCHEDULED of every group's scheduled.
+ */
 async function reconcile(
   notifications: ExpoNotifications,
   group: string | null,
   items: readonly ScheduledNotification[],
 ): Promise<ScheduledNotificationsResult> {
+  const pending = (await notifications.getAllScheduledNotificationsAsync())
+    .map(({ identifier }) => identifier)
+    .filter((identifier) => identifier.startsWith(IDENTIFIER_PREFIX));
+  if (group === null) {
+    await writeState({ groups: {}, scheduledOnce: [] });
+    for (const identifier of pending) await notifications.cancelScheduledNotificationAsync(identifier);
+    return { ok: true, scheduled: 0 };
+  }
+
   const now = Date.now();
   const exact = await hasExactAlarms();
-  const prefix = group === null ? IDENTIFIER_PREFIX : `${IDENTIFIER_PREFIX}${group}_`;
-  const wantedEntries = new Map<string, ScheduleEntry>();
-  for (const item of items) {
-    const entry = toEntry(item, prefix, now, exact);
-    if (entry) wantedEntries.set(entry.identifier, entry);
+  const state = await readState();
+  state.groups[group] = items.map(toRequested).filter((item): item is Requested => item !== null);
+  const wanted = new Map<string, ScheduleEntry>();
+  for (const [name, requested] of Object.entries(state.groups)) {
+    for (const entry of requested.flatMap((item) => toEntries(name, item, now, exact))) wanted.set(entry.identifier, entry);
   }
+  const entries = [...wanted.values()];
+  const pendingIds = new Set(pending);
+  // A group without stored state (it couldn't be saved) keeps its pending notifications.
+  const knownGroups = new Set(Object.keys(state.groups));
+  const isKnown = (identifier: string) => knownGroups.has(identifier.slice(IDENTIFIER_PREFIX.length).split('_')[0]);
+  const unknownCount = pending.filter((identifier) => !isKnown(identifier)).length;
 
-  const pending = await notifications.getAllScheduledNotificationsAsync();
-  const pendingInOtherGroups = pending.filter(
-    ({ identifier }) => identifier.startsWith(IDENTIFIER_PREFIX) && !identifier.startsWith(prefix),
-  ).length;
-  const upcoming = [...wantedEntries.values()]
+  // A one-off this module scheduled that is no longer pending has been shown: Android may show an
+  // inexact one early, and it mustn't be scheduled again while unchanged.
+  const shown = new Set(state.scheduledOnce.filter((identifier) => wanted.has(identifier) && !pendingIds.has(identifier)));
+  // Keep a pending one-off notification whose time has already passed while it's unchanged: its
+  // alarm may still be in its delivery window, and cancelling it now would lose it entirely.
+  const late = entries.filter(
+    (entry) => entry.when.kind === 'once' && entry.nextMs - now < MIN_LEAD_MS && pendingIds.has(entry.identifier),
+  );
+  const upcoming = entries
     .filter((entry) => entry.when.kind !== 'once' || entry.nextMs - now >= MIN_LEAD_MS)
+    .filter((entry) => !shown.has(entry.identifier))
     .sort((a, b) => a.nextMs - b.nextMs)
-    .slice(0, Math.max(0, MAX_SCHEDULED - pendingInOtherGroups));
-  const wanted = new Set(upcoming.map((entry) => entry.identifier));
+    .slice(0, Math.max(0, MAX_SCHEDULED - unknownCount - late.length));
+  const selected = new Map([...late, ...upcoming].map((entry) => [entry.identifier, entry]));
 
-  const kept = new Set<string>();
-  for (const { identifier } of pending) {
-    if (!identifier.startsWith(prefix)) continue; // another group's, or not this module's
-    const entry = wantedEntries.get(identifier);
-    // Keep a pending one-off notification whose time has already passed while it's unchanged:
-    // its alarm may still be in its delivery window, and cancelling it now would lose it entirely.
-    const isLate = entry?.when.kind === 'once' && entry.nextMs - now < MIN_LEAD_MS;
-    if (entry && (wanted.has(identifier) || isLate)) {
-      kept.add(identifier);
-    } else {
-      await notifications.cancelScheduledNotificationAsync(identifier);
-    }
+  for (const identifier of pending) {
+    if (isKnown(identifier) && !selected.has(identifier)) await notifications.cancelScheduledNotificationAsync(identifier);
   }
+  const isOnce = (identifier: string) => wanted.get(identifier)?.when.kind === 'once';
+  state.scheduledOnce = [...shown, ...[...selected.keys()].filter((id) => pendingIds.has(id) && isOnce(id))];
+  await writeState(state);
 
-  const missing = upcoming.filter((entry) => !kept.has(entry.identifier));
-  if (missing.length === 0) return { ok: true, scheduled: kept.size };
+  const missing = [...selected.values()].filter((entry) => !pendingIds.has(entry.identifier));
+  if (missing.length === 0) return { ok: true, scheduled: selected.size };
   if (!(await ensurePermission(notifications))) return { ok: false, reason: 'PERMISSION_DENIED' };
   await ensureAndroidSetup(notifications);
-  for (const entry of missing) {
-    await notifications.scheduleNotificationAsync({
-      identifier: entry.identifier,
-      content: { title: entry.title, body: entry.body, sound: 'default', data: { id: entry.id } },
-      trigger: toTrigger(notifications, entry.when, now, exact),
-    });
+  try {
+    for (const entry of missing) {
+      await notifications.scheduleNotificationAsync({
+        identifier: entry.identifier,
+        content: { title: entry.title, body: entry.body, sound: 'default', data: { id: entry.id } },
+        trigger: toTrigger(notifications, entry.when, now, exact),
+      });
+      if (entry.when.kind === 'once') state.scheduledOnce.push(entry.identifier);
+    }
+  } finally {
+    await writeState(state);
   }
-  return { ok: true, scheduled: kept.size + missing.length };
+  return { ok: true, scheduled: selected.size };
 }
 
 async function reconcileSafely(
@@ -429,7 +508,8 @@ function enqueue(key: string, items: readonly ScheduledNotification[]): Promise<
 /**
  * Makes `group`'s scheduled notifications match `items`, which must be every notification that
  * source wants (for example one per open task). New ones are scheduled; ones that dropped out,
- * changed time or changed text are cancelled or rescheduled; other groups are left alone. Asks for
+ * changed time or changed text are cancelled or rescheduled. Every group's latest notifications are
+ * kept, so the soonest 48 across all groups are scheduled whichever group syncs. Asks for
  * notification permission only when something new needs scheduling. Calls are serialized, and a
  * call made while one runs replaces the same group's call still waiting.
  */
@@ -574,8 +654,8 @@ npx --no-install tsc --noEmit
 
 Execute the shared compatibility contract's Step 4 after type-checking. Recheck
 the lazy load, every export, one-off and repeating times, group isolation, the
-cap, the Android handler and timing adjustment, the layout call, and each owner
-screen's call. Type-check success alone is
+shared cap, retained late entries, delivered one-off state, the Android handler
+and timing adjustment, the layout call, and each owner screen's call. Type-check success alone is
 insufficient; do not fix screen/generated files. Only after the requested
 artifact contract and TypeScript both pass, return the shared compatibility
 result and actual created/updated/reused paths before reporting:

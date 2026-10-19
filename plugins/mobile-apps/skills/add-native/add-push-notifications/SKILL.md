@@ -189,8 +189,8 @@ export function showPushMessage({ notification }: PushMessage): void {
 /**
  * Registers the signed-in user's device for push notifications, hands notifications that arrive
  * while the app is open to `onForegroundMessage`, and keeps the topic subscription across token
- * refreshes. Mount it once, in the signed-in layout. Does nothing where push notifications aren't
- * available.
+ * refreshes, removing it on sign-out or when `topic` changes. Mount it once, in the signed-in
+ * layout. Does nothing where push notifications aren't available.
  */
 export function usePushNotifications(
   enabled: boolean,
@@ -198,6 +198,10 @@ export function usePushNotifications(
   topic: string = ALL_USERS_TOPIC,
 ): void {
   const foregroundHandler = useRef(onForegroundMessage);
+  // Topic (un)subscriptions run one at a time, across effect runs too: a sign-out or topic change
+  // unsubscribes only after any registration still in flight, and before the next one subscribes.
+  const topicUpdates = useRef<Promise<void>>(Promise.resolve());
+
   useEffect(() => {
     foregroundHandler.current = onForegroundMessage;
   }, [onForegroundMessage]);
@@ -206,16 +210,27 @@ export function usePushNotifications(
     const push = enabled ? loadPush() : null;
     if (!push) return undefined;
     const { fcm, messaging } = push;
-    void registerForPushNotifications(topic).then((result) => {
+    let active = true;
+    const updateTopic = (update: () => Promise<unknown>) => {
+      topicUpdates.current = topicUpdates.current.then(update).then(() => undefined, () => undefined);
+    };
+    updateTopic(async () => {
+      if (!active) return;
+      const result = await registerForPushNotifications(topic);
       if (__DEV__) console.log('[push] registration', result.ok ? 'succeeded' : result.reason, result.ok ? '' : result.message ?? '');
     });
     const stopMessages = fcm.onMessage(messaging, (message) => foregroundHandler.current(message));
     const stopTokenRefresh = fcm.onTokenRefresh(messaging, () => {
-      fcm.subscribeToTopic(messaging, topic).catch(() => undefined);
+      updateTopic(async () => {
+        if (active) await fcm.subscribeToTopic(messaging, topic);
+      });
     });
     return () => {
+      active = false;
       stopMessages();
       stopTokenRefresh();
+      // Signed out, topic changed or unmounted: the device stops receiving this topic.
+      updateTopic(() => fcm.unsubscribeFromTopic(messaging, topic));
     };
   }, [enabled, topic]);
 }
