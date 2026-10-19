@@ -5,7 +5,9 @@
 // is built for the Node-20 ABI; the default Node fails to load it). Prints a combined PASS/FAIL and
 // exits non-zero on any failure — the "did I break anything?" gate to run before every commit.
 // The plugin suite runs in a temporary folder of its own, and the run also fails when a test leaves
-// a file or folder in it (runPluginSuite, below).
+// a file or folder in it, or makes a `.maker-workspace` in the plugin's own folder, which is the
+// folder the suite runs in (runPluginSuite, below). That one is removed again only when it is empty:
+// what is in it may be another process's, and the run deletes nothing it cannot show to be its own.
 //
 // Usage:
 //   node scripts/run-tests.js                       # plugin suite only
@@ -56,13 +58,59 @@ function sdkTestSpec(sdkPath, node20Bin) {
   };
 }
 
+// Folders a test must not make in the folder the suite runs in, which is the plugin's own. A build opens its workspace, `<app folder>/.maker-workspace`, unless it is given another, so a test that hands a
+// build `process.cwd()` as its app folder (or none, which a build reads as `.`) made `plugins/model-apps/.maker-workspace` and left it there: empty, and in no .gitignore. Nothing about such a folder says
+// which test made it, and the next run finds it already there and takes it for one that always was, so a leak of this kind can only be caught by the run that makes it.
+const STRAY_NAMES = ['.maker-workspace'];
+
+// Which of them `dir` holds, whatever they are (a link is there too).
+function strayFoldersIn(dir) {
+  return STRAY_NAMES.filter((name) => {
+    try {
+      fs.lstatSync(path.join(dir, name));
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+// Remove `folder` when it is a plain folder with nothing in it, and say whether it is gone. A link is not a plain folder, whatever it points at — Node reports a junction on Windows as a link too — and is never removed:
+// a removal that follows it reaches what it points at. `rmdir` is not recursive and refuses a folder that has anything in it (ENOTEMPTY, or EEXIST where the system says so), which is what spares another process's
+// workspace. A folder that cannot be removed for any other reason (an empty one that another process holds open, on Windows) is kept too: failing to remove is the safe answer here.
+function removeIfEmpty(folder) {
+  try {
+    if (!fs.lstatSync(folder).isDirectory()) return false;
+    fs.rmdirSync(folder);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// What a run made: the stray folders `dir` holds now that it did not hold before the run, named by path (`made`). One that was there before the run is not the run's to answer for, and stays as it is.
+//
+// That a folder is there now and was not before the run does not make it the suite's. Another process can open its own workspace in the same folder while the suite runs — a build started by hand beside it opens
+// `<app folder>/.maker-workspace` — and what is in it is that process's baseline and lock; a removal of everything in the folder, which this once was, took a live build's workspace away. The run cannot tell the two
+// apart, so it deletes nothing it cannot show to be its own: it names the folder, and fails on it, and takes it away only when it is empty (removeIfEmpty). What it leaves — a folder with something in it, a link, a
+// file — is `kept`, for the developer to delete when they know whose it is. The next run finds a kept folder already there and takes it for one that always was, which is why the report says to delete it (reportStrayFolders).
+function settleStrayFolders(dir, before) {
+  const made = strayFoldersIn(dir).filter((name) => !before.includes(name)).map((name) => path.join(dir, name));
+  const kept = [];
+  for (const folder of made) if (!removeIfEmpty(folder)) kept.push(folder);
+  return { made, kept };
+}
+
 // The plugin suite runs in a temporary folder of its own: TEMP, TMP and TMPDIR point into it, so os.tmpdir() does too,
 // in every test file and in every process a test starts. Whatever is still in it when the suite ends was left by a test
 // that did not clean up after itself, so the run names it and fails. A full run used to leave about 260 folders in the
 // developer's own temp folder, which grew by hundreds of thousands of entries; tests/helpers/temp-dirs.js is the shared
 // way to clean up. The private folder is removed either way, so a leak never reaches the developer's temp folder.
+// The folder the suite runs in is watched too: `made` is what the run made in it that was not there before it (STRAY_NAMES, above), and `kept` the part of that which the run left in place (settleStrayFolders).
 function runPluginSuite(files, { cwd, stdio = 'inherit', tempParent = os.tmpdir() } = {}) {
   const tempDir = fs.mkdtempSync(path.join(tempParent, 'model-apps-tests-'));
+  const here = cwd || process.cwd();
+  const before = strayFoldersIn(here);
   try {
     // A process a test runner starts inherits NODE_TEST_CONTEXT, and a `node --test` that has it acts as that runner's
     // child: given these files, it ran none of them and exited 0 (measured: a test that makes a folder made none). The
@@ -70,7 +118,8 @@ function runPluginSuite(files, { cwd, stdio = 'inherit', tempParent = os.tmpdir(
     const env = withTempDir(process.env, tempDir);
     delete env.NODE_TEST_CONTEXT;
     const run = spawnSync(process.execPath, ['--test', ...files], { cwd, stdio, env });
-    return { status: run.status, left: fs.readdirSync(tempDir).sort() };
+    const left = fs.readdirSync(tempDir).sort();
+    return { status: run.status, left, ...settleStrayFolders(here, before) };
   } finally {
     try {
       fs.rmSync(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -79,6 +128,18 @@ function runPluginSuite(files, { cwd, stdio = 'inherit', tempParent = os.tmpdir(
       process.stderr.write(`could not remove the suite's temporary folder ${tempDir}: ${error.message}\n`);
     }
   }
+}
+
+// What the run says of the folders it made in the plugin's own folder: each by path, whether it took the folder away again (it was empty) or left it in place, and what to do about it. Nothing is said when it made none.
+function reportStrayFolders({ made, kept }) {
+  if (made.length === 0) return '';
+  const lines = [`\n${made.length} folder(s) made in the plugin's own folder while the suite ran:`];
+  for (const folder of made) lines.push(`  ${folder}  ${kept.includes(folder) ? '(left in place)' : '(empty: removed again)'}`);
+  if (kept.length) {
+    lines.push('A folder left in place has something in it, or is not a plain folder, and the run does not remove what it cannot show to be its own: another process may have made it while the suite ran (a build started beside the suite opens .maker-workspace in the folder it is given). Delete it by hand once you know it is not in use; until then the next run takes it for one that was always there, and a leak is not caught again.');
+  }
+  lines.push('A test that runs a build must give it a folder and a workspace of its own: a temporary folder it removes (scripts/tests/helpers/temp-dirs.js), never process.cwd(). With no workspace given, a build opens <app folder>/.maker-workspace.');
+  return `${lines.join('\n')}\n`;
 }
 
 // os.tmpdir() reads TEMP, then TMP, on Windows, and TMPDIR on macOS and Linux. Windows names are case-insensitive, so every
@@ -115,6 +176,8 @@ function main(argv) {
     process.stdout.write('A test must remove every file and folder it makes (scripts/tests/helpers/temp-dirs.js).\n');
   }
   results.push({ name: 'nothing left in the temporary folder', ok: plugin.left.length === 0 });
+  process.stdout.write(reportStrayFolders(plugin));
+  results.push({ name: 'nothing made in the plugin folder', ok: plugin.made.length === 0 });
 
   // 2) SDK Jest suite (opt-in, Node 20).
   if (sdkPath) {
@@ -157,4 +220,4 @@ if (require.main === module) {
   process.exit(main(process.argv));
 }
 
-module.exports = { pluginTestFiles, sdkTestSpec, summarize, runPluginSuite, withTempDir, main };
+module.exports = { pluginTestFiles, sdkTestSpec, summarize, runPluginSuite, reportStrayFolders, withTempDir, main };

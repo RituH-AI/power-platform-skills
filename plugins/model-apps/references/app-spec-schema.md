@@ -314,6 +314,15 @@ languages resolves to the same artifact. One option, one value, several names.
 column or option labelled in several languages comes back as a map, and one labelled in a single
 language comes back as a plain string (so no existing spec changes shape). The download emits
 `pluralName` alongside a localized `displayName`, so its own output re-validates.
+A navigation `label` or `title` is always a plain string (the spec has no map form for one), read in the
+language a rebuild writes it in: `--language-code`, else the `languageCode` the spec already on disk pins,
+else the environment's base language. When none of the three gives one — the base language could not be
+read — the download writes nothing (`"code": "navigation-language-unknown"`) rather than guess one: run it
+again, or pass `--language-code <lcid>` (it decides the language the titles are read in and is not written
+into the spec, so a language other than the environment's base language must be passed to the build and to
+`verify-model-app.js` too, or pinned as the spec's `languageCode`, or a rebuild writes those titles as
+base-language titles). A title a node holds only in another language is not in the spec, and a rebuild into the
+same environment leaves it as it is.
 
 ## `description` — write one on everything that takes one
 
@@ -463,13 +472,15 @@ spec with its last snapshot, not with the deployed row, so it does not notice).
 - **Column `type`:** `Text · Memo · Choice · MultiChoice · Boolean · Money · DateTime ·
   Integer · BigInt · Decimal · Double · File · Image · AutoNumber · Customer`.
   **Lookups are NOT columns** — declare a `OneToMany` relationship instead.
-- **Per-type options** (all optional): `required: true` / `"recommended"`; Text → `maxLength`,
+- **Per-type options** (all optional except an AutoNumber column's `autoNumberFormat`): `required: true` /
+  `"recommended"` / `false`; Text → `maxLength`,
   `format` (`Text`/`Email`/`Url`/`Phone`); numeric → `minValue`/`maxValue`/`precision`;
   Integer → also `integerFormat` (`None`/`Duration`/`TimeZone`/`Language`/`Locale` — e.g. render a
   raw minute count as a Duration picker instead of a plain number); DateTime → `dateFormat`
   (`DateOnly`/`DateAndTime`); Boolean → `trueLabel`/`falseLabel`/`defaultValue` (explicit `true` or
   `false` — see note below); File/Image → `maxSizeKb`, Image → `isPrimaryImage`; AutoNumber →
-  `autoNumberFormat` (e.g. `"C-{SEQNUM:5}"`); Calculated/Rollup → `source: "Calculated"|"Rollup"` +
+  `autoNumberFormat` (**required** on an AutoNumber column, e.g. `"C-{SEQNUM:5}"` — see the
+  AutoNumber note below); Calculated/Rollup → `source: "Calculated"|"Rollup"` +
   `formula`.
 - **Write permissions** (optional, every column type **except Customer**): `isValidForCreate` /
   `isValidForUpdate` / `isValidForRead` — see `isValidForCreate / isValidForUpdate /
@@ -480,12 +491,26 @@ spec with its last snapshot, not with the deployed row, so it does not notice).
   column (not `BigInt`/`Decimal`/`Double`/`Money`, even though they share the same numeric
   `minValue`/`maxValue`/`precision` options) — either mismatch is rejected by name at validation
   time rather than surfacing as a mid-build SDK error.
-- **`required` converges on rebuild only when authored explicitly.** For a new column, `true` creates
+- **`required` is `true`, `false` or `"recommended"` — and converges on rebuild only when authored
+  explicitly.** `true` is Dataverse `ApplicationRequired` (Business Required), `"recommended"` is
+  `Recommended` and `false` is `None`. Any other value — `"ApplicationRequired"`, `"true"`,
+  `"required"`, `"Recommended"`, `1`, `null` — is refused at validation, on a column and on
+  `primaryAttribute` alike, naming the table, the column and the value (the build would otherwise
+  read it as not required, and write that over an existing column's level); omit the key instead to
+  leave an existing column as it is. For a new column, `true` creates
   Dataverse `ApplicationRequired` and `"recommended"` creates `Recommended`. For a column that
   already exists (including the primary/name column), a rebuild first reads its current
   `RequiredLevel` and only writes when the explicit spec value differs. If `required` is omitted,
   the build leaves the existing column alone instead of treating omission as `None`, so it never
-  silently demotes a field a maker already made Business Required.
+  silently demotes a field a maker already made Business Required. The primary/name column's
+  `required` is applied on a **new** table too: it is asked in the table's create, and because a plain
+  text name column is stored not required whatever the create asks (an auto-numbered one keeps the
+  level), the build's SDK reads the level back and sets it with one update. The build says the level
+  was applied on create only once the SDK has confirmed it (for `false`, once it has seen the table
+  created). When it cannot be confirmed the table still exists: the build stops (or, for a table found
+  after the answer to its create was lost, or an existing table whose columns could not be read,
+  warns — `false` too, since nothing shows what the column holds), and running the build again finds
+  the table and sets the level as it does for any existing column — it never creates the table twice.
 - **`defaultValue`, `integerFormat`, and `isValidFor*` converge differently: by re-assertion, not
   by diff.** Unlike `required` above, a rebuild does not read the column's current state first —
   it simply re-sends whichever of these fields the spec sets explicitly, on every build, for both a
@@ -497,6 +522,10 @@ spec with its last snapshot, not with the deployed row, so it does not notice).
   (see `globalChoices` below). **Customer** is a polymorphic account/contact lookup.
 - **AutoNumber** can also be the **primary** column — put `autoNumberFormat` on `primaryAttribute`
   (above) instead of adding a separate column, so the generated number is the record identity.
+  An `AutoNumber` **column** needs its `autoNumberFormat` — a non-blank string such as `"C-{SEQNUM:5}"`.
+  One without it is refused when the spec is validated, before anything is built, naming the table and
+  the column: the platform would create a plain text column instead, so write `type: "Text"` for a plain
+  text column. On the primary column the format stays optional: without one the name column is plain text.
 - **Primary column length — `primaryAttribute.maxLength`** (optional; a whole number from 1 to 850, the
   most Dataverse allows for a table's name column — more is refused by Dataverse, so
   anything else is rejected at validation, for `/genpage` and `/app-builder` input as well). Without it
@@ -1074,8 +1103,8 @@ A table's Main forms are served in its **Main Form Set order**, and a user opens
 they may open** — unless they switched forms earlier: the platform remembers the last Main form each
 user opened for a table and opens that one for them while they may still open it. The order is
 stored on each form (its formxml `<DisplayConditions Order="n">`), and `systemform.isdefault` does
-not change it: measured, moving the flag reordered nothing, and a table's three new Main forms — all
-at the same order, as every new form is — were served with the `isdefault` form *last*.
+not change it: measured, moving the flag reordered nothing, and a table's three new Main forms, all at
+the same order, were served with the `isdefault` form *last*.
 
 - **`forms[].isDefault: true`** — this form opens first: it becomes the table's default **and** comes
   first in the order. Applied on any table.
@@ -1617,6 +1646,15 @@ custom control), but the spec validator emits a warning.
   written onto the live entry it corresponds to (a subarea by its target; an area or group by its
   label), so the live entry's id, its other attributes (`Client`, `Sku`, `AvailableOffline`, …) and its
   titles in other languages survive; only the label, title, target and icons the spec sets are applied.
+  **A title the spec does not give is kept:** an area, group or entry whose `label` / `title` is empty or
+  left out keeps the title it has in the environment, and the build says so — a rebuild never clears one,
+  so state a title to change it. (An entry whose title the baseline below shows the spec used to state,
+  and the spec now leaves out, loses it: that is an edit.)
+  **An area or group with no entries and no label** — what an earlier download wrote for each empty group of an
+  environment whose base language is not 1033 — is the environment's empty group when there is one of each. With more than
+  one on either side, which is which cannot be told, so none is paired: the spec's are written as new, untitled
+  ones, and the build names each environment group it does not keep, with its title. Give the spec's group the
+  label it has in the environment to keep it.
   A `dashboard` entry is written the way the designer writes one, with
   `Url="/workplace/home_dashboards.aspx"` — without it the app shows a placeholder icon for the entry,
   and `--verify` fails it.

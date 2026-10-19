@@ -553,9 +553,10 @@ a lookup column from a retained table or deletes a shared option set. Dashboards
 teardown deletes only those the app's solution holds, never another app's namesake — and none when the spec
 has no real solution to ask (the `Default` a download may leave); it keeps the solution itself while any step
 failed, so a re-run can still tell, keeps the page manifest while the generative-pages step failed, so a
-re-run still finds the pages the app authored, and keeps a table while a business rule on it could not be
-deleted (the rule's activated copy can never be deleted once its table is gone), so a re-run deletes the rule
-first, then the table. **Dry-run by default**; add `--apply
+re-run still finds the pages the app authored, and keeps a table — with its icon web resource and a global choice its
+columns bind, which the platform refuses to delete while the table exists, and its relationship to itself — while a
+business rule on it could not be deleted (the rule's activated copy can never be deleted once its table is gone), so
+a re-run deletes the rule first, then the table and what was kept with it. **Dry-run by default**; add `--apply
 --allow-destructive` to actually delete (`--clear-workspace` also prunes `.maker-workspace/`).
 **`--allow-destructive` is required for `teardown --apply`** — without it teardown refuses and
 touches nothing.
@@ -691,7 +692,12 @@ Then:
    earlier `app-spec.json` gives one key to two pages (or one page two keys) and **nothing was written**: show
    the user the message, which names the pages and keys, and either correct the file and pull again or —
    only when the user says so, because fresh keys can make a copy deployed elsewhere update the wrong
-   pages — pull again with `--reset-page-keys`, which re-keys exactly those pages.
+   pages — pull again with `--reset-page-keys`, which re-keys exactly those pages. If it answers
+   `"code": "navigation-language-unknown"`, the environment's base language could not be read, so the
+   language of the app's navigation titles is not known, and **nothing was written**: pull again, or pass
+   `--language-code <lcid>` (the environment's base language — the flag the build takes; a spec already in
+   the folder that pins `languageCode` needs neither). Do not guess it: a spec whose titles were read in the
+   wrong language writes them over the right ones on the next build.
 2. Edit `app-spec.json` (and any page `.tsx`) for the requested change. A page you edit by hand is
    checked like a generated one: run `node "${PLUGIN_ROOT}/scripts/check-griffel-styles.js" --file <page.tsx>`
    on it before you rebuild (the rule and the ten shorthands are in Phase 1.5, step 5) and fix what it
@@ -820,7 +826,9 @@ child view id. Each step emits `[n/total]`.
     `workflows` row through the SDK's generic artifact surface, with no bound member involved.
 - Supported: the full data model — all column types, **AutoNumber primary**, global choices, status
   reasons, alternate keys, **N:N + junction-with-payload**; **`required` reconciled on existing
-  columns** (an explicit `required` converges on rebuild; an omitted one never demotes);
+  columns** (`true`, `false` or `"recommended"` — anything else is refused at validation; an explicit
+  `required` converges on rebuild; an omitted one never demotes) and **asked
+  of a new table's primary column in its create**, said applied only once the SDK confirms it;
   **Boolean `defaultValue`**, whole-number **`integerFormat`** (incl. `Duration`), and per-column
   **write permissions** (`isValidForCreate` / `isValidForUpdate` / `isValidForRead` — this is how you
   make a column read-only), all applied on **create and on rebuild**; adaptive

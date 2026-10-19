@@ -4869,11 +4869,13 @@ async function runSdkBuildPhases(spec, opts, owed) {
   //
   // Only forms the spec declares are ever written. Where the spec orders the table — `mainFormOrder`,
   // an explicit `isDefault`, or any table the spec owns — its Main forms get Order 0..n-1 in the
-  // planned order, skipping any already in place. Elsewhere the order belongs to the environment, and
-  // the build touches it only to put a Main form it CREATED in this run after the table's other Main
-  // forms: a new form carries Order 0, so it would otherwise tie with the form everyone opens today —
-  // or, on a table whose forms carry no order at all, displace it. A table the author orders by hand
-  // (`securityRoles.order`) is left alone entirely.
+  // planned order, skipping any already in place (a form the SDK just created has no Order, so it is
+  // always written, the first of a table included). Elsewhere the order belongs to the
+  // environment, and the build touches it only to put a Main form it CREATED in this run after the
+  // table's other Main forms: a new form carries no Order, and where the platform serves a form with
+  // none is not the build's choice, so it could come ahead of the form everyone opens today. (On a
+  // table whose forms carry no order at all there is nothing to follow: it comes first, and the build
+  // says so.) A table the author orders by hand (`securityRoles.order`) is left alone entirely.
   //
   // Best-effort like the promotion above: a failed read or write is reported (✗ and a warning) and
   // `--verify` fails on the order it reads back, but the build goes on.
@@ -4982,9 +4984,9 @@ async function runSdkBuildPhases(spec, opts, owed) {
 
   // AB#6736948 — a Main form the build CREATES on a table whose order it does not set is created already
   // after the table's other Main forms. Its order is written into the new form's own <DisplayConditions>
-  // (the SDK gives every new form one, at Order 0, in its root bag) BEFORE the first push, so the order is
-  // part of the create: no interrupted run and no later failure can leave the form at Order 0, which can
-  // put it ahead of the form the table opens with. A separate write after the create, as first tried,
+  // (the SDK gives every new form one, with no Order, in its root bag) BEFORE the first push, so the order
+  // is part of the create: no interrupted run and no later failure can leave the form without one, which
+  // can put it ahead of the form the table opens with. A separate write after the create, as first tried,
   // left exactly that on any failure between the two — and a later build cannot tell the form is new.
   //
   // The place is (highest order among the table's other Main forms) + 1 + (the form's index among the
@@ -5016,9 +5018,9 @@ async function runSdkBuildPhases(spec, opts, owed) {
     const order = snapshot.error ? APPEND_FALLBACK_ORDER + idx : snapshot.base + 1 + idx;
     // The root bag of a new form, as the SDK builds it (abridged):
     //   { "c": [ { "i": 1, "node": { "n": "header", … } }, { "i": 2, "node": { "n": "footer", … } },
-    //            { "i": 3, "node": { "n": "DisplayConditions", "a": [["Order", "0"], ["FallbackForm", "true"]],
+    //            { "i": 3, "node": { "n": "DisplayConditions", "a": [["FallbackForm", "true"]],
     //                                "c": [{ "n": "Everyone", "a": [], "c": [] }] } } ] }
-    // Only the Order attribute changes; the node is replaced whole through the generic surface, as the
+    // Only the Order attribute is added; the node is replaced whole through the generic surface, as the
     // form-events region is (wireFormEvents).
     const art = await provision.getArtifact('form', formId);
     const bag = (art && art.bag && Array.isArray(art.bag.c)) ? art.bag.c : [];
@@ -5026,6 +5028,8 @@ async function runSdkBuildPhases(spec, opts, owed) {
     if (at < 0) return;
     const entry = JSON.parse(JSON.stringify(bag[at]));
     const attrs = Array.isArray(entry.node.a) ? entry.node.a : [];
+    // The SDK gives a new form no Order, so it is added first, as Maker's own file has it. A node that already
+    // carries one (an earlier SDK gave every new form Order "0") has it replaced, not repeated.
     const has = attrs.some((p) => Array.isArray(p) && p[0] === 'Order');
     entry.node.a = has ? attrs.map((p) => (Array.isArray(p) && p[0] === 'Order' ? ['Order', String(order)] : p)) : [['Order', String(order)], ...attrs];
     await provision.updateElement('form', formId, `/bag/c/${at}`, entry);
@@ -7136,7 +7140,38 @@ async function runSdkBuildPhases(spec, opts, owed) {
       summaryOverrides.set(String(key).toLowerCase(), val);
     }
     const DUPLICATE_MODEL_REASON = 'a model with this name already exists';
+    // An org without the AI template a row summary is built from. The SDK reads the template before its first write and refuses with its own
+    // code (`configureRowSummary`: ROW_SUMMARY_TEMPLATE_NOT_FOUND, "Nothing was written"), where it used to publish a model that named no template and let the
+    // platform answer. It is the same kind of environment gate as the licence refusal below — nothing in the spec can fix it — so it skips the same way.
+    const NO_TEMPLATE_REASON = 'no row-summary AI template in this environment';
+    // The code alone does not prove that the org has no template, though. The SDK's lookup is
+    //   GET /msdyn_aitemplates?$select=msdyn_aitemplateid&$filter=msdyn_uniquename eq 'GptPowerPrompt'&$top=1   ->   { "value": [ { "msdyn_aitemplateid": "<guid>" } ] }
+    // and it raises the code whenever the FIRST row has no `msdyn_aitemplateid`, without checking that there is a row: `{ "value": [] }`, `{ "value": [ {} ] }` and
+    // `{ "value": [ null ] }` all raise it. Only the empty list says the org has no template; the other two are answers that cannot be read, and an answer that cannot be
+    // read stops the build (as it did before the skip) instead of passing for an environment gate. So the first time the code is seen, the build asks the same question
+    // through `queryRecords` — which refuses an answer without its `value` array — and skips only on an empty list. Rows, a row that is no row and a read that fails leave
+    // the SDK's own error to stop the build. The verdict is kept: every table's lookup is the same question, so one read settles the whole build.
+    // This mirrors the SDK's lookup (its template name, its select) and can go once the SDK raises the code for an empty list only and answers a malformed first row with a
+    // ConnectionError. If the SDK ever looks for another template, this read can only fail to confirm, which stops the build: the safe side.
+    // `msdyn_aitemplate` is the table behind the SDK's `/msdyn_aitemplates` set:
+    // https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/msdyn_aitemplate
+    // The verdict is `{ absent }` — true only for an empty list — and, when the read itself failed, `{ absent: false, failure }`, what it threw. The read is two requests, the first time:
+    // the one that names the template table's set (the SDK looks it up once and keeps it) and the one that reads the list; either can fail.
+    const ROW_SUMMARY_TEMPLATE_NAME = 'GptPowerPrompt';
+    let templateVerdict;
+    const confirmNoTemplate = async () => {
+      if (templateVerdict === undefined) {
+        try {
+          const rows = await provision.queryRecords('msdyn_aitemplate', { select: ['msdyn_aitemplateid'], filter: `msdyn_uniquename eq '${ROW_SUMMARY_TEMPLATE_NAME}'`, top: 1 });
+          templateVerdict = { absent: Array.isArray(rows) && rows.length === 0 };
+        } catch (failure) {
+          templateVerdict = { absent: false, failure };
+        }
+      }
+      return templateVerdict;
+    };
     const aiSummaryUnsupported = (err) => {
+      if (err && err.code === 'ROW_SUMMARY_TEMPLATE_NOT_FOUND') return templateVerdict && templateVerdict.absent ? NO_TEMPLATE_REASON : false;
       const detail = `${(err && err.message) || ''} ${JSON.stringify((err && err.cause) || '')}`;
       // Match the platform's own error CODE, not the prose: the message is localized and the status
       // alone (403/400) is also what a plain privilege or validation failure returns, which must
@@ -7187,7 +7222,25 @@ async function runSdkBuildPhases(spec, opts, owed) {
         const override = summaryOverrides.get(String(logical).toLowerCase());
         await runner.run('ai-features', `row summary for ${logical}`, async () => {
           const promptSpec = buildPromptSpec(ent, { spec, override });
-          const res = await provision.configureRowSummary(promptSpec, { solutionUniqueName });
+          let res;
+          try {
+            res = await provision.configureRowSummary(promptSpec, { solutionUniqueName });
+          } catch (err) {
+            // `skipIf` is synchronous, so the read that confirms the template is absent is made here, before the error reaches it. The error is never replaced: when the
+            // read does not confirm it, it stops the build as it is — the SDK's own error, whole, as the halt's own cause.
+            if (err && err.code === 'ROW_SUMMARY_TEMPLATE_NOT_FOUND') {
+              const { failure } = await confirmNoTemplate();
+              // A read that FAILED is kept beneath the SDK's error. The runner decides from the chain of causes whether the build may run this attempt again (lib/retry-policy.js, judgeFailure): a throttle, an
+              // unavailable service or a reset connection that stopped the read has to be on that chain, or the halt is final whatever the read failed with — and the halt's text says that the read failed, and why
+              // (operatorRemedy). It is only a failure of the SERVICE that makes the halt transient: a missing template on its own, and a read that answered, however wrongly, stay final. The SDK's error has no
+              // cause of its own, so the one it has here is this one. `withCause` is the link a result carries for the same reason (a failure reported by value); an error that cannot take it (a frozen one)
+              // stops the build as it did before, final.
+              if (failure !== undefined) {
+                try { withCause(err, failure); } catch { /* nothing to carry it on */ }
+              }
+            }
+            throw err;
+          }
           result.created.ai.summaries[logical] = res;
           return res.modelId;
         }, {
@@ -7195,14 +7248,19 @@ async function runSdkBuildPhases(spec, opts, owed) {
             const reason = aiSummaryUnsupported(err);
             if (!reason) return false;
             result.skipped.aiSummaries.push(logical);
-            pendingAiSummaryReports.push(logical);
+            // Nothing was written for a table the SDK refused before its first write, so there is no model to look for.
+            if (reason !== NO_TEMPLATE_REASON) pendingAiSummaryReports.push(logical);
             // Warn ONCE per build: on a gated environment every table skips for the same reason, and
             // N copies of the same paragraph buries the rest of the output.
             if (!aiSummaryGateWarned && typeof opts.warn === 'function') {
               aiSummaryGateWarned = true;
-              opts.warn(reason === DUPLICATE_MODEL_REASON
-                ? `AI row summaries were NOT created: an AI model named "<table> row summary" already exists for a table in this spec, so the platform refused to create another (duplicate key on 'ndx_Uniquename'). Same-name models are kept because this attempt returned no created-model id. Review the reported ids before any separate cleanup. Everything else in the app was built normally.`
-                : `AI row summaries were NOT created: this environment does not license the row-summary (AI Builder) capability, so there is no supported way to author them here — the org's 'EnableFormInsights' setting can read ON and the publish still be refused. Everything else in the app was built normally. Re-run against a licensed environment, or set ai.summaries.default to "off" (with no per-table enabled:true) to stop requesting them.`);
+              if (reason === DUPLICATE_MODEL_REASON) {
+                opts.warn(`AI row summaries were NOT created: an AI model named "<table> row summary" already exists for a table in this spec, so the platform refused to create another (duplicate key on 'ndx_Uniquename'). Same-name models are kept because this attempt returned no created-model id. Review the reported ids before any separate cleanup. Everything else in the app was built normally.`);
+              } else if (reason === NO_TEMPLATE_REASON) {
+                opts.warn(`AI row summaries were NOT created: this environment has no 'GptPowerPrompt' AI template, which a row summary is built from (AI Builder provides it), so none can be authored here, and nothing was written for them. Everything else in the app was built normally. Re-run once the environment has the template, or set ai.summaries.default to "off" (with no per-table enabled:true) to stop requesting them.`);
+              } else {
+                opts.warn(`AI row summaries were NOT created: this environment does not license the row-summary (AI Builder) capability, so there is no supported way to author them here — the org's 'EnableFormInsights' setting can read ON and the publish still be refused. Everything else in the app was built normally. Re-run against a licensed environment, or set ai.summaries.default to "off" (with no per-table enabled:true) to stop requesting them.`);
+              }
             }
             return reason;
           },
