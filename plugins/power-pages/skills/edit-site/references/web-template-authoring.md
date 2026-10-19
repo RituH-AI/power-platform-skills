@@ -14,6 +14,9 @@ Authoring callers first follow [shared routing and execution](non-spa-site-autho
 as create, source edit, rename, refactor, rebind, or delete, and resolve existing records by
 both `adx_name` and `adx_webtemplateid`, not directory name alone.
 
+Resolve required named page bindings through [site markers](site-marker-authoring.md).
+Reading `sitemarkers` in Liquid does not authorize changing the marker or its target page.
+
 Default to a reusable fragment for shared markup/logic, a page-layout source for webpage
 rendering, a base layout only when derived layouts need stable overridable blocks, and a
 derived layout only when an existing base supplies those blocks. Preserve website header/footer

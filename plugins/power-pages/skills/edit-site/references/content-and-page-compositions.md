@@ -229,12 +229,13 @@ Execute only reference workflows required by the resolved structure:
 - imported local assets: `author-web-file`;
 - reusable text or Liquid values: `author-content-snippet`;
 - Liquid source or reusable layout logic: `author-web-template`;
-- a new page-template binding: `author-page-template`.
+- a new page-template binding: `author-page-template`;
+- an explicitly requested named webpage binding: `author-site-marker`.
 
 Invoke `author-webpage-content` for localized section/column/element composition and
 execute [the styling workflow](style-site-workflow.md) for local visual treatment.
 
 A straightforward new page normally needs the webpage reference workflow, including default
 navigation or its explicit opt-out, followed by `author-webpage-content` with the resolved
-composition. Do not add assets, snippets, templates, extra navigation placements, or styling
+composition. Do not add assets, snippets, templates, site markers, extra navigation placements, or styling
 merely because those capabilities are available.

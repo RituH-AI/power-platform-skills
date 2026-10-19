@@ -3,7 +3,7 @@ name: edit-site
 description: >-
   Plans, coordinates and customizes PAC CLI-downloaded Standard or Enhanced data model non-SPA
   Power Pages sites created from Microsoft templates or manually in Design Studio. Use for
-  requests involving pages, localized content, navigation, assets, snippets,
+  requests involving pages, localized content, navigation, assets, snippets, site markers,
   Liquid/web templates, page layouts, or styling. Coordinated work produces an approved
   browser-viewable plan, executes changes in dependency order, verifies the local result,
   and optionally hands off to deployment. Not for React, Angular, Vue, or Astro SPA sites.
@@ -66,7 +66,7 @@ For coordinated work, this skill owns:
 - committing coherent customization units;
 - offering deployment after local verification.
 
-It authors webpage, snippet, web-file, web-template, and page-template records only through
+It authors webpage, snippet, web-file, web-template, page-template, and site-marker records only through
 `${PLUGIN_ROOT}/skills/edit-site/references/non-spa-site-authoring.md` and the selected component reference.
 The `author-webpage-content` skill owns localized body HTML; the
 `style-site` reference workflow owns guarded styling.
@@ -97,8 +97,9 @@ For coordinated work, create these tasks before starting:
 3. If several valid sites remain and request/workspace evidence does not identify one, ask the
    user to choose. Never select the first filesystem result.
 4. Read the site identity, configured languages, existing pages, navigation,
-   snippets, web files, web templates, page templates, CSS sources, Bootstrap evidence, logos,
-   favicons, existing page imagery, and the exact callers of site-wide brand assets.
+   snippets, site markers and their page bindings, web files, web templates, page templates,
+   CSS sources, Bootstrap evidence, logos, favicons, existing page imagery, and the exact callers
+   of site-wide brand assets.
    For header work, resolve the active website header binding, its source/includes, localized
    branding snippets, navigation callers, and responsive/authenticated variants. Do not assume
    that a template named `Header` is the one the site uses.
@@ -268,7 +269,7 @@ modifying Dataverse.
    write staged bytes directly into the non-SPA site.
 2. Divide the request into the smallest coherent operations identified by:
    `author-web-file`, `author-content-snippet`, `author-web-template`,
-   `author-page-template`, `author-webpage`, `author-webpage-content`, and `style-site`.
+   `author-page-template`, `author-webpage`, `author-site-marker`, `author-webpage-content`, and `style-site`.
    Use the non-SPA authoring index's dispatch for component reference workflows.
    Invoke only `author-webpage-content` through the `Skill` tool.
    Execute `style-site` through its reference workflow.

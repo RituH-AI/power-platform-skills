@@ -82,6 +82,7 @@ test('component operation identifiers execute without rewriting the approved pla
     ['author-content-snippet', 'content-snippets/brand/Brand.en-US.contentsnippet.yml'],
     ['author-web-template', 'web-templates/header/Header.webtemplate.yml'],
     ['author-page-template', 'page-templates/default/Default.pagetemplate.yml'],
+    ['author-site-marker', 'sitemarker.yml'],
   ];
   for (const [owner, metadataPath] of metadataOwners) {
     plan.operations.push({

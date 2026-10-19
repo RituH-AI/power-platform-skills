@@ -34,6 +34,10 @@ New pages update navigation by default unless the user explicitly asks not to.
 Resolve the target web link set and label before writing; body-only edits leave navigation unchanged.
 For an approved operation, apply only its approved navigation scope.
 
+For named page bindings, follow [site markers](site-marker-authoring.md) after the page
+identity is verified. Creating or moving a page does not authorize creating, retargeting,
+or renaming a marker. Preserve existing marker bindings when the page ID stays unchanged.
+
 ## Contents
 
 - [Create and model records](#webpage-creation-workflow)

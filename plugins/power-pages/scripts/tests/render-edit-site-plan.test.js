@@ -205,7 +205,7 @@ test('rejects unsupported skills and dependencies that are not ordered', () => {
     { encoding: 'utf8' }
   );
   assert.equal(unsupportedResult.status, 1);
-  assert.match(unsupportedResult.stderr, /unsupported operation skill invent-portal-metadata/);
+  assert.match(unsupportedResult.stderr, /unsupported operation identifier invent-portal-metadata/);
 
   const unordered = {
     ...SAMPLE_PLAN,

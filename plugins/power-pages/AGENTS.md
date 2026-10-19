@@ -108,6 +108,10 @@ Keep this extension in the non-SPA authoring path; SPA/shared design references 
 Coordinated work uses seven phases and explicit approval gates. Individual page or component edits follow
 `skills/edit-site/references/non-spa-site-authoring.md` and only relevant component references.
 Component instructions live under `skills/edit-site/references/`.
+Site markers use `site-marker-authoring.md` and the `author-site-marker` reference operation,
+not a new skill. Preserve downloaded storage/field conventions and same-site page identities;
+new-page bindings depend on verified webpage outputs. Marker edits do not enable search or
+alter navigation, and local removal is not proof of remote deletion.
 Page-element markup and composition instructions live under `skills/author-webpage-content/references/`.
 
 Use the shared authoring reference's dispatch table to select component workflows.

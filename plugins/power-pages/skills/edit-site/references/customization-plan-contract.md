@@ -360,7 +360,8 @@ Rules:
 
 - `id` is unique kebab-case.
 - `skill` is one supported authoring operation identifier. `author-web-file`,
-  `author-content-snippet`, `author-web-template`, `author-page-template`, `author-webpage`, and `style-site`
+  `author-content-snippet`, `author-web-template`, `author-page-template`, `author-webpage`,
+  `author-site-marker`, and `style-site`
   execute the corresponding non-SPA authoring reference workflow in the coordinator.
   Only `author-webpage-content` is a skill invocation.
 - `action` uses the owning workflow's terminology.

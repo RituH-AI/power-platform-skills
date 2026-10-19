@@ -171,6 +171,7 @@ and do not apply to React, Angular, Vue, or Astro SPA sites.
 | Site-served images, CSS, JavaScript, fonts, documents, and adjacent PAC metadata | [Web files](skills/edit-site/references/web-file-authoring.md) |
 | Liquid/HTML fragments, inherited layouts, and explicitly requested callers or bindings | [Web templates](skills/edit-site/references/web-template-authoring.md) |
 | Page-template metadata, web-template-backed layouts, rewrite templates, and requested page assignments | [Page templates](skills/edit-site/references/page-template-authoring.md) |
+| Named webpage bindings, exact-name Liquid lookups, retargeting, and dependency-safe marker changes | [Site markers](skills/edit-site/references/site-marker-authoring.md) |
 
 The [shared authoring contract](skills/edit-site/references/non-spa-site-authoring.md) owns routing,
 autonomy, dependency loading, local-only boundaries, and final verification. New pages update
