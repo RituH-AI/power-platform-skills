@@ -20,29 +20,47 @@ Comprehensive rules for generating generative page code. Read this file during c
 12. **Forbidden Functions**: Don't use `createTheme`, `mergeThemes`, `useTheme` (don't exist in Fluent UI V9)
 13. **Navigation**: Use the `Xrm.Navigation.navigateTo` API for all in-app navigation. Never construct raw URLs or manipulate `window.location` — see **Special Patterns > Generative Page Navigation**.
 14. **Batched async state — no intermediate renders**: React 17 does NOT batch `setState` calls inside async functions. Every separate `setState` triggers its own render. When a component fetches multiple pieces of data (e.g., a record plus related records), use a **single state object** and a **single `setData(...)` call** at the end: `const [{ record, related, loading, error }, setData] = useState({...})`. For multi-entity fetches, use `Promise.all` or `Promise.allSettled` so one `setData` completes the entire load. Never call `setLoading(false)` in a `finally` block when the data setters are in the `try` block — this always produces an intermediate render. **PageInput exception:** initial `useState({ loading: !!recordId, ... })` (PageInput rendering pattern) does NOT violate this rule — that's a synchronous initial value, not a separate `setState` call after fetch. The rule is per-effect: independent effects (e.g., usersettings fetch + record fetch) can each have their own single batched `setData`.
-15. **Data fetching — inline IIFE + cache guard (Dataverse list/detail pages)**: For pages where the user navigates away and returns (list paired with detail, tabbed UIs), use the module-level `window` cache + inline async IIFE pattern documented in `references/data-caching.md`. Never use `useCallback` for data-fetching functions — `dataApi` gets a new object reference after the initial render, so a `useCallback` recreates, re-fires the effect, and any `setData(loading: true)` call resets the spinner causing flicker. The cache guard (`if (cache.has(key)) return`) is the fix. **Do NOT apply this pattern to forms, single-visit dashboards, or mock-data pages.** See the reference for the full pattern.
+15. **Data fetching — de-dupe + cache, and NEVER `dataApi` in a dependency array (any real host read on mount)**: The genpage host (a) hands a **new `dataApi` reference every render** and (b) **double-mounts the page on open** — a cache-bypassing re-mount ~300ms after the first. Both make a naive on-mount fetch run 2+ times → double fetch + spinner re-flash. Fixes: **(1)** Never put `dataApi` in a `useEffect`/`useMemo`/`useCallback` dependency array, and never `useCallback` a fetch function — it re-fires the effect on every render. Depend on a **readiness boolean** (`const dataReady = !!dataApi;`) plus `recordId`/`reloadKey` as needed. **(2)** Wrap the fetch in the **in-flight-promise de-dupe + `window` cache** pattern in `references/data-caching.md` so concurrent mounts share ONE round-trip and later mounts read cache. The in-flight de-dupe — not the dep array — is what defeats the host double-mount (correct deps alone do NOT). Apply to **any page that fetches data on mount through a real host read**, including Dataverse reads, connector reads (`queryConnectorTable` / `executeConnectorOperation`), and single-visit overviews/dashboards. **Skip only pages that render inline mock arrays and forms with no initial fetch.** See the reference for the full pattern.
 16. **Overlays must be confined to the page container (`mountNode`)**: The generated page shares the DOM with the genpage *designer* — the preview is NOT an isolated iframe. Every Fluent surface that renders through a portal (`Dialog` via `DialogSurface`, `Popover`, `Menu`, `Tooltip`, `Combobox`/`Dropdown` listbox, `DatePicker`, `TimePicker`) defaults to portalling to `document.body` of the **designer**, so without a `mountNode` it escapes the preview and can cover the designer chrome — including the coding-agent panel. Establish a single `containerRef`/`mountNode` on the page root and thread it to every overlay. See **Special Patterns > Dialogs and Overlays**.
 17. **No full-viewport modal scrims; prefer non-modal or in-page panels**: A default `<Dialog>` is `modalType="modal"` — it draws a `position: fixed` backdrop and traps focus across the whole window, which in the designer blankets the agent panel and locks the user out (they can't even ask the agent to remove it). Default dialogs to `modalType="non-modal"` **and** pass `mountNode`, or use an in-page absolutely-positioned panel. The page root must establish a containing block (`position: relative` + `contain: layout`) so even a fixed-position overlay is clipped to the page. Never size overlays to the viewport. See **Special Patterns > Dialogs and Overlays**.
 18. **Never nest a `<Dialog>` inside another `<Dialog>`**: Stacked modal scrims and nested focus traps make dialogs impossible to dismiss reliably. Render sibling dialogs as separate top-level surfaces switched by state, never one `<Dialog>` as a child of another's JSX.
 19. **All hooks above every early return — no conditional hook calls**: Detail/record pages crash with **minified React error #310** ("rendered more/fewer hooks than the previous render") on the *first* open of a record, then work on the second click. Cause: a hook — usually a `useMemo` deriving chart points or display rows from loaded data — sits *below* a loading/empty early return (`if (data.loading) return <Spinner/>`). On the first render data is still loading, the component early-returns and never reaches that `useMemo` (fewer hooks); when data arrives it renders past the return and calls the extra hook → the hook count differs between renders → #310. The "works the second time" intermittency (the cached render skips the loading branch) is the signature of this bug. **Fix:** place every `useMemo`/`useState`/`useEffect`/`useCallback` **above all early returns**, and make derived memos tolerate not-yet-loaded data (read from an always-initialized value, e.g. `data.rows ?? []`). Early returns are fine — they just must come *after* the last hook call. This is the React rules of hooks: never call a hook below a conditional `return`.
+20. **Never put `...` alone on a line**: Write the spread/rest token and its operand together (`...rows`, not `...` followed by `rows` on the next line).
+21. **End final type-argument statements with `;`**: If the file's last statement ends in a type argument list (`Page<string>`, `Array<Row>`), terminate it with a semicolon.
 
 ---
 
 ## Supported Libraries
 
-Only these libraries are available. Do NOT use any other library.
+Only the generated `package.json` dependencies below are available. Do NOT use
+any other library. `scripts/lib/supported-dependencies.js` is the source of
+truth for names, versions, and feature gates; this example is validated against
+that module by `scripts/tests/supported-dependencies-docs.test.js`.
 
+```json
+{
+  "dependencies": {
+    "react": "17.0.2",
+    "react-dom": "17.0.2",
+    "@fluentui/react-components": "^9.54.0",
+    "@fluentui/react-icons": "2.0.326",
+    "d3": "^7.8.5",
+    "@fluentui/react-datepicker-compat": "^0.4.50",
+    "@fluentui/react-timepicker-compat": "^0.2.40"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/react": "^17.0.80",
+    "@types/react-dom": "^17.0.25",
+    "@types/d3": "^7.4.3"
+  }
+}
 ```
-"react": "^17.0.2"
-"uuid": "^9.0.1"
-"@fluentui/react-icons": "^2.0.292"
-"@fluentui/react-calendar-compat": "^0.2.2"
-"@fluentui/react-components": "^9.46.4"
-"@fluentui/react-datepicker-compat": "^0.5.0"
-"@fluentui/react-timepicker-compat": "^0.3.0"
-"@fluentui/react-theme": "^9.1.24"
-"d3": "^7.9.0"
-```
+
+Feature-gated packages are installed only when the generator receives the
+matching flag: `charts` adds `d3` and `@types/d3`, `datepicker` adds
+`@fluentui/react-datepicker-compat`, and `timepicker` adds
+`@fluentui/react-timepicker-compat`.
 
 **CRITICAL**: DatePicker must be imported from `@fluentui/react-datepicker-compat` and TimePicker from `@fluentui/react-timepicker-compat` (NOT from `@fluentui/react-components`)
 
@@ -167,7 +185,7 @@ const useStyles = makeStyles({
 ## Localization
 
 Localization guidance has been moved to a separate reference that is loaded
-**conditionally** — only when `pac model list-languages` returns multiple
+**conditionally** — only when `scripts/list-languages.js` (or its fallback, `pac model list-languages --environment '<envUrl>'`) reports multiple
 configured languages OR any non-English language. For English-only environments,
 skip this entirely.
 
@@ -213,10 +231,13 @@ export interface PageInput {
 const { dataApi, pageInput } = props;
 const recordId = pageInput?.recordId;
 const entityName = pageInput?.entityName;
+const dataReady = !!dataApi;   // never depend on `dataApi` itself — see Rule 15
 const [row, setRow] = useState(undefined);
 
 useEffect(() => {
-    if (entityName === "account" && recordId && dataApi) {
+    if (entityName === "account" && recordId && dataReady) {
+        // Full pages should also de-dupe the host double-mount — see
+        // references/data-caching.md. Kept minimal here for the illustration.
         (async () => {
             const r = await dataApi.retrieveRow("account", {
                 id: recordId,
@@ -225,7 +246,8 @@ useEffect(() => {
             setRow(r);
         })();
     }
-}, [dataApi, entityName, recordId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [dataReady, entityName, recordId]);
 ```
 
 ### Example — `data` with safe casting
@@ -331,30 +353,65 @@ const isDark =
 const [isDarkMode, setIsDarkMode] = useState(isDark);
 ```
 
-#### Multi-page builds: use `PAGEREF_` placeholders
+#### Multi-page builds: use `PAGEREF_<token>` placeholders
 
 In a multi-page deployment, page GUIDs don't exist until after first upload. Use a
-`PAGEREF_<filename-without-tsx>` placeholder as the `pageId` — the skill replaces
-these with real GUIDs in a second pass after all pages are deployed.
+`PAGEREF_<token>` placeholder as the `pageId`. The build replaces these with real GUIDs in a
+resolved deployment copy after all pages are deployed; your canonical `.tsx` keeps the symbolic
+token (the build never writes a GUID back into it).
+
+**The token depends on the caller — read the plan's `## Environment` `Mode:` line:**
+
+| `Mode:` | Token | Why |
+|---------|-------|-----|
+| `app-builder` | the target page's **`Key`** (the `Key` column in `## Pages`, = App Spec `pages[].key` = `navigatesTo[].targetKey`) | Rename-stable, and a downloaded page's file is a storage path (`pages/<guid>/page.tsx`) whose stem means nothing |
+| absent (standalone `/genpage`) | the target page's **file name without `.tsx`**, exactly as in the `File` column | There is no App Spec, so there are no keys and the plan has no `Key` column; Phase 6.5 builds a filename-stem → page-id map |
 
 ```typescript
-// Navigating to a sibling page — use PAGEREF_ placeholder at build time
+// Navigating to a sibling page — pass any custom id in `data` (never recordId)
 xrm.Navigation.navigateTo({
     pageType: "generative",
-    pageId: "PAGEREF_pet-gallery",    // replaced with real GUID post-deploy
-    entityName: "adopt_pet",
-    recordId: selectedId,
+    pageId: "PAGEREF_pet-gallery",   // app-builder: target's Key. standalone: target's file stem.
+    data: { selectedPetId: selectedId },   // custom ids go in data (read as pageInput?.data?.selectedPetId)
 });
 ```
 
-The placeholder format is `PAGEREF_` followed by the sibling page's filename without
-`.tsx` (e.g., `pet-gallery.tsx` → `PAGEREF_pet-gallery`).
+**Must be quoted, and it is the pageId.** The build's single structural resolver only rewrites a
+`PAGEREF_<token>` that appears as the **double-quoted `pageId:` value of a `pageType:"generative"`
+`navigateTo` call** — the value is exactly that one string literal, with nothing after it but the
+`,` or `}` that ends the property (a plain cast — `as const`, `as Name`, `satisfies Name`, with `Name` a plain or dotted
+identifier — may follow the literal and is left as written; a generic, a union or a string-literal type may not). The options
+object has to be **written inline in the call**: an object built in a variable and passed by name is not recognised, and
+its token halts the build as stray. **Write the plain form, `navigateTo({ … })` or
+`Xrm.Navigation.navigateTo({ … })`.** A parenthesised callee, `(navigateTo)({ … })`, is read only where a call can
+start — at the start of a statement or after `;` `{` `(` `[` `,` `:`, a ternary `?`, an operator ending in `=`, `=>`,
+`&&`, `||` or `??`, or the keyword `return` on the same line (`return (navigateTo)({ … })`; not `await` or `yield`) — and never
+after a name or any other keyword, `)`, `]`, `.`, `}`, `!`, `>`, a quote or a back-tick, because
+there the parentheses are an argument list for some other function (`factory!(navigateTo)({ … })`,
+``tag`x`(navigateTo)({ … })``); the token in one halts the build as stray. Always emit it exactly there — never single-quoted, back-ticked,
+concatenated, followed by an expression (`"PAGEREF_x".slice(8)`, `&& other`,
+`("PAGEREF_x" as const).slice(1)`), in a
+`pageType` that is not the plain literal, in a call spelled some way the resolver does not read, or
+as a decoy string elsewhere (the pre-deploy scan **rejects** a malformed nav ref, any `PAGEREF_`
+token that is not a resolvable nav pageId — **no comment may hold one**: a `//` comment, a block comment, a trailing comment
+(`navigateTo({ … }); // PAGEREF_x`) and a JSX `{/* PAGEREF_x */}` are all refused, so write the comment without the token — and any
+parity mismatch, and reports the page, line and column). Also keep the code before a navigation call unambiguous: the checker has
+no parser, so where it cannot tell a division from a regex, or a comparison from an element — a `/` or `<` right after a `}`
+(write `({ … }) / 2`, not `{ … } / 2`), after a `)` whose `(` is far back, after a word that can be a keyword or a name (`of`,
+`type`, `get`, `as` …), after a `>`, or on a later line than the operand before it (`type Value = number` then a regex line);
+an identifier written with a `\u` escape — it does not trust a `PAGEREF_` token at or after that spot, or a `navigateTo` call
+whose object or arguments reach it. Put the operand in parentheses, end the statement with `;`, or write the navigation call above it. In `app-builder` mode every `PAGEREF_<key>` you emit must have a
+matching `navigatesTo` entry in the page's spec, and every declared `navigatesTo.targetKey` must
+appear as a real nav pageId in the source (the build enforces exact parity, and verification
+confirms each edge resolves to the actual target).
 
-**Must be quoted.** The skill's Phase 6.5 fix-up looks for `"PAGEREF_<name>"` as a
-quoted token to avoid partial-string collisions (e.g., `PAGEREF_pet` inside
-`PAGEREF_pet-gallery`). Always emit the placeholder as a string literal inside
-double quotes — assign it to `pageId` as a string, never construct it via
-concatenation.
+**Every `PAGEREF_` target page must be sitemap-placed.** <a id="PAGEREF_sitemap_placement"></a>
+A page referenced by a `PAGEREF_` placeholder must have a matching `page` subarea in the
+app's `appShell`. Navigation-only pages — reachable only via a `PAGEREF_` call but absent from the
+app sitemap — are not supported; validation rejects them. A "detail" page that receives a caller-
+supplied record id or other context is a normal sitemap page; it reads its input via
+`pageInput?.data?.<field>`. See [`app-spec-schema.md`](../references/app-spec-schema.md) → `## pages[]`
+for the three-authority identity model and the `pages[].pageId` edit-snapshot field.
 
 ### Dark Mode Toggle
 
@@ -399,29 +456,34 @@ import { webDarkTheme, webLightTheme } from "@fluentui/react-components";
 Recurring CSS bugs that type-check and compile but render wrong. Check for these before finishing a page:
 
 1. **A bar/progress fill `<span>` with a `width`/`height` % but no `display` is invisible.** A `<span>` defaults to `display: inline`, which ignores width/height → a 0×0 box, so the colored fill never paints (only the track shows — looks like "the color got lost"). Symptom: computed `backgroundColor` is correct but `offsetWidth`/`offsetHeight` is `0`. Fix: add `display: "block"` (or `inline-block`) to the fill — or use a `<div>` for fills.
-2. **Concatenated `makeStyles` classes lose status/warning colors to a shorthand-vs-longhand collision.** ``className={`${base} ${warning}`}`` (plain template string, not `mergeClasses`) where `base` sets a shorthand `border:` / `backgroundColor: "transparent"` and `warning` sets the longhand `borderColor` / `backgroundColor` — Griffel's atomic output plus the shorthand-vs-longhand cascade lets the base win, so the amber bg/border/text silently fall back to neutral. Fix: apply the status colors **inline** (`style={{ backgroundColor: tokens.colorStatusWarningBackground1, borderColor: tokens.colorStatusWarningBorder1 }}` — inline wins) or use `mergeClasses` instead of string concatenation.
+2. **Concatenated `makeStyles` classes lose status/warning colors to a shorthand-vs-longhand collision.** ``className={`${base} ${warning}`}`` (plain template string, not `mergeClasses`) where `base` sets a shorthand `border:` / `backgroundColor: "transparent"` and `warning` sets the longhand `borderTopColor` / `backgroundColor` — Griffel's atomic output plus the shorthand-vs-longhand cascade lets the base win, so the amber bg/border/text silently fall back to neutral. Fix: apply the status colors **inline** (`style={{ backgroundColor: tokens.colorStatusWarningBackground1, borderColor: tokens.colorStatusWarningBorder1 }}` — inline wins) or use `mergeClasses` instead of string concatenation.
 3. **`tokens.fontFamilyNumeric` is Bahnschrift, not Segoe UI.** Using it for tabular numbers (counts, %, ranks, dates) renders those digits in Bahnschrift — visibly mismatched against Segoe UI everywhere else. Fix: use `tokens.fontFamilyBase` and keep `fontVariantNumeric: "tabular-nums"` for aligned digits.
 4. **Gradient hero with white text: `colorPalette*Background2/3` tokens are light tints, not dark.** A gradient built from e.g. `colorPalettePurpleBackground3` / `colorPaletteTealBackground2` with `color: colorNeutralForegroundOnBrand` (white) renders white-on-light → unreadable; those `Background2/3` palette tokens are pale. Fix: build the gradient from the dark, saturated `colorPalette*Foreground2` stops (e.g. `colorPalettePurpleForeground2`, `colorPaletteTealForeground2`), which are dark enough for white text to pass AA.
+5. **Ten CSS shorthands are unsupported by Griffel — `borderWidth` is the usual one.** Griffel does not support ten CSS shorthands, and `makeStyles` drops them at runtime: the page type-checks, transpiles and deploys, then renders without the border, color or reset. They are `all`, `borderColor`, `borderStyle`, `borderWidth`, `borderBlock`, `borderBlockStart`, `borderBlockEnd`, `borderInline`, `borderInlineStart` and `borderInlineEnd`. Write longhands instead: `borderColor`, `borderStyle` and `borderWidth` become one longhand per side, `border` + `Top`, `Right`, `Bottom` or `Left` + `Color`, `Style` or `Width` (`borderWidth` → `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`); `borderBlock`, `borderInline` and their `Start` and `End` forms become the `Width`, `Style` and `Color` longhands of the sides they name (`borderBlockStart` → `borderBlockStartWidth`, `borderBlockStartStyle`, `borderBlockStartColor`; `borderBlock` → those and the three `borderBlockEnd…` ones); `all` has no longhands, so set the properties you need one by one. Every other shorthand (`padding`, `margin`, `border`, `borderRadius`, `gap`, `outline`) is supported, and an inline `style={{ … }}` is not Griffel at all. The browser console logs `@griffel/react: You are using unsupported shorthand CSS property "<name>"` for each one that reaches it. Run `node "${PLUGIN_ROOT}/scripts/check-griffel-styles.js" --file '<page.tsx>'` on the finished page. `check-griffel-styles.js` prints each problem it finds — a key Griffel drops in a `makeStyles` call, at any depth, with its line, column and longhands, or a call or a style object it cannot read, with what to change — and exits 3 while any is left: fix what it reports and run it again, and do not transpile or upload the page until it exits 0. It reads the style objects written inline in the call, `makeStyles({ … })`, so write them there: one passed or spread in from elsewhere (`makeStyles(styles)`, `...base`) is reported, because the check cannot see its keys, and so is a key computed from an expression (`[key]: …`), whose name it cannot see (a template that starts with `--`, `&`, `:` or `@` is read); Fluent's `...shorthands.*(…)` and `...typographyStyles.*` may be spread as they are.
 
-### Data Caching Across Navigations
+### Data Fetching: the host double-mount, de-dupe, and caching
 
-The genpage platform **re-evaluates the module script on every navigation** — including when the user navigates back to a page they've already visited. This means module-level variables (e.g., `let _cache = null`) are reset on each visit, causing the component to re-fetch data and show a loading spinner even on return visits.
+Two host behaviors make a naive on-mount fetch run more than once:
 
-**Fix: initialize module-level variables from `window`, and write back to `window` on fetch.** The `window` object persists for the lifetime of the browser session regardless of module re-evaluation.
+1. **Double-mount on open.** The PowerApps webplayer host launches the hosted app twice when a generative page opens — a cached mount, then a cache-bypassing re-mount ~300ms later (two `POST .../powerapps/apps/<app>/launch` calls, the second `bypass-cache=true`). Each fresh mount re-runs the data effect **even with a correct dependency array**.
+2. **Module re-evaluation on navigation.** Navigating back to a visited page re-evaluates the module script, resetting module-level variables (`let _cache = null`).
 
-Use `window.__pp<EntityName>Cache` as a naming convention to avoid collisions with other scripts.
+`window` survives both (the second mount runs in the same window), so the fix lives on `window`:
 
-**Always use a single batched state object** (`{ records, loading, error }`) — multiple separate `setState` calls in an async function produce separate renders in React 17, each potentially showing an intermediate state.
+- **In-flight promise** (`window.__pp<EntityName>Inflight`) — concurrent mounts share ONE pending fetch, so the double-mount is a single round-trip. This is the piece that defeats the double-mount; the dependency array cannot.
+- **Resolved cache** (`window.__pp<EntityName>Cache`) — later mounts and return visits read cache: no re-fetch, no spinner.
 
 **Key rules:**
-- Initialize module-level variables from `window.__pp<EntityName>Cache` (naming convention to avoid collisions)
-- Write back to `window` after fetch so the data survives module re-evaluation
-- Use a single batched state object (`{ records, loading, error }`) — separate `setState` calls in async functions produce intermediate renders in React 17
-- For detail pages, use a `Map<string, MyRow>` on `window` keyed by `recordId`
+- **Never put `dataApi` in a dependency array** (`useEffect`/`useMemo`/`useCallback`) and never `useCallback` a fetch function — the host hands a new `dataApi` ref every render, so it re-fires the effect each render. Depend on a **readiness boolean** (`const dataReady = !!dataApi;`) plus `recordId`/`reloadKey` as needed.
+- **Scope each `window` key by page + query** (include the page name, e.g. `__ppAccountOverview_accountCache`), not just the entity — two pages querying the same entity with different `select`/`filter` must not share a cache or in-flight entry.
+- Seed initial `useState` from the `window` cache so the second mount paints final content with no spinner.
+- Use a single batched state object (`{ records, loading, error }`) — separate `setState` calls in async functions produce intermediate renders in React 17.
+- For detail pages, key both the cache and the in-flight map by `recordId` (`Map<string, ...>` on `window`).
+- On mutation or manual refresh, clear the cache **and** the in-flight promise before refetching.
 
-**When to apply:** Any time a page fetches Dataverse data and the user may navigate away and return (e.g., an explorer page paired with a detail page). First visit shows a spinner; return visits render instantly.
+**When to apply:** any page that fetches data on mount through a real host read — Dataverse `dataApi` calls OR connector calls such as `queryConnectorTable` / `executeConnectorOperation` (lists, details, and single-visit overviews/dashboards). Skip only pages that render inline mock arrays and forms with no initial fetch.
 
-See [`references/data-caching.md`](./data-caching.md) for complete list-page and detail-page caching examples.
+See [`references/data-caching.md`](./data-caching.md) for the complete list and detail patterns.
 
 ### Charts and Visualization
 - Use D3.js for all charts
@@ -578,6 +640,19 @@ Platform connectors via `queryConnectorTable` (tabular) and
 `executeConnectorOperation` (REST). These are optional runtime methods — always
 presence-check before calling. See [connectors.md](./connectors.md) for the
 required patterns and the binding contract.
+
+### Custom API DataAPI (optional — only when the plan has Custom API Bindings)
+
+When the plan's `## Custom API Bindings` contains a binding table, the page may invoke Dataverse
+**Custom APIs** (server-side plug-in logic) on the signed-in user's own token. A Custom
+API of kind **Action** (may mutate) is called with `dataApi.executeAction`; a **Function**
+(read-only) with `dataApi.executeFunction`; `dataApi.listBoundActions` enumerates the
+page's bound operations. These are optional runtime methods — always presence-check before
+calling, guard Actions against double-submit, read results from `res.outputs` (never
+`res.value`), surface only the sanitized `res.error?.message`, and never auto-retry an
+`indeterminate` result. Call only the `name`s in the plan's `## Custom API Bindings`; a name
+not bound to the page fails with `not_bound`. See [custom-api.md](./custom-api.md) for the
+required patterns, the `boundTo` rules, and the full `error.code` contract.
 
 ---
 

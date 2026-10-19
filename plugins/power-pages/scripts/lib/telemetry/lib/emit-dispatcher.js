@@ -30,7 +30,7 @@ function localConfigDir() {
   return CONFIG_DIR_ENV || DEFAULT_LOCAL_DIR;
 }
 
-// Anonymous telemetry is default-on. The user opt-out is per-plugin and lives in
+// Usage telemetry is default-on. The user opt-out is per-plugin and lives in
 // config.json (telemetry[<pluginName>] === "off"), written by the telemetry skill.
 // It suppresses TRANSMISSION only; the local mirror is written before this gate.
 function isUserOptedOut(pluginName) {
@@ -104,6 +104,26 @@ function buildEnvelope(eventName, time, sanitized, resolvedIKey, eventStreamName
     iKey: "o:" + String(resolvedIKey || "").split("-")[0],
     data: wireData,
   };
+}
+
+// The wire envelope is the shared shape above unless the plugin's resolver.js
+// exports an optional `formatEnvelope({ eventName, time, data, iKey,
+// eventStreamName })`. That lets a plugin whose tenant ingests a different
+// schema (e.g. the Power Apps client `event` table) reshape the payload without
+// forking this dispatcher. `data` is the already-sanitized allowlisted payload,
+// so a formatter can only rearrange approved fields, never add new sources.
+// A formatter that throws or returns nothing sends NOTHING (fail closed): the
+// plugin opted into a specific shape, and the default one would not be
+// ingested by its pipeline anyway. The local mirror was already written.
+function formatEnvelope(resolver, { eventName, time, data, iKey, eventStreamName }) {
+  if (resolver && typeof resolver.formatEnvelope === "function") {
+    try {
+      return resolver.formatEnvelope({ eventName, time, data, iKey, eventStreamName }) || null;
+    } catch {
+      return null;
+    }
+  }
+  return buildEnvelope(eventName, time, data, iKey, eventStreamName);
 }
 
 function writeProbe(filePath, { headers, body }) {
@@ -209,7 +229,14 @@ process.stdin.on("end", async () => {
 
   // Real iKey → Common Schema envelope (reuses the same time + sanitized data
   // as the local mirror) → HTTPS POST.
-  const envelope = buildEnvelope(event.name, time, sanitized, iKey, cfg.event_stream_name);
+  const envelope = formatEnvelope(resolver, {
+    eventName: event.name,
+    time,
+    data: sanitized,
+    iKey,
+    eventStreamName: cfg.event_stream_name,
+  });
+  if (!envelope) return exitSilently();
   const body = JSON.stringify(envelope) + "\n";
   const headers = {
     "Content-Type": "application/x-json-stream; charset=utf-8",

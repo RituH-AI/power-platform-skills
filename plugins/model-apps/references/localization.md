@@ -1,7 +1,15 @@
 # Localization Reference
 
+> **Scope: generated PAGE code, not Dataverse metadata.** This file covers translating the React
+> pages `/genpage` writes — translation dictionaries, RTL, and user-settings-driven number/date
+> formatting. It does **not** cover Dataverse table, column or choice **labels**. Those are set per
+> field: a plain string uses the build-wide authoring language (`languageCode`), or write the field
+> as an LCID map to label it in several languages at once. There is no per-table language
+> (see `app-spec-schema.md` → `languageCode` and *Localized labels*).
+
 Read this only when the planner has detected multiple configured languages OR any
-non-English language via `pac model list-languages`. English-only environments
+non-English language via `scripts/list-languages.js` (or `pac model list-languages --environment '<envUrl>'`, which the planner
+runs when that script cannot read them). English-only environments
 should skip this entire file — the page-builder will write the page without any
 localization scaffolding.
 
@@ -12,7 +20,7 @@ section, not unconditionally.
 
 ### When to Apply
 
-Only apply localization when `pac model list-languages` (run by the planner during requirements gathering) returns **multiple languages** or **any non-English language**. English-only environments skip this entire section.
+Only apply localization when `scripts/list-languages.js` (run by the planner during requirements gathering; its fallback is `pac model list-languages --environment '<envUrl>'`) reports **multiple languages** or **any non-English language**. English-only environments skip this entire section.
 
 ### Language Detection
 
@@ -23,8 +31,13 @@ const language = React.useMemo(() => {
   const uiLanguageId = (typeof Xrm !== "undefined" &&
     Xrm.Utility?.getGlobalContext()?.userSettings?.languageId) || 1033;
   const langMap: Record<number, { code: string; name: string; isRtl: boolean }> = {
-    // Populate entries from pac model list-languages output, mapped to LCID info.
-    // Example: 1033: { code: "en-US", name: "English", isRtl: false },
+    // One entry per language in the plan's `## Environment` → `Languages` line, e.g.
+    //   English (1033, en-US); Arabic (Saudi Arabia) (1025, ar-SA) — RTL
+    // becomes 1033: { code: "en-US", name: "English", isRtl: false } and
+    // 1025: { code: "ar-SA", name: "Arabic (Saudi Arabia)", isRtl: true }.
+    // `isRtl` is true exactly where the line carries `— RTL` (see RTL Layout Support) — never from memory.
+    // A language the plan lists with no code has nothing to key a translation by: it gets no entry, and the
+    // fallback below serves that user in English.
   };
   return langMap[uiLanguageId] || { code: "en-US", name: "English", isRtl: false };
 }, []);
@@ -60,7 +73,30 @@ Usage: `<Text>{translate("title")}</Text>` — never `<Text>Dashboard</Text>`.
 
 ### RTL Layout Support
 
-Detect RTL from the language LCID. Arabic (1025, 2049, 3073, 4097, 5121) and Hebrew (1037) are RTL.
+Take each language's direction from the `rtl` field of `scripts/list-languages.js` (carried into the
+plan's `## Environment` → `Languages` line as a `— RTL` mark; when the planner fell back to `pac model list-languages --environment '<envUrl>'`,
+from that table's RTL column) — never from a hand-written list of LCIDs. The script reads
+it from a table of Windows culture data, and a list always misses some: Windows culture data marks more than 40
+right-to-left cultures — every Arabic region, Persian and Dari, Urdu, Pashto, Sindhi, Uyghur, Divehi, Syriac, Central
+Kurdish, Hebrew and Yiddish among them — and a language a list forgot renders left-to-right.
+
+If the plan marks no direction for a language (a plan written before the script reported one), compute the flag from
+the language's **Code** instead. Direction is a
+property of the script a language is written in, and `Intl.Locale#maximize()` fills in the likely script
+from CLDR (`fa` → `fa-Arab-IR`, `ur-PK` → `ur-Arab-PK`, `dv-MV` → `dv-Thaa-MV`):
+
+```typescript
+// ISO 15924 scripts written right-to-left.
+const RTL_SCRIPTS = new Set(["Arab", "Hebr", "Syrc", "Thaa", "Nkoo", "Adlm", "Rohg", "Mand", "Samr"]);
+const isRtlLocale = (code: string): boolean => {
+  try {
+    // `Intl.Locale` is typed only from the ES2020 lib, so the cast keeps an older `lib` setting compiling.
+    return RTL_SCRIPTS.has(new (Intl as any).Locale(code).maximize().script ?? "");
+  } catch {
+    return false; // not a valid BCP-47 tag
+  }
+};
+```
 
 - Wrap the root element with the `dir` attribute: `<div dir={language.isRtl ? "rtl" : "ltr"}>`.
 - Use **logical CSS properties** instead of physical ones:
@@ -78,27 +114,46 @@ Detect RTL from the language LCID. Arabic (1025, 2049, 3073, 4097, 5121) and Heb
 Retrieve these columns: `uilanguageid`, `localeid`, `decimalsymbol`, `numberseparator`, `currencysymbol`, `dateformatstring`, `dateseparator`.
 
 ```typescript
-const [userSettings, setUserSettings] = React.useState<any>(null);
+// Cache user settings on `window` + de-dupe the host double-mount so we retrieve
+// them once (see references/data-caching.md). Keyed globally — settings are
+// per-user and stable for the session.
+const winAny = window as unknown as Record<string, unknown>;
+const SETTINGS_KEY = "__ppUserSettings";
+const SETTINGS_INFLIGHT = "__ppUserSettingsInflight";
+
+const [userSettings, setUserSettings] = React.useState<any>(
+  () => (winAny[SETTINGS_KEY] as any) ?? null,
+);
+const dataReady = !!dataApi;   // never depend on `dataApi` itself — see Rule 15
 
 React.useEffect(() => {
-  const fetchUserSettings = async () => {
-    try {
-      const currentUserId = (typeof Xrm !== "undefined" &&
-        Xrm.Utility?.getGlobalContext()?.userSettings?.userId)
-        ?.replace("{", "").replace("}", "");
-      if (!currentUserId) return;
-      const settings = await dataApi.retrieveRow("usersettings" as any, {
-        id: currentUserId,
-        select: ["uilanguageid", "localeid", "decimalsymbol", "numberseparator",
-                 "currencysymbol", "dateformatstring", "dateseparator"] as any,
-      });
-      setUserSettings(settings);
-    } catch (error) {
-      console.error("Failed to fetch user settings", error);
-    }
-  };
-  void fetchUserSettings();
-}, [dataApi]);
+  if (!dataReady) return;
+  if (winAny[SETTINGS_KEY] !== undefined) { setUserSettings(winAny[SETTINGS_KEY]); return; }
+  const currentUserId = (typeof Xrm !== "undefined" &&
+    Xrm.Utility?.getGlobalContext()?.userSettings?.userId)
+    ?.replace("{", "").replace("}", "");
+  if (!currentUserId) return;
+  let cancelled = false;
+
+  // Share one in-flight fetch across the two host mounts.
+  let pending = winAny[SETTINGS_INFLIGHT] as Promise<any> | undefined;
+  if (!pending) {
+    pending = dataApi.retrieveRow("usersettings" as any, {
+      id: currentUserId,
+      select: ["uilanguageid", "localeid", "decimalsymbol", "numberseparator",
+               "currencysymbol", "dateformatstring", "dateseparator"] as any,
+    })
+      .then((settings: any) => { winAny[SETTINGS_KEY] = settings; return settings; })
+      .finally(() => { if (winAny[SETTINGS_INFLIGHT] === pending) delete winAny[SETTINGS_INFLIGHT]; });
+    winAny[SETTINGS_INFLIGHT] = pending;
+  }
+  pending
+    .then((settings: any) => { if (!cancelled) setUserSettings(settings); })
+    .catch((error: any) => { if (!cancelled) console.error("Failed to fetch user settings", error); });
+
+  return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [dataReady]);
 ```
 
 Provide formatting helpers that use these settings. **NEVER hardcode date formats or currency symbols.**

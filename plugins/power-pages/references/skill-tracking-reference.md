@@ -32,6 +32,7 @@ If the tracking script creates or updates site setting YAML files, include those
 | add-sample-data | AddSampleData | Site/AI/Skills/AddSampleData |
 | activate-site | ActivateSite | Site/AI/Skills/ActivateSite |
 | add-seo | AddSeo | Site/AI/Skills/AddSeo |
+| add-localization | AddLocalization | Site/AI/Skills/AddLocalization |
 | create-webroles | CreateWebroles | Site/AI/Skills/CreateWebroles |
 | integrate-webapi | IntegrateWebApi | Site/AI/Skills/IntegrateWebApi |
 | setup-auth | SetupAuth | Site/AI/Skills/SetupAuth |
@@ -56,7 +57,9 @@ If the tracking script creates or updates site setting YAML files, include those
 | deploy-pipeline | DeployPipeline | Site/AI/Skills/DeployPipeline |
 | ensure-pipelines-host | EnsurePipelinesHost | Site/AI/Skills/EnsurePipelinesHost |
 | force-link-environment | ForceLinkEnvironment | Site/AI/Skills/ForceLinkEnvironment |
-| manage-governance | ManageGovernance | Site/AI/Skills/ManageGovernance |
+| migrate-bootstrap | MigrateBootstrap | Site/AI/Skills/MigrateBootstrap |
+| migrate-webapi-selectall | MigrateWebapiSelectall | Site/AI/Skills/MigrateWebapiSelectall |
+| manage-governance (temporarily disabled) | ManageGovernance | Site/AI/Skills/ManageGovernance |
 
 ## YAML Format
 

@@ -3,7 +3,8 @@
 
 // Layer 2 eval runner — grades generated .tsx fixtures against the
 // common_code_assertions and per-eval Phase 5 expectations defined in
-// evals.json. Pure file I/O + regex; no Anthropic API, no Dataverse.
+// evals.json. Offline file I/O, static checks and pure production gates/resolver;
+// no agent, TypeScript compiler, React rendering or Dataverse calls.
 //
 // Usage:
 //   node run-layer-2.js [--fixtures <dir>] [--eval <id>] [--tier <smoke|full|stress>]
@@ -22,28 +23,19 @@ const path = require('node:path');
 const fs = require('node:fs');
 
 const { loadFixtures } = require('./lib/fixture-loader.js');
+const { parseEvalArgs } = require('../lib/eval-args.js');
 const { TapReporter } = require('./lib/reporter.js');
+const { refusalProblems } = require('./lib/workflow-evidence.js');
 const {
   ASSERTIONS,
   PHASE5_EXPECTATIONS,
 } = require('./lib/assertions-layer-2.js');
 
 function parseArgs(argv) {
-  const args = { fixtures: null, eval: null, tier: null };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--fixtures') args.fixtures = argv[++i];
-    else if (a === '--eval') args.eval = parseInt(argv[++i], 10);
-    else if (a === '--tier') args.tier = argv[++i];
-    else if (a === '--help' || a === '-h') {
-      printHelp();
-      process.exit(0);
-    } else {
-      console.error(`Unknown argument: ${a}`);
-      process.exit(2);
-    }
-  }
-  return args;
+  // Shared with the app-builder runner: all three shipped an identical parser whose
+  // `argv[++i]` yielded `undefined` for a trailing flag, so a value-less `--tier`/`--fixtures`
+  // silently became "no filter" and the run reported PASS for a scope never asked for.
+  return parseEvalArgs(argv, { printHelp });
 }
 
 function printHelp() {
@@ -76,7 +68,45 @@ function loadEvals() {
 }
 
 function isPhase5Expectation(text) {
-  return /^Phase 5\b/.test(text);
+  // The letter is part of the phase name, so \b after "5" alone silently excluded 5b's registered check.
+  return /^Phase 5(?:[abc])?\b/.test(text);
+}
+
+function getExpectationCheck(text) {
+  return isPhase5Expectation(text) ? PHASE5_EXPECTATIONS.get(text) : undefined;
+}
+
+// Grades one fixture in report order: an expected refusal or a fixture without pages is a single
+// gate result; otherwise the common code assertions, then the eval's Phase 5 / 5a / 5b / 5c
+// expectations. `kind` says which list a result came from. main() reports exactly these results,
+// and evals/model-apps/tests/eval-coverage-contract.test.js reads the same ones.
+function gradeFixture(fix, ev, evalsData) {
+  if (!ev) {
+    return [{ kind: 'gate', text: `fixture references eval id ${fix.id}`, result: { status: 'fail', reason: `no eval with id ${fix.id} in evals.json` } }];
+  }
+  if (fix.manifest?.expectedOutcome === 'refused') {
+    const problems = refusalProblems(fix);
+    return [{ kind: 'gate', text: 'expected refusal has a failed gate and no generated pages or mutations', result: problems.length
+      ? { status: 'fail', reason: problems[0] }
+      : { status: 'pass', reason: '' } }];
+  }
+  if (fix.files.length === 0) {
+    return [{ kind: 'gate', text: 'fixture has at least one .tsx file', result: { status: 'fail', reason: 'no .tsx files in fixture (excluding RuntimeTypes.ts)' } }];
+  }
+  const results = [];
+  for (const text of evalsData.common_code_assertions) {
+    const check = ASSERTIONS.get(text);
+    results.push({ kind: 'common', text, result: check
+      ? check({ files: fix.files, fixture: fix, eval: ev })
+      : { status: 'skip', reason: 'no check registered for this assertion text' } });
+  }
+  for (const text of ev.expectations.filter(isPhase5Expectation)) {
+    const check = getExpectationCheck(text);
+    results.push({ kind: 'expectation', text, result: check
+      ? check({ files: fix.files, fixture: fix, eval: ev })
+      : { status: 'skip', reason: 'no check registered for this Phase 5 expectation' } });
+  }
+  return results;
 }
 
 function main() {
@@ -124,43 +154,9 @@ function main() {
 
   for (const fix of selected) {
     reporter.startFixture(fix.dirName);
-    const ev = evalById.get(fix.id);
-    if (!ev) {
-      reporter.assertion(
-        `fixture references eval id ${fix.id}`,
-        { status: 'fail', reason: `no eval with id ${fix.id} in evals.json` }
-      );
-      reporter.endFixture();
-      continue;
+    for (const { text, result } of gradeFixture(fix, evalById.get(fix.id), evalsData)) {
+      reporter.assertion(text, result);
     }
-    if (fix.files.length === 0) {
-      reporter.assertion(
-        'fixture has at least one .tsx file',
-        { status: 'fail', reason: 'no .tsx files in fixture (excluding RuntimeTypes.ts)' }
-      );
-      reporter.endFixture();
-      continue;
-    }
-
-    // Apply every common_code_assertion
-    for (const assertionText of evalsData.common_code_assertions) {
-      const check = ASSERTIONS.get(assertionText);
-      const result = check
-        ? check({ files: fix.files, eval: ev })
-        : { status: 'skip', reason: 'no check registered for this assertion text' };
-      reporter.assertion(assertionText, result);
-    }
-
-    // Apply each per-eval Phase 5 expectation
-    const phase5 = ev.expectations.filter(isPhase5Expectation);
-    for (const expectationText of phase5) {
-      const check = PHASE5_EXPECTATIONS.get(expectationText);
-      const result = check
-        ? check({ files: fix.files, eval: ev })
-        : { status: 'skip', reason: 'no check registered for this Phase 5 expectation' };
-      reporter.assertion(expectationText, result);
-    }
-
     reporter.endFixture();
   }
 
@@ -170,4 +166,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { main, parseArgs };
+module.exports = { main, parseArgs, isPhase5Expectation, getExpectationCheck, gradeFixture };

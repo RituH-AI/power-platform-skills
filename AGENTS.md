@@ -6,6 +6,52 @@ This file provides guidance to AI Agents when working with code in this reposito
 
 A **plugin marketplace** for Power Platform development by Microsoft. The Open Plugins marketplace manifest (`marketplace.json`) references individual plugins in `plugins/`. Each plugin has its own `AGENTS.md` with plugin-specific guidance.
 
+## This Repo Is PUBLIC — keep internal detail out of it
+
+Everything here — code, docs, commit messages, PR descriptions, and branch names — is world-readable.
+Write for a reader outside Microsoft who cannot see any internal system.
+
+**Do not commit:**
+
+- **Internal hosts, repos or paths** — `*.ghe.com` links, internal repo names, or a path into an
+  internal repo's doc tree. Naming one discloses its existence and its structure.
+- **References to internal documents**, including indexes into them — "spec rank 14",
+  "Group N P1", "(resolves C2, I1)", "see the R1 review". A reader who cannot open the document
+  gets nothing from the pointer, and it advertises the document.
+- **Real environment, tenant or org identifiers** — Dataverse environment names/URLs, tenant GUIDs,
+  subscription ids. These name real infrastructure. In examples use an obvious placeholder
+  (`https://contoso.crm.dynamics.com`, `<envUrl>`); to record that something was live-verified, keep
+  the **claim** and drop the environment ("live-verified", not "live-verified on <envname>").
+- **Internal review process** — who or which model reviewed something, how many rounds, internal
+  finding ids. "Adversarially reviewed" is a useful signal; the rest is internal.
+- **Exploratory design docs for UNBUILT work** — roadmaps, prioritisation, and candid notes on
+  limitations. A design doc for something that **shipped** is fine and often valuable (see
+  `plugins/model-apps/docs/`); a proposal for something that has not is internal.
+- **Pointers to files that are not in the repo** — a citation nobody can resolve is noise at best.
+
+**Fine to commit:** ADO / `AB#` work-item ids (opaque, and `AB#` is the standard Azure Boards ↔
+GitHub link syntax), and the location of a first-party source repo a maintainer needs in order to
+rebuild a vendored bundle. Both carry real "why" context and disclose no content.
+
+**When you must record internal context**, put it in the PR conversation or an internal doc — not in
+a committed file. When editing an existing doc, keep this rule in mind for the lines around your
+change, not just the ones you add.
+
+**CI enforcement (partial).** `node scripts/validate-no-real-environments.js` (wired into the
+`validate-repository-metadata` workflow) fails the build when a real Dataverse host, tenant, or
+previously-removed identifier appears under `plugins/model-apps/**`, `evals/model-apps/**`, `plugins/pcf/**`, or `evals/pcf/**`. It
+matches on *shape* — `org<8 hex>` is what Dataverse auto-generates, so it is rejected even though it
+starts with the otherwise-allowed word `org` — rather than only re-catching known strings. Run it
+locally after touching eval fixtures or any file that quotes an environment URL.
+
+The scan is **scoped to model-apps and pcf only**, and this is a real gap rather than an oversight: other
+plugins still carry pre-existing references of this class (for example real `org<8 hex>` orgs cited
+in power-pages provenance comments), so widening the scan today would fail unrelated PRs. Scrub a
+plugin first, then add it to `SCAN_PATHS`. The guard also cannot see the *local part* of a UPN, so
+`firstname.lastname@contoso.onmicrosoft.com` passes — use a role word (`maker@`, `tester@`).
+Captured `pac auth list` transcripts are the most common source of all three; when scrubbing one,
+prefer an **equal-length** placeholder so the fixed-width table stays aligned.
+
 ## Repository Structure
 
 ```
@@ -41,19 +87,48 @@ claude --plugin-dir /path/to/plugins/<plugin-name>
 
 No root-level build, lint, or test commands exist. Build/test tooling lives inside each plugin.
 
+## CI
+
+**Only two workflows run on every PR** — `validate-keyword-case` and `validate-repository-metadata`.
+Both are repo-wide and enforce metadata/marketplace rules. `validate-repository-metadata` also
+runs standalone installer regression tests on Linux and Windows.
+
+**Every test workflow is path-filtered** — to a single plugin (`power-pages` → `plugins/power-pages/**`;
+`model-apps` → `plugins/model-apps/**` + `evals/model-apps/**` + the `shared/` sources it bundles;
+`pcf` → `plugins/pcf/**` + `evals/pcf/**` + the model-apps/shared sources it bundles), or,
+for code no plugin owns, to that code (`shared-telemetry-tests` → `shared/telemetry/**`).
+This is deliberate — a PR should not spend CI on a plugin it never touched — but it has a corollary:
+*a green PR does not mean the repo is green*, only that the paths you touched are. A plugin that ships
+copies of `shared/` sources may list those sources too, so a change to one runs that plugin's drift
+test in the PR that made it rather than in the plugin's next, unrelated PR.
+
+**A test suite with no workflow silently never runs.** When you add tests to a plugin, add or extend
+that plugin's own path-filtered workflow in the same PR; do not widen another plugin's filter to
+cover yours.
+
+A plugin that has adopted telemetry must also set its opt-out env var on any job that could execute a
+telemetry-emitting hook or script (see `## Shared Telemetry`) — e.g.
+`POWER_PLATFORM_SKILLS_TELEMETRY_MODEL_APPS_OPTOUT: "1"`. It suppresses transmission only, so it
+cannot change what a test asserts.
+
 ## Plugin Conventions
+
+When a plugin copies code from another plugin, add it to the `COPY_SETS` in `scripts/validate-plugin-copies.js`. That validator runs on every PR and in both affected plugins' suites, so a source-side or copy-side edit fails until the bundled copy is refreshed.
+
 
 Each plugin follows this structure:
 
 - `.plugin/plugin.json` — Open Plugins metadata (name, version, keywords)
 - `.claude-plugin/plugin.json` — legacy mirror of `.plugin/plugin.json` kept for existing subscriptions
 - `.mcp.json` — MCP server configuration (optional)
+- `plugin.json` and `mcp.json` — optional additive Agent Plugins 1.0.0 files at the
+  individual plugin root (currently `process-intelligence`); retain the legacy files above
 - `agents/` — Agent definitions (`.md` files with YAML frontmatter)
 - `skills/` — Skill definitions, each in its own subdirectory with a `SKILL.md`
 - `scripts/` — Shared utility scripts referenced by skills and agents
 - `references/` — Shared reference documents used by multiple skills
 
-Skills are defined in `SKILL.md` files with YAML frontmatter (name, description, allowed-tools, model, hooks). The `allowed-tools` field must use a **comma-separated list** (e.g., `allowed-tools: Read, Write, Edit, Bash, Glob, Grep`) — not JSON array syntax (`["Read", "Write"]`) or YAML list syntax. Each skill may include validation scripts in a `scripts/` subdirectory, run as Stop hooks when the skill session ends.
+Skills are defined in `SKILL.md` files with YAML frontmatter (name, description, allowed-tools, model, hooks). The `allowed-tools` field must use a **comma-separated list** (e.g., `allowed-tools: Read, Write, Edit, Bash, Glob, Grep`) — not JSON array syntax (`["Read", "Write"]`) or YAML list syntax. Each skill may include a validation script in a `scripts/` subdirectory (the first `validate*.js`, discovered automatically). It is run by the plugin's **`PostToolUse` hook on the `Skill` tool** — `hooks/run-skill-posttool-validation.js` looks the script up and executes it after the Skill tool returns, propagating its exit code. Note this fires when the skill is **invoked**, not when its work finishes, so a validator must no-op (approve) when the artifacts it checks are not present yet.
 
 ## Cross-Plugin Shared Skills
 
@@ -73,15 +148,17 @@ This keeps the skill discoverable in each plugin while preserving install-time p
 
 Edit `shared/telemetry/` first, then refresh every adopting plugin's copied `scripts/lib/telemetry/lib` directory in the same change so the canonical source and bundled plugin content stay in sync.
 
-**Never reuse another plugin's instrumentation key or event stream.** When adopting telemetry in a new plugin, copy only the routing-agnostic library (`shared/telemetry/lib` → `plugins/<plugin>/scripts/lib/telemetry/lib`) — do **not** copy an existing adopter's real `ikey.json` (or its `resolver.js`). Each plugin's `ikey.json` carries that plugin's own instrumentation key(s), collector routing, and `event_stream_name`; start from the placeholder `shared/telemetry/ikey.json` (every region key is `PLACEHOLDER_REPLACE_BEFORE_SHIPPING` and it ships `disabled: true`) and provision a fresh, plugin-specific key before shipping. Copying a key already committed to another plugin (e.g. lifting `power-pages`'s `ikey.json` wholesale) mis-attributes the new plugin's events to the other plugin's Kusto stream and pollutes it — the copy step must bring over library code only, never another plugin's provisioned `ikey.json`/`resolver.js`.
+`eventInfo` is a dynamic escape hatch whose nested keys are not enforced by `FIELD_TYPES`. Follow the approved schema in `shared/telemetry/README.md`; do not add nested fields or arbitrary payloads without privacy review and coordinated disclosure, schema, and test updates.
 
-This invariant is CI-enforced: `node scripts/validate-telemetry-ikeys.js` (wired into the `validate-repository-metadata` workflow) scans every `plugins/*/**/ikey.json`, ignores placeholder/empty values, and fails if the same instrumentation key or `event_stream_name` appears under two different plugins. A single plugin reusing one key across regions is allowed; only cross-plugin reuse fails. Run it locally after touching any plugin's `ikey.json`.
+**Never reuse another plugin's instrumentation key or event stream.** The sole sanctioned key-sharing exception is `model-apps` + `pcf`: the same team owns both plugins and their 1DS tenant, and PCF ships a byte-identical copy of model-apps' `ikey.json`, enforced by `scripts/validate-plugin-copies.js`. Both use the Power Apps client `event` shape, with rows separated by `clientType`/`pluginName`. For every other adopter, copy only the routing-agnostic library (`shared/telemetry/lib` → `plugins/<plugin>/scripts/lib/telemetry/lib`) — do **not** copy an existing adopter's real `ikey.json` (or its `resolver.js`). Each plugin's `ikey.json` carries its instrumentation key(s), collector routing, and `event_stream_name`; start from the placeholder `shared/telemetry/ikey.json` (every region key is `PLACEHOLDER_REPLACE_BEFORE_SHIPPING` and it ships `disabled: true`) and provision a fresh, plugin-specific key before shipping. Copying another adopter's key outside the sanctioned pair mis-attributes events and pollutes its stream.
 
-Per-plugin iKey/collector routing is pluggable via a `resolver.js` placed next to the plugin's `ikey.json` (implementing the `resolve`/`isProvisioned` contract); the shared library ships only that contract plus a static-key fallback, not any routing logic. A per-plugin opt-out env var `POWER_PLATFORM_SKILLS_TELEMETRY_<PLUGIN>_OPTOUT` (derived as the uppercased plugin name with non-alphanumerics collapsed to `_`, suffixed `_OPTOUT`) disables transmission for automation when set to `1`/`true` (dotnet `*_TELEMETRY_OPTOUT` convention); it has the **highest precedence**, overriding both the persisted `config.json` choice and `/<plugin>:telemetry on`.
+This invariant is CI-enforced: `node scripts/validate-telemetry-ikeys.js` (wired into the `validate-repository-metadata` workflow) scans every `plugins/*/**/ikey.json` and ignores placeholder/empty values. A shared key is allowed only when **all** its plugin owners belong to one `SHARED_KEY_GROUPS` entry, currently exactly `model-apps` + `pcf`; any outsider still fails, even if both group members own the key. Adding a group is a deliberate, reviewed change. The copy check also enforces byte-identical configs, so a model-apps key rotation must refresh pcf in the same PR. A single plugin reusing one key across regions is allowed. The independent stream-name exemption remains `event`: it is the shared Power Apps client telemetry table, so several plugins may send to it, provided each makes its rows separable with its own `clientType` and `pluginName` in `customDimensions`. Every other cross-plugin stream-name reuse fails. Run both validators locally after touching either shared config.
+
+Per-plugin iKey/collector routing is pluggable via a `resolver.js` placed next to the plugin's `ikey.json` (implementing the `resolve`/`isProvisioned` contract); the shared library ships only that contract plus a static-key fallback, not any routing logic. A per-plugin opt-out env var `POWER_PLATFORM_SKILLS_TELEMETRY_<PLUGIN>_OPTOUT` (derived as the uppercased plugin name with non-alphanumerics collapsed to `_`, suffixed `_OPTOUT`; the name is the manifest's `name`, not the directory — `plugins/mobile-apps` is `mobile-app`, so its variable ends `_MOBILE_APP_OPTOUT`) disables transmission for automation when set to `1`/`true` (dotnet `*_TELEMETRY_OPTOUT` convention); it has the **highest precedence**, overriding both the persisted `config.json` choice and `/<plugin>:telemetry on`.
 
 ### CI must opt out of telemetry transmission
 
-An adopting plugin's committed `ikey.json` ships **enabled** (`disabled: false`) with a real production instrumentation key, so any process that runs a telemetry-emitting hook or script **without isolating emission** will POST a real (but fake-in-content) event to the production collector. CI runs are not real usage, and such events pollute the production telemetry stream.
+A transmitting adopter's committed `ikey.json` ships **enabled** (`disabled: false`) with a real production instrumentation key, so any process that runs a telemetry-emitting hook or script **without isolating emission** will POST a real (but fake-in-content) event to the production collector. CI runs are not real usage, and such events pollute the production telemetry stream.
 
 **Therefore: every GitHub Actions job that runs the test suite — or any step that could execute a telemetry-emitting hook/script for an adopting plugin — MUST set the plugin's opt-out env var at the job (or workflow) level.** For `power-pages`:
 
@@ -96,7 +173,7 @@ jobs:
 
 This opt-out suppresses **transmission only** (the local diagnostic mirror is still written), so it is safe and has no effect on what the job actually tests. Tests that need to assert that emission *happens* clear the var in their own spawned-process env and route the event to a local `POWER_PLATFORM_SKILLS_FAKE_HTTPS` probe instead of the real collector — so the job-level opt-out never breaks them. Existing reference: `.github/workflows/power-pages-script-tests.yml`. When you add a new such workflow (or a new emitting step to an existing one), add this env var in the same change; treat a CI job that runs the tests without it as a production-telemetry leak.
 
-Current adopters: `power-pages`. Others adopt on demand.
+Current adopters: `power-pages`, `mobile-apps`, `model-apps`, and `pcf` (all transmitting; `pcf` shares model-apps' tenant). Others adopt on demand. The library's own tests (`shared/telemetry/tests`) run in `.github/workflows/shared-telemetry-tests.yml` on a change to the source or to any bundled copy, and its `bundled-copies.test.js` fails when any adopter's `plugins/<plugin>/scripts/lib/telemetry/lib` differs from `shared/telemetry/lib`. The workflow sets every adopter's opt-out — add a new adopter's variable there too. power-pages and model-apps also keep a `scripts/tests/telemetry-lib-copy.test.js` that runs the same comparison in their own suites (model-apps also checks its shared skill copies, and lists `shared/telemetry/**` in its workflow's path filter so a source edit runs it too).
 
 ## Legacy Marketplace Compatibility
 
@@ -112,6 +189,28 @@ subscriptions may still resolve the legacy paths during auto-update, so removing
 drifting these files can force users to reinstall. Because mirrors are committed
 files (not symlinks), update both source and legacy copies together, then run
 `node scripts/validate-legacy-compatibility.js` after metadata changes.
+
+Plugins adopting Agent Plugins 1.0.0 also keep root `plugin.json` metadata synchronized with
+the legacy manifests' common fields, excluding `$schema`. Their root `mcp.json` uses the matching
+canonical schema and explicit transport type while preserving the legacy launcher. Both formats
+share skills/runtime files. A recognized portable root manifest takes precedence; clients do not
+merge the two component sets. Do not migrate siblings or remove legacy mirrors merely because
+one plugin adopts the portable format.
+
+### External plugins
+
+A plugin maintained in another repository (today `dataverse`, from `microsoft/Dataverse-skills`) is listed with a remote `source` object instead of a `./plugins/<name>` path.
+Its metadata and legacy mirrors live in that repository, so nothing for it is committed under `plugins/`.
+This is the one place where the two marketplace files intentionally differ, because each host reads a different file and spells a subdirectory source differently:
+
+- `marketplace.json` (read by Copilot CLI): `{ "source": "github", "repo": "owner/repo", "path": "sub/dir" }`.
+  Copilot CLI rejects `git-subdir` and then refuses the whole marketplace, breaking every plugin in it.
+- `.claude-plugin/marketplace.json` (read by Claude Code): `{ "source": "git-subdir", "url": "owner/repo", "path": "sub/dir" }`.
+  Claude Code's `github` source ignores `path`, installs the repository root, and loads no skills while still reporting success.
+
+Carry any `ref` or `sha` pin into both entries.
+The validator enforces the pairing, and `scripts/tests/validate-legacy-compatibility.test.js` covers it.
+After adding or changing an external entry, install it from a local checkout in both hosts (`copilot plugin marketplace add <checkout>` and `claude plugin marketplace add <checkout>`) and confirm its skills load.
 
 ## Code Conventions
 

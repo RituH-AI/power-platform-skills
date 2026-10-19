@@ -91,6 +91,7 @@ Integrate Power Pages generative-AI summarization APIs into a SPA site. This ski
 - **Raw `fetch` + CSRF.** Every summarization request attaches `__RequestVerificationToken` (from `/_layout/tokenhtml`) and `X-Requested-With: XMLHttpRequest`. Never route through an OData wrapper.
 - **Skip `/integrate-webapi` when it's not needed.** If every confirmed target is Search Summary (which has no per-table Web API prerequisites), or every Layer 1/2 prerequisite already exists on disk, the skill goes straight from Phase 3 to Phase 5.
 - **Use TaskCreate/TaskUpdate** — create the todo list upfront with all phases before starting.
+- **Preserve site integrity.** Before adding or tweaking an AI surface, read `${PLUGIN_ROOT}/references/site-modification-integrity.md`; localization covers labels, loading, empty, error, citation, recommendation, and remediation states, and the UI must remain bidirectional and expansion-safe.
 
 > **Prerequisites:**
 >
@@ -286,8 +287,8 @@ What the Explore agent reports back (summary — see the reference for the exact
 - **Layer 1/2 status** per Data Summarization target plus every `$expand` target —
   `ready` / `missing` / `n/a (search)`.
 - **Fields-list breadth advisory** — for Layer 1/2 `ready` rows whose existing
-  `Webapi/<table>/fields` is broader than the AI surface needs (primary key included, lookup
-  write forms, unused columns), flagged `fields-broader-than-ai-mode` so Phase 3 can surface
+  `Webapi/<table>/fields` is broader than the AI surface needs (primary key included, relationship
+  Navigation Properties unused by `@odata.bind`, unused columns), flagged `fields-broader-than-ai-mode` so Phase 3 can surface
   it.
 - **Layer 3 status** per Data Summarization target — `Summarization/Data/Enable` and the
   specific `Summarization/prompt/<id>` the code will send.
@@ -756,6 +757,18 @@ recipe — a Data Summarization call configured for `incidents` with the `case_s
 identifier.)
 
 **Build status:** Pass / Fail (with details).
+
+### 7.5 Final site-integrity gate
+
+After all AI integration source changes and the build verification are complete, run:
+
+```bash
+node "${PLUGIN_ROOT}/scripts/validate-site-integrity.js" --projectRoot "<PROJECT_ROOT>"
+```
+
+Fix every blocking error before presenting completion or asking to deploy. Inspect and report
+review findings in both directions and with expanded content. Rerun this gate after any later
+source change.
 
 **Output**: all integration files verified; project builds.
 

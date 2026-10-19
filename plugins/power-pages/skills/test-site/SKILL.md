@@ -358,11 +358,39 @@ Server logic endpoints (`/_api/serverlogics/<name>`) commonly return a standard 
 For each `/_api/serverlogics/` request observed on any tested page:
 
 1. Record the endpoint name from the URL (`/_api/serverlogics/<endpointName>`), the HTTP method, query string parameters, and HTTP status code.
-2. When the request was a GET (no CSRF token required), re-execute it from the browser with `browser_evaluate` so the full response body is captured. Progressively parse the payload — keep parsing string-typed fields until further parsing fails — and record the shape at each level. Use a script of this form, replacing the URL with the observed one:
+2. When the request was a GET, re-execute it from the same authenticated site with `browser_evaluate` so its response shape is captured.
+   Power Pages API requests require the site's verification token; GET is read-only, not an authentication or CSRF exemption.
+   Prefer the site's existing authenticated request wrapper when it is exposed to the browser.
+   Otherwise fetch the token from the same-origin `/_layout/tokenhtml` endpoint, keep it in memory, and never include it in logs or reports.
+   If the token endpoint is unavailable or the observed URL is not same-origin, report the replay as blocked instead of importing cookies or making an unauthenticated request.
+   Progressively parse string-typed payload fields and record the shape at each level.
+   Serialize the observed URL with `JSON.stringify(observedUrl)`, then replace
+   `<serialized-observed-url>` with that complete serialized value, including
+   its quotes. Do not wrap the placeholder in another string literal.
+   Use a script of this form:
 
     ```javascript
     async () => {
-      const res = await fetch('<observed-url>', { credentials: 'include', headers: { 'Content-Type': 'application/json' } });
+      const url = new URL(<serialized-observed-url>, window.location.origin);
+      if (url.origin !== window.location.origin) throw new Error('API replay must remain on the authenticated site.');
+      const tokenResponse = await fetch(new URL('/_layout/tokenhtml', window.location.origin).href, {
+        credentials: 'include',
+        redirect: 'error',
+        headers: { Accept: 'text/html' },
+      });
+      if (tokenResponse.status !== 200) throw new Error('The site verification-token endpoint is unavailable; read-only replay is blocked.');
+      const tokenHtml = await tokenResponse.text();
+      const valueMarker = 'value="';
+      const valueStart = tokenHtml.indexOf(valueMarker);
+      const valueEnd = valueStart === -1 ? -1 : tokenHtml.indexOf('"', valueStart + valueMarker.length);
+      const token = valueStart === -1 || valueEnd === -1
+        ? '' : tokenHtml.slice(valueStart + valueMarker.length, valueEnd);
+      if (typeof token !== 'string' || !token.trim()) throw new Error('The site verification token is unavailable.');
+      const res = await fetch(url.href, {
+        credentials: 'include',
+        redirect: 'error',
+        headers: { Accept: 'application/json', '__RequestVerificationToken': token },
+      });
       const status = res.status;
       const text = await res.text();
       const levels = [];
@@ -394,7 +422,7 @@ Record the findings and any recommended frontend fixes for the Phase 6 report.
 For each failed API request, provide specific remediation:
 
 - **401 Unauthorized**: "This endpoint requires authentication. If you skipped login in Phase 3, try re-running with authentication. Otherwise, check that the auth token is being passed correctly."
-- **403 Forbidden on `/_api/` calls**: "Check the following:\n  1. **Table permissions** — Ensure a table permission exists for this table with the correct scope and privileges (Read, Write, etc.) assigned to the appropriate web role.\n  2. **Site settings** — Verify `Webapi/<tablename>/enabled` is set to `true` and `Webapi/<tablename>/fields` lists the required columns (exact Dataverse LogicalNames, all lowercase, comma-separated). If the failing request uses aggregate OData (`$apply`, `aggregate`, grouped totals), set `Webapi/<tablename>/fields` to `*`.\n  3. **Web role assignment** — Confirm the authenticated user has the correct web role assigned."
+- **403 Forbidden on `/_api/` calls**: "Check the following:\n  1. **Table permissions** — Ensure a table permission exists for this table with the correct scope and privileges (Read, Write, etc.) assigned to the appropriate web role.\n  2. **Site settings** — Verify `Webapi/<tablename>/enabled` is set to `true`. The fields value uses LogicalNames for ordinary columns, `_<LogicalName>_value` for lookup reads, and exact Navigation Properties for relationships written through `@odata.bind`. For aggregate OData, include every grouping key, aggregate input, filter column, and ordered column.\n  3. **Web role assignment** — Confirm the authenticated user has the correct web role assigned."
 - **404 Not Found**: "Verify the entity set name (should be the plural form of the table logical name). Check that the table exists in Dataverse and is published."
 - **500 Internal Server Error**: "Enable the `Webapi/error/innererror` site setting (set to `true`) to get detailed error messages. Redeploy and retest to see the inner error details."
 

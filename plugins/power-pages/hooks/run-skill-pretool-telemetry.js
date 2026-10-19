@@ -9,7 +9,7 @@ const crypto = require("node:crypto");
 const PLUGIN_ROOT = path.resolve(__dirname, "..");
 const TELEMETRY_DIR = path.join(PLUGIN_ROOT, "scripts", "lib", "telemetry");
 
-let emitSpawn, eventsLib, sessionLib, pacAuthLib, agentInfoLib, resolverLoader;
+let emitSpawn, eventsLib, sessionLib, pacAuthLib, agentInfoLib, resolverLoader, invocationState;
 try {
   emitSpawn = require(path.join(TELEMETRY_DIR, "lib", "emit-spawn"));
   eventsLib = require(path.join(TELEMETRY_DIR, "lib", "events"));
@@ -17,6 +17,7 @@ try {
   pacAuthLib = require(path.join(TELEMETRY_DIR, "lib", "pac-auth"));
   agentInfoLib = require(path.join(TELEMETRY_DIR, "lib", "agent-info"));
   resolverLoader = require(path.join(TELEMETRY_DIR, "lib", "resolver-loader"));
+  invocationState = require(path.join(TELEMETRY_DIR, "invocation-state"));
 } catch {
   process.exit(0);
 }
@@ -26,6 +27,18 @@ try {
   hookUtils = require(path.join(PLUGIN_ROOT, "scripts", "lib", "powerpages-hook-utils"));
 } catch {
   process.exit(0);
+}
+
+// Loaded separately and NON-fatally: the framework signal is one optional field
+// inside `eventInfo`, so it must not be able to take the whole event down with
+// it. Bundling optional enrichment into the block above would widen the blast
+// radius of any packaging slip or syntax error from "no framework" to
+// "no telemetry".
+let detectFramework = null;
+try {
+  detectFramework = require(path.join(PLUGIN_ROOT, "scripts", "lib", "detect-site-framework"));
+} catch {
+  detectFramework = null;
 }
 
 function readPluginVersion() {
@@ -110,6 +123,23 @@ function readStdin() {
   }
   if (!provisioned) process.exit(0);
 
+  const resolvedSessionId = sessionLib.getSessionId(
+    sessionLib.resolveHostSessionId(parsed)
+  );
+  // The skill resolves its actual project root after this hook runs. Record a
+  // path-free pending start now; the first project-aware telemetry call binds
+  // it only when that pending invocation is unambiguous.
+  if (skillName === "create-site" || skillName === "add-localization") {
+    try {
+      invocationState.recordPendingStart(
+        skillName,
+        resolvedSessionId
+      );
+    } catch {
+      // Correlation state is best-effort and must never block the skill start.
+    }
+  }
+
   const correlation_id = crypto.randomUUID();
 
   const configDir = process.env.POWER_PLATFORM_SKILLS_CONFIG_DIR || "";
@@ -132,10 +162,27 @@ function readStdin() {
     agentInfo = {};
   }
 
+  // Which SPA framework the site under work uses. Resolved AFTER the hard-off /
+  // isProvisioned gates above so a disabled or unprovisioned plugin pays nothing
+  // for it. User opt-out still builds the event for the local diagnostic mirror.
+  // Claude Code supplies the host session's working directory on the hook payload
+  // (same field run-skill-posttool-validation.js reads); fall back to this
+  // process's cwd for hosts that don't.
+  let framework = null;
+  try {
+    framework = detectFramework
+      ? detectFramework.detectSiteFramework(
+          typeof parsed.cwd === "string" && parsed.cwd ? parsed.cwd : process.cwd()
+        )
+      : null;
+  } catch {
+    framework = null;
+  }
+
   const fields = {
     pluginName: "power-pages",
     pluginVersion: readPluginVersion(),
-    sessionId: sessionLib.getSessionId(sessionLib.resolveHostSessionId(parsed)),
+    sessionId: resolvedSessionId,
     correlationId: correlation_id,
     osName: osFriendlyName(process.platform),
     osVersion: os.release(),
@@ -144,7 +191,15 @@ function readStdin() {
   };
   if (pacAuth && pacAuth.orgId) fields.orgId = pacAuth.orgId;
   if (pacAuth && pacAuth.tenantId) fields.tenantId = pacAuth.tenantId;
-  if (pacAuth && pacAuth.objectId) fields.eventInfo = { aadObjectId: pacAuth.objectId };
+  // `eventInfo` carries two INDEPENDENT signals, so it is assembled up front and
+  // assigned only when non-empty. Creating it inside the objectId guard instead
+  // would drop `framework` on every unauthenticated run (`pac auth who` surfaces
+  // no object id), and mutating the undefined would throw — a throw the
+  // fail-closed wrapper swallows, silently degrading the run to no event at all.
+  const eventInfo = {};
+  if (framework) eventInfo.framework = framework;
+  if (pacAuth && pacAuth.objectId) eventInfo.aadObjectId = pacAuth.objectId;
+  if (Object.keys(eventInfo).length > 0) fields.eventInfo = eventInfo;
   if (agentInfo.aiAgentName) fields.aiAgentName = agentInfo.aiAgentName;
   if (agentInfo.aiAgentVersion) fields.aiAgentVersion = agentInfo.aiAgentVersion;
   if (agentInfo.pacCliVersion) fields.pacCliVersion = agentInfo.pacCliVersion;

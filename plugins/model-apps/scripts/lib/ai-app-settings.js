@@ -1,0 +1,443 @@
+'use strict';
+// SINGLE SOURCE OF TRUTH for the per-app AI feature contract.
+//
+// Before this module the same knowledge lived in four parallel places — the validation allow-list
+// (app-spec.js), the setting-name map (verify-spec.js), the build's requested flag set
+// (sdk-build.js) and the SDK's own module-private map — and they had already drifted in a way that
+// re-opened the bug this area exists to fix: the BUILD writes a default for every feature whenever
+// `spec.ai` is present, but verify only reconciled the features a spec DECLARED. A spec carrying
+// `ai.summaries` and no `ai.appFeatures` therefore had three features written and ZERO verified,
+// so `--verify` reported a clean PASS for features the platform may never have stored — exactly the
+// false PASS of ADO 6603383, just narrowed rather than removed.
+//
+// Everything here is pure except the two `read`-driven proof helpers, which take an injected reader
+// so both the build engine and the verifier can share one implementation of the authoritative query.
+
+const { odataLit } = require('./odata.js');
+
+// The PER-APP setting each AI feature writes — mirrors the SDK's `APP_SETTING` map (api/AiApi.ts).
+// These are deliberately DISTINCT from the org readiness gates in the SDK's `AI_GATE`: e.g. the
+// `nlSearch` org gate is the boolean `EnableNLGridSearch`, but the per-app setting is the numeric
+// `NLGridSearchSetting`. Verify must read the PER-APP setting, because that is what the build wrote
+// and what is in force for this app. Conflating the two is exactly the bug that made NL grid search
+// report "applied" while writing nothing (ADO 6560699 / 6603383).
+// Keep in sync with the vendored SDK; `sdk-surface-contract.test.js` guards the method surface and
+// `verify-spec.test.js` pins these names.
+const AI_APP_SETTING = {
+  // The AI form-fill FAMILY. `FormFillBarUXEnabled` is only the assist toolbar; the SDK now models
+  // the three siblings as first-class features too, so the App Spec exposes them rather than
+  // pretending "form fill" is one switch.
+  //
+  // Note `formFillSmartPaste` writes `FormPredictSmartPasteEnabledOnByDefault` per app while its ORG
+  // GATE is `FormPredictSmartPasteEnabled` — a different row, like nlSearch. Mirrors the SDK's
+  // `APP_SETTING`; the gate names live in the SDK's `AI_GATE`.
+  formFill: 'FormFillBarUXEnabled',
+  formFillSuggestions: 'FormPredictEnabled',
+  formFillSmartPaste: 'FormPredictSmartPasteEnabledOnByDefault',
+  formFillFiles: 'FormFillFileUploadEnabled',
+  nlSearch: 'NLGridSearchSetting',
+  nlChart: 'NLChartDataVisualizationSetting',
+  m365: 'm365copilotmodelappenabled',
+};
+
+// ON/OFF values are NOT uniform across these settings, and `1` is not universally "on".
+//
+// Each value is taken from the platform's own settings UI — the maker designer's tri-state dropdown
+// and the admin center's feature settings — which is the only first-party statement of what the
+// stored numbers mean:
+//   FormFillBarUXEnabled, NLGridSearchSetting, m365copilotmodelappenabled — and the rest of the
+//   form-fill family — use the shared tri-state dropdown: 0 = Default, 1 = Off, 2 = On.
+//   NLChartDataVisualizationSetting is ordered differently: 0 = Off, 1 = Auto, 2 = On, and its
+//   setting definition's default value is 1.
+// So the obvious `true -> '1'` writes Off for grid search and M365, and only Auto for charts —
+// which is what every build wrote until AB#6714731, while `--verify` agreed, because it expected
+// the same wrong values. `platformDefault` is the value that defers to the platform; it is neither
+// on nor off, and it differs by setting.
+const AI_SETTING_CODEC = {
+  formFill: { enabled: '2', disabled: '1', platformDefault: '0' },
+  formFillSuggestions: { enabled: '2', disabled: '1', platformDefault: '0' },
+  formFillSmartPaste: { enabled: '2', disabled: '1', platformDefault: '0' },
+  formFillFiles: { enabled: '2', disabled: '1', platformDefault: '0' },
+  nlSearch: { enabled: '2', disabled: '1', platformDefault: '0' },
+  nlChart: { enabled: '2', disabled: '0', platformDefault: '1' },
+  m365: { enabled: '2', disabled: '1', platformDefault: '0' },
+};
+
+// Derived, never hand-maintained: the validator's allow-list IS the set of features we can write.
+const AI_FEATURE_KEYS = new Set(Object.keys(AI_APP_SETTING));
+
+// Upper bound for a per-app AI feature setting value. MIRRORS `MAX_SETTING_VALUE` in the SDK's
+// api/AiApi.ts, which THROWS an InvalidArgumentError outside this range — validating against the
+// same bound turns a mid-build abort into an up-front spec error naming the offending field.
+const AI_FEATURE_MAX_VALUE = 1000000;
+
+// What the build requests when a spec opts into `ai` without naming a feature. `m365` is not turned
+// on by default, because it surfaces the app inside M365 Copilot, which is a deliberate choice rather
+// than a sensible default. Nor is it forced off: it gets `0` (Default), the app-scope value every
+// default build has written. That is still an override — the app gets the platform's default, not
+// the environment's value — and an explicit `false` writes Off instead.
+const DEFAULT_APP_FEATURES = { formFill: true, nlSearch: true, nlChart: true, m365: 0 };
+
+/**
+ * Does this spec opt into AI at all?
+ *
+ * The ONE predicate the build, the verifier and teardown must all use. `selectSummaryTables` does
+ * NOT decide this: handed a spec with no `ai` block it reads `summaries` as `{}`, which means
+ * "default auto", and returns every entity carrying a descriptive column. That is correct for what
+ * it is — a candidate selector — but it is not an opt-in test, and treating it as one has now gone
+ * wrong twice in two different files:
+ *   * teardown gated on `spec.ai.summaries` and planned NOTHING for a spec carrying only
+ *     `ai.appFeatures`, so the row summary the build created blocked the table delete;
+ *   * verify gated on nothing at all, so a spec with NO `ai` block failed with
+ *     "ai.summaries requests a row summary for 'x'" for a summary nobody requested and the build
+ *     never created — a false FAIL on the build's own exit code, for most specs.
+ * Both were the same mistake in opposite directions. Asking here, once, is what stops a third.
+ *
+ * `null` is treated as opting out alongside `undefined`: it is what a JSON caller produces for
+ * "no AI", and the build has always read it that way.
+ */
+function specOptsIntoAi(spec) {
+  return !!spec && spec.ai !== undefined && spec.ai !== null;
+}
+
+/**
+ * The EXACT flag set the build writes for a spec — and therefore the exact set verify must
+ * reconcile. Both callers MUST go through this; that equality is the whole point of the module.
+ * Returns null when the spec opts out of `ai` entirely (no features are written, none are checked).
+ */
+function resolveAiFlags(spec) {
+  if (!specOptsIntoAi(spec)) return null;
+  const flags = Object.assign({}, DEFAULT_APP_FEATURES, spec.ai.appFeatures || {});
+  // Drop keys the SDK has no setting for: it ignores them, so verifying them would invent a
+  // permanent failure for a spec the validator already reports on.
+  const out = {};
+  for (const [k, v] of Object.entries(flags)) if (AI_FEATURE_KEYS.has(k)) out[k] = v;
+  return out;
+}
+
+/**
+ * Normalize a requested flag to the string the setting actually stores.
+ *
+ * `true`/`false` are ergonomic spellings, but what they MEAN is per setting (see AI_SETTING_CODEC):
+ * on is `'2'` for every feature, while off is `'1'` for most and `'0'` for `nlChart`. Any explicit
+ * integer is used verbatim.
+ *
+ * `feature` is required. Without it a boolean falls back to the plain `'1'`/`'0'`, which is wrong for
+ * every setting here — a verifier using that spelling reports a correctly-applied feature as missing.
+ */
+function featureWantValue(requested, feature) {
+  if (typeof requested !== 'boolean') return String(requested).trim();
+  const codec = feature && AI_SETTING_CODEC[feature];
+  if (codec) return requested ? codec.enabled : codec.disabled;
+  return requested ? '1' : '0';
+}
+
+/**
+ * The flags the build hands `setAppAiFeatures`, with every boolean already encoded to the value the
+ * setting stores. The SDK passes an explicit value through unchanged, but maps a boolean through its
+ * own codec, which (as of the vendored bundle) covers only the form-fill family and writes `'1'` for
+ * `true` everywhere else. Encoding here keeps what is written, and what `--verify` expects, in one
+ * table: this module's.
+ */
+function encodeAiFlags(flags) {
+  if (!flags) return flags;
+  const out = {};
+  for (const [feature, requested] of Object.entries(flags)) out[feature] = featureWantValue(requested, feature);
+  return out;
+}
+
+/**
+ * Move the SDK's `skipped` verdicts that are not ENABLES to `notPersisted`, rewriting their reasons.
+ *
+ * `skipped` means "no override appeared, and the feature's org gate reads off", and its reason tells
+ * an admin to enable the feature "before this app can turn the feature on". The vendored SDK only
+ * reaches for the gate when it thinks the request enables the feature — and it decides that with a
+ * codec that knows only the form-fill family, so any non-zero value counts. A correctly encoded Off
+ * for grid search or M365 (`'1'`) therefore came back telling the admin to switch the feature ON.
+ * A gate that governs turning a feature on cannot explain why a request that does not turn it on was
+ * not stored, so that request is simply not persisted.
+ *
+ * `encodedFlags` is what the build sent (see encodeAiFlags). Mutates and returns `result`.
+ */
+function rebucketNonEnablingSkips(result, encodedFlags) {
+  if (!result || !Array.isArray(result.skipped) || !result.skipped.length) return result;
+  const enables = (feature) => {
+    const codec = AI_SETTING_CODEC[feature];
+    // A feature this module has no codec for keeps the SDK's verdict: there is no table to say otherwise.
+    return !codec || String(encodedFlags && encodedFlags[feature]).trim() === codec.enabled;
+  };
+  const moved = result.skipped.filter((f) => !enables(f));
+  if (!moved.length) return result;
+  result.skipped = result.skipped.filter(enables);
+  result.notPersisted = [...(Array.isArray(result.notPersisted) ? result.notPersisted : []), ...moved];
+  for (const o of result.outcomes || []) {
+    if (!o || !moved.includes(o.feature)) continue;
+    const value = o.requestedValue !== undefined ? o.requestedValue : encodedFlags[o.feature];
+    o.status = 'notPersisted';
+    o.reason = `the write reported success but no app-scope override holding '${value}' was observed for '${o.setting || AI_APP_SETTING[o.feature]}' (Dataverse can accept an app-scope write without storing it); the feature's org gate reads off, but it governs turning the feature on, which this request does not`;
+  }
+  return result;
+}
+
+/**
+ * Move the outcomes the SDK reports `applied` but flags `pendingPublish` out of `applied`, into a `pendingPublish`
+ * bucket of their own.
+ *
+ * The SDK proves an app-scope override where the write put it, and a write lands in the app's UNPUBLISHED layer — the
+ * published `appsettings` projection cannot show it, which is why a feature on a freshly created app used to read back
+ * `notPersisted` and be written again after a publish. It now reads the row where it is, and answers `applied` with
+ * `pendingPublish: true`: saved, in force once the app is published. That is not "applied" for this build unless a
+ * publish follows — nothing else publishes the app after the write, and `--verify` reads the published layer — so
+ * counting it applied would let a build without `--publish` report rows that are not in force.
+ *
+ * The bucket is the plugin's own, so `applied` stays the one bucket that means "in force", and the build's generic
+ * re-confirmation (every non-`applied` array in the result) takes it from here: it publishes the app and PROVES the
+ * row — the row is already saved, so there is nothing to write again — or, when the build has already published the
+ * app, only proves it. The same filing applies to the result of a write the re-confirmation re-issues, because a
+ * publish that failed, or could not be confirmed, leaves that row in the unpublished layer too.
+ *
+ * Mutates and returns `result`.
+ */
+function rebucketPendingPublish(result) {
+  if (!result || !Array.isArray(result.outcomes)) return result;
+  const pending = result.outcomes.filter((o) => o && o.status === 'applied' && o.pendingPublish === true && typeof o.feature === 'string');
+  if (!pending.length) return result;
+  const features = pending.map((o) => o.feature);
+  result.applied = (Array.isArray(result.applied) ? result.applied : []).filter((f) => !features.includes(f));
+  result.pendingPublish = [...(Array.isArray(result.pendingPublish) ? result.pendingPublish : []), ...features];
+  for (const o of pending) {
+    o.status = 'pendingPublish';
+    o.reason = "saved in the app's unpublished layer, so it is not in force until the app is published";
+  }
+  return result;
+}
+
+/**
+ * Compare a stored setting value against a requested one.
+ *
+ * Deliberately NOT dependent on the setting's `dataType`. A Dataverse Boolean setting (dataType 2)
+ * reports `'true'`/`'false'` rather than a number, so the two spellings must be reconciled — but
+ * branching on a dataType read makes the comparison depend on a SECOND request that can fail
+ * independently, which silently turned a correctly-applied feature into a FAIL when that read
+ * errored. Normalizing both sides unconditionally is a no-op for the numeric values these settings
+ * actually store (live: the override rows hold '0'/'1'/'2'), while still accepting the boolean
+ * spelling — so it is strictly safer and has no hidden dependency.
+ *
+ * Pass `feature` whenever it is known: a Boolean spelling then means that feature's own on/off
+ * value. Without it, `'true'`/`'false'` fall back to `'1'`/`'0'` — which for every per-app AI setting
+ * would equate `'true'` with Off.
+ */
+function sameSettingValue(a, b, feature) {
+  const codec = feature && AI_SETTING_CODEC[feature];
+  const onOff = (v) => {
+    const s = String(v === undefined || v === null ? '' : v).trim().toLowerCase();
+    if (s === 'true') return codec ? codec.enabled : '1';
+    if (s === 'false') return codec ? codec.disabled : '0';
+    return s;
+  };
+  return onOff(a) === onOff(b);
+}
+
+/**
+ * Resolve the `appmoduleid` for an app's unique name via an injected reader.
+ *
+ * Deliberately NOT cached beyond one call: an app can be deleted and re-imported under the same
+ * unique name with a NEW id, and a stale id would prove an override against the wrong app.
+ * Returns `{ appModuleId }` on success or `{ error }` when it could not be resolved — the caller
+ * must fail CLOSED on `error` rather than assume absence.
+ */
+async function resolveAppModuleId(read, appUniqueName) {
+  try {
+    const rows = await read.queryRecords('appmodule', { select: ['appmoduleid'], filter: `uniquename eq '${odataLit(appUniqueName)}'`, top: 1 });
+    const appModuleId = rows && rows[0] && rows[0].appmoduleid;
+    if (!appModuleId) return { error: `no app module with unique name '${appUniqueName}' was found` };
+    return { appModuleId };
+  } catch (e) {
+    return { error: `the app module could not be read: ${e && e.message}` };
+  }
+}
+
+/**
+ * Prove whether an APP-SCOPE override row exists for `setting` on this app, and what it holds.
+ *
+ * This is the ONLY authoritative signal. `RetrieveSetting(name, { appUniqueName })` FALLS BACK to
+ * the ENVIRONMENT value when the app has no override, so a matching read-back does NOT prove the
+ * app-scope write landed: if the environment already holds the requested value, a write the
+ * platform silently ignored reads back as a perfect match. (Live-verified: RetrieveSetting returned
+ * the env value while `appsettings` held zero rows for that app+setting.)
+ *
+ * Returns `{ exists, value }`, or `{ error }` when the proof could not be RUN — the caller must
+ * distinguish "verifiably absent" from "could not look" and never report the latter as success.
+ */
+async function proveAppOverride(read, appModuleId, setting, opts = {}) {
+  let defId;
+  try {
+    const defs = await read.queryRecords('settingdefinition', { select: ['settingdefinitionid'], filter: `uniquename eq '${odataLit(setting)}'`, top: 1 });
+    defId = defs && defs[0] && defs[0].settingdefinitionid;
+  } catch (e) {
+    return { error: `the setting definition could not be read: ${e && e.message}` };
+  }
+  // A setting the environment has never heard of is NOT the same as an app missing an override:
+  // e.g. `m365copilotmodelappenabled` simply does not exist in an org where M365 Copilot was never
+  // provisioned, and there is no action a maker could take to satisfy it. Report it as unprovable
+  // so the caller can say so precisely instead of alleging a missing override.
+  if (!defId) return { error: `no setting definition named '${setting}' exists in this environment`, unsupported: true };
+  // Retry ONLY the absent case, and only when the caller asks. An override row can lag briefly
+  // behind the write that created it (observed live: the SDK reported a feature not persisted on
+  // first apply and clean on a re-run, with the value correct all along), and a verifier that reads
+  // once turns that lag into a false FAIL on the build's exit code. A read ERROR is not retried —
+  // that is a different condition the caller must surface as "could not look", not "not there yet".
+  const attempts = Math.max(1, Math.min(10, opts.attempts || 1));
+  const delayMs = Math.max(0, Math.min(5000, opts.delayMs === undefined ? 500 : opts.delayMs));
+  let last = { exists: false };
+  for (let i = 0; i < attempts; i += 1) {
+    if (i > 0 && delayMs) await new Promise((r) => setTimeout(r, delayMs));
+    try {
+      // `appsetting` rows carry the app and definition as lookups; GUID lookup values are compared
+      // UNQUOTED in an OData $filter (…?$filter=_parentappmoduleid_value eq 0000…-0000), matching
+      // the SDK's own query for the same proof.
+      const rows = await read.queryRecords('appsetting', { select: ['value'], filter: `_parentappmoduleid_value eq ${odataGuid(appModuleId)} and _settingdefinitionid_value eq ${odataGuid(defId)}`, top: 1 });
+      if (rows && rows.length) return { exists: true, value: rows[0].value };
+      last = { exists: false };
+    } catch (e) {
+      return { error: `the app-scope override row could not be read: ${e && e.message}` };
+    }
+  }
+  return last;
+}
+
+// How long an app-scope override row is waited for after the call that should have put it in force (a write, or the
+// publish of the app). The row can lag briefly behind that call, and one read turns the lag into a false negative: it
+// reported a published row as NOT YET PUBLISHED in a run whose own `--verify` — which reads three times — passed. Only the
+// ABSENT case is read again (see proveAppOverride), 500 ms apart. ONE budget for the build's proof after its publish
+// and for `--verify`, so the two cannot disagree about the same row for want of a second look.
+const AI_PROOF_BUDGET = Object.freeze({ attempts: 3, delayMs: 500 });
+
+// The budget a caller uses: `AI_PROOF_BUDGET`, unless a test passes `proofAttempts` / `proofDelayMs` to drive the absent
+// path without paying the backoff (both callers take the same two options).
+function proofBudget(opts = {}) {
+  return {
+    attempts: opts.proofAttempts === undefined ? AI_PROOF_BUDGET.attempts : opts.proofAttempts,
+    delayMs: opts.proofDelayMs === undefined ? AI_PROOF_BUDGET.delayMs : opts.proofDelayMs,
+  };
+}
+
+/**
+ * Resolve the EFFECTIVE value of a per-app AI setting: the most specific scope that holds a value
+ * wins — app-scope override, then the ENVIRONMENT-scope value, then the definition's default.
+ *
+ * This exists because the org READINESS GATE and the feature's actual setting are different rows,
+ * and reading only the gate is actively misleading. Live-measured on a real environment:
+ *   gate `EnableNLGridSearch`          = "false"   ← what the readiness report shows
+ *   setting `NLGridSearchSetting`      = "2" at ENVIRONMENT scope  ← the feature is ON for every app
+ * Reporting that feature as simply "disabled" sends an operator to the admin centre to switch on
+ * something already in effect. The gate governs only whether the BUILD will write an app-scope
+ * override; it does not decide whether the feature runs.
+ *
+ * `appModuleId` may be null (no app in scope) — the app layer is then skipped and the answer is the
+ * environment/default value, which is exactly what a not-yet-created app would inherit.
+ *
+ * Returns `{ value, scope }` where scope is 'app' | 'environment' | 'default', or `{ error }` when
+ * the lookup could not be RUN. Never conflates "could not look" with "not set".
+ */
+async function effectiveSettingValue(read, appModuleId, setting) {
+  let def;
+  try {
+    const defs = await read.queryRecords('settingdefinition', { select: ['settingdefinitionid', 'defaultvalue'], filter: `uniquename eq '${odataLit(setting)}'`, top: 1 });
+    def = defs && defs[0];
+  } catch (e) {
+    return { error: `the setting definition could not be read: ${e && e.message}` };
+  }
+  if (!def || !def.settingdefinitionid) {
+    // Not provisioned in this environment at all — distinct from "set to off".
+    return { error: `no setting definition named '${setting}' exists in this environment`, unsupported: true };
+  }
+
+  if (appModuleId) {
+    try {
+      const rows = await read.queryRecords('appsetting', { select: ['value'], filter: `_parentappmoduleid_value eq ${odataGuid(appModuleId)} and _settingdefinitionid_value eq ${odataGuid(def.settingdefinitionid)}`, top: 1 });
+      if (rows && rows.length) return { value: rows[0].value, scope: 'app' };
+    } catch (e) {
+      return { error: `the app-scope override row could not be read: ${e && e.message}` };
+    }
+  }
+
+  try {
+    const rows = await read.queryRecords('organizationsetting', { select: ['value'], filter: `_settingdefinitionid_value eq ${odataGuid(def.settingdefinitionid)}`, top: 1 });
+    if (rows && rows.length) return { value: rows[0].value, scope: 'environment' };
+  } catch (e) {
+    return { error: `the environment-scope value could not be read: ${e && e.message}` };
+  }
+
+  return { value: def.defaultvalue, scope: 'default' };
+}
+
+/**
+ * Is a setting value "on" FOR THIS FEATURE?
+ *
+ * Values are stored as STRINGS ("0"/"1"/"2"/"true"/"false"), so plain JS truthiness is wrong twice
+ * over — it calls "0" true and "false" true. Worse, the numeric meaning is not uniform: for most of
+ * these settings `1` means Off and `2` means On, and for `nlChart` `0` is Off and `1` is Auto, so a
+ * "non-zero is on" rule reports a deliberately disabled feature as running. A setting's platform
+ * default (Default, or Auto for charts) defers to the platform, which is genuinely UNKNOWN rather
+ * than off — reporting it as off overstates what we know.
+ *
+ * `feature` is optional so existing callers keep the plain numeric convention; pass it whenever the
+ * feature is known, which is every caller inside this plugin.
+ */
+function settingIsOn(value, feature) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const s = String(value).trim().toLowerCase();
+  if (s === 'true') return true;
+  if (s === 'false') return false;
+  const codec = feature && AI_SETTING_CODEC[feature];
+  if (codec) {
+    if (s === codec.enabled) return true;
+    if (s === codec.disabled) return false;
+    // The platform default (Default, or Auto for charts): not a claim either way.
+    return undefined;
+  }
+  const n = Number(s);
+  return Number.isNaN(n) ? undefined : n !== 0;
+}
+
+/**
+ * Normalize a GUID before it is interpolated into a Dataverse request. Dataverse returns bare GUIDs,
+ * but a caller-supplied id can arrive `{braced}` (the form `normalizeGuid` also accepts).
+ *
+ * This previously documented itself as the thing that keeps the `$filter` valid — that a braced
+ * comparand "400s". MEASURED against a live environment, that is not what the server does: a braced
+ * GUID in a `$filter` comparand is ACCEPTED and returns the right row (200), quoted or unquoted, on
+ * both a primary-key column and a lookup `_value` column. The shape that genuinely rejects braces is
+ * the URL KEY SEGMENT — `workflows({0000…})` returns 400 where `workflows(0000…)` succeeds.
+ *
+ * So normalize for the two reasons that hold: an id is also used as a plain string KEY for
+ * comparison (a Map join, a Set membership test), where a formatting difference is a SILENT miss
+ * rather than an error; and an id normalized here stays safe if it is later moved into a key
+ * segment. Anything that is not a brace passes through, so a genuinely bad id still fails loudly.
+ */
+function odataGuid(id) {
+  return String(id === undefined || id === null ? '' : id).replace(/[{}]/g, '');
+}
+
+module.exports = {
+  AI_APP_SETTING,
+  AI_SETTING_CODEC,
+  AI_FEATURE_KEYS,
+  AI_FEATURE_MAX_VALUE,
+  DEFAULT_APP_FEATURES,
+  specOptsIntoAi,
+  resolveAiFlags,
+  featureWantValue,
+  encodeAiFlags,
+  rebucketNonEnablingSkips,
+  rebucketPendingPublish,
+  sameSettingValue,
+  resolveAppModuleId,
+  proveAppOverride,
+  AI_PROOF_BUDGET,
+  proofBudget,
+  effectiveSettingValue,
+  settingIsOn,
+  odataGuid,
+};

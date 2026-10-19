@@ -16,6 +16,7 @@
 //     --table <table_logical_name> \
 //     [--offline true|false]   (default: true)
 //     [--tracking true|false]  (default: true)
+//     [--tenant-id <id>]       (resolved environment tenant, including retries)
 //
 // Output (single-line JSON to stdout):
 //   No-op:    { "status": 200, "table": "...", "noop": true, "before": {...} }
@@ -28,6 +29,7 @@
 //   1 — bad args, auth failure, network failure after retries
 
 const { getAuthToken, makeRequest } = require('./lib/validation-helpers');
+const { retryAfterDelayMs } = require('./dataverse-request');
 
 function parseArgs() {
   const argv = process.argv.slice(2);
@@ -40,6 +42,7 @@ function parseArgs() {
     table: null,
     offline: true,
     tracking: true,
+    tenantId: null,
   };
 
   for (let i = 1; i < argv.length; i++) {
@@ -49,6 +52,11 @@ function parseArgs() {
       case '--table':    out.table = next; i++; break;
       case '--offline':  out.offline = parseBool('--offline', next); i++; break;
       case '--tracking': out.tracking = parseBool('--tracking', next); i++; break;
+      case '--tenant-id':
+        if (!next || !next.trim() || next.startsWith('--')) usage('--tenant-id requires a value');
+        out.tenantId = next.trim();
+        i++;
+        break;
       default:           usage(`Unknown flag: ${flag}`);
     }
   }
@@ -71,7 +79,7 @@ function usage(msg) {
   process.stderr.write(`Error: ${msg}\n\n`);
   process.stderr.write(
     'Usage: node update-entity-offline-flags.js <envUrl> --table <name> ' +
-      '[--offline true|false] [--tracking true|false]\n'
+      '[--offline true|false] [--tracking true|false] [--tenant-id <id>]\n'
   );
   process.exit(1);
 }
@@ -136,9 +144,9 @@ async function putMetadata(envUrl, table, current, desired, token) {
 }
 
 async function main() {
-  const { envUrl, table, offline, tracking } = parseArgs();
+  const { envUrl, table, offline, tracking, tenantId } = parseArgs();
 
-  let token = await getAuthToken(envUrl);
+  let token = await getAuthToken(envUrl, tenantId);
   if (!token) {
     process.stderr.write('Failed to get Azure CLI token. Run `az login` first.\n');
     process.exit(1);
@@ -186,7 +194,7 @@ async function main() {
     }
 
     if (res.statusCode === 401 && attempt < maxRetries) {
-      token = await getAuthToken(envUrl);
+      token = await getAuthToken(envUrl, tenantId);
       if (!token) {
         console.log(JSON.stringify({ status: 401, table, error: 'token refresh failed' }));
         process.exit(1);
@@ -195,8 +203,7 @@ async function main() {
     }
 
     if (res.statusCode === 429 && attempt < maxRetries) {
-      const retryAfter = res.headers?.['retry-after'];
-      const delayMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 30000;
+      const delayMs = retryAfterDelayMs(res.headers?.['retry-after'], 30000);
       process.stderr.write(`429 rate-limited — waiting ${delayMs / 1000}s\n`);
       await new Promise((r) => setTimeout(r, delayMs));
       continue;

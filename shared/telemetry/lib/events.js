@@ -34,7 +34,9 @@ const FIELD_TYPES = {
   pacCliVersion: "string",
   aiAgentName: "string",
   aiAgentVersion: "string",
-  // Common — caller-supplied dynamic JSON
+  // Common — caller-supplied dynamic JSON. This validates only the container,
+  // not nested keys. Callers must follow shared/telemetry/README.md's approved
+  // eventInfo schema; arbitrary nested payloads can bypass the top-level allowlist.
   eventInfo: "object",
   // Skill
   skillName: "string",
@@ -112,12 +114,20 @@ function buildEvent(envelopeName, eventName, info, severity) {
 }
 
 function buildSkillStarted(envelopeName, input) {
+  return buildSkillEvent(envelopeName, "skill_started", input, "Info");
+}
+
+function buildSkillEvent(envelopeName, eventName, input, severity = "Info") {
   return buildEvent(
     envelopeName,
-    "skill_started",
+    eventName,
     pick(input, [...COMMON_FIELDS, ...SKILL_FIELDS]),
-    "Info"
+    severity
   );
+}
+
+function buildSkillConfigured(envelopeName, input) {
+  return buildSkillEvent(envelopeName, "skill_configured", input, "Info");
 }
 
 function buildSkillCompleted(envelopeName, input) {
@@ -132,6 +142,8 @@ function buildSkillCompleted(envelopeName, input) {
 
 module.exports = {
   buildSkillStarted,
+  buildSkillEvent,
+  buildSkillConfigured,
   buildSkillCompleted,
   FIELD_TYPES,
   pick,

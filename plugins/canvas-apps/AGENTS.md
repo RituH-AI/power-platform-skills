@@ -19,18 +19,43 @@ claude --plugin-dir /path/to/plugins/canvas-apps
 ## Architecture
 
 ```
+.claude-plugin/plugin.json     ← Claude Code metadata (mirrors .plugin/plugin.json)
 .plugin/plugin.json            ← Open Plugins metadata (name, version, keywords)
 .mcp.json                      ← MCP server config (canvas-authoring, auto-registered)
 AGENTS.md                      ← Plugin guidance for AI agents (this file)
-CLAUDE.md                      ← Symlink → AGENTS.md
+hooks.json                     ← Copilot-format hooks: userPromptTransformed
+hooks/
+  hooks.json                   ← Claude-format hooks: UserPromptSubmit
+  inject-sync-reminder.cs      ← File-based .NET app that emits the sync reminder for both hosts
 references/
-  TechnicalGuide.md            ← YAML syntax, control selection, layout strategies, Power Fx patterns
+  YamlSyntax.md                ← .pa.yaml structure, syntax rules, and parse-error triage
+  ControlGuide.md              ← Control selection, property contracts, enums, and versions
+  LayoutGuide.md               ← Responsive sizing, scrolling, galleries, and contrast
+  GridLayoutGuide.md           ← Conditional GridLayout formulas and invariants
+  PowerFxGuide.md              ← State, events, named formulas, and mock data
   DesignGuide.md               ← Aesthetic guidelines, anti-patterns, design process
-  QAChecks.md                  ← Runtime anti-pattern checks for self-QA
-  PlanTemplates.md             ← CREATE and EDIT plan document structures for canvas-app-planner
+  QAChecks.md                  ← Named runtime anti-pattern checks for per-screen self-QA
+  CreateWorkflow.md            ← CREATE stages 1–4, revision/resume, and approval
+  CreateBuilderCore.md         ← CREATE implementation rules and topic-module ownership
+  CreateSelectionControls.md   ← CREATE selection, filtering, defaults, and reset
+  CreateGalleryLayout.md       ← CREATE galleries, record surfaces, and dataset bounds
+  CreateNavigationState.md     ← CREATE cross-screen context and shared state
+  CreateMutations.md           ← CREATE mutations and persisted-data initialization
+  CreateConformance.md         ← CREATE inspection, repair, and evidence procedures
+  CreateImplementation.md      ← CREATE stage 5 shared wiring, screen waves, and compilation
+  CreateValidation.md          ← CREATE final validation gates
+  EditWorkflow.md              ← EDIT routing and direct/partitioned/planned execution
+  EditConformance.md           ← EDIT implementation checks
+  PlannedEditHandoff.md        ← Planned EDIT acceptance and screen-wave handoff
+  ValidationWorkflow.md        ← EDIT compile, repair, acceptance, and final validation gates
 agents/
-  canvas-app-planner.md        ← Discovers resources and writes plan document; invoked by canvas-app
-  canvas-screen-builder.md     ← Builds or modifies one screen; invoked by canvas-app (parallel)
+  canvas-create-functionality.md ← CREATE stage 1: owns create-functionality.md
+  canvas-create-screens.md       ← CREATE stage 2: owns create-screens.md
+  canvas-create-layout.md        ← CREATE stage 3: owns create-design.md and per-screen compositions
+  canvas-create-discovery.md      ← CREATE stage 4: owns create-discovery.md and feasibility findings
+  canvas-create-builder.md        ← CREATE stage 5 worker: owns exactly one assigned screen YAML file
+  canvas-app-planner.md           ← Planned EDIT: owns the dispatch index, shared contract, and screen briefs
+  canvas-screen-builder.md       ← EDIT worker: modifies one assigned screen
 skills/
   canvas-app/
     SKILL.md                   ← Unified skill: create or edit a Canvas App (auto-detects mode)
@@ -38,8 +63,6 @@ skills/
     SKILL.md                   ← Registers the Canvas Authoring MCP server with Claude Code
   add-data-source/
     SKILL.md                   ← Guides user to add a data source or connector in Studio, then verifies
-  generate-canvas-app/
-    SKILL.md                   ← [DEPRECATED] Redirects to canvas-app
 ```
 
 ## Skills
@@ -56,8 +79,13 @@ Agents are invoked by skills via the `Task` tool — they are not user-invocable
 
 | Agent | Invoked By | Description |
 |-------|-----------|-------------|
-| `canvas-app-planner` | `canvas-app` | Receives the approved plan from the skill. Discovers available controls, APIs, and data sources; gathers control property definitions (`describe_control`); writes `App.pa.yaml` (CREATE mode) and `canvas-app-plan.md` for downstream screen builders. |
-| `canvas-screen-builder` | `canvas-app` | For Create actions: writes YAML for one new screen based on the plan. For Modify actions: applies targeted edits to one existing screen. Runs in parallel with other builders; validation is performed later by `canvas-app` using `compile_canvas`. |
+| `canvas-create-functionality` | `canvas-app` | CREATE stage 1; defines requirements and actions in `create-functionality.md` without choosing screens or implementation. |
+| `canvas-create-screens` | `canvas-app` | CREATE stage 2; organizes approved functionality into screens and states in `create-screens.md`. |
+| `canvas-create-layout` | `canvas-app` | CREATE stage 3; owns shared visual design and each screen's composition artifact. |
+| `canvas-create-discovery` | `canvas-app` | CREATE stage 4; checks control/data/API/image and composition feasibility in `create-discovery.md`. |
+| `canvas-create-builder` | `canvas-app` | CREATE stage 5 worker; implements exactly one assigned screen from the approved composition and bindings. The skill coordinator owns shared bindings, app/editor files, and compilation; builders run in waves of at most three. |
+| `canvas-app-planner` | `canvas-app` | Planned EDIT only; discovers missing resource contracts and writes the dispatch index, shared contract, and affected-screen briefs for an approved edit. |
+| `canvas-screen-builder` | `canvas-app` | EDIT worker; modifies one assigned screen from its approved brief and shared contract. |
 
 ## MCP Tools
 
@@ -74,6 +102,31 @@ The `canvas-authoring` MCP server exposes the following tools:
 | `list_controls` | Lists all available Power Apps controls in the current authoring session |
 | `list_data_sources` | Lists all available data sources in the current authoring session |
 | `sync_canvas` | Syncs the current coauthoring session state from the server to a local directory, writing all YAML files |
+
+## Hooks
+
+Both hosts inject a reminder to call `sync_canvas` before acting, so the agent never edits stale
+local `.pa.yaml` files. The reminder is conditional in wording — the agent skips the sync when no
+coauthoring session is active or the request is unrelated to a canvas app.
+
+Registration uses both plugin [hook formats](https://code.visualstudio.com/docs/agent-customization/agent-plugins)
+— Claude-format (`hooks/hooks.json`) and Copilot-format (`hooks.json` at the plugin root) — which
+the hosts read independently:
+
+| Host | Registered in | Event |
+|------|---------------|-------|
+| Claude Code | `hooks/hooks.json` (Claude format) | `UserPromptSubmit` |
+| Copilot CLI | `hooks.json` in the plugin root (Copilot format) | `userPromptTransformed` |
+
+Each host reads only its own file and ignores the other's. Both run
+`hooks/inject-sync-reminder.cs` via `dotnet run --file`, which branches on its stdin payload to
+emit the output shape each host expects.
+
+Keep the two files separate. Claude Code rejects unrecognized hook event names, so putting
+`userPromptTransformed` in `hooks/hooks.json` makes Claude fail to load the plugin, disabling its
+`canvas-authoring` MCP server. Neither manifest should declare a `"hooks"` field: Claude Code
+auto-discovers `hooks/hooks.json`, and pointing at it explicitly is treated as a duplicate hook
+source, which also disables MCP.
 
 ## Prerequisites
 

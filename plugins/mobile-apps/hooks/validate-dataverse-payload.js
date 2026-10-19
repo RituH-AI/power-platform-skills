@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * PostToolUse hook: catch the two HTTP-400 crash patterns on Dataverse calls.
+ * Explicit validator: catch HTTP-400 crash patterns on Dataverse calls.
  *
  * Fires after Write / Edit / MultiEdit on TS/TSX files. Reads the resulting
  * file content and blocks the write if either:
@@ -62,7 +62,7 @@ function isWatchedFile(filePath) {
   // Only screens/components/services under the project — skip plugin files,
   // generated scaffolding helpers, and anything outside an `src/` tree.
   if (!/[\\/]src[\\/]/.test(filePath)) return false;
-  // Skip the generated layer itself — npx power-apps owns those files.
+  // Skip the generated layer itself — the Power Apps CLI owns those files.
   if (/[\\/]src[\\/]generated[\\/]/.test(filePath)) return false;
   return true;
 }

@@ -1,0 +1,188 @@
+#!/usr/bin/env node
+'use strict';
+// promote-intent-pages: validate every generated page, then flip `source: intent -> tsx` in ONE
+// atomic spec write.
+//
+// WHY this is a script and not a prose step: /app-builder Phase 1.5 dispatches N headless workers
+// and any subset of them can fail. If the orchestrator flips each page's `source` as that page
+// comes back, a partial failure leaves `app-spec.json` half-promoted — some pages claim a `.tsx`
+// that was never written, or a page that WAS written is still `intent`. Phase 2 then validates
+// under the `deploy` profile and fails, but the spec on disk is already corrupted and the user has
+// no clean state to retry from. So promotion is all-or-nothing and performed here: every page is
+// validated first, and the spec file is only touched if EVERY page passes.
+//
+// Exit codes: 0 = promoted (or nothing to do), 3 = validation failed and the spec was NOT modified.
+//
+// Usage:
+//   node promote-intent-pages.js --spec @<working-dir>/app-spec.json --working-dir <dir>
+
+const fs = require('node:fs');
+const path = require('node:path');
+const { parseArgs, validateFlags, readJsonArg, emitResult } = require('./lib/dataverse-auth.js');
+const { migrateAppSpec } = require('./lib/app-spec.js');
+const { pageKey, pageFile } = require('./lib/page-plan.js');
+const { navReferencedKeys, navMalformedRefs, navTargetParity, strayPageRefs, describePageRefLocations, pageRefAdvice, frontierNote, PAGEREF_RULE } = require('./lib/pageref-resolver.js');
+// The structural gate (empty, truncated, prose, elided) is shared with genpage-worker-output.js, so a
+// page one gate refuses the other refuses too. See lib/page-structure.js for each check and why.
+const { pageStructureProblems: structuralProblems } = require('./lib/page-structure.js');
+
+function validatePage(page, absWorkingDir) {
+  const key = pageKey(page);
+  const file = pageFile(page);
+
+  // Containment check BEFORE any read. `codeFile` is author-editable and, on an edit round-trip,
+  // download-derived — so a `../` prefix or an absolute path would make this script read (and then
+  // record) a file outside the app folder. The spec is only ever allowed to reference pages inside
+  // its own working directory.
+  const abs = path.resolve(absWorkingDir, file);
+  const rel = path.relative(absWorkingDir, abs);
+  if (path.isAbsolute(file) || rel.startsWith('..') || path.isAbsolute(rel)) {
+    return { key, file, problems: [`codeFile escapes the working directory (resolved to ${abs})`] };
+  }
+  if (!fs.existsSync(abs)) return { key, file, problems: ['file was never written'] };
+
+  const code = fs.readFileSync(abs, 'utf8');
+  const problems = structuralProblems(code);
+
+  // Cross-page nav must be exactly what the spec declares, checked BEFORE promotion. The build
+  // HALTs on a malformed PAGEREF or a nav parity mismatch, so catching it here keeps the failure
+  // in Phase 1.5 where the page can simply be regenerated.
+  const malformed = navMalformedRefs(code);
+  if (malformed.length) problems.push(`malformed nav pageref(s): ${malformed.join(', ')} (must be a double-quoted "PAGEREF_<key>" literal; ${PAGEREF_RULE})`);
+
+  const declared = (page.navigatesTo || []).map((n) => (typeof n === 'string' ? n : n && n.targetKey)).filter(Boolean);
+  const { declaredNotReferenced, referencedNotDeclared } = navTargetParity(declared, navReferencedKeys(code));
+  // A PAGEREF_ token that is not the pageId of a recognised call is never rewritten, so the page would ship it as literal
+  // text. The build refuses it too; here it can be fixed by regenerating the page, and the report says where it is.
+  const stray = strayPageRefs(code);
+  // A call the lexer cannot see is "absent" here, which sends the author looking for a call that is plainly there. A hidden call's token
+  // lies after the guess, and the report of the token below names it; only when no token does is the guess named on this line.
+  const hidden = declaredNotReferenced.length && !stray.some((r) => r.frontier) ? frontierNote(code) : '';
+  if (declaredNotReferenced.length) problems.push(`navigatesTo declares ${declaredNotReferenced.join(', ')} but the code never navigates there${hidden ? ` — ${hidden}` : ''}`);
+  if (referencedNotDeclared.length) problems.push(`code navigates to ${referencedNotDeclared.join(', ')} which is not in navigatesTo`);
+
+  if (stray.length) problems.push(`PAGEREF_ token(s) no navigation rewrite will resolve: ${describePageRefLocations(stray)} (${pageRefAdvice(stray)})`);
+
+  return { key, file, problems };
+}
+
+function main() {
+  const argv = process.argv.slice(2);
+  const { positional, flags } = parseArgs(argv);
+  const USAGE = 'Usage: node scripts/promote-intent-pages.js --spec @<app-folder>/app-spec.json --working-dir <dir>';
+  const flagError = validateFlags(argv, {
+    known: ['spec', 'working-dir'],
+    needValue: ['spec', 'working-dir'],
+  });
+  if (flagError) {
+    process.stderr.write(`✗ ${flagError}\n${USAGE}\n`);
+    process.exit(1);
+  }
+  const specArg = flags.spec || positional[0];
+  const workingDir = flags['working-dir'];
+  if (!specArg || !workingDir) {
+    process.stderr.write(USAGE + '\n');
+    process.exit(1);
+  }
+
+  const specPath = path.resolve(specArg.startsWith('@') ? specArg.slice(1) : specArg);
+  const absWorkingDir = path.resolve(workingDir);
+  // Read the raw text so the rewrite preserves the author's formatting for everything we do not
+  // touch — migrateAppSpec is only used to reason about the CURRENT shape, never to rewrite it.
+  // A missing/garbled spec is a normal operator error, not a crash: report it as a fail-closed
+  // result so the skill sees the same exit-3 contract as a validation failure.
+  let raw;
+  let originalText;
+  try {
+    originalText = fs.readFileSync(specPath, 'utf8');
+    raw = JSON.parse(originalText);
+  } catch (e) {
+    process.stderr.write(`cannot read app spec at ${specPath}: ${e.message}\n`);
+    process.exit(3);
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    process.stderr.write(`app spec at ${specPath} is not a JSON object\n`);
+    process.exit(3);
+  }
+  if (raw.pages !== undefined && !Array.isArray(raw.pages)) {
+    process.stderr.write(`app spec "pages" must be an array (got ${typeof raw.pages})\n`);
+    process.exit(3);
+  }
+  const spec = migrateAppSpec(JSON.parse(JSON.stringify(raw)));
+
+  const pages = spec.pages || [];
+  const intentIdx = pages.map((p, i) => [p, i]).filter(([p]) => p && (!p.source || p.source.kind === 'intent'));
+  if (!intentIdx.length) {
+    emitResult(true, { ok: true, promoted: [], message: 'no intent pages to promote' });
+    return;
+  }
+
+  const results = intentIdx.map(([p, i]) => ({ index: i, ...validatePage(p, absWorkingDir) }));
+
+  // Two pages resolving to the same file means one worker overwrote the other's output, so both
+  // rows would be promoted to identical code. Compare case-insensitively: NTFS and macOS are
+  // case-insensitive, so `Overview.tsx` and `overview.tsx` are the SAME file there.
+  const byFile = new Map();
+  for (const r of results) {
+    const k = path.resolve(absWorkingDir, r.file).toLowerCase();
+    if (byFile.has(k)) {
+      r.problems.push(`resolves to the same file as page "${byFile.get(k)}" — one page overwrote the other`);
+    } else byFile.set(k, r.key);
+  }
+
+  const failed = results.filter((r) => r.problems.length);
+  if (failed.length) {
+    // Fail-closed: the spec on disk is untouched, so the caller can regenerate just the bad pages
+    // and re-run this command.
+    process.stdout.write(JSON.stringify({ ok: false, promoted: [], failed }, null, 2) + '\n');
+    process.stderr.write(
+      `promotion aborted — ${failed.length} of ${results.length} page(s) failed validation; app-spec.json was NOT modified\n`
+      + failed.map((f) => `  - ${f.file}: ${f.problems.join('; ')}`).join('\n') + '\n'
+    );
+    process.exit(3);
+  }
+
+  // All pages passed -> single write. Mutate the RAW object (not the migrated copy) so unrelated
+  // fields and legacy shapes survive the round-trip untouched. Pages are matched by POSITION, not by
+  // key: `key` is optional in an authored spec (migrateAppSpec derives it by slugifying `name`), so
+  // a key lookup against the raw pages would throw on the very specs that need promoting most.
+  // migrateAppSpec never reorders or filters `pages[]`, so index i is the same page in both.
+  for (const r of results) {
+    const target = (raw.pages || [])[r.index];
+    if (!target) continue;
+    target.source = { kind: 'tsx', codeFile: r.file };
+  }
+  // Write via a temp file + rename so a crash mid-write cannot truncate the user's spec.
+  // fs.renameSync overwrites an existing destination on both POSIX and Windows (libuv uses
+  // MoveFileEx with MOVEFILE_REPLACE_EXISTING), so no unlink-first dance is needed. The temp name
+  // includes the pid so two concurrent promotions cannot clobber each other's staging file.
+  //
+  // Compare-and-swap: validating N pages involves N file reads, so a user editing app-spec.json in
+  // Maker/an editor meanwhile would have their change silently overwritten by our stale in-memory
+  // copy. STAGE FIRST, then re-read and compare in the last instant before the rename — doing the
+  // compare before writing the temp file leaves the whole serialize+write window unguarded, which
+  // is the larger of the two. This is a narrow-window check, not a lock: without OS-level file
+  // locking (unavailable portably in node) a write landing between the compare and the rename is
+  // still possible. That residual is acceptable because promotion is operator-driven and rerunnable,
+  // and the check closes the window that is actually long (page validation).
+  const tmp = `${specPath}.${process.pid}.promote.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(raw, null, 2) + '\n', 'utf8');
+    if (fs.readFileSync(specPath, 'utf8') !== originalText) {
+      fs.unlinkSync(tmp);
+      process.stderr.write('app spec changed while pages were being validated; nothing was written — re-run promotion\n');
+      process.exit(3);
+    }
+    fs.renameSync(tmp, specPath);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch { /* nothing to clean up */ }
+    process.stderr.write(`failed to write ${specPath}: ${e.message}\n`);
+    process.exit(3);
+  }
+
+  emitResult(true, { ok: true, promoted: results.map((r) => ({ key: r.key, codeFile: r.file })), specPath });
+}
+
+if (require.main === module) main();
+
+module.exports = { main, validatePage, structuralProblems };
