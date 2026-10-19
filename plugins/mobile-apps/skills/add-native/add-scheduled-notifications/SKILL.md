@@ -76,7 +76,8 @@ Inspect `src/native/scheduledNotifications.ts` for `syncScheduledNotifications`,
 `expo-notifications` load; one-off, daily and weekly times; groups that preserve
 each source's desired entries while allocating the app-wide 48-notification cap
 by next occurrence; retained late entries; delivered one-off occurrence state;
-serialized syncs; the Android-only handler that presents this module's notifications; and
+serialized syncs; the session hook's clear on sign-out and on unmount; the
+Android-only handler that presents this module's notifications; and
 the Android inexact-window adjustment with exact-alarm detection. Inspect `app/(app)/_layout.tsx` for one unconditional
 `useScheduledNotificationSession` call, and each owner screen for its
 `useScheduledNotifications` call. A wrapper that imports `expo-notifications`
@@ -123,6 +124,7 @@ export type ScheduledNotification = { id: string; title: string; body?: string }
   | { weekly: TimeOfDay & { weekday: number } }
 );
 
+/** `scheduled` counts the synced group's pending notifications; the rest wait for room under the cap. */
 export type ScheduledNotificationsResult =
   | { ok: true; scheduled: number }
   | { ok: false; reason: 'UNAVAILABLE' | 'PERMISSION_DENIED' | 'SCHEDULE_FAILED'; message?: string };
@@ -182,6 +184,12 @@ interface StoredState {
   scheduledOnce: string[];
 }
 
+/** This module's notifications already scheduled: those pending, and the one-offs it scheduled. */
+interface Scheduled {
+  pending: ReadonlySet<string>;
+  once: ReadonlySet<string>;
+}
+
 const STORAGE_KEY = 'powerapps.scheduledNotifications';
 
 /**
@@ -222,7 +230,11 @@ async function readState(): Promise<StoredState> {
 }
 
 async function writeState(state: StoredState): Promise<void> {
-  await loadStorage()?.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    await loadStorage()?.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Unsaved state is rebuilt as the groups sync; scheduling carries on without it.
+  }
 }
 
 let exactAlarms: Promise<boolean> | undefined;
@@ -286,6 +298,13 @@ function nextOccurrence(when: When, now: number): number {
   return next.getTime();
 }
 
+/** The occurrence of repeating `when` one period before its occurrence at `ms`. */
+function previousOccurrence(when: When, ms: number): number {
+  const previous = new Date(ms);
+  previous.setDate(previous.getDate() - (when.kind === 'weekly' ? 7 : 1));
+  return previous.getTime();
+}
+
 function whenKey(when: When): string {
   if (when.kind === 'once') return String(when.ms);
   if (when.kind === 'daily') return `d${when.hour}-${when.minute}`;
@@ -306,19 +325,28 @@ function toEntry(group: string, { id, title, body }: Requested, when: When, next
 
 /**
  * What to schedule for `requested`. Without exact alarms a repeating time triggers an hour early
- * (see toTrigger), so within that hour its next trigger is a whole period away: the imminent
- * occurrence is then scheduled as a one-off of its own, and the repeating one covers the rest.
+ * (see toTrigger), so a repeating notification first scheduled within that hour misses that
+ * occurrence, which is then scheduled as a one-off of its own at the same time. A repeating
+ * notification already pending before that hour shows the occurrence itself, so it gets none. Such
+ * a one-off stays wanted until the occurrence after it passes: kept while late, and not rescheduled
+ * once shown.
  */
-function toEntries(group: string, requested: Requested, now: number, exact: boolean): ScheduleEntry[] {
+function toEntries(group: string, requested: Requested, now: number, exact: boolean, scheduled: Scheduled): ScheduleEntry[] {
   const { when } = requested;
   const dueMs = nextOccurrence(when, now);
-  if (when.kind === 'once' || exact || dueMs - MAX_INEXACT_WINDOW_MS > now) {
-    return [toEntry(group, requested, when, dueMs, exact)];
-  }
-  return [
-    toEntry(group, requested, { kind: 'once', ms: dueMs }, dueMs, exact),
-    toEntry(group, requested, when, nextOccurrence(when, dueMs), exact),
-  ];
+  const entry = toEntry(group, requested, when, dueMs, exact);
+  if (when.kind === 'once' || exact) return [entry];
+  const oneOff = (ms: number) => toEntry(group, requested, { kind: 'once', ms }, ms, exact);
+  const previous = oneOff(previousOccurrence(when, dueMs));
+  const next = oneOff(dueMs);
+  const missesNext =
+    scheduled.once.has(next.identifier) ||
+    (!scheduled.pending.has(entry.identifier) && dueMs - MAX_INEXACT_WINDOW_MS <= now);
+  if (missesNext) entry.nextMs = nextOccurrence(when, dueMs);
+  const entries = [entry];
+  if (scheduled.once.has(previous.identifier)) entries.push(previous);
+  if (missesNext) entries.push(next);
+  return entries;
 }
 
 /**
@@ -407,12 +435,15 @@ async function reconcile(
   const exact = await hasExactAlarms();
   const state = await readState();
   state.groups[group] = items.map(toRequested).filter((item): item is Requested => item !== null);
+  const pendingIds = new Set(pending);
+  const scheduled: Scheduled = { pending: pendingIds, once: new Set(state.scheduledOnce) };
   const wanted = new Map<string, ScheduleEntry>();
   for (const [name, requested] of Object.entries(state.groups)) {
-    for (const entry of requested.flatMap((item) => toEntries(name, item, now, exact))) wanted.set(entry.identifier, entry);
+    for (const item of requested) {
+      for (const entry of toEntries(name, item, now, exact, scheduled)) wanted.set(entry.identifier, entry);
+    }
   }
   const entries = [...wanted.values()];
-  const pendingIds = new Set(pending);
   // A group without stored state (it couldn't be saved) keeps its pending notifications.
   const knownGroups = new Set(Object.keys(state.groups));
   const isKnown = (identifier: string) => knownGroups.has(identifier.slice(IDENTIFIER_PREFIX.length).split('_')[0]);
@@ -439,9 +470,11 @@ async function reconcile(
   const isOnce = (identifier: string) => wanted.get(identifier)?.when.kind === 'once';
   state.scheduledOnce = [...shown, ...[...selected.keys()].filter((id) => pendingIds.has(id) && isOnce(id))];
   await writeState(state);
+  const groupPrefix = `${IDENTIFIER_PREFIX}${group}_`;
+  const scheduledInGroup = [...selected.keys()].filter((identifier) => identifier.startsWith(groupPrefix)).length;
 
   const missing = [...selected.values()].filter((entry) => !pendingIds.has(entry.identifier));
-  if (missing.length === 0) return { ok: true, scheduled: selected.size };
+  if (missing.length === 0) return { ok: true, scheduled: scheduledInGroup };
   if (!(await ensurePermission(notifications))) return { ok: false, reason: 'PERMISSION_DENIED' };
   await ensureAndroidSetup(notifications);
   try {
@@ -456,7 +489,7 @@ async function reconcile(
   } finally {
     await writeState(state);
   }
-  return { ok: true, scheduled: selected.size };
+  return { ok: true, scheduled: scheduledInGroup };
 }
 
 async function reconcileSafely(
@@ -572,15 +605,17 @@ export function useScheduledNotifications(
  * Mount once, in the signed-in layout. While the user is signed in, a notification from this module
  * that comes due with the app open shows like any other: on Android as a banner (its handler is in
  * place from the start of the session), and on iOS as an in-app alert, the same way open-app push
- * messages are, because Firebase Messaging owns foreground presentation there. Signing out cancels
- * every group's notifications.
+ * messages are, because Firebase Messaging owns foreground presentation there. Ending the session
+ * cancels every group's notifications.
  */
 export function useScheduledNotificationSession(isSignedIn: boolean): void {
-  const wasSignedIn = useRef(isSignedIn);
-
   useEffect(() => {
-    if (wasSignedIn.current && !isSignedIn) void clearScheduledNotifications();
-    wasSignedIn.current = isSignedIn;
+    if (!isSignedIn) return undefined;
+    // Runs on sign-out, and on unmount: sign-out navigation can unmount this layout before it
+    // renders signed out, and the previous user's notifications must not stay scheduled.
+    return () => {
+      void clearScheduledNotifications();
+    };
   }, [isSignedIn]);
 
   useEffect(() => {

@@ -95,7 +95,8 @@ approval/mode from `/add-native`; do not repeat a valid scoped approval.
 Inspect `src/native/pushNotifications.ts` for `isPushNotificationsAvailable`,
 `registerForPushNotifications`, `showPushMessage`, `usePushNotifications`,
 `ALL_USERS_TOPIC`, `PushMessage`, and `PushResult`, the Firebase app check before
-the push modules load, and the foreground and token-refresh handling. Inspect
+the push modules load, the foreground and token-refresh handling, the topic
+unsubscribe on cleanup, and the permission-checked retry on return to the app. Inspect
 `app/(app)/_layout.tsx` for one unconditional `usePushNotifications` call. A
 wrapper that imports Firebase or `expo-notifications` statically, or calls
 Firebase without the check, is not compatible. An incompatible
@@ -111,7 +112,7 @@ example. Screens and layouts import this wrapper, not Firebase directly.
 ```ts
 // src/native/pushNotifications.ts
 import { useEffect, useRef } from 'react';
-import { Alert, Platform } from 'react-native';
+import { Alert, AppState, Platform } from 'react-native';
 import type { Messaging, RemoteMessage } from '@react-native-firebase/messaging';
 
 declare const require: (id: string) => unknown;
@@ -189,8 +190,10 @@ export function showPushMessage({ notification }: PushMessage): void {
 /**
  * Registers the signed-in user's device for push notifications, hands notifications that arrive
  * while the app is open to `onForegroundMessage`, and keeps the topic subscription across token
- * refreshes, removing it on sign-out or when `topic` changes. Mount it once, in the signed-in
- * layout. Does nothing where push notifications aren't available.
+ * refreshes, removing it on sign-out or when `topic` changes. A failed registration (for example,
+ * permission denied and later granted in system Settings) is retried when the app returns, without
+ * asking again. Mount it once, in the signed-in layout. Does nothing where push notifications
+ * aren't available.
  */
 export function usePushNotifications(
   enabled: boolean,
@@ -209,24 +212,40 @@ export function usePushNotifications(
   useEffect(() => {
     const push = enabled ? loadPush() : null;
     if (!push) return undefined;
-    const { fcm, messaging } = push;
+    const { fcm, messaging, notifications } = push;
     let active = true;
+    let registered = false;
     const updateTopic = (update: () => Promise<unknown>) => {
       topicUpdates.current = topicUpdates.current.then(update).then(() => undefined, () => undefined);
     };
-    updateTopic(async () => {
-      if (!active) return;
-      const result = await registerForPushNotifications(topic);
-      if (__DEV__) console.log('[push] registration', result.ok ? 'succeeded' : result.reason, result.ok ? '' : result.message ?? '');
-    });
+    const register = () =>
+      updateTopic(async () => {
+        if (!active || registered) return;
+        const result = await registerForPushNotifications(topic);
+        registered = result.ok;
+        if (__DEV__) console.log('[push] registration', result.ok ? 'succeeded' : result.reason, result.ok ? '' : result.message ?? '');
+      });
+    register();
     const stopMessages = fcm.onMessage(messaging, (message) => foregroundHandler.current(message));
     const stopTokenRefresh = fcm.onTokenRefresh(messaging, () => {
       updateTopic(async () => {
         if (active) await fcm.subscribeToTopic(messaging, topic);
       });
     });
+    // Retry a failed registration on return to the app, once permission is granted: checking never
+    // shows the prompt, so users aren't asked again on every resume.
+    const appState = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' || registered) return;
+      void notifications.getPermissionsAsync().then(
+        ({ granted }) => {
+          if (granted) register();
+        },
+        () => undefined,
+      );
+    });
     return () => {
       active = false;
+      appState.remove();
       stopMessages();
       stopTokenRefresh();
       // Signed out, topic changed or unmounted: the device stops receiving this topic.
