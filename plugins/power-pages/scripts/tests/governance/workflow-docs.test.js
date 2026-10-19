@@ -23,6 +23,20 @@ test('governance stays undiscoverable until its entry point is explicitly restor
   assert.match(catalog, /`manage-governance:4\.2\.3\.consent`\s*\|\s*disabled/);
 });
 
+test('governance is documented as disabled outside the user-invocable inventory', () => {
+  const agents = fs.readFileSync(path.join(skillRoot, '../../AGENTS.md'), 'utf8');
+  const skillsStart = agents.indexOf('### Skills');
+  const disabledStart = agents.indexOf('### Temporarily disabled skills');
+  const hooksStart = agents.indexOf('### Hooks', disabledStart);
+  assert.ok(skillsStart >= 0 && disabledStart > skillsStart && hooksStart > disabledStart);
+  assert.doesNotMatch(agents.slice(skillsStart, disabledStart), /`manage-governance`/);
+  const disabled = agents.slice(disabledStart, hooksStart);
+  assert.match(disabled, /`manage-governance`/);
+  assert.match(disabled, /Disabled pending Product approval/);
+  assert.match(disabled, /not user-invocable or automatically discoverable/);
+  assert.match(disabled, /HOW_IT_WORKS\.md#temporary-disablement/);
+});
+
 test('preserved governance workflow stays concise and requires each branch procedure', () => {
   const skill = read(entry);
   assert.ok(skill.split(/\r?\n/).length < 500, 'keep procedural detail out of the entry point');
