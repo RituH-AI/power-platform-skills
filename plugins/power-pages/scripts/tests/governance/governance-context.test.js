@@ -23,6 +23,56 @@ const {
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
+
+test('TIP auth uses shell-free argv and preserves token and failure behavior', () => {
+  const modulePath = require.resolve('../../../skills/manage-governance/scripts/governance-context');
+  const scriptDir = path.join(os.tmpdir(), 'governance helpers & tools');
+  const env = { PP_GOV_TIP_CLIENT_ID: 'test-client' };
+  for (const scenario of [
+    { output: '  test-token\n', expected: 'test-token' },
+    { output: ' \n', expected: null },
+    { throws: true, expected: null },
+    { configError: true, expected: null },
+  ]) {
+    const calls = [];
+    const sandbox = {
+      module: { exports: {} },
+      __dirname: scriptDir,
+      process: { execPath: process.execPath },
+      require(name) {
+        if (name === 'child_process') {
+          return {
+            execFileSync(executable, args, options) {
+              calls.push({ executable, args, options });
+              if (scenario.throws) throw new Error('device-code helper failed');
+              return scenario.output;
+            },
+          };
+        }
+        if (name === 'fs') return fs;
+        if (name === 'path') return path;
+        if (name === '../../../scripts/lib/power-platform-api') return {};
+        if (name === '../../../scripts/lib/validation-helpers') return {};
+        if (name === './tip-auth') {
+          return { resolveTipConfig: () => scenario.configError ? { error: 'missing config' } : {} };
+        }
+        throw new Error(`Unexpected dependency: ${name}`);
+      },
+    };
+    vm.runInNewContext(fs.readFileSync(modulePath, 'utf8'), sandbox, { filename: modulePath });
+    assert.strictEqual(sandbox.module.exports.getTipTokenSync(env), scenario.expected);
+    assert.equal(calls.length, scenario.configError ? 0 : 1);
+    if (scenario.configError) continue;
+    assert.equal(calls[0].executable, process.execPath);
+    assert.deepEqual(Array.from(calls[0].args), [path.join(scriptDir, 'tip-auth.js')]);
+    assert.equal(calls[0].options.encoding, 'utf8');
+    assert.deepEqual(Array.from(calls[0].options.stdio), ['ignore', 'pipe', 'inherit']);
+    assert.equal(calls[0].options.timeout, 15 * 60 * 1000);
+    assert.strictEqual(calls[0].options.env, env);
+    assert.notEqual(calls[0].options.shell, true);
+  }
+});
 
 function shippedRingKey() {
   resetConfigCache();

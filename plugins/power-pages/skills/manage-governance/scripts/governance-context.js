@@ -2,7 +2,7 @@
 
 'use strict';
 
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const {
@@ -245,7 +245,8 @@ function getTipTokenSync(env) {
   const cfg = resolveTipConfig(env);
   if (cfg.error) return null;
   try {
-    const out = execSync(`node "${path.join(__dirname, 'tip-auth.js')}"`, {
+    // Use this Node runtime and argv so install paths never pass through a shell.
+    const out = execFileSync(process.execPath, [path.join(__dirname, 'tip-auth.js')], {
       encoding: 'utf8',
       // stdin ignored, stdout captured (the token), stderr inherited (prompt).
       stdio: ['ignore', 'pipe', 'inherit'],
