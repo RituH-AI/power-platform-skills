@@ -105,6 +105,7 @@ Update after:
 | Environment ID | [ENVIRONMENT_GUID]             |
 | App URL        | [APP_URL]                      |
 | CLI Binary     | [pa / power-apps]              |
+| CLI Version    | [e.g. 1.3.0]                   |
 | Created Date   | [DATE]                         |
 | Status         | [In Progress/Created/Deployed] |
 
