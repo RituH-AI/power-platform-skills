@@ -13,107 +13,36 @@ function hostAgent(env) {
   return 'unknown';
 }
 
-// Tokenize only for detection: the original command is never reconstructed.
-// Quotes keep `echo "npx --no-install pa"` from looking like an invocation.
-// Backslash (Bash) and backtick (PowerShell) escapes include line continuations.
-function tokens(command, shell) {
-  const result = [];
-  const escape = shell === 'bash' ? '\\' : '`';
-  let word = '';
-  let started = false;
-  let quote = '';
-  const flush = () => {
-    if (started) result.push({ value: word, separator: false });
-    word = '';
-    started = false;
-  };
-  for (let i = 0; i < command.length; i++) {
-    const ch = command[i];
-    if (ch === escape && quote !== "'" &&
-        !(shell === 'bash' && quote === '"' && !/[$`"\\\r\n]/.test(command[i + 1] || ''))) {
-      const next = command[++i];
-      if (next === '\r' && command[i + 1] === '\n') i++;
-      else if (next !== '\n' && next !== undefined) {
-        word += next;
-        started = true;
-      }
-    } else if (quote) {
-      if (ch === quote) {
-        if (shell === 'powershell' && command[i + 1] === quote) {
-          word += ch;
-          i++;
-        } else quote = '';
-      } else word += ch;
-    } else if (ch === '$' && command[i + 1] === '{' && command.indexOf('}', i + 2) !== -1) {
-      const end = command.indexOf('}', i + 2);
-      word += command.slice(i, end + 1);
-      started = true;
-      i = end;
-    } else if (ch === '"' || ch === "'") {
-      quote = ch;
-      started = true;
-    } else if (ch === '#' && !started) {
-      while (i < command.length && command[i] !== '\n') i++;
-      flush();
-      result.push({ value: '\n', separator: true });
-    } else if (';|&(){}\n'.includes(ch)) {
-      flush();
-      result.push({ value: ch, separator: true });
-    } else if (/\s/.test(ch)) flush();
-    else {
-      word += ch;
-      started = true;
-    }
-  }
-  flush();
-  return result;
-}
-
-function executable(value) {
-  return value.split(/[\\/]/).pop().replace(/\.(cmd|exe|ps1)$/i, '').toLowerCase();
-}
-
 function invokesCli(command, shell) {
-  // Do not interpret heredoc/here-string data as executable shell source.
-  // Dynamically generated commands are outside this lexical hook's contract.
-  if (shell === 'bash' ? /<<-?\s*\S/.test(command) : /@['"]\r?\n/.test(command)) return false;
-  const words = tokens(command, shell);
-  let start = true;
-  let npx = false;
-  let shellWrapper = '';
-  let scriptNext = false;
-  for (let index = 0; index < words.length; index++) {
-    const token = words[index];
-    if (token.separator) {
-      start = true;
-      npx = false;
-      shellWrapper = '';
-      scriptNext = false;
-      continue;
-    }
-    const value = token.value;
-    if (start) {
-      if (/^[A-Za-z_][A-Za-z_0-9]*=/.test(value)) continue;
-      if (['if', 'then', 'else', 'elif', 'do', '!', 'command', 'exec', 'env'].includes(value)) continue;
-      const name = executable(value);
-      const definition = shell === 'bash' && words[index + 1]?.value === '(' && words[index + 2]?.value === ')';
-      if (!definition && (['pa', 'power-apps'].includes(name) || value === '$PA' || value === '${PA}')) return true;
-      npx = name === 'npx';
-      shellWrapper = ['bash', 'sh'].includes(name) ? 'bash'
-        : ['pwsh', 'powershell'].includes(name) ? 'powershell' : '';
-      start = false;
-    } else if (npx) {
-      if (value === '--no-install' || value === '--') continue;
-      if (['pa', 'power-apps'].includes(executable(value))) return true;
-      npx = false;
-    } else if (shellWrapper && scriptNext) {
-      if (invokesCli(value, shellWrapper)) return true;
-      shellWrapper = '';
-    } else if (shellWrapper && ['-c', '-command'].includes(value.toLowerCase())) {
-      scriptNext = true;
-    }
+  // Deliberately match only single-line, leading invocations, not shell grammar.
+  // Skipping scripts also avoids treating multiline strings/comments as code.
+  if (/[\r\n]/.test(command)) return false;
+  if (shell === 'bash' ? /<<|`/.test(command) : /<#|#>|@\s*['"]|`/.test(command)) return false;
+  let candidate = command.trimStart();
+  // `using namespace System; ...` must stay ahead of executable statements.
+  // Do not try to relocate declarations or parse a PowerShell preamble.
+  if (shell === 'powershell' && /^using\b/i.test(candidate)) return false;
+
+  // The only supported prelude is `cd app && ...` (or `cd app; ...` in
+  // PowerShell), with a simple unquoted path or a literal single-quoted path.
+  candidate = candidate.replace(
+    shell === 'bash'
+      ? /^cd\s+(?:[A-Za-z0-9_./\\:-]+|'[^'\r\n]+')\s*&&\s*/
+      : /^cd\s+(?:[A-Za-z0-9_./\\:-]+|'[^'\r\n]+')\s*(?:&&|;)\s*/i,
+    '',
+  );
+  if (shell === 'bash') {
+    // Exact capture form: result="$(npx --no-install pa app list)".
+    // Reject nested/escaped expressions rather than interpreting their contents.
+    const capture = candidate.match(/^[A-Za-z_][A-Za-z_0-9]*="\$\(([^()"'`\\\r\n]+)\)"(?:\s*;|$)/);
+    if (capture) candidate = capture[1].trimStart();
+  } else {
+    // PowerShell executes the RHS in both `$apps = npx ...` and `$apps=npx ...`.
+    candidate = candidate.replace(/^\$[A-Za-z_][A-Za-z_0-9]*\s*=\s*/, '');
   }
-  return false;
+  const cli = /^(?:npx(?:\.cmd|\.exe)?\s+--no-install\s+(?:pa|power-apps)|(?:\.\/node_modules\/\.bin\/)?(?:pa|power-apps)(?:\.cmd|\.exe|\.ps1)?)(?:\s+(?!\s*\()|$)/;
+  return (shell === 'powershell' ? new RegExp(cli.source, 'i') : cli).test(candidate)
+    || (shell === 'bash' && /^\$(?:PA|\{PA\})(?:\s+|$)/.test(candidate));
 }
 
 function rewrite(payload, env = process.env) {
@@ -148,16 +77,15 @@ function rewrite(payload, env = process.env) {
 }
 
 async function main() {
-  let source = '';
-  process.stdin.setEncoding('utf8');
-  for await (const chunk of process.stdin) source += chunk;
   try {
+    let source = '';
+    process.stdin.setEncoding('utf8');
+    for await (const chunk of process.stdin) source += chunk;
     const output = rewrite(JSON.parse(source));
     if (output) process.stdout.write(JSON.stringify(output));
   } catch (error) {
     // Attribution must not block a user's command, but failures must be visible.
     process.stderr.write(`[code-apps] CLI attribution was not applied: ${error.message}\n`);
-    process.exitCode = 1;
   }
 }
 

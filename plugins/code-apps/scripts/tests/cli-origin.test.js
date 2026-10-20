@@ -24,31 +24,85 @@ test('detects host only from host signals, never collects model information', ()
   assert.equal(hostAgent({ MODEL: 'anything' }), 'unknown');
 });
 
-test('detects CLI executables, not arguments, comments or similarly named packages', () => {
+test('detects leading CLI invocations and simple directory changes', () => {
   for (const command of [
     'npx --no-install pa app list', 'npx --no-install power-apps list-codeapps',
     'cd app && npx --no-install pa app list',
+    "cd 'my app' && npx --no-install pa app list",
+    '$PA app list', '${PA} app list',
+    'pa app list', './node_modules/.bin/power-apps list-codeapps',
+    'pa app list | cat', 'pa app list && echo done',
+  ]) assert.equal(invokesCli(command, 'bash'), true, command);
+  for (const command of [
+    'npx.cmd --no-install pa app list', 'power-apps.exe list-codeapps',
+    "cd 'my app'; npx --no-install pa app list", 'PA app list',
+  ]) assert.equal(invokesCli(command, 'powershell'), true, command);
+});
+
+test('recognizes only simple executable captures, never literal quoted messages', () => {
+  for (const binary of ['pa', 'power-apps']) {
+    for (const prefix of [`npx --no-install ${binary}`, binary]) {
+      assert.equal(invokesCli(`result="$(${prefix} app list)"`, 'bash'), true);
+      for (const assignment of ['$apps = ', '$apps=']) {
+        assert.equal(invokesCli(`${assignment}${prefix} app list`, 'powershell'), true);
+      }
+    }
+  }
+  assert.equal(invokesCli('result="$($PA app list)"', 'bash'), true);
+  assert.equal(invokesCli('result="$(${PA} app list)"', 'bash'), true);
+  for (const command of [
+    'echo "npx --no-install pa app list"', 'printf "%s" pa',
+    'echo "hello; npx --no-install pa app list"',
+    'result="npx --no-install pa app list"',
+    'result=\'$(npx --no-install pa app list)\'',
+    'echo \'result="$(npx --no-install pa app list)"\'',
+    'result="\\$(npx --no-install pa app list)"',
+    'result="$(echo npx --no-install pa app list)"',
+    '# npx --no-install pa app list\necho hi',
+    '# result="$(npx --no-install pa app list)"',
+    'npx --no-install parallel', 'npx --no-install pa-other',
+    'git diff -- pa', 'node -e "console.log(\'pa app list\')"',
+    'PA="npx --no-install pa"; echo "$PA"',
+    'pa() { echo hello; }; echo defined',
+    'pa () { echo hello; }; echo defined',
+  ]) assert.equal(invokesCli(command, 'bash'), false, command);
+  for (const command of [
+    "Write-Output 'npx --no-install pa app list'",
+    '$apps = "npx --no-install pa app list"',
+    "$apps='power-apps list-codeapps'",
+    '$apps = Write-Output "npx --no-install pa app list"',
+    '# $apps=npx --no-install pa app list',
+    "<# comment #> $apps=npx --no-install pa app list",
+  ]) assert.equal(invokesCli(command, 'powershell'), false, command);
+});
+
+test('leaves scripts and broader shell syntax outside the detection contract unchanged', () => {
+  for (const command of [
     'npx --no-install tsc; npx --no-install pa app list',
     'if true; then npx --no-install pa app list; fi',
     'command npx --no-install pa app list',
     'env PA_CLI_ORIGIN=custom npx --no-install pa app list',
     'PA="npx --no-install pa"; $PA app list',
-    'PA="npx --no-install pa"; ${PA} app list',
-    'pa app list', './node_modules/.bin/power-apps list-codeapps',
     'npx \\\n --no-install pa app list',
     'bash -c "npx --no-install pa app list"',
-  ]) assert.equal(invokesCli(command, 'bash'), true, command);
-  for (const command of [
-    'echo "npx --no-install pa app list"', 'printf "%s" pa',
-    '# npx --no-install pa app list\necho hi',
-    'npx --no-install parallel', 'npx --no-install pa-other',
-    'git diff -- pa', 'node -e "console.log(\'pa app list\')"',
-    'PA="npx --no-install pa"; echo "$PA"',
-    'pa() { echo hello; }; echo defined',
     'cat <<EOF\npa app list\nEOF',
+    'message="\npa app list\n"',
+    'result="$(echo "$(npx --no-install pa app list)")"',
+    'result=`npx --no-install pa app list`',
+    'function run() { pa app list; }',
+    'npx pa app list',
+    "'/tools/pa' app list",
   ]) assert.equal(invokesCli(command, 'bash'), false, command);
-  assert.equal(invokesCli("& 'C:\\tools\\pa.cmd' app list", 'powershell'), true);
-  assert.equal(invokesCli("Write-Output 'npx --no-install pa app list'", 'powershell'), false);
+  for (const command of [
+    "using namespace System; npx --no-install pa app list",
+    "  USING namespace System; power-apps list-codeapps",
+    "# comment\nusing namespace System\npa app list",
+    "<# comment #> using namespace System; pa app list",
+    '$message = @"\npa app list\n"@',
+    '<#\npa app list\n#>',
+    "& 'C:\\tools\\pa.cmd' app list",
+    'pwsh -Command "pa app list"',
+  ]) assert.equal(rewrite(copilot(command), {}), null, command);
 });
 
 test('uses each host output contract, preserving non-command fields and approval policy', () => {
@@ -101,9 +155,10 @@ for (const shell of ['bash', 'pwsh']) {
         : 'function pa { node stub.cjs @args }; function power-apps { node stub.cjs @args }; function npx { $binary=$args[1]; & $binary @($args | Select-Object -Skip 2) }; ';
       const env = { ...process.env, COPILOT_CLI: '1' };
       delete env.PA_CLI_ORIGIN;
-      const run = (command, extra = {}) => {
+      const run = (command, extra = {}, prelude = setup) => {
         const result = rewrite(copilot(command, isBash ? 'bash' : 'powershell'), env);
-        const script = updated(result)?.command || command;
+        // Stub functions are test harness setup, not part of the hook input.
+        const script = prelude + (updated(result)?.command || command);
         const args = isBash ? ['--noprofile', '--norc', '-c', script]
           : ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script];
         return spawnSync(shell, args, { cwd: dir, env: { ...env, ...extra }, encoding: 'utf8', timeout: 15000 });
@@ -117,18 +172,42 @@ for (const shell of ['bash', 'pwsh']) {
       };
       const call = 'npx --no-install pa app list "a b"';
       for (const binary of ['pa', 'power-apps']) {
-        check(setup + `npx --no-install ${binary} app list "a b"`, 'plugin/copilot-cli');
+        check(`npx --no-install ${binary} app list "a b"`, 'plugin/copilot-cli');
       }
       if (isBash) {
-        check(setup + 'PA="npx --no-install pa"; $PA app list "a b"', 'plugin/copilot-cli');
-        check(setup + 'PA="npx --no-install pa"; ${PA} app list "a b"', 'plugin/copilot-cli');
+        check('$PA app list "a b"', 'plugin/copilot-cli', { PA: 'npx --no-install pa' });
+        check('${PA} app list "a b"', 'plugin/copilot-cli', { PA: 'npx --no-install pa' });
       }
-      check(setup + call, 'parent/custom', { PA_CLI_ORIGIN: 'parent/custom' });
-      check(setup + call, '', { PA_CLI_ORIGIN: '' });
-      check(setup + (isBash ? 'PA_CLI_ORIGIN=inline/custom ' : "$env:PA_CLI_ORIGIN='inline/custom'; ") + call, 'inline/custom');
-      check(setup + (isBash ? 'export PA_CLI_ORIGIN=script/custom; ' : "$env:PA_CLI_ORIGIN='script/custom'; ") + call, 'script/custom');
-      const failure = run(setup + call + (isBash ? '' : '; exit $LASTEXITCODE'), { STUB_EXIT: '7' });
+      check(`cd . ${isBash ? '&&' : ';'} ${call}`, 'plugin/copilot-cli');
+      check(call, 'parent/custom', { PA_CLI_ORIGIN: 'parent/custom' });
+      check(call, '', { PA_CLI_ORIGIN: '' });
+      check((isBash ? 'PA_CLI_ORIGIN=inline/custom ' : "$env:PA_CLI_ORIGIN='inline/custom'; ") + call, 'inline/custom');
+      check((isBash ? 'export PA_CLI_ORIGIN=script/custom; ' : "$env:PA_CLI_ORIGIN='script/custom'; ") + call, 'script/custom');
+      const override = run(call + (isBash ? '; PA_CLI_ORIGIN=inline/custom ' : "; $env:PA_CLI_ORIGIN='inline/custom'; ") + call);
+      assert.equal(override.status, 0, override.stderr);
+      assert.deepEqual(override.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line).origin),
+        ['plugin/copilot-cli', 'inline/custom']);
+      const failure = run(call + (isBash ? '' : '; exit $LASTEXITCODE'), { STUB_EXIT: '7' });
       assert.equal(failure.status, 7, failure.stderr);
+      for (const binary of ['pa', 'power-apps']) {
+        for (const prefix of [`npx --no-install ${binary}`, binary]) {
+          const captures = isBash
+            ? [`result="$(${prefix} app list)"; printf '%s' "$result"`]
+            : [`$apps = ${prefix} app list; $apps`, `$apps=${prefix} app list; $apps`];
+          for (const capture of captures) {
+            const result = run(capture);
+            assert.equal(result.status, 0, result.stderr);
+            assert.deepEqual(JSON.parse(result.stdout.trim()), { origin: 'plugin/copilot-cli', args: ['app', 'list'] });
+          }
+        }
+      }
+      if (!isBash) {
+        const command = `using namespace System; ${setup}${call}`;
+        assert.equal(rewrite(copilot(command), env), null);
+        const result = run(command, {}, '');
+        assert.equal(result.status, 0, result.stderr);
+        assert.deepEqual(JSON.parse(result.stdout.trim()), { args: ['app', 'list', 'a b'] });
+      }
       const unrelated = isBash ? 'printf "%s" "${PA_CLI_ORIGIN-unset}"' : "if (Test-Path Env:PA_CLI_ORIGIN) { $env:PA_CLI_ORIGIN } else { 'unset' }";
       assert.equal(run(unrelated).stdout.trim(), 'unset');
     } finally {
@@ -144,10 +223,12 @@ test('hook process reads UTF-8 JSON, reports malformed input, and runs from bund
   const result = spawnSync(process.execPath, [hook], { input: JSON.stringify(payload), env, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.ok(updated(JSON.parse(result.stdout)).command.endsWith(payload.tool_input.command));
-  const bad = spawnSync(process.execPath, [hook], { input: '{', env, encoding: 'utf8' });
-  assert.equal(bad.status, 1);
-  assert.match(bad.stderr, /CLI attribution was not applied/);
-  assert.equal(bad.stdout, '');
+  for (const input of ['{', JSON.stringify({ toolName: 'powershell', toolArgs: '{' })]) {
+    const bad = spawnSync(process.execPath, [hook], { input, env, encoding: 'utf8' });
+    assert.equal(bad.status, 0);
+    assert.match(bad.stderr, /CLI attribution was not applied/);
+    assert.equal(bad.stdout, '');
+  }
   const claudeHook = require('../../hooks/hooks.json').hooks.PreToolUse[0];
   const nativeManifest = require('../../hooks.json');
   const copilotHook = nativeManifest.hooks.preToolUse[0];
@@ -162,5 +243,15 @@ test('hook process reads UTF-8 JSON, reports malformed input, and runs from bund
     const launched = spawnSync(launcher, { shell: true, input: JSON.stringify(data), env, encoding: 'utf8' });
     assert.equal(launched.status, 0, launched.stderr);
     assert.ok(updated(JSON.parse(launched.stdout)).command.endsWith(data.tool_input?.command || data.toolArgs.command));
+    for (const root of [undefined, path.join(pluginRoot, 'missing-plugin-root')]) {
+      const badEnv = { ...env };
+      delete badEnv.PLUGIN_ROOT;
+      delete badEnv.CLAUDE_PLUGIN_ROOT;
+      if (root) badEnv.PLUGIN_ROOT = root;
+      const failed = spawnSync(launcher, { shell: true, input: JSON.stringify(data), env: badEnv, encoding: 'utf8' });
+      assert.equal(failed.status, 0, failed.stderr);
+      assert.equal(failed.stdout, '');
+      assert.match(failed.stderr, /CLI attribution was not applied/);
+    }
   }
 });

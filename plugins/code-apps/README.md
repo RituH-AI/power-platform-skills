@@ -48,8 +48,11 @@ Before recognized Power Apps CLI shell commands, the plugin supplies
 `PA_CLI_ORIGIN=plugin/<host-agent>` (`claude-code`, `copilot-cli`, or `unknown`).
 It supports Bash and PowerShell, both `npx --no-install pa` and the
 `npx --no-install power-apps` fallback, direct binaries, and the resolved `$PA`
-prefix. Existing parent-environment values and inline assignments take precedence.
-Unrelated commands are not rewritten; no model information is collected.
+prefix, plus simple Bash and PowerShell output captures. Detection is limited to
+leading invocations on a single line (optionally after a simple `cd`); complex
+scripts and PowerShell `using` preambles are left unchanged. Existing
+parent-environment values and inline assignments take precedence. Unrelated
+commands are not rewritten; no model information is collected.
 
 CLI versions that support `PA_CLI_ORIGIN` record the complete value in the existing
 `cliSource` telemetry common property (queried as `customDimensions.cliSource`),

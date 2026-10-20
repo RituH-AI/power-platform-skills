@@ -24,7 +24,7 @@ agents/
 hooks.json                        <- Native Copilot CLI preToolUse hook
 hooks/
   hooks.json                      <- Claude Code PreToolUse hook
-  set-cli-origin.js               <- Shell-aware CLI attribution (Node only)
+  set-cli-origin.js               <- Narrow leading-invocation attribution (Node only)
   README.md                       <- Hook contracts and limitations
 shared/
   shared-instructions.md          <- Cross-cutting concerns (Windows CLI, safety, planning, memory bank)
@@ -109,6 +109,10 @@ CLI invocations without replacing explicit user values. Do not manually export
 attribution in skills. Keep both host hook configurations in sync; native Copilot
 events preserve shell identity, whereas its Claude-compatible `Bash` alias does
 not distinguish Bash from PowerShell. See [hooks/README.md](./hooks/README.md).
+Keep detection conservative and tokenizer-free: match supported single-line
+leading invocations and simple output captures, not arbitrary shell programs.
+Leave PowerShell `using` preambles unchanged. Handled hook/launcher failures must
+report stderr diagnostics but complete successfully without rewriting the call.
 
 ```bash
 pa app push                   # Deploy app
