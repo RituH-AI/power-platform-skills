@@ -31,7 +31,11 @@ Exit codes:
 Stdout (JSON):
   { "status": "ok", "policy": "<name>", "envId": "<guid>",
     "transport": "gateway",
+    "settingPresent": true|false,
     "value": "All"|"None"|"Include"|"Exclude", "body": <raw> }
+
+A policy-read 404 reports settingPresent=false, value=None, and the message
+"No governance setting on record." Other request failures remain errors.
 `;
 
 async function main() {
@@ -66,6 +70,8 @@ async function main() {
         policy: args.policy,
         envId: args.envId,
         transport: res.transport,
+        settingPresent: res.settingPresent !== false,
+        ...(res.settingPresent === false ? { message: 'No governance setting on record.' } : {}),
         value: normalizeEnvValue(res.body),
         body: res.body,
       },

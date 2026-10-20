@@ -148,9 +148,15 @@ Fetch Env uses `all`; a request to read one named site routes to Fetch Site.
 Fetch Site must resolve exactly one site, not `all` or multiple sites.
 
 If there are zero sites, say so explicitly and skip the empty picker table.
-An Apply returns to scope/environment selection, Fetch Site stops, and Fetch
-Env may still report its empty environment result (zero sites is not an API
-failure).
+For Apply, ask: "This environment has no sites. Enter all for environment-wide
+site selection, or cancel." Accept only `all` as the site-selection value;
+do not offer specific names/IDs, exclusions, or `none`. Do not silently choose
+`all`. Use the existing enable/disable intent mapping for the policy value:
+the user's `all` selects the environment-wide scope, not the action direction.
+Continue through the normal impact summary and explicit Apply now / Cancel
+approval; an empty inventory does not authorize a POST. Fetch Site stops, and
+Fetch Env may still report its empty environment result (zero sites is not an
+API failure).
 
 Resolve site input with:
 
@@ -162,6 +168,14 @@ node "${PLUGIN_ROOT}/skills/manage-governance/scripts/list-portals.js" --envId "
 
 The output has `policyValue`, `portalIds`, `resolvedNames`, and `errors`.
 When scope is already resolved, ignore the parser's `policyValue`; use only
-IDs/names. Surface every error and reprompt. Persist `<PORTAL_IDS>` and
+IDs/names. Surface every error and reprompt.
+
+When a name is ambiguous, display every matching site's name, URL, and site ID
+from the full inventory in an assistant message, then ask for the exact site
+ID or cancel using a short plain-text form. Never choose the first or last
+match automatically. Resolve the reply through the same parser and do not
+retain a partial selection from the failed input.
+
+Persist `<PORTAL_IDS>` and
 `<PORTAL_NAMES_LIST>` for Apply, or `<PORTAL_ID>` / `<PORTAL_NAME>` for Fetch
 Site. Use `/websites` IDs throughout, never Dataverse record IDs.

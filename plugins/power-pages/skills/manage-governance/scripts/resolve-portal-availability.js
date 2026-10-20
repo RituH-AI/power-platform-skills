@@ -294,7 +294,8 @@ function resolvePortalStates(envValue, detailsBody, portals) {
  *   { [parentPolicyName]: {
  *       envValue: 'All'|'None'|'Include'|'Exclude'|'Unknown',
  *       inclusion?: Set<string>|string[],   // portal ids (any casing)
- *       exclusion?: Set<string>|string[]
+ *       exclusion?: Set<string>|string[],
+ *       membershipReadError?: { statusCode: number, message: string }
  *     } }
  *   A parent absent from the map, or with envValue 'Unknown', is treated as
  *   fail-open (does not block) but recorded in `unreadParents`.
@@ -335,6 +336,7 @@ function computeAvailability(req, opts = {}) {
 
   // Pre-normalize each parent's membership sets once.
   const norm = {};
+  const membershipReadErrors = {};
   for (const parent of deps) {
     const st = parentStates[parent] || {};
     const toSet = (v) => {
@@ -348,7 +350,10 @@ function computeAvailability(req, opts = {}) {
       envValue: st.envValue,
       inclusion: toSet(st.inclusion),
       exclusion: toSet(st.exclusion),
+      membershipUnread: Boolean(st.membershipReadError)
+        && ['Include', 'Exclude'].includes(canonicalizeEnvValue(st.envValue)),
     };
+    if (norm[parent].membershipUnread) membershipReadErrors[parent] = st.membershipReadError;
   }
 
   const available = [];
@@ -359,7 +364,7 @@ function computeAvailability(req, opts = {}) {
     const unreadParents = [];
     for (const parent of deps) {
       const st = norm[parent];
-      const state = computeSiteState(st.envValue, {
+      const state = st.membershipUnread ? 'Unknown' : computeSiteState(st.envValue, {
         inInclusion: st.inclusion.has(pid),
         inExclusion: st.exclusion.has(pid),
       });
@@ -380,7 +385,7 @@ function computeAvailability(req, opts = {}) {
       });
     } else {
       // Fail-open: an unread parent does NOT hide the portal, but we surface it
-      // so the caller can note "couldn't confirm <parent>" if desired.
+      // so the caller must disclose "couldn't confirm <parent>" before consent.
       available.push(unreadParents.length ? { ...portal, unreadParents } : portal);
     }
   }
@@ -408,6 +413,7 @@ function computeAvailability(req, opts = {}) {
     unavailable,
     remediationChain,
     next: remediationChain[0] || null,
+    ...(Object.keys(membershipReadErrors).length ? { membershipReadErrors } : {}),
   };
 }
 
@@ -420,6 +426,17 @@ function mdCell(s) {
 
 function urlOf(portal) {
   return (portal && (portal.url || portal.websiteUrl || portal.WebsiteUrl)) || '';
+}
+
+function withUnreadParentWarning(partition, rendered) {
+  const parents = [...new Set(
+    [...(partition.available || []), ...(partition.unavailable || [])]
+      .flatMap((portal) => portal.unreadParents || [])
+  )];
+  if (parents.length === 0) return rendered;
+  return `**Warning:** Could not verify parent state or site membership for ${parents.map(mdCell).join(', ')}. ` +
+    'Eligibility is unverified for affected sites; unread parents do not block selection (fail-open).\n\n' +
+    rendered;
 }
 
 // Render ONE Markdown table listing EVERY portal with an explicit **Eligible**
@@ -461,7 +478,7 @@ function renderAvailabilityMarkdown(partition, opts = {}) {
       (p && p.name) || '(unnamed)',
       urlOf(p),
       portalIdOf(p) || '',
-      icons ? '✅ Yes' : 'Yes',
+      (icons ? '✅ Yes' : 'Yes') + (p.unreadParents?.length ? ' (unverified)' : ''),
     ]);
   }
   for (const p of unavail) {
@@ -481,7 +498,7 @@ function renderAvailabilityMarkdown(partition, opts = {}) {
   const head = '| ' + headers.map(mdCell).join(' | ') + ' |';
   const sep = '| ' + headers.map(() => '---').join(' | ') + ' |';
   const body = rows.map((r) => '| ' + r.map(mdCell).join(' | ') + ' |');
-  return [head, sep, ...body].join('\n');
+  return withUnreadParentWarning(partition, [head, sep, ...body].join('\n'));
 }
 
 // Render ONLY the AVAILABLE portals for a child auth policy — the scope picker
@@ -571,8 +588,9 @@ function renderAvailablePortalsMarkdown(partition, opts = {}) {
   // a table; the orchestrator must NOT prompt for a scope here.
   if (avail.length === 0) {
     const dot = icons ? '🔴 ' : '';
-    return `**${dot}The ${orList} Governance setting is off for this environment.** ` +
-      `No sites are available to configure ${childGov} here — ${enableInstruction} first, then try again.`;
+    return withUnreadParentWarning(partition,
+      `**${dot}The ${orList} Governance setting is off for this environment.** ` +
+      `No sites are available to configure ${childGov} here — ${enableInstruction} first, then try again.`);
   }
 
   // Render only the available portals (the actionable set).
@@ -601,7 +619,7 @@ function renderAvailablePortalsMarkdown(partition, opts = {}) {
       `so ${childGov} can't apply there.`
     );
   }
-  return out.join('\n');
+  return withUnreadParentWarning(partition, out.join('\n'));
 }
 
 // ---------------------------------------------------------------------------
@@ -641,6 +659,7 @@ async function readParentStates(deps, envId) {
     // mis-reported as disabled env-wide. `getDetails` is the correct source.
     let inclusion = new Set();
     let exclusion = new Set();
+    let membershipReadError;
     if (envValue === 'Include' || envValue === 'Exclude') {
       const listRes = await callGovernance({
         op: 'getDetails',
@@ -651,12 +670,22 @@ async function readParentStates(deps, envId) {
         const lists = extractLists(listRes.body);
         inclusion = lists.inclusion;
         exclusion = lists.exclusion;
+      } else {
+        const message = listRes.error?.message || `status ${listRes.statusCode}`;
+        if (listRes.statusCode === 401 || listRes.statusCode === 403 || listRes.error?.code === 'ContextError') {
+          const error = new Error(`Reading parent "${parent}" site membership failed: ${message}`);
+          error.exitCode = 2;
+          throw error;
+        }
+        // An unread Include/Exclude list is not an empty successful list.
+        // Preserve its scope but mark per-site eligibility Unknown (fail-open).
+        membershipReadError = { statusCode: listRes.statusCode || 0, message };
       }
-      // A failed list read leaves both sets empty -> Include resolves every
-      // portal to Disabled (fail-closed for the list, but the parent value was
-      // read successfully so this is the correct conservative result).
     }
-    parentStates[parent] = { envValue, inclusion, exclusion };
+    parentStates[parent] = {
+      envValue, inclusion, exclusion,
+      ...(membershipReadError ? { membershipReadError } : {}),
+    };
   }
   return parentStates;
 }

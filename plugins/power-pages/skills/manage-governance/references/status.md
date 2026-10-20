@@ -16,6 +16,14 @@ also treats a failed site-list read as fatal. Surface failures/uncertainty
 explicitly, and stop for sign-in errors (exit `2`). Do not substitute a
 success-shaped result. Zero sites is not a failed API call.
 
+A 404 specifically from `GET /governance/{policy}` is the documented
+unconfigured-policy state, not an unread-parent failure. The shared transport
+marks it `settingPresent: false` and classifies its scope as `None` (Disabled).
+For `get-env.js`, display its "No governance setting on record" message.
+For batched reads, disclose every entry in `unconfiguredPolicies` in prose
+before the table, including missing parent settings. Do not describe these
+as explicitly configured `None` policies. Other 404s remain errors.
+
 Every Fetch Env, Fetch Site, and post-Apply status result uses:
 
 ```bash

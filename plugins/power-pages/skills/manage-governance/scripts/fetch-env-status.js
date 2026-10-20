@@ -237,6 +237,8 @@ async function main() {
         policy: flags.policy,
         envId: flags.envId || null,
         envValue,
+        settingPresent: byPolicy[flags.policy].env.settingPresent !== false,
+        unconfiguredPolicies: allPolicies.filter((p) => byPolicy[p].env.settingPresent === false),
         dependencies: deps,
         apiCalls: 1 + allPolicies.length * 2,
         portalCount: rows.length,

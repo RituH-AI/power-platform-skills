@@ -187,6 +187,11 @@ acquired a token.
 `governance-context.js` resolves both the **gateway host** and the **bearer
 token** per ring. **TIP/Preprod is the default ring**; Prod is opt-out.
 
+When `--envId` is omitted, the transport reuses a supplied context or resolves
+the current/configured environment before validating the route. If no
+environment can be resolved, it returns a `ContextError` without sending a
+request; supply `--envId` or select a current PAC environment.
+
 ### Ring flag
 
 | Source | Effect |
@@ -597,9 +602,17 @@ report all portals available. Note `EnableProtocolOpenAuth` (OAuth 2.0) is
 **not** dependency-free — it is both a child of External Auth and the parent of
 the three social providers.
 
-**Fail-open posture.** A parent whose state cannot be read (transient error,
-missing record) is recorded in `unreadParents` and does **not** hide the portal
-— a read failure never removes options from the admin.
+**Fail-open posture.** Unknown parent states and unread Include/Exclude
+membership lists are recorded in each affected site's `unreadParents` and do
+**not** hide that site. Failed membership reads also appear in the top-level
+`membershipReadErrors` map as `{ "<parent>": { "statusCode", "message" } }`;
+the known parent scope is preserved rather than reinterpreted as an empty
+successful list. Both Markdown views emit a warning, and the full picker
+marks affected rows `Yes (unverified)`. Disclose this uncertainty before
+selection and final consent. Known disabled parents still block. Required
+environment-read failures remain fatal; membership HTTP 401/403 or context
+errors stop with exit 2. A documented environment-policy 404 is instead a
+known unconfigured/Disabled state, as described in Error handling below.
 
 **List-read source.** Parent inclusion/exclusion lists are read via the
 env-level **`getDetails`** op (`GET /governance/{policy}/details`), which returns
@@ -980,6 +993,18 @@ or an exact case-insensitive site name from the supplied site list. UUIDs
 embedded in prose, braces, or other extra text are not extracted. Any invalid
 token rejects the entire selection with errors and no selected IDs.
 
+Site names must match exactly one distinct site ID, case-insensitively. If
+multiple sites share a name, the parser reports ambiguity and the matching
+IDs; ask the user for an exact ID or cancel. Repeated inventory records for
+the same ID do not create ambiguity. Exact IDs remain usable when names clash.
+
+When the supplied site inventory is empty (`validIds: []` or
+`{"portals":[]}`), only `all` is accepted. Other input returns an error asking
+the user to enter `all` for environment-wide selection or cancel. This differs
+from omitting the validation list, which still permits format-only UUID
+parsing. Cancellation is handled by the orchestrator, not as a policy value.
+For Apply, preserve the enable/disable intent separately from the `all` scope.
+
 ### Usage
 
 Pipe the user's reply to stdin and reference the `list-portals.js` output for
@@ -1035,7 +1060,7 @@ non-interactive and is supplying `--policyValue` and `--portalIds` directly to
 |---------------|--------------|--------------------------|
 | `401` | Token expired between resolve and request. | Tell the user to re-run `az login`; the script exits 2. |
 | `403` | Signed-in user is not a tenant / env admin. | Surface the message; do not retry. |
-| `404` on `/governance/{policy}` | Policy has never been applied in this env. | Render as "no governance setting on record" instead of an error. |
+| `404` on `/governance/{policy}` | Policy has never been applied in this env. | Shared transport returns `ok: true`, `settingPresent: false`, and canonical `None`, retaining HTTP 404. Render as "no governance setting on record", not an explicitly configured `None`. Batched status readers list absent policies in `unconfiguredPolicies`; an absent prerequisite is Disabled and can enter parent remediation. Other routes' 404s are not normalized. |
 | `400 / "Unsupported policy"` | Policy string is misspelled or new. | Skill rejects unknown policies before the call; this should not surface unless `policies.js` is patched without the API. |
 | `409` during POST | A roll-out is already in progress. | Skip the POST, just poll the existing roll-out (future enhancement — today the script surfaces the error and stops). |
 | Timeout (exit `3`) | Roll-out exceeded `--timeoutMinutes`. | Tell the user the roll-out is still in flight; suggest running `get-status.js` later. |

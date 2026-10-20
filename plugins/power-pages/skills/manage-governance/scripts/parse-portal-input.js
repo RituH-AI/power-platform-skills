@@ -18,6 +18,10 @@
 // in `errors`. Names resolved from `validIds` (when entries are objects with
 // {portalId, name}) land in `resolvedNames` so callers can echo a friendly
 // summary on the consent gate.
+// Names matching multiple distinct site IDs are rejected; callers must ask
+// for an exact ID rather than choosing a site from inventory order.
+// An explicitly empty site list accepts only "all" for environment-wide scope;
+// it must never fall back to accepting unverified site IDs.
 //
 // Without `validIds`, only UUIDs are accepted as portal tokens; names cannot
 // be resolved with no list to match against and are rejected.
@@ -39,6 +43,12 @@ const NOT_RE = /^\s*(not|except)\b\s*/i;
  */
 function parsePortalInput(input, opts = {}) {
   const errors = [];
+  const valid = normalizeValidIds(opts.validIds);
+  if (valid && valid.byId.size === 0 && !/^all$/i.test(String(input ?? '').trim())) {
+    return makeResult(null, [], [], [
+      'This environment has no sites. Enter "all" for environment-wide site selection, or cancel.',
+    ]);
+  }
   if (input == null) {
     errors.push('Empty input. Expected "all", "none", "<id>, <id>", or "not <id>, <id>".');
     return makeResult(null, [], [], errors);
@@ -66,7 +76,6 @@ function parsePortalInput(input, opts = {}) {
     return makeResult(null, [], [], errors);
   }
 
-  const valid = normalizeValidIds(opts.validIds);
   const portalIds = [];
   const resolvedNames = [];
   const seen = new Set();
@@ -98,11 +107,17 @@ function parsePortalInput(input, opts = {}) {
       errors.push(`Not a valid site id and no site list was provided to resolve "${tok}" by name.`);
       continue;
     }
-    const entry = valid.byName.get(tok.toLowerCase());
-    if (!entry) {
+    const matches = valid.byName.get(tok.toLowerCase());
+    if (!matches) {
       errors.push(`No site matched "${tok}" — not a known id or name.`);
       continue;
     }
+    if (matches.size > 1) {
+      const ids = [...matches.values()].map((entry) => entry.portalId).join(', ');
+      errors.push(`Site name "${tok}" is ambiguous. Matching site IDs: ${ids}. Provide the exact site ID or cancel.`);
+      continue;
+    }
+    const entry = matches.values().next().value;
     const lower = entry.portalId.toLowerCase();
     if (seen.has(lower)) continue;
     seen.add(lower);
@@ -119,7 +134,7 @@ function parsePortalInput(input, opts = {}) {
 }
 
 function normalizeValidIds(validIds) {
-  if (!Array.isArray(validIds) || validIds.length === 0) return null;
+  if (!Array.isArray(validIds)) return null;
   const byId = new Map();
   const byName = new Map();
   for (const entry of validIds) {
@@ -131,7 +146,12 @@ function normalizeValidIds(validIds) {
       const lower = String(entry.portalId).toLowerCase();
       const rec = { portalId: entry.portalId, name: entry.name || null };
       byId.set(lower, rec);
-      if (entry.name) byName.set(String(entry.name).toLowerCase(), rec);
+      if (entry.name) {
+        const name = String(entry.name).toLowerCase();
+        if (!byName.has(name)) byName.set(name, new Map());
+        // Repeated records for one ID are not distinct sites; ID casing is immaterial.
+        byName.get(name).set(lower, rec);
+      }
     }
   }
   return { byId, byName };

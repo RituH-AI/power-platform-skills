@@ -86,6 +86,25 @@ test('governance selection preserves full environments and separate site-display
   }
 });
 
+test('empty environments require explicit all-only selection without bypassing Apply consent', () => {
+  const selection = read('references/selection.md');
+  const empty = selection.slice(selection.indexOf('If there are zero sites'), selection.indexOf('Resolve site input with:'));
+  assert.match(empty, /Accept only `all`/);
+  assert.match(empty, /Do not silently choose\s+`all`/);
+  assert.match(empty, /enable\/disable intent mapping/);
+  assert.match(empty, /explicit Apply now \/ Cancel\s+approval/);
+  assert.match(empty, /Fetch Site stops/);
+  assert.match(read('references/apply.md'), /empty inventory is not a list of blocked sites/);
+});
+
+test('ambiguous site names require exact IDs without automatic or partial selection', () => {
+  const selection = read('references/selection.md');
+  assert.match(selection, /When a name is ambiguous, display every matching site's name, URL, and site ID/);
+  assert.match(selection, /ask for the exact site\s+ID or cancel/);
+  assert.match(selection, /Never choose the first or last\s+match automatically/);
+  assert.match(selection, /do not\s+retain a partial selection/);
+});
+
 test('explicit environments skip redundant selection but retain fresh validation and consent', () => {
   const selection = read('references/selection.md');
   const supplied = selection.slice(

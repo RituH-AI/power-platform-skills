@@ -80,6 +80,8 @@ Stdout (JSON) — the shape render-portal-table.js consumes directly (it reads
   {
     "status": "ok",
     "policy": "<name>",
+    "settingPresent": true|false,
+    "unconfiguredPolicies": ["<policy with no setting on record>", ...],
     "dependencies": ["<parent>", ...],
     "apiCalls": <n>,               // policies × 2, all issued in parallel
     "effectiveEnabledCount": <n>,
@@ -232,6 +234,8 @@ async function main() {
       {
         status: 'ok',
         policy: flags.policy,
+        settingPresent: byPolicy[flags.policy].env.settingPresent !== false,
+        unconfiguredPolicies: allPolicies.filter((p) => byPolicy[p].env.settingPresent === false),
         dependencies: deps,
         apiCalls: allPolicies.length * 2,
         effectiveEnabledCount: rows.filter((r) => r.state).length,

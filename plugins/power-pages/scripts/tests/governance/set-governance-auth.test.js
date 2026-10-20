@@ -113,6 +113,24 @@ test('Apply also reuses its context for existing uncertain-response recovery', a
   assert.deepEqual(h.calls.map((call) => call.op), ['apply', 'getEnv', 'getStatus']);
 });
 
+for (const scope of ['Include', 'Exclude']) {
+  test(`CLI forwards comma/space-separated removals for a removal-only ${scope} edit`, async () => {
+    const h = harness([ok(), ok()], undefined, [
+      '--policyValue', scope, '--removePortalIds', 'site-a, site-b site-c',
+    ]);
+    const result = await h.run();
+    assert.equal(result.code, 0);
+    assert.deepEqual(h.calls.map((call) => call.op), ['apply', 'getStatus']);
+    const payload = JSON.parse(JSON.stringify(h.calls[0].body));
+    assert.deepEqual(payload, [{
+      policyName: 'EnableProtocolOpenIdConnect',
+      policyValue: scope,
+      ToBeAdded: [],
+      ToBeRemoved: ['site-a', 'site-b', 'site-c'],
+    }]);
+  });
+}
+
 for (const statusCode of [400, 409, 429, 500, 503]) {
   for (const scope of ['Include', 'Exclude']) {
     test(`HTTP ${statusCode} rejects a ${scope} membership edit without matching-scope recovery`, async () => {

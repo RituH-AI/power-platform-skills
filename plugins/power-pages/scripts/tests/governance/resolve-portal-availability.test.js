@@ -2,6 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const { createRequire } = require('node:module');
 
 const {
   dependenciesForPolicy,
@@ -148,6 +151,109 @@ const PORTALS = [
   { portalId: 'bbb', name: 'Site 2', websiteUrl: 'https://b' },
   { portalId: 'ccc', name: 'Site 3', websiteUrl: 'https://c' },
 ];
+
+function parentReadHarness(responses) {
+  const filename = require.resolve('../../../skills/manage-governance/scripts/resolve-portal-availability');
+  const realRequire = createRequire(filename);
+  const calls = [];
+  const queue = [...responses];
+  const sandbox = {
+    module: { exports: {} },
+    __dirname: path.dirname(filename),
+    require(name) {
+      if (name === './governance-transport') {
+        return {
+          async callGovernance(args) {
+            calls.push(args);
+            assert.ok(queue.length, `Unexpected parent read: ${args.op}`);
+            return queue.shift();
+          },
+        };
+      }
+      return realRequire(name);
+    },
+  };
+  vm.runInNewContext(fs.readFileSync(filename, 'utf8'), sandbox, { filename });
+  return { resolver: sandbox.module.exports, calls };
+}
+
+for (const envValue of ['Include', 'Exclude']) {
+  for (const statusCode of [0, 404, 429, 503]) {
+    test(`${envValue} parent membership failure ${statusCode} is disclosed, not interpreted as an empty list`, async () => {
+      const h = parentReadHarness([
+        { ok: true, body: envValue },
+        { ok: false, statusCode, error: { message: 'Membership unavailable' } },
+      ]);
+      const parent = 'EnableExternalAuthProviders';
+      const states = await h.resolver.readParentStates([parent], 'test-env');
+      assert.equal(states[parent].envValue, envValue);
+      assert.equal(states[parent].membershipReadError.statusCode, statusCode);
+      assert.equal(states[parent].membershipReadError.message, 'Membership unavailable');
+      const part = h.resolver.computeAvailability({
+        targetPolicy: 'EnableProtocolOpenIdConnect', portals: PORTALS, parentStates: states,
+      });
+      assert.equal(part.available.length, 3);
+      assert.equal(part.unavailable.length, 0);
+      assert.equal(part.remediationChain.length, 0);
+      assert.equal(part.membershipReadErrors[parent].statusCode, statusCode);
+      for (const portal of part.available) assert.deepEqual([...portal.unreadParents], [parent]);
+      for (const render of [h.resolver.renderAvailabilityMarkdown, h.resolver.renderAvailablePortalsMarkdown]) {
+        const markdown = render(part);
+        assert.match(markdown, /^\*\*Warning:\*\*.*EnableExternalAuthProviders.*Eligibility is unverified/);
+        assert.match(markdown, /Site 1/);
+      }
+      assert.match(h.resolver.renderAvailabilityMarkdown(part), /Yes \(unverified\)/);
+      assert.deepEqual(h.calls.map((call) => call.op), ['getEnv', 'getDetails']);
+    });
+  }
+
+  test(`successful empty ${envValue} membership retains its known semantics without a warning`, async () => {
+    const h = parentReadHarness([{ ok: true, body: envValue }, { ok: true, body: {} }]);
+    const states = await h.resolver.readParentStates(['EnableExternalAuthProviders']);
+    const part = h.resolver.computeAvailability({
+      targetPolicy: 'EnableProtocolOpenIdConnect', portals: PORTALS, parentStates: states,
+    });
+    assert.equal(part.available.length, envValue === 'Include' ? 0 : 3);
+    assert.equal(states.EnableExternalAuthProviders.membershipReadError, undefined);
+    assert.equal(part.membershipReadErrors, undefined);
+    assert.doesNotMatch(h.resolver.renderAvailabilityMarkdown(part), /Warning|unverified/);
+  });
+}
+
+test('parent membership authentication failures stop rather than failing open', async () => {
+  for (const failure of [
+    { ok: false, statusCode: 401, error: { message: 'Unauthorized' } },
+    { ok: false, statusCode: 403, error: { message: 'Forbidden' } },
+    { ok: false, statusCode: 0, error: { code: 'ContextError', message: 'Sign-in required' } },
+  ]) {
+    const h = parentReadHarness([{ ok: true, body: 'Exclude' }, failure]);
+    await assert.rejects(
+      h.resolver.readParentStates(['EnableExternalAuthProviders']),
+      (error) => error.exitCode === 2 && /site membership failed/.test(error.message),
+    );
+  }
+});
+
+test('known blocking parents remain blocking while a different membership is unread', () => {
+  const part = computeAvailability({
+    targetPolicy: 'EnableIdpOAuthGoogle',
+    portals: PORTALS,
+    parentStates: {
+      EnableExternalAuthProviders: { envValue: 'None' },
+      EnableProtocolOpenAuth: {
+        envValue: 'Exclude', membershipReadError: { statusCode: 503, message: 'Unavailable' },
+      },
+    },
+  });
+  assert.equal(part.available.length, 0);
+  for (const portal of part.unavailable) {
+    assert.deepEqual(portal.blockingParents, ['EnableExternalAuthProviders']);
+    assert.deepEqual(portal.unreadParents, ['EnableProtocolOpenAuth']);
+  }
+  assert.deepEqual(part.remediationChain.map((parent) => parent.policyName), ['EnableExternalAuthProviders']);
+  assert.match(renderAvailabilityMarkdown(part), /^\*\*Warning:\*\*/);
+  assert.match(renderAvailablePortalsMarkdown(part), /^\*\*Warning:\*\*/);
+});
 
 test('External Auth disabled env-wide makes every portal unavailable for a protocol child', () => {
   const part = computeAvailability({

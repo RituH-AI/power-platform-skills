@@ -32,7 +32,20 @@ but do not invent a block. This differs from effective status reads, which
 fail closed for an unread parent. See `commands.md` for the resolver's JSON
 fields and read/error behavior.
 
-If no site is eligible, surface the helper's disabled-parent message instead
+An unread Include/Exclude membership list is not a successful empty list.
+The resolver preserves the known parent scope, records `membershipReadErrors`
+and per-site `unreadParents`, and marks affected eligibility as unverified.
+Display the helper's warning before selection and repeat the uncertainty
+before final consent, including on the named-site path. Do not claim these
+parents are Enabled or Disabled or offer remediation based on an unread list.
+Known disabled parents still block; membership HTTP 401/403 or context errors
+stop the operation instead of failing open.
+
+If the environment has zero sites, follow the all-only site-selection prompt
+in `selection.md`; an empty inventory is not a list of blocked sites. Preserve
+the requested enable/disable direction and the normal impact/consent gates.
+
+If the inventory is nonempty but no site is eligible, surface the helper's disabled-parent message instead
 of an all-No table, do not prompt for scope, do not render an impact summary,
 and do not POST. Follow the parent-remediation procedure below.
 
