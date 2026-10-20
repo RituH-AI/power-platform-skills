@@ -40,9 +40,13 @@ const tableId = (schema) => `${hex(hash(`table.${schema}`), 8)}-0000-4000-8000-$
 const duplicateAttribute = (name, table) => ({ status: 400, headers: {}, body: { error: { code: '0x80060304', message: `Attribute ${name} already exists for entity ${table}.` } } });
 // Columns every table gets from the platform, whatever the request says.
 const SYSTEM_COLUMNS = ['createdon', 'modifiedon', 'ownerid', 'statecode', 'statuscode'];
-// The most bytes an alternate key may hold. A text column takes 2 bytes a character, so a name column of 450 characters is the longest
-// that can be in a key alone — and the 850 characters some environments make of a new name column are far too long.
-const KEY_BYTES_LIMIT = 900;
+// The most bytes an alternate key may hold on the environment measured: the platform's own answer to a key that is too large names the
+// limit (HTTP 400, code 0x80060895, "Index size exceeded the size limit of 1700 bytes. The key is too large. Try removing some columns or
+// making the strings in string columns shorter."). A text column takes 2 bytes a character, so the 850 characters that are the most a name
+// column may have are 1,700 bytes by themselves: that column alone fits, and no other column fits beside it. Microsoft Learn documents 900
+// bytes; an environment that enforces that is the stub's `keyBytesLimit: 900`.
+// See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/define-alternate-keys-entity#create-alternate-keys
+const KEY_BYTES_LIMIT = 1700;
 // A table or a column in a metadata path is named by its logical name — the alternate key, `LogicalName='new_ticket'` — or by its
 // MetadataId, the primary key. A table's MetadataId stops answering when the table is deleted, whatever is made under its name afterwards.
 // See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/retrieve-metadata-name-metadataid
@@ -134,6 +138,7 @@ function fakeDataverse({
   tableReadBack = null,        // (table) => response | undefined; overrides the read the SDK makes of a table it just created
   lookupLag = 0,               // how many reads of a new table BY NAME answer 404 before it shows (the metadata-read lag)
   keepsAskedLength = false,    // the environment that keeps the length asked of a plain text primary column in a one-attribute create
+  plainPrimaryLength = 850,    // what an environment that ignores the length asked makes of a plain text primary column: the one measured makes the most there is, 850
   keepsAskedRequired = false,  // the environment that keeps the required level asked of a plain text primary column (the one measured stores it None whatever is sent)
   levelRead = null,            // (n) => response | undefined; overrides the typed read of one column's RequiredLevel (the SDK's check of a primary column's level)
   columnListRead = null,       // (n) => response | undefined; overrides the read of all of a table's columns with their RequiredLevel (the build's read of what an existing table holds)
@@ -141,6 +146,8 @@ function fakeDataverse({
   identityRead = null,         // (n) => response | undefined; overrides the read of which table answers to a name (its MetadataId and primary name column)
   updateFails = null,          // (body) => response | falsy, for the PUT of a typed column; a falsy answer lets it through
   keyFails = null,             // (body, table) => response | falsy, for the request that creates an alternate key; a falsy answer lets it through
+  keyBytesLimit = KEY_BYTES_LIMIT, // the most bytes a key may hold on this environment (the one measured answers 1,700; Learn documents 900)
+  createdOnColumn = false,     // list `createdon` among a new table's columns, as the DateTime the platform gives every table, so a key can name it
   extraCompanions = null,      // (body) => names the platform makes beside a column that nothing in the build lists
 } = {}) {
   const log = [];
@@ -279,7 +286,7 @@ function fakeDataverse({
           // What the platform makes of the primary name column's length in a create that carries only that column (measured on two
           // environments): one keeps the length asked, the other makes a plain text column 850 whatever length was asked and keeps
           // the length asked of an auto-numbered one.
-          primaryLength: !body.Attributes[0].AutoNumberFormat && !keepsAskedLength ? 850 : body.Attributes[0].MaxLength,
+          primaryLength: !body.Attributes[0].AutoNumberFormat && !keepsAskedLength ? plainPrimaryLength : body.Attributes[0].MaxLength,
         };
         const collision = firstTaken(table, body.Attributes);
         if (collision) return refuse(p, duplicateAttribute(collision, logical));
@@ -290,6 +297,8 @@ function fakeDataverse({
         const primary = clone(body.Attributes[0]);
         if (!primary.AutoNumberFormat && !keepsAskedRequired) primary.RequiredLevel = { ...primary.RequiredLevel, Value: 'None' };
         addColumn(table, primary);
+        // `createdon` is one of the columns the platform gives every table (SYSTEM_COLUMNS), a DateTime: a key may name it, though no spec declares it.
+        if (createdOnColumn) table.columns.set('createdon', { body: { '@odata.type': 'Microsoft.Dynamics.CRM.DateTimeAttributeMetadata', SchemaName: 'createdon' }, row: columnRow(table, { SchemaName: 'createdon' }) });
         if (createCommitsThenFails) return refuse(p, createCommitsThenFails(body));
         return created(`EntityDefinitions(${table.id})`);
       }
@@ -302,8 +311,9 @@ function fakeDataverse({
         return created(`EntityDefinitions(LogicalName='${m[1]}')/Attributes(${attributeId(t.logical, body.SchemaName)})`);
       }
       // The request that creates an alternate key. The platform validates a key when it is created: its columns must exist, and the
-      // key's total size must stay within what an index holds — 900 bytes, 2 for each character of a text column. This stub refuses a
-      // key that is too large with a message of its own: the rule is the platform's, the wording is not.
+      // key's total size must stay within what an index holds — 2 bytes for each character of a text column (see KEY_BYTES_LIMIT). The
+      // answers are the platform's own, as measured: a key that is too large is HTTP 400 with code 0x80060895, a key made twice is HTTP 400
+      // with code 0x80060893.
       // See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/define-alternate-keys-entity#create-alternate-keys
       if ((m = /^\/EntityDefinitions\(LogicalName='([^']+)'\)\/Keys$/.exec(p))) {
         const t = tables.get(m[1]);
@@ -311,7 +321,7 @@ function fakeDataverse({
         const failure = keyFails && keyFails(body, t);
         if (failure) return refuse(p, failure);
         const name = String(body.SchemaName).toLowerCase();
-        if (t.keys.has(name)) return refuse(p, reply(400, { error: { message: `A key with the same name already exists on ${t.logical}.` } }));
+        if (t.keys.has(name)) return refuse(p, reply(400, { error: { code: '0x80060893', message: `An entity key with the name ${body.SchemaName} already exists on entity ${t.logical}.` } }));
         let bytes = 0;
         for (const attribute of body.KeyAttributes) {
           const column = t.columns.get(attribute);
@@ -319,7 +329,7 @@ function fakeDataverse({
           const isText = /StringAttributeMetadata$/.test(String(column.body['@odata.type']));
           bytes += isText ? 2 * (attribute === t.primaryName ? t.primaryLength : (column.body.MaxLength || 100)) : 8;
         }
-        if (bytes > KEY_BYTES_LIMIT) return refuse(p, reply(400, { error: { message: `The key ${body.SchemaName} is ${bytes} bytes long; a key may hold at most ${KEY_BYTES_LIMIT}.` } }));
+        if (bytes > keyBytesLimit) return refuse(p, reply(400, { error: { code: '0x80060895', message: `Index size exceeded the size limit of ${keyBytesLimit} bytes. The key is too large. Try removing some columns or making the strings in string columns shorter.` } }));
         const id = attributeId(t.logical, `key.${body.SchemaName}`);
         t.keys.set(name, { body: clone(body), id });
         return created(`EntityDefinitions(LogicalName='${m[1]}')/Keys(${id})`);
@@ -572,6 +582,7 @@ test('each column\'s body in the change set equals the body the per-column path 
   assert.strictEqual(byName.get('new_title').MaxLength, 200);
   assert.strictEqual(byName.get('new_email').FormatName.Value, 'Email', 'a Text column\'s format');
   assert.strictEqual(byName.get('new_email').MaxLength, 120);
+  assert.strictEqual(byName.get('new_notes').MaxLength, 4000, 'a Memo column\'s maxLength');
   assert.strictEqual(byName.get('new_count').RequiredLevel.Value, 'Recommended');
   assert.strictEqual(byName.get('new_minutes').Format, 'Duration', 'an Integer column\'s display format');
   assert.strictEqual(byName.get('new_big').AttributeType, 'BigInt', 'a BigInt column');
@@ -788,7 +799,7 @@ test('only an answer that leaves the outcome unknown is followed by a read of th
 // The plugin's own HTTP client over the same stub — what a real build sends: its `postRaw` (the verbatim body a change set needs; the
 // SDK's DataverseClient.supportsAtomicBatch is true exactly when the client has it), its headers and its retry policy. `slept` records
 // the waits between attempts (without waiting); the jitter is off, so they are the schedule itself.
-function throughAzHttpClient(dv) {
+function throughAzHttpClient(dv, clientOptions = {}) {
   const { createAzHttpClient } = require('../lib/sdk-http-client.js');
   const sent = [];
   const slept = [];
@@ -802,7 +813,7 @@ function throughAzHttpClient(dv) {
     else throw new Error(`unexpected ${method} ${url}`);
     return { statusCode: res.status, headers: res.headers || {}, body: typeof res.body === 'string' ? res.body : (res.body === null || res.body === undefined ? '' : JSON.stringify(res.body)) };
   };
-  const httpClient = createAzHttpClient(ORG, { getToken: () => 'test-token', request, sleep: async (ms) => { slept.push(ms); }, random: () => 0 });
+  const httpClient = createAzHttpClient(ORG, { getToken: () => 'test-token', request, sleep: async (ms) => { slept.push(ms); }, random: () => 0, ...clientOptions });
   return { httpClient, sent, slept };
 }
 
@@ -881,6 +892,247 @@ test('a table still locked after the HTTP client has spent its attempts: the cha
   const baseline = await provisionOver(spec, { inlineColumns: false });
   assert.deepStrictEqual(result, baseline.result);
   assert.deepStrictEqual(events, baseline.events);
+});
+
+// ── A change set the run's throttle budget has no room to wait for ────────────────────────────────────────────────────────────────────────────
+// With a run's budget (lib/throttle-budget.js) the HTTP client does not send the change set again when the wait the service asks for does not fit what is left: it hands the 429 back as it came and tells the budget. The service has asked the
+// run to hold back, so the columns are NOT then created one by one — each would be one more request to a service that said to wait — and the phase halts with the budget's halt before any request of a column's own. What the halted phase still owes
+// (the length of the name column of the table this run created) is settled as it is for any halt. A refusal the budget did not make — the client's sends ran out while the budget had room — is the fallback it always was.
+test('a change set the budget has no room to wait for (HTTP 429, Retry-After ten minutes) stops the phase before any column request — no column is created one by one — and the length the halted phase owes is still set', async () => {
+  const { makeThrottleBudget } = require('../lib/throttle-budget.js');
+  const { isTransientHalt } = require('../build-model-app.js');
+  const dv = fakeDataverse({ batchFails: () => ({ status: 429, headers: { 'retry-after': '600' }, body: TABLE_LOCKED_BODY }) });
+  const throttle = makeThrottleBudget();
+  const { httpClient, sent, slept } = throughAzHttpClient(dv, { throttle });
+  const sdk = await realSdk(httpClient);
+  const events = [];
+  const warnings = [];
+  const spec = oneTable([textColumn('new_a'), { schemaName: 'new_b', type: 'Integer' }], asksFor(120));
+  await assert.rejects(
+    provisionDataModel({ sdk, provision: sdk, runner: makeRunner({ emit: (e) => events.push(e), total: 99, throttle }), spec, apply: true, preResolvedLanguageCode: 1033, provisionedLanguages: async () => [1033], sleep: async () => {}, warn: (m) => warnings.push(m) }),
+    (error) => {
+      assert.ok(error instanceof BuildHalt);
+      assert.strictEqual(error.code, 'throttle-budget-exhausted');
+      assert.strictEqual(error.phase, 'data-model');
+      assert.strictEqual(error.recoverable, true);
+      assert.strictEqual(isTransientHalt(error), true, 'a later run goes on from here');
+      assert.match(error.message, /^data-model stopped: the service asked to wait 600 s before the next send, which does not fit in what is left of the 5 minutes a run allows itself for waiting out a throttled service \(0 s are spent\)\./);
+      return true;
+    },
+  );
+  assert.strictEqual(sent.filter((s) => /\/\$batch$/.test(s.url)).length, 1, 'the change set was sent once');
+  assert.deepStrictEqual(slept, [], 'and nothing was waited for');
+  assert.deepStrictEqual(sent.filter((s) => /\/Attributes$/.test(s.url) && s.method === 'POST'), [], 'no column was created by a request of its own');
+  assert.deepStrictEqual(['new_a', 'new_b'].filter((name) => dv.tables.get('new_ticket').columns.has(name)), [], 'and neither column exists');
+  assert.deepStrictEqual(warnings.filter((w) => /one by one/.test(w)), [], 'no fallback is announced');
+  assert.strictEqual(throttle.declined().count, 1, 'the client told the budget once');
+  assert.strictEqual(dv.tables.get('new_ticket').primaryLength, 120, 'the table this run created has the name length the spec asks for: a halted phase still settles it');
+  assert.deepStrictEqual(lengthEvents({ events }).map((e) => [e.status, e.label]), [['ok', 'primary column length new_ticket.new_name -> 120']]);
+});
+
+test('a change set the budget had room to wait for and the client\'s sends ran out on is not the budget\'s refusal — the columns are created one by one, as before, with the table-was-throttled warning', async () => {
+  const { makeThrottleBudget } = require('../lib/throttle-budget.js');
+  const dv = fakeDataverse({ batchFails: () => ({ status: 429, headers: { 'retry-after': '1' }, body: TABLE_LOCKED_BODY }) });
+  const throttle = makeThrottleBudget();
+  const { httpClient, sent, slept } = throughAzHttpClient(dv, { throttle });
+  const sdk = await realSdk(httpClient);
+  const events = [];
+  const warnings = [];
+  const spec = oneTable([textColumn('new_a'), textColumn('new_b')]);
+  const result = await provisionDataModel({ sdk, provision: sdk, runner: makeRunner({ emit: (e) => events.push(e), total: 99, throttle }), spec, apply: true, preResolvedLanguageCode: 1033, provisionedLanguages: async () => [1033], sleep: async () => {}, warn: (m) => warnings.push(m) });
+  assert.strictEqual(sent.filter((s) => /\/\$batch$/.test(s.url)).length, 6, 'six attempts in all');
+  assert.deepStrictEqual(slept, [1000, 2000, 4000, 8000, 8000], 'each wait fit what was left');
+  assert.strictEqual(throttle.declined().count, 0, 'so the budget refused nothing');
+  assert.strictEqual(sent.filter((s) => /\/Attributes$/.test(s.url) && s.method === 'POST').length, 2, 'and each column was created by its own request');
+  assert.deepStrictEqual(warnings, [`table new_ticket was throttled (${LOCKED_REASON}), so its 2 ordinary column(s) are created one by one instead of in one request`]);
+  const baseline = await provisionOver(spec, { inlineColumns: false });
+  assert.deepStrictEqual(result, baseline.result);
+  assert.deepStrictEqual(events, baseline.events);
+});
+
+test('through the build, a change set the budget has no room to wait for halts the build once with the budget\'s halt — it is not run again, waits for nothing and creates no column one by one', async () => {
+  const { buildModelApp, isTransientHalt } = require('../build-model-app.js');
+  const { runSdkBuild } = require('../lib/sdk-build.js');
+  const { makeThrottleBudget } = require('../lib/throttle-budget.js');
+  const dv = fakeDataverse({ batchFails: () => ({ status: 429, headers: { 'retry-after': '600' }, body: TABLE_LOCKED_BODY }) });
+  const warnings = [];
+  const waits = [];
+  const throttle = makeThrottleBudget({ warn: (line) => warnings.push(line) });
+  const { httpClient, sent, slept } = throughAzHttpClient(dv, { throttle });
+  const sdk = await realSdk(httpClient);
+  const spec = { schemaVersion: 2, ...oneTable([textColumn('new_a'), textColumn('new_b')]), app: { name: 'Budget app' } };
+  let attempts = 0;
+  const error = await buildModelApp(spec, { apply: true, env: ORG, preResolvedLanguageCode: 1033 }, {
+    sdk, provisionSdk: sdk, throttle, log: () => {}, warn: (m) => warnings.push(m), provisionedLanguages: async () => [1033], sleep: async (ms) => { waits.push(ms); },
+    discoverOpDiffState: async () => ({ collision: { appExists: false, solutionExists: false }, forms: [], sitemap: null }),
+    runBuild: (s, o) => { attempts += 1; return runSdkBuild(s, { ...o, phases: ['data-model'] }); },
+  }).then(() => null, (e) => e);
+  assert.ok(error, 'the build did not report a success: the service asked it to wait ten minutes');
+  assert.strictEqual(error.code, 'throttle-budget-exhausted');
+  assert.strictEqual(isTransientHalt(error), true);
+  assert.match(error.message, /^data-model stopped: the service asked to wait 600 s before the next send, which does not fit/);
+  assert.strictEqual(attempts, 1, 'the phase was not run again to meet the same answer');
+  assert.deepStrictEqual([...waits, ...slept], [], 'nothing was waited for, by the client or by the build');
+  assert.deepStrictEqual(sent.filter((s) => /\/Attributes$/.test(s.url) && s.method === 'POST'), [], 'no column was created by a request of its own');
+  assert.deepStrictEqual(warnings.filter((w) => /one by one/.test(w)), []);
+});
+
+// ── What the build owes when the budget refuses a wait ────────────────────────────────────────────────────────────────────────────────────────
+// A table this run creates is owed the length the spec asks of its name column, and only this run can pay it: a run in a new process finds the table and leaves its name column as it is (a rebuild must not shorten a column that may hold data),
+// and a key over that column is refused for its size while the column keeps the 850 characters some environments make of a new one. So the budget's refusal of one table's length update — the service throttled it for longer than the run has room
+// to wait — must not stop the update of the next table's, and a length step that never began must not count as a length that was set. The step guard (makeRunner) stops the steps of the phase after a refusal; the length a table owes is not one of them.
+const NOTE_KEY = { schemaName: 'new_note_namekey', displayName: 'Name key', columns: ['new_notename'] };
+// Two tables that each ask for a length (120 and 180); the second has an alternate key over its name column, which waits for that length.
+function twoOwedLengths({ key = false } = {}) {
+  const spec = oneTable([], asksFor(120));
+  spec.entities.push({ schemaName: 'new_note', displayName: 'Note', primaryAttribute: { schemaName: 'new_notename', displayName: 'Name', maxLength: 180 }, columns: [], ...(key ? { alternateKeys: [NOTE_KEY] } : {}) });
+  return spec;
+}
+// The first update of a length — the one that asks 120 — is throttled for ten minutes, which the budget has no room for; every other request is healthy.
+function firstLengthThrottled() {
+  let refused = false;
+  return (body) => {
+    if (refused || body.MaxLength !== 120) return null;
+    refused = true;
+    return { status: 429, headers: { 'retry-after': '600' }, body: { error: { message: 'throttled first length update' } } };
+  };
+}
+// One run of the data-model phase as a process makes it: its own SDK over the transport, its own budget, its own record of what is owed. `runnerOf` stands between the engine and its runner.
+async function budgetedRun(dv, spec, { owedLengths = new Map(), runnerOf = (runner) => runner } = {}) {
+  const { makeThrottleBudget } = require('../lib/throttle-budget.js');
+  const warnings = [];
+  const events = [];
+  const throttle = makeThrottleBudget({ warn: () => {} });
+  const { httpClient, sent, slept } = throughAzHttpClient(dv, { throttle });
+  const sdk = await realSdk(httpClient);
+  const runner = runnerOf(makeRunner({ emit: (e) => events.push(e), total: 99, throttle }));
+  const error = await provisionDataModel({
+    sdk, provision: sdk, runner, spec, apply: true, owedLengths, preResolvedLanguageCode: 1033, provisionedLanguages: async () => [1033], sleep: async () => {}, warn: (m) => warnings.push(m),
+  }).then(() => null, (err) => err);
+  return { error, events, warnings, throttle, sent, slept, owedLengths, sdk };
+}
+const primaryLengths = (dv) => Object.fromEntries([...dv.tables].map(([name, table]) => [name, table.primaryLength]));
+const keysOf = (dv) => Object.fromEntries([...dv.tables].map(([name, table]) => [name, [...table.keys.keys()]]));
+const lengthRequests = (dv) => dv.log.filter((r) => r.method === 'PUT').map((r) => r.body.MaxLength);
+
+test('the budget refuses the first of two owed name lengths: the second is still set, the key over it waits for the next run, and that run finishes — a length the build owes is not dropped', async () => {
+  const { isTransientHalt } = require('../build-model-app.js');
+  const dv = fakeDataverse({ updateFails: firstLengthThrottled() });
+  const spec = twoOwedLengths({ key: true });
+  const first = await budgetedRun(dv, spec);
+  assert.strictEqual(first.throttle.declined().count, 1, 'one update was refused for want of room');
+  assert.deepStrictEqual(first.slept, [], 'and nothing was waited for');
+  assert.ok(first.error instanceof BuildHalt, 'the phase stops at the key, a step of the phase');
+  assert.strictEqual(first.error.code, 'throttle-budget-exhausted');
+  assert.strictEqual(isTransientHalt(first.error), true, 'a later run goes on from here');
+  assert.deepStrictEqual(lengthRequests(dv), [120, 180], 'both tables were asked to set their length');
+  assert.deepStrictEqual(primaryLengths(dv), { new_ticket: 850, new_note: 180 }, 'the table whose update was refused keeps the length the platform gave it; the other was set');
+  assert.deepStrictEqual(lengthEvents(first).map((e) => [e.status, e.label]), [['error', 'primary column length new_ticket.new_name -> 120'], ['ok', 'primary column length new_note.new_notename -> 180']]);
+  assert.deepStrictEqual([...first.owedLengths.keys()], ['new_ticket'], 'what is still owed is the length whose update was refused: the one that was set is paid');
+  assert.strictEqual(first.owedLengths.get('new_ticket').tried, true, 'and its step has run and said what became of it');
+  assert.deepStrictEqual(keysOf(dv), { new_ticket: [], new_note: [] }, 'the key is a step of the phase, and no step of the phase starts after a refusal');
+  // The next run is a new process: it finds both tables, owes nothing, and the key goes over a name column of 180 characters.
+  const refusedBefore = dv.refusals.length;
+  const next = await budgetedRun(dv, spec);
+  assert.strictEqual(next.error, null, 'the next run finishes');
+  assert.deepStrictEqual(keysOf(dv), { new_ticket: [], new_note: ['new_note_namekey'] });
+  assert.strictEqual(dv.refusals.length, refusedBefore, 'and the platform refuses nothing');
+  assert.deepStrictEqual(primaryLengths(dv), { new_ticket: 850, new_note: 180 }, 'a run that finds a table leaves its name column as it is');
+});
+
+test('the budget refuses the first of two owed name lengths and no key waits: the second table is set all the same, narrated as any length step is, and only the refused one stays owed', async () => {
+  const dv = fakeDataverse({ updateFails: firstLengthThrottled() });
+  const run = await budgetedRun(dv, twoOwedLengths());
+  assert.strictEqual(run.throttle.declined().count, 1, 'one update was refused for want of room');
+  assert.strictEqual(run.error, null, 'the refused update is best-effort, as any failed length step is: the phase goes on');
+  assert.deepStrictEqual(primaryLengths(dv), { new_ticket: 850, new_note: 180 });
+  assert.deepStrictEqual(lengthEvents(run).map((e) => [e.status, e.label]), [['error', 'primary column length new_ticket.new_name -> 120'], ['ok', 'primary column length new_note.new_notename -> 180']]);
+  assert.strictEqual(run.warnings.length, 1, 'one warning, for the table whose update was refused');
+  assert.match(run.warnings[0], /^could not set the length of the primary name column new_ticket\.new_name to 120 /);
+  assert.deepStrictEqual([...run.owedLengths.keys()], ['new_ticket']);
+});
+
+// What an attempt that failed leaves behind (`owedLengths`) is paid by the attempt that follows it, and a refusal of the budget in that attempt does not change that.
+test('a debt an earlier attempt left is still paid by a run in which the budget refuses the first of two owed lengths — the second table\'s carried debt is not dropped', async () => {
+  let attempt = 1;
+  const throttled = firstLengthThrottled();
+  const dv = fakeDataverse({ updateFails: (body) => (attempt === 1 ? refusal() : throttled(body)) });
+  const spec = twoOwedLengths();
+  const owed = new Map();
+  // The first attempt creates both tables and cannot set either length: the platform refuses each update, so both are owed, and tried.
+  const first = await budgetedRun(dv, spec, { owedLengths: owed });
+  assert.strictEqual(first.error, null);
+  assert.deepStrictEqual([...owed.keys()].sort(), ['new_note', 'new_ticket']);
+  assert.deepStrictEqual(primaryLengths(dv), { new_ticket: 850, new_note: 850 });
+  // The retry is handed the debts: the budget refuses the update of the first, and the second is paid all the same.
+  attempt = 2;
+  const retry = await budgetedRun(dv, spec, { owedLengths: owed });
+  assert.strictEqual(retry.throttle.declined().count, 1, 'one update was refused for want of room');
+  assert.strictEqual(retry.error, null);
+  assert.deepStrictEqual(primaryLengths(dv), { new_ticket: 850, new_note: 180 });
+  assert.deepStrictEqual(lengthEvents(retry).map((e) => [e.status, e.label]), [
+    ['error', `primary column length new_ticket.new_name -> 120 (${OWED})`],
+    ['ok', `primary column length new_note.new_notename -> 180 (${OWED})`],
+  ]);
+  assert.deepStrictEqual([...owed.keys()], ['new_ticket'], 'the debt of the table whose update was refused stays; the other was paid');
+});
+
+test('a length step the runner stopped before it began is not a length that was set: the debt stays, untried, the key is not asked for, and the settlement of a halted build pays it', async () => {
+  const { settleOwedLengths } = require('../lib/entity-provision.js');
+  const dv = fakeDataverse();
+  const spec = keyedTable([NAME_KEY]);
+  // The engine's contract is that a runner can stop a step before it calls the step's function — the budget's guard does — and the engine swallows that stop for a best-effort step.
+  const stopsLengthSteps = (runner) => ({ ...runner, run: (phase, label, fn, options) => (/^primary column length /.test(label) ? Promise.reject(new Error('the runner stopped the step before it began')) : runner.run(phase, label, fn, options)) });
+  const run = await budgetedRun(dv, spec, { runnerOf: stopsLengthSteps });
+  assert.deepStrictEqual(lengthRequests(dv), [], 'no update was sent');
+  assert.strictEqual(primaryLengths(dv).new_ticket, 850);
+  assert.match(run.warnings.join('\n'), /could not set the length of the primary name column new_ticket\.new_name to 120 .*the runner stopped the step before it began/);
+  assert.ok(run.error instanceof BuildHalt, 'the key that waits for the length is not made over a column that was not set');
+  assert.strictEqual(run.error.code, 'alt-key-name-length-not-set');
+  assert.match(run.error.message, /whose length the build could not set to 120 \(.*the runner stopped the step before it began/);
+  assert.deepStrictEqual(keyPosts({ dv }), [], 'nothing was sent for the key');
+  assert.deepStrictEqual([...run.owedLengths.keys()], ['new_ticket'], 'the debt stays');
+  assert.strictEqual(run.owedLengths.get('new_ticket').tried, false, 'and no step has tried it, so a build that stops for good still pays it');
+  const warnings = [];
+  await settleOwedLengths({ sdk: run.sdk, provision: run.sdk, spec, owed: [...run.owedLengths.values()], warn: (m) => warnings.push(m), sleep: async () => {} });
+  assert.deepStrictEqual(warnings, []);
+  assert.deepStrictEqual(lengthRequests(dv), [120], 'the settlement sets it');
+  assert.strictEqual(primaryLengths(dv).new_ticket, 120);
+});
+
+test('through the build, the budget refusing the first of two owed name lengths halts the build once — the second table is set, the length refused is not sent again, and the next run finishes', async () => {
+  const { buildModelApp, isTransientHalt } = require('../build-model-app.js');
+  const { runSdkBuild } = require('../lib/sdk-build.js');
+  const { makeThrottleBudget } = require('../lib/throttle-budget.js');
+  const dv = fakeDataverse({ updateFails: firstLengthThrottled() });
+  const spec = { schemaVersion: 2, ...twoOwedLengths({ key: true }), app: { name: 'Budget app' } };
+  // A run of the build is a process: its own budget, its own SDK, nothing carried from the last but what the environment holds.
+  const buildOnce = async () => {
+    const waits = [];
+    const warnings = [];
+    const throttle = makeThrottleBudget({ warn: (line) => warnings.push(line) });
+    const { httpClient, sent, slept } = throughAzHttpClient(dv, { throttle });
+    const sdk = await realSdk(httpClient);
+    let attempts = 0;
+    const error = await buildModelApp(spec, { apply: true, env: ORG, preResolvedLanguageCode: 1033 }, {
+      sdk, provisionSdk: sdk, throttle, log: () => {}, warn: (m) => warnings.push(m), provisionedLanguages: async () => [1033], sleep: async (ms) => { waits.push(ms); },
+      discoverOpDiffState: async () => ({ collision: { appExists: false, solutionExists: false }, forms: [], sitemap: null }),
+      runBuild: (s, o) => { attempts += 1; return runSdkBuild(s, { ...o, phases: ['data-model'] }); },
+    }).then(() => null, (err) => err);
+    return { error, attempts, waits: [...waits, ...slept], sent, warnings };
+  };
+  const first = await buildOnce();
+  assert.ok(first.error, 'the build did not report a success: the service asked it to wait ten minutes');
+  assert.strictEqual(first.error.code, 'throttle-budget-exhausted');
+  assert.strictEqual(isTransientHalt(first.error), true);
+  assert.strictEqual(first.attempts, 1, 'the phase was not run again to meet the same answer');
+  assert.deepStrictEqual(first.waits, [], 'nothing was waited for, by the client or by the build');
+  assert.deepStrictEqual(lengthRequests(dv), [120, 180], 'each table was asked once: what the build settles after its halt does not send the refused update again');
+  assert.deepStrictEqual(primaryLengths(dv), { new_ticket: 850, new_note: 180 });
+  const next = await buildOnce();
+  assert.strictEqual(next.error, null, 'the next run finishes');
+  assert.deepStrictEqual(keysOf(dv), { new_ticket: [], new_note: ['new_note_namekey'] });
+  assert.deepStrictEqual(lengthRequests(dv), [120, 180], 'and sends no length: a run that finds the tables leaves their name columns as they are');
 });
 
 // A column whose options cannot even be built (a spec the validator would have refused) must not turn into a different failure for
@@ -2308,11 +2560,12 @@ test('the primary column length step is planned exactly when the spec asks for a
 });
 
 // --- an alternate key over a new table's name column -----------------------------------------------------------------------------
-// The platform validates a key when it is created, and a key may hold at most 900 bytes (KEY_BYTES_LIMIT, 2 a character of text). The
-// name column of a new table has the length the spec asks for only once the length step has run — last in the phase, because its read
-// carries labels (see the order tests above) — and an environment that ignores the length asked of the create makes it 850 characters,
-// 1,700 bytes: far too long for a key. So a key over the name column of a table whose length is still to be set waits for that step,
-// and is not asked for when the step failed.
+// The platform validates a key when it is created, and a key may hold at most 1,700 bytes (KEY_BYTES_LIMIT, 2 a character of text), which
+// the 850 characters an environment may make of a new name column fill by themselves. The name column of a new table has the length the
+// spec asks for only once the length step has run — last in the phase, because its read carries labels (see the order tests above). So
+// a key over the name column of a table whose length is still to be set waits for that step when its label goes out in one language, and
+// is not asked for when the step failed. A key labelled in several languages is made ahead of it, unless the environment made the column
+// too long for the key to fit beside the others (see below).
 
 const NAME_KEY = { schemaName: 'new_namekey', displayName: 'Name Key', columns: ['new_name'] };
 // One table with a name column as given and the alternate keys given, beside a text column `new_code`.
@@ -2410,7 +2663,9 @@ test('a name column key that waits is created once, with the options the inline 
 });
 
 test('a table found after the answer to its create was lost keeps its keys where they were: nothing shows that this build made it, so its name column is not written for a key', async () => {
-  const run = await provisionOver(keyedTable([NAME_KEY]), { dataverse: { createCommitsThenFails: lostAnswer }, capture: true });
+  // A key over the name column and another column: at the 850 characters the environment made the column it is too large, which is what the platform then says.
+  const pair = { ...NAME_KEY, columns: ['new_name', 'new_code'] };
+  const run = await provisionOver(keyedTable([pair]), { dataverse: { createCommitsThenFails: lostAnswer }, capture: true });
   assert.deepStrictEqual(puts(run), [], 'the column is left alone');
   assert.strictEqual(keyPosts(run).length, 1, 'and the key is asked for where it always was');
   assert.ok(run.error instanceof BuildHalt && run.error.code !== 'alt-key-name-length-not-set', 'where the platform refuses it, as it did before');
@@ -2426,7 +2681,8 @@ test('a key that waits for a length that could not be set is not asked for: the 
   assert.deepStrictEqual(keyPosts(run), [], 'no request was sent for the key, so the platform said nothing about it');
   assert.match(run.error.message, /^data-model failed: alt key new_ticket\.new_namekey was not created: .*\bnew_name\b.*\b120\b/);
   assert.match(run.error.message, /The attribute cannot be changed right now/, 'with what stopped the length from being set');
-  assert.match(run.error.message, /900 bytes/, 'and why a key needs it');
+  assert.match(run.error.message, /1,700 bytes/, 'and why a key needs it: with the limit the platform names');
+  assert.doesNotMatch(run.error.message, /900 bytes/, 'not the one Microsoft Learn documents');
   assert.match(run.error.message, /Maker/, 'and what to do');
   assert.deepStrictEqual(run.events.filter((e) => e.status === 'error').map((e) => e.label), ['primary column length new_ticket.new_name -> 120', 'alt key new_ticket.new_namekey'], 'both steps are narrated as failed, the length first');
   assert.strictEqual(run.warnings.length, 1, 'and the length is warned about once, as ever');
@@ -2636,6 +2892,14 @@ test('a length step that fails on its own stops the build at the key that waited
   assert.strictEqual(run.dv.tables.get('new_ticket').primaryLength, 120);
   assert.deepStrictEqual([...run.dv.tables.get('new_ticket').keys.keys()], ['new_namekey']);
   assert.deepStrictEqual(run.attempts.map((a) => (a.owedIn || []).length), [0, 1]);
+  // The key fits once the length is set, which the build could not promise: the stop of the first attempt and the warning of its length step said a
+  // run MAY create the key, on that condition — and here the run that follows does.
+  const stop = run.events.find((e) => e.attempt === 1 && e.status === 'error' && e.label === 'alt key new_ticket.new_namekey');
+  assert.match(stop.detail, /Nothing was sent for the key\. Set new_name to 120 characters in Maker, or clear the cause above; running the build again may then create the key: it does if new_name at 120 characters leaves room for it\. That is not certain: the build counts at least 240 bytes for the key at that length/);
+  assert.doesNotMatch(stop.detail, /it creates the key|cannot fit once the length is set/);
+  const warned = run.warnings.filter((w) => w.attempt === 1).map((w) => w.text);
+  assert.strictEqual(warned.length, 1);
+  assert.match(warned[0], /which is over that column and is not asked for while the column is that long\. Running the build again once new_name is 120 characters long may create it: it does if new_name at 120 characters leaves room for it\./);
 });
 
 // The engine's own requests — the read of the column's length, the read of which table answers to a name and the update that pays a carried length (readTextColumn,
@@ -3336,12 +3600,29 @@ test('what is sent decides, not the language the build is authored in: a key who
   assert.deepStrictEqual(finished(other).slice(-2), finished(base).slice(-2), 'and the same last two steps: the length, then the key');
 });
 
-test('a key labelled in several languages keeps its place ahead of the length step, and where the platform then refuses it the build says why and what to do — and the run that follows makes it, with both labels', async () => {
+// The build asks for such a key where it always did and finds out from the platform whether it fits: it cannot know the limit of an
+// environment that enforces the 900 bytes Microsoft Learn documents (the stub's `keyBytesLimit`), where even the name column alone is too
+// long at 850 characters.
+//
+// What it can know of a key's size is a floor (keyBytesAtLeast): it counts a column that is not text, or that the spec does not describe, at
+// one byte. Where the floor at the length the spec asks is within the limit, the build cannot tell whether setting that length makes room for
+// the key, so after the platform refuses the key its warning promises nothing: a run again may create the key, on that condition, and where it
+// is refused the same way the platform's error and the sizes of the key's columns say why. A label in one language changes where a key is
+// made, not its size, so it is not offered as a way out.
+function assertConditionalAdvice(advice, { column, asked, floor }) {
+  assert.match(advice, new RegExp(`running the build again may create the key: it does if ${column} at ${asked} characters leaves room for it\\. That is not certain: the build counts at least ${floor} bytes for the key at that length`), 'what a run again may do, on what condition, and how far the build can tell');
+  assert.match(advice, /and the platform may count more, or allow less than the 1,700 bytes measured\./, 'and why it cannot tell');
+  assert.match(advice, /If the next run is refused the same way, compare the platform's error with the sizes of the key's columns, and take a column out of the key or make its text columns shorter\.$/, 'and where to look then');
+  assert.doesNotMatch(advice, /so the key is created then/, 'no promise');
+  assert.doesNotMatch(advice, /cannot fit at that length either/, 'nor a proof the build does not have');
+  assert.doesNotMatch(advice, /labelled in one language/, 'and no label in one language as a way out');
+}
+test('a key labelled in several languages that the build had no reason to think too large is made ahead of the length step, and where the platform then refuses it the build says why and what to do — and the run that follows makes it, with both labels', async () => {
   const labelled = MAP_KEY({ 1033: 'Name Key', 3082: 'Clave del nombre' });
-  const run = await provisionOver(keyedTable([labelled]), { capture: true });
+  const run = await provisionOver(keyedTable([labelled]), { dataverse: { keyBytesLimit: 900 }, capture: true });
   assert.ok(run.error instanceof BuildHalt, 'the build stops where the platform refuses the key');
   assert.deepStrictEqual(run.events.filter((e) => e.status === 'error').map((e) => e.label), ['alt key new_ticket.new_namekey'], 'at the key');
-  assert.match(run.error.message, /1700 bytes/, 'with the platform\'s own words');
+  assert.match(run.error.message, /Index size exceeded the size limit of 900 bytes/, 'with the platform\'s own words');
   assert.notStrictEqual(run.error.code, 'alt-key-name-length-not-set', 'this is the platform\'s refusal: the key was asked for');
   const lines = run.dv.log.map(requestLine);
   assert.ok(lines.findIndex((l) => /\/Keys$/.test(l)) < lines.findIndex((l) => l.startsWith('PUT ')), 'the key is asked for before the length step, as it always was');
@@ -3351,9 +3632,10 @@ test('a key labelled in several languages keeps its place ahead of the length st
   assert.match(advice[0], /It is over the name column new_name of a table this build created/);
   assert.match(advice[0], /its label is in several languages \(1033, 3082\), so the build creates it before it sets that column/, 'says why this key was made first, from the languages the label goes out in');
   assert.doesNotMatch(advice[0], /more than the build's language/, 'and not in terms of the build\'s language: only what goes out matters');
-  assert.match(advice[0], /900 bytes/, 'and what the platform refused it for');
-  assert.match(advice[0], /run the build again/, 'and what to do');
-  assert.match(advice[0], /A key labelled in one language is created after the length is set/, 'and how to have it made first time');
+  assert.match(advice[0], /at most 1,700 bytes, 2 for each character of text/, 'and what the platform refuses a key for, with the limit the platform names');
+  assert.match(advice[0], /850 characters .* no other column/, 'and what that makes of a name column of 850 characters');
+  assert.doesNotMatch(advice[0], /900 bytes/, 'not the limit Microsoft Learn documents and the platform does not name');
+  assertConditionalAdvice(advice[0], { column: 'new_name', asked: 120, floor: '240' });
   const again = await provisionAgain(run.dv, keyedTable([labelled]));
   assert.strictEqual(again.error, null, 'the run that follows finds the table with the length set');
   assert.deepStrictEqual([...run.dv.tables.get('new_ticket').keys.keys()], ['new_namekey']);
@@ -3377,6 +3659,406 @@ test('a key labelled in several languages that the platform accepts, or refuses 
   const existing = await provisionAgain(dv, keyedTable([labelled]));
   assert.ok(existing.error instanceof BuildHalt, 'a table that already existed');
   assert.deepStrictEqual(existing.warnings, [], 'is not one the build set the length of, so the advice does not apply');
+});
+
+// --- a key over the name column and another column, labelled in several languages -----------------------------------------------------
+// A key labelled in several languages is made ahead of the length step, because that step's read carries labels (see above). The platform
+// takes a key of at most 1,700 bytes, 2 for each character of text, so the 850 characters an environment may make of a new name column fill
+// it by themselves: a key over that column alone fits, and a key that holds any other column beside it does not — the platform refuses it
+// (HTTP 400, 0x80060895), where the first build used to stop, for the run that followed to make the key. Such a key cannot be made ahead of
+// the step that shortens the column, so it is the one key labelled in several languages that is made after it: decided from the length the
+// environment made of the column, which is read — narrowly, no labels — before the key is asked for, and only where waiting can change the
+// platform's answer. Measured live: a key made after the length step keeps both of its labels (the SDK's `updateColumn`, then its
+// `createAlternateKey`).
+const PAIR_LABELS = { 1033: 'Pair Key', 3082: 'Clave de pareja' };
+const PAIR_KEY = { schemaName: 'new_pairkey', displayName: PAIR_LABELS, columns: ['new_name', 'new_code'] };
+const PAIR_BOTH = [[1033, 'Pair Key'], [3082, 'Clave de pareja']];
+const labelsOfSteps = (run) => finished(run).map(([, label]) => label);
+
+test('a key over the name column and another column, labelled in several languages, is made after the length step where the environment made the name column 850 characters long: the first build succeeds, with both labels', async () => {
+  const run = await provisionOver(keyedTable([PAIR_KEY]), { capture: true });
+  assert.strictEqual(run.error, undefined, 'the first build succeeds');
+  assert.deepStrictEqual(run.dv.refusals, [], 'the platform refused nothing: the key was not asked for while it could not fit');
+  const table = run.dv.tables.get('new_ticket');
+  assert.strictEqual(table.primaryLength, 120, 'the name column has the length the spec asks for');
+  assert.deepStrictEqual([...table.keys.keys()], ['new_pairkey'], 'and the key exists after the first build');
+  assert.strictEqual(keyPosts(run).length, 1, 'the key is asked for once');
+  assert.deepStrictEqual(keyLabels(run), [PAIR_BOTH], 'with both of its labels');
+  const lines = run.dv.log.map(requestLine);
+  assert.ok(lines.findIndex((l) => l.startsWith('PUT ')) < lines.findIndex((l) => /\/Keys$/.test(l)), 'after the length is written');
+  assert.deepStrictEqual(labelsOfSteps(run), [
+    'table new_ticket', 'column new_ticket.new_code (Text)', 'primary column length new_ticket.new_name -> 120', 'alt key new_ticket.new_pairkey',
+  ], 'the key is the last step, after the length');
+  assert.strictEqual(lengthReads(run).length, 2, 'the column is read once to decide where the key goes and once by the length step, both typed and narrow');
+  assert.deepStrictEqual(run.warnings, []);
+});
+
+test('a key over the name column alone, labelled in several languages, keeps its place ahead of the length step where the environment made the column 850 characters long: that is exactly the 1,700 bytes a key may hold, and the platform takes it', async () => {
+  const labelled = MAP_KEY({ 1033: 'Name Key', 3082: 'Clave del nombre' });
+  const run = await provisionOver(keyedTable([labelled]), { capture: true });
+  assert.strictEqual(run.error, undefined, 'the first build succeeds');
+  assert.deepStrictEqual(run.dv.refusals, [], 'the platform took the key while the column was 850 characters long');
+  assert.deepStrictEqual(labelsOfSteps(run), [
+    'table new_ticket', 'column new_ticket.new_code (Text)', 'alt key new_ticket.new_namekey', 'primary column length new_ticket.new_name -> 120',
+  ], 'it is made with its table, ahead of the length step, as it always was');
+  const lines = run.dv.log.map(requestLine);
+  assert.ok(lines.findIndex((l) => /\/Keys$/.test(l)) < lines.findIndex((l) => l.startsWith('PUT ')), 'on the wire too');
+  assert.strictEqual(lengthReads(run).length, 1, 'the column is read once, by the length step: nothing is read to decide where a key that holds the name column alone goes');
+  assert.deepStrictEqual(keyLabels(run), [[[1033, 'Name Key'], [3082, 'Clave del nombre']]]);
+  assert.strictEqual(run.dv.tables.get('new_ticket').primaryLength, 120);
+  assert.deepStrictEqual(run.warnings, []);
+});
+
+test('a table with several keys: only the key labelled in several languages that cannot fit moves to the end — every other key keeps the place it has', async () => {
+  const keys = [
+    { schemaName: 'new_codekey', displayName: PAIR_LABELS, columns: ['new_code'] },
+    { ...MAP_KEY({ 1033: 'Name Key', 3082: 'Clave del nombre' }), schemaName: 'new_namelabelled' },
+    NAME_KEY,
+    PAIR_KEY,
+  ];
+  const run = await provisionOver(keyedTable(keys), { capture: true });
+  assert.strictEqual(run.error, undefined, 'the first build succeeds');
+  assert.deepStrictEqual(labelsOfSteps(run), [
+    'table new_ticket',
+    'column new_ticket.new_code (Text)',
+    'alt key new_ticket.new_codekey', // another column: with its table, whatever its label
+    'alt key new_ticket.new_namelabelled', // the name column alone, labelled in several languages: ahead of the length step, which fits
+    'primary column length new_ticket.new_name -> 120',
+    'alt key new_ticket.new_namekey', // the name column, labelled in one language: after the length step, as it always was
+    'alt key new_ticket.new_pairkey', // the name column and another, labelled in several languages: after it too, because it could not fit before
+  ]);
+  assert.deepStrictEqual(run.dv.refusals, []);
+  assert.deepStrictEqual([...run.dv.tables.get('new_ticket').keys.keys()], ['new_codekey', 'new_namelabelled', 'new_namekey', 'new_pairkey']);
+  assert.deepStrictEqual(keyLabels(run).map((labels) => labels.length), [2, 2, 1, 2], 'each with the labels it was given');
+  assert.deepStrictEqual(run.warnings, []);
+});
+
+test('where the environment keeps the length asked, a key over the name column and another column, labelled in several languages, is made where it always was: ahead of the length step, which is a skip', async () => {
+  const run = await provisionOver(keyedTable([PAIR_KEY]), { dataverse: HONOURING, capture: true });
+  assert.strictEqual(run.error, undefined);
+  assert.deepStrictEqual(labelsOfSteps(run), [
+    'table new_ticket', 'column new_ticket.new_code (Text)', 'alt key new_ticket.new_pairkey', 'primary column length new_ticket.new_name (already 120)',
+  ]);
+  assert.deepStrictEqual(puts(run), [], 'nothing is written to the column');
+  assert.deepStrictEqual(run.dv.refusals, []);
+  assert.deepStrictEqual(keyLabels(run), [PAIR_BOTH]);
+  assert.strictEqual(lengthReads(run).length, 2, 'one narrow read to decide, which shows the column is as long as the spec asks, and one by the length step');
+  assert.deepStrictEqual(run.warnings, []);
+});
+
+test('the run after a first build that made such a key after the length step finds the table, the length and the key, and has nothing to do', async () => {
+  const first = await provisionOver(keyedTable([PAIR_KEY]), { capture: true });
+  assert.strictEqual(first.error, undefined);
+  const again = await provisionAgain(first.dv, keyedTable([PAIR_KEY]));
+  assert.strictEqual(again.error, null, 'the run after succeeds');
+  assert.deepStrictEqual(again.events.filter((e) => e.status !== 'start').map((e) => [e.status, e.label]), [
+    ['skip', 'table new_ticket (exists — reuse)'],
+    ['skip', 'primary column length new_ticket.new_name (table exists — kept)'],
+    ['skip', 'column new_ticket.new_code (exists)'],
+    ['skip', 'alt key new_ticket.new_pairkey (exists)'],
+  ], 'every step is a skip, the key\'s too: the platform answers that it exists');
+  assert.deepStrictEqual(again.warnings, []);
+  assert.strictEqual(puts(first).length, 1, 'the one write of the length is the first build\'s');
+  assert.strictEqual(first.dv.tables.get('new_ticket').primaryLength, 120);
+  assert.deepStrictEqual([...first.dv.tables.get('new_ticket').keys.keys()], ['new_pairkey'], 'and there is one key');
+});
+
+test('where the length the environment made cannot be read, such a key is made where it always was, and where the platform then refuses it the build says why with the platform\'s numbers — and the run that follows makes it, with both labels', async () => {
+  const run = await provisionOver(keyedTable([PAIR_KEY]), { dataverse: { lengthRead: (n) => (n === 1 ? SERVICE_UNAVAILABLE : undefined) }, capture: true });
+  assert.ok(run.error instanceof BuildHalt, 'the build stops where the platform refuses the key, as it did before');
+  assert.match(run.error.message, /Index size exceeded the size limit of 1700 bytes/, 'with the platform\'s own words');
+  const lines = run.dv.log.map(requestLine);
+  assert.ok(lines.findIndex((l) => /\/Keys$/.test(l)) < lines.findIndex((l) => l.startsWith('PUT ')), 'the key is asked for ahead of the length step');
+  assert.strictEqual(run.dv.tables.get('new_ticket').primaryLength, 120, 'the length is set as the build stops');
+  const advice = run.warnings.filter((w) => /alt key new_ticket\.new_pairkey/.test(w));
+  assert.strictEqual(advice.length, 1, 'one warning names the key');
+  assert.match(advice[0], /at most 1,700 bytes, 2 for each character of text/, 'with the limit the platform names');
+  assert.match(advice[0], /850 characters .* no other column/, 'and what a name column of 850 characters leaves a key');
+  assert.doesNotMatch(advice[0], /900 bytes/);
+  // The build could not read the length, so it cannot tell whether setting it makes room: it says the run after MAY create the key, and here it does.
+  assertConditionalAdvice(advice[0], { column: 'new_name', asked: 120, floor: '440' });
+  const again = await provisionAgain(run.dv, keyedTable([PAIR_KEY]));
+  assert.strictEqual(again.error, null, 'the run that follows finds the table with the length set');
+  assert.deepStrictEqual(keyLabels({ dv: run.dv }).slice(-1), [PAIR_BOTH], 'and makes the key with both of its labels');
+});
+
+test('a key that would not fit at the length the spec asks either is not made later: waiting would change nothing, so it is asked for where it always was and nothing is read to decide', async () => {
+  const wide = { ...textColumn('new_wide'), maxLength: 900 };
+  const key = { schemaName: 'new_widekey', displayName: PAIR_LABELS, columns: ['new_name', 'new_wide'] };
+  const run = await provisionOver(keyedTable([key], asksFor(120), [wide]), { capture: true });
+  assert.ok(run.error instanceof BuildHalt, 'the platform refuses it, as it did');
+  assert.match(run.error.message, /Index size exceeded the size limit of 1700 bytes/);
+  const lines = run.dv.log.map(requestLine);
+  assert.ok(lines.findIndex((l) => /\/Keys$/.test(l)) < lines.findIndex((l) => l.startsWith('PUT ')), 'ahead of the length step');
+  assert.strictEqual(lengthReads(run).length, 1, 'the length step reads the column; nothing else does');
+});
+
+test('a key that waits because it could not fit is not asked for when the length step failed: the build stops there and says why, with the platform\'s numbers', async () => {
+  const run = await provisionOver(keyedTable([PAIR_KEY]), { dataverse: { updateFails: refusal }, capture: true });
+  assert.ok(run.error instanceof BuildHalt, 'the build stops');
+  assert.strictEqual(run.error.code, 'alt-key-name-length-not-set');
+  assert.deepStrictEqual(keyPosts(run), [], 'no request was sent for the key');
+  assert.deepStrictEqual(run.dv.refusals.map((r) => r.message), ['The attribute cannot be changed right now'], 'the platform refused the length and nothing else');
+  assert.match(run.error.message, /^data-model failed: alt key new_ticket\.new_pairkey was not created: .*\bnew_name\b.*\b120\b/);
+  assert.match(run.error.message, /at most 1,700 bytes, 2 for each character of text/);
+  assert.doesNotMatch(run.error.message, /900 bytes/);
+  assert.deepStrictEqual(run.events.filter((e) => e.status === 'error').map((e) => e.label), ['primary column length new_ticket.new_name -> 120', 'alt key new_ticket.new_pairkey']);
+  assert.match(run.warnings[0], /the build stops at alt key new_ticket\.new_pairkey, which is over that column and is not asked for while the column is that long\. /);
+  assert.doesNotMatch(run.warnings[0], /cannot be created while the column is that long/, 'no claim about a key the build did not ask for');
+});
+
+test('the retry that pays a length an attempt owed makes such a key after it, with both labels — and the attempt that never got as far as the key did not ask for it', async () => {
+  const spec = retriedTicket({ key: false });
+  spec.entities[0].alternateKeys = [{ ...PAIR_KEY, columns: ['new_name', 'new_title'] }];
+  const run = await buildWithRetries(spec, { faults: { createFile: 1, setLength: 1 } });
+  assert.strictEqual(run.result.ok, true, 'the build completed');
+  assert.strictEqual(run.retries, 1);
+  assert.deepStrictEqual(run.requests(1).filter((r) => /\/Keys$/.test(r.path)), [], 'the first attempt did not ask for the key');
+  const retry = run.requests(2).map(requestLine);
+  assert.strictEqual(retry.filter((l) => /\/Keys$/.test(l)).length, 1, 'the retry asked for it once');
+  assert.ok(retry.findIndex((l) => l.startsWith('PUT ')) < retry.findIndex((l) => /\/Keys$/.test(l)), 'after the length');
+  assert.deepStrictEqual(run.dv.refusals, [], 'and the platform refused nothing');
+  assert.strictEqual(run.dv.tables.get('new_ticket').primaryLength, 120);
+  assert.deepStrictEqual([...run.dv.tables.get('new_ticket').keys.keys()], ['new_pairkey']);
+  assert.deepStrictEqual(keyLabels({ dv: run.dv }), [PAIR_BOTH]);
+  assert.deepStrictEqual(run.steps(2, /^(primary column length|alt key) /), [`ok primary column length new_ticket.new_name -> 120${OWED_NOTE}`, 'ok alt key new_ticket.new_pairkey']);
+});
+
+test('a spec with such a key narrates exactly the steps the plan has, so [n/total] holds, under both behaviours of the platform', async () => {
+  const { planFor } = require('../lib/sdk-build.js');
+  for (const [what, dataverse] of [['the platform makes the name column 850 characters long', {}], ['the platform keeps the length', HONOURING]]) {
+    const spec = keyedTable([PAIR_KEY]);
+    const run = await provisionOver(spec, { dataverse });
+    const planned = planFor(spec, { phases: ['data-model'] });
+    assert.strictEqual(run.events.filter((e) => e.status !== 'start').length, planned.length, `${what}: as many steps as the plan has`);
+    assert.strictEqual(Math.max(...run.events.map((e) => e.n)), planned.length, `${what}: and n ends on the total`);
+  }
+});
+
+test('where such a key is made: after the length step where the name column reads 850 characters, ahead of it where the environment kept the length, and with its table where the table already existed', async (t) => {
+  const key = { schemaName: 'new_k', columns: ['new_x', 'new_n'], displayName: { 1033: 'Key', 3082: 'Clave' } };
+  const reading = (maxLength) => (doubles) => {
+    const get = doubles.provision.dataverse.get;
+    doubles.provision.dataverse.get = async (url) => (/StringAttributeMetadata\?\$select=MaxLength$/.test(url) ? { status: 200, body: { MaxLength: maxLength } } : get(url));
+  };
+  for (const [what, arrange, existing, expected] of [
+    ['a name column of 850 characters', () => {}, [], [...A_FIRST, ...THEN_B, SET_A_LENGTH, KEY_ON_A]],
+    ['a name column that is already the length asked', reading(120), [], [...A_FIRST, KEY_ON_A, ...THEN_B]],
+    ['a name column the environment made 300 characters long: the key fits beside it, so it is made ahead of the length step, where it always was', reading(300), [], [...A_FIRST, KEY_ON_A, ...THEN_B, SET_A_LENGTH]],
+    ['a table that already existed: its name column is never written', () => {}, ['new_a'], ['createColumn new_a.new_x', KEY_ON_A, ...THEN_B]],
+  ]) {
+    await t.test(what, async () => {
+      const doubles = orderDoubles({ existing });
+      arrange(doubles);
+      await runOrder(doubles, KEYED_PAIR(key));
+      assert.deepStrictEqual(doubles.calls, expected);
+    });
+  }
+});
+
+// --- the size of a key is judged by the columns the build creates ---------------------------------------------------------------------
+// Whether a key over the name column and another column is made after the length step comes from sums over the lengths the build creates the
+// key's columns with: it cannot fit while the name column is as long as the environment made it, and can at the length the spec asks
+// (keyHasRoomOnlyAfterLength, keyMustWaitForShorterNameColumn). The build sends a column's `maxLength` only for a column that names its type
+// Text (maxLengthSent, the rule columnOptions follows), so an auto-number column, and a column that gives no type, are the 100 characters the SDK
+// gives a text column whatever maxLength they carry. A key sized from the lengths the spec writes instead moved a key that fits and kept one that
+// does not.
+const REF_COLUMN = (extra = {}) => ({ schemaName: 'new_ref', displayName: 'Reference', type: 'AutoNumber', autoNumberFormat: 'R-{SEQNUM:4}', ...extra });
+const UNTYPED_REF = (extra = {}) => ({ schemaName: 'new_ref', displayName: 'Reference', ...extra });
+const REF_KEY = { schemaName: 'new_refkey', displayName: PAIR_LABELS, columns: ['new_name', 'new_ref'] };
+// A column as it went on the wire, in the change set or in a request of its own, by schema name.
+const wireColumn = (run, schemaName) => [...batchColumns(run), ...columnPosts(run).map((r) => r.body)].find((c) => c.SchemaName === schemaName);
+
+test('an auto-number column, or a column that gives no type, is created 100 characters long whatever maxLength it carries, so a key over the name column and it is made after the length step where the name column is 850 characters long: the first build succeeds, with both labels', async () => {
+  const { planFor } = require('../lib/sdk-build.js');
+  for (const [what, column] of [['an auto-number column', REF_COLUMN({ maxLength: 900 })], ['a column that gives no type', UNTYPED_REF({ maxLength: 900 })]]) {
+    const spec = keyedTable([REF_KEY], asksFor(120), [column]);
+    const run = await provisionOver(spec, { capture: true });
+    assert.strictEqual(run.error, undefined, `${what}: the first build succeeds`);
+    assert.strictEqual(wireColumn(run, 'new_ref').MaxLength, 100, `${what}: the build sent no length for it, so the SDK made it 100 characters long`);
+    assert.deepStrictEqual(run.dv.refusals, [], `${what}: the platform refused nothing: the key was not asked for while it could not fit`);
+    assert.deepStrictEqual(labelsOfSteps(run), [
+      'table new_ticket', `column new_ticket.new_ref (${column.type || 'Text'})`, 'primary column length new_ticket.new_name -> 120', 'alt key new_ticket.new_refkey',
+    ], `${what}: the key is the last step, after the length`);
+    assert.deepStrictEqual(keyLabels(run), [PAIR_BOTH], `${what}: with both of its labels`);
+    assert.strictEqual(run.dv.tables.get('new_ticket').primaryLength, 120, what);
+    assert.strictEqual(run.events.filter((e) => e.status !== 'start').length, planFor(spec, { phases: ['data-model'] }).length, `${what}: as many steps as the plan has`);
+    assert.deepStrictEqual(run.warnings, [], what);
+  }
+});
+
+test('a key that really fits is not moved: beside a name column of 600 characters an auto-number column that carries a maxLength is 100 characters, 1,400 bytes in all — it is made ahead of the length step, where it always was, and a length that cannot be set does not stop the build at it', async () => {
+  const spec = keyedTable([REF_KEY], asksFor(120), [REF_COLUMN({ maxLength: 500 })]);
+  const run = await provisionOver(spec, { dataverse: { plainPrimaryLength: 600 }, capture: true });
+  assert.strictEqual(run.error, undefined, 'the first build succeeds');
+  assert.deepStrictEqual(run.dv.refusals, [], 'the platform took the key beside the column of 600 characters');
+  assert.deepStrictEqual(labelsOfSteps(run), [
+    'table new_ticket', 'column new_ticket.new_ref (AutoNumber)', 'alt key new_ticket.new_refkey', 'primary column length new_ticket.new_name -> 120',
+  ], 'with its table, ahead of the length step');
+  const lines = run.dv.log.map(requestLine);
+  assert.ok(lines.findIndex((l) => /\/Keys$/.test(l)) < lines.findIndex((l) => l.startsWith('PUT ')), 'on the wire too');
+  assert.strictEqual(lengthReads(run).length, 2, 'one narrow read to decide, which shows the column fits, and one by the length step');
+  assert.deepStrictEqual(keyLabels(run), [PAIR_BOTH]);
+  assert.deepStrictEqual(run.warnings, []);
+  // Nothing waits for the length, so one that cannot be set is a warning and the build goes on, as it did before the build read the column.
+  const refused = await provisionOver(spec, { dataverse: { plainPrimaryLength: 600, updateFails: refusal }, capture: true });
+  assert.strictEqual(refused.error, undefined, 'the build goes on');
+  assert.deepStrictEqual([...refused.dv.tables.get('new_ticket').keys.keys()], ['new_refkey'], 'with the key made');
+  assert.strictEqual(refused.warnings.length, 1, 'and one warning, for the length');
+  assert.match(refused.warnings[0], /^could not set the length of the primary name column new_ticket\.new_name to 120 — .*and the rest of the build continues: asked 120, the platform made 600: /);
+});
+
+test('a Text column is created at the maxLength the spec writes, so it counts in full: a Text column of 700 characters beside the name column is 1,640 bytes at the length asked and 3,100 at 850, and the key is made after the length step', async () => {
+  const key = { ...REF_KEY, schemaName: 'new_widekey', columns: ['new_name', 'new_wide'] };
+  const run = await provisionOver(keyedTable([key], asksFor(120), [{ ...textColumn('new_wide'), maxLength: 700 }]), { capture: true });
+  assert.strictEqual(run.error, undefined, 'the first build succeeds');
+  assert.strictEqual(wireColumn(run, 'new_wide').MaxLength, 700, 'the build sent the length');
+  assert.deepStrictEqual(run.dv.refusals, []);
+  assert.deepStrictEqual(labelsOfSteps(run).slice(-2), ['primary column length new_ticket.new_name -> 120', 'alt key new_ticket.new_widekey']);
+});
+
+test('the floor of a key counts each column as the platform holds it once the build has created it — a single line of text at its MaxLength, a column of any other type at one byte — for every type the build creates, in the change set and one request each', async () => {
+  const { keyBytesAtLeast } = require('../lib/app-spec.js');
+  const { SDK_COLUMN_TYPE } = require('../lib/entity-provision.js');
+  const columns = [
+    ...ORDINARY,
+    ...PER_COLUMN,
+    { ...textColumn('new_t300'), maxLength: 300 },
+    { ...textColumn('new_t0'), maxLength: 0 },
+    REF_COLUMN({ schemaName: 'new_a_plain' }),
+    REF_COLUMN({ schemaName: 'new_a900', maxLength: 900 }),
+    UNTYPED_REF({ schemaName: 'new_u_plain' }),
+    UNTYPED_REF({ schemaName: 'new_u900', maxLength: 900 }),
+    { schemaName: 'new_m900', displayName: 'Long Notes', type: 'Memo', maxLength: 900 },
+    { schemaName: 'new_n900', displayName: 'Number', type: 'Integer', maxLength: 900 },
+    { schemaName: 'new_picture', displayName: 'Picture', type: 'Image' },
+  ];
+  assert.deepStrictEqual(Object.keys(SDK_COLUMN_TYPE).filter((type) => !columns.some((c) => (c.type || 'Text') === type)), [], 'a column of every type the build creates');
+  for (const [how, inlineColumns] of [['in one change set', true], ['one request each', false]]) {
+    const spec = keyedTable([], asksFor(120), columns);
+    const run = await provisionOver(spec, { inlineColumns });
+    assert.strictEqual(batchPosts(run).length > 0, inlineColumns, how);
+    const table = run.dv.tables.get('new_ticket');
+    for (const column of columns) {
+      const made = table.columns.get(column.schemaName.toLowerCase());
+      assert.ok(made, `${how}: ${column.schemaName} was created`);
+      const text = /\.StringAttributeMetadata$/.test(made.body['@odata.type']);
+      assert.strictEqual(
+        keyBytesAtLeast(spec.entities[0], { schemaName: 'new_k', columns: [column.schemaName] }, 120),
+        text ? 2 * made.body.MaxLength : 1,
+        `${how}: ${column.schemaName} (${column.type || 'no type'}) is ${text ? `a single line of text ${made.body.MaxLength} characters long` : made.body['@odata.type']} on the platform`,
+      );
+    }
+  }
+});
+
+// The size decides what the build says, too. A key that cannot fit even at the length the spec asks is not moved (waiting changes nothing), so it
+// is made ahead of the length step, where the platform refuses it; the run after would be refused the same way, so the warning must not send the
+// reader to run the build again, as it may for a key whose size the build cannot tell.
+test('a key that cannot fit even at the length the spec asks is not promised to the run after: the warning says it cannot fit, with the bytes its columns take, and the run after is refused as the first build was', async () => {
+  const key = { schemaName: 'new_widekey', displayName: PAIR_LABELS, columns: ['new_name', 'new_wide'] };
+  const spec = keyedTable([key], asksFor(120), [{ ...textColumn('new_wide'), maxLength: 900 }]);
+  const run = await provisionOver(spec, { capture: true });
+  assert.ok(run.error instanceof BuildHalt, 'the platform refuses the key');
+  assert.match(run.error.message, /Index size exceeded the size limit of 1700 bytes/);
+  const advice = run.warnings.filter((w) => /alt key new_ticket\.new_widekey/.test(w));
+  assert.strictEqual(advice.length, 1, 'one warning names the key');
+  assert.match(advice[0], /its label is in several languages \(1033, 3082\), so the build creates it before it sets that column to 120 characters/, 'why it was made first, as before');
+  assert.match(advice[0], /with new_name at 120 characters the key's columns take at least 2,040 bytes, and a key may hold at most 1,700, 2 for each character of text/, 'what it holds at the length the spec asks, counted from the columns as the build creates them');
+  assert.match(advice[0], /running the build again does not create it/);
+  assert.match(advice[0], /Take a column out of the key, or make its text columns shorter\.$/, 'and what to change');
+  assert.doesNotMatch(advice[0], /the length is set as the build stops, so the key is created then/, 'not the advice for a key the length step makes room for');
+  assert.doesNotMatch(advice[0], /A key labelled in one language is created after the length is set/, 'nor the way out a one-language label gives, which makes no room either');
+  // What the platform enforces agrees: the run after finds the table with the length set, asks for the key with it, and is refused the same way.
+  assert.strictEqual(run.dv.tables.get('new_ticket').primaryLength, 120, 'the length is set as the build stops');
+  const again = await provisionAgain(run.dv, spec);
+  assert.ok(again.error instanceof BuildHalt, 'the run after stops at the key too');
+  assert.match(again.error.message, /Index size exceeded the size limit of 1700 bytes/);
+  assert.deepStrictEqual([...run.dv.tables.get('new_ticket').keys.keys()], [], 'and there is no key');
+});
+
+// A key the build's count does NOT show too large can be too large all the same: the count is a floor, and it counts a column that is not text, or
+// that the spec does not describe, at one byte. Beside a name column of 849 characters (1,698 bytes) one byte fits and anything more does not; the
+// stub counts such a column at 8 bytes (SQL Server stores an integer in 4 and a datetime in 8), and any count over two bytes gives the same answer.
+// The environment keeps the length asked, so the length step has nothing to set, and the run after asks for the same key at the same size.
+for (const [what, key, columns, dataverse] of [
+  ['an Integer column', { schemaName: 'new_countkey', displayName: PAIR_LABELS, columns: ['new_name', 'new_count'] }, [{ schemaName: 'new_count', displayName: 'Count', type: 'Integer' }], HONOURING],
+  ['createdon, a column every table has that the spec does not describe', { schemaName: 'new_createdkey', displayName: PAIR_LABELS, columns: ['new_name', 'createdon'] }, [], { ...HONOURING, createdOnColumn: true }],
+]) {
+  test(`a key whose size the build cannot tell is not promised to the run after: over a name column asked and made 849 characters long and ${what}, the build counts 1,699 bytes, the platform refuses the key, and the run after is refused the same way`, async () => {
+    const spec = keyedTable([key], asksFor(849), columns);
+    const label = `alt key new_ticket.${key.schemaName}`;
+    const run = await provisionOver(spec, { dataverse, capture: true });
+    assert.ok(run.error instanceof BuildHalt, 'the platform refuses the key');
+    assert.match(run.error.message, /Index size exceeded the size limit of 1700 bytes/, 'for its size');
+    assert.deepStrictEqual(labelsOfSteps(run).slice(-2), [label, 'primary column length new_ticket.new_name (already 849)'], 'made ahead of the length step, which has nothing to set');
+    const advice = run.warnings.filter((w) => w.startsWith(`${label} was not created.`));
+    assert.strictEqual(advice.length, 1, 'one warning names the key');
+    assertConditionalAdvice(advice[0], { column: 'new_name', asked: 849, floor: '1,699' });
+    const again = await provisionAgain(run.dv, spec);
+    assert.ok(again.error instanceof BuildHalt, 'the run after stops at the key too: nothing it does changes the key\'s size');
+    assert.match(again.error.message, /Index size exceeded the size limit of 1700 bytes/);
+    assert.deepStrictEqual([...run.dv.tables.get('new_ticket').keys.keys()], [], 'and there is no key');
+  });
+}
+
+// --- the stop for a key that waited for a length that could not be set ------------------------------------------------------------
+// When the length step fails, a key that waits for it is not asked for: the build stops at it (createWaitingKeys, `alt-key-name-length-not-set`),
+// and the warning of the step names it (alignPrimaryNameLength). Both say what the build can tell of the key at the length the spec asks, in the
+// words of the warning above, from the same floor: a key proven too large there is promised to no run, and one whose size the build cannot tell is
+// promised nothing either way — setting the length MAY make room. What "no run" and "may" are worth is shown against the platform: the length is
+// then set as a maker sets it in Maker, and the run that follows asks for the key.
+const setInMaker = (dv, length) => { dv.tables.get('new_ticket').primaryLength = length; };
+
+test('a key that waits for a length step that fails, and is proven too large at the length the spec asks, is promised to no run: the stop and the warning give its size and what to change — and once the length is set, the platform refuses it', async () => {
+  // Labelled in one language, so it waits for the length step whatever its size (keyWaitsForNameLength); beside the name column at the 120 characters
+  // the spec asks, a Text column of 900 makes it 2,040 bytes at least.
+  const key = { schemaName: 'new_widekey', displayName: 'Wide Key', columns: ['new_name', 'new_wide'] };
+  const spec = keyedTable([key], asksFor(120), [{ ...textColumn('new_wide'), maxLength: 900 }]);
+  const run = await provisionOver(spec, { dataverse: { updateFails: refusal }, capture: true });
+  assert.ok(run.error instanceof BuildHalt, 'the build stops at the key, as it did');
+  assert.strictEqual(run.error.code, 'alt-key-name-length-not-set');
+  assert.strictEqual(run.error.recoverable, true);
+  assert.deepStrictEqual(keyPosts(run), [], 'and sends nothing for it');
+  const proven = 'It cannot fit once the length is set either: with new_name at 120 characters the key\'s columns take at least 2,040 bytes, and a key may hold at most 1,700, 2 for each character of text — so no run creates it as the spec has it. Take a column out of the key, or make its text columns shorter.';
+  assert.ok(run.error.message.endsWith(`Nothing was sent for the key. ${proven}`), `the stop says it cannot fit, with its size, and what to change: ${run.error.message}`);
+  assert.doesNotMatch(run.error.message, /it creates the key|may then create|in Maker/, 'and promises nothing, nor sends the reader to set a length that makes no room');
+  assert.strictEqual(run.warnings.length, 1, 'the length step warns once');
+  assert.ok(run.warnings[0].startsWith('could not set the length of the primary name column new_ticket.new_name to 120 — it keeps the length the platform gave it, and the build stops at alt key new_ticket.new_widekey, which is over that column and is not asked for while the column is that long. '
+    + `${proven} Why the length could not be set: asked 120, the platform made 850: `), `the warning says the same of the key: ${run.warnings[0]}`);
+  assert.doesNotMatch(run.warnings[0], /cannot be created while the column is that long/, 'and no claim about the key at the length the column was left at');
+  // What the platform enforces agrees: with the length set as the spec asks, the run that follows asks for the key, and it is refused.
+  setInMaker(run.dv, 120);
+  const again = await provisionAgain(run.dv, spec);
+  assert.ok(again.error instanceof BuildHalt, 'no run creates it');
+  assert.match(again.error.message, /Index size exceeded the size limit of 1700 bytes/);
+  assert.deepStrictEqual([...run.dv.tables.get('new_ticket').keys.keys()], []);
+});
+
+test('a key moved after the length step because it could not fit, whose size the build cannot tell, is promised nothing when that step fails: the stop and the warning say setting the length may make room — and here, once the length is set, the platform still refuses it', async () => {
+  // Labelled in several languages, over the name column and an Integer column: at least 1,701 bytes beside the 850 characters the environment made of
+  // the column, so the build moves it after the length step; 1,699 at the 849 the spec asks, which the platform still refuses (the stub counts an
+  // Integer at 8 bytes; any count over two bytes is too many).
+  const key = { schemaName: 'new_countkey', displayName: PAIR_LABELS, columns: ['new_name', 'new_count'] };
+  const spec = keyedTable([key], asksFor(849), [{ schemaName: 'new_count', displayName: 'Count', type: 'Integer' }]);
+  const run = await provisionOver(spec, { dataverse: { updateFails: refusal }, capture: true });
+  assert.ok(run.error instanceof BuildHalt, 'the build stops at the key, as it did');
+  assert.strictEqual(run.error.code, 'alt-key-name-length-not-set');
+  assert.deepStrictEqual(keyPosts(run), [], 'and sends nothing for it');
+  assert.strictEqual(lengthReads(run).length, 2, 'the narrow read that moved the key, and the length step\'s: nothing more');
+  const inconclusive = 'running the build again may then create the key: it does if new_name at 849 characters leaves room for it. That is not certain: the build counts at least 1,699 bytes for the key at that length — one byte for a column that is not text, or that the spec does not describe — and the platform may count more, or allow less than the 1,700 bytes measured. If the next run is refused the same way, compare the platform\'s error with the sizes of the key\'s columns, and take a column out of the key or make its text columns shorter.';
+  assert.ok(run.error.message.endsWith(`Nothing was sent for the key. Set new_name to 849 characters in Maker, or clear the cause above; ${inconclusive}`), `the stop: ${run.error.message}`);
+  assert.doesNotMatch(run.error.message, /it creates the key|cannot fit once the length is set/, 'neither a promise nor a proof');
+  assert.strictEqual(run.warnings.length, 1, 'the length step warns once');
+  assert.match(run.warnings[0], /the build stops at alt key new_ticket\.new_countkey, which is over that column and is not asked for while the column is that long\. Running the build again once new_name is 849 characters long may create it: it does if new_name at 849 characters leaves room for it\. That is not certain: the build counts at least 1,699 bytes/, 'the warning says the same');
+  assert.doesNotMatch(run.warnings[0], /cannot be created while the column is that long/);
+  // What the platform enforces: with the length set as the spec asks, the run that follows asks for the key, and it is refused — "may" was all the
+  // build could say.
+  setInMaker(run.dv, 849);
+  const again = await provisionAgain(run.dv, spec);
+  assert.ok(again.error instanceof BuildHalt);
+  assert.match(again.error.message, /Index size exceeded the size limit of 1700 bytes/);
+  assert.deepStrictEqual([...run.dv.tables.get('new_ticket').keys.keys()], []);
 });
 
 // --- the dry run and the apply agree on where a key goes ------------------------------------------------------------------------
@@ -3441,7 +4123,7 @@ test('a length that could not be set: the warning promises the build goes on whe
   const waiting = await provisionOver(keyedTable([NAME_KEY]), { dataverse: { updateFails: refuse }, capture: true });
   assert.strictEqual(waiting.error.code, 'alt-key-name-length-not-set', 'the build stops at the key');
   assert.strictEqual(waiting.warnings.length, 1);
-  assert.match(waiting.warnings[0], /^could not set the length of the primary name column new_ticket\.new_name to 120 — it keeps the length the platform gave it, and the build stops at alt key new_ticket\.new_namekey, which is over that column and cannot be created while the column is that long: asked 120, the platform made 850: .*invalid length/);
+  assert.match(waiting.warnings[0], /^could not set the length of the primary name column new_ticket\.new_name to 120 — it keeps the length the platform gave it, and the build stops at alt key new_ticket\.new_namekey, which is over that column and is not asked for while the column is that long\. Running the build again once new_name is 120 characters long may create it: .* Why the length could not be set: asked 120, the platform made 850: .*invalid length/);
   assert.doesNotMatch(waiting.warnings[0], /rest of the build continues/, 'it does not promise what the build is about to refuse');
   const two = await provisionOver(keyedTable([NAME_KEY, { schemaName: 'new_pairkey', columns: ['new_code', 'new_name'] }]), { dataverse: { updateFails: refuse }, capture: true });
   assert.match(two.warnings[0], /the build stops at alt keys new_ticket\.new_namekey, new_ticket\.new_pairkey, which are over that column/, 'every key that waits is named');
@@ -3453,7 +4135,8 @@ test('where the phase stops before the length step and a key that waits was not 
   await assert.rejects(runOrder(doubles, KEYED_PAIR({ schemaName: 'new_k', columns: ['new_n'] }), events), /createRelationship new_a_b/);
   const warned = events.filter((e) => e.warning).map((e) => e.warning);
   assert.strictEqual(warned.length, 1);
-  assert.match(warned[0], /^could not set the length of the primary name column new_a\.new_n to 120 — it keeps the length the platform gave it, and because the data-model phase stopped, and a run that finds the table already there leaves its name column as it is, change the length in Maker if it matters — it does for alt key new_a\.new_k, which is over that column and is refused while the column is that long: /);
+  assert.match(warned[0], /^could not set the length of the primary name column new_a\.new_n to 120 — it keeps the length the platform gave it, and because the data-model phase stopped, and a run that finds the table already there leaves its name column as it is, change the length in Maker if it matters — alt key new_a\.new_k is over that column\. Running the build again once new_n is 120 characters long may create it: it does if new_n at 120 characters leaves room for it\. That is not certain: .* Why the length could not be set: /);
+  assert.doesNotMatch(warned[0], /refused while the column is that long|it creates the key/, 'no claim about the key at the length the column was left at, and no promise');
   assert.doesNotMatch(warned[0], /rest of the build continues/);
   assert.ok(!doubles.calls.includes('createAlternateKey new_a.new_k'), 'the key was not made');
 });

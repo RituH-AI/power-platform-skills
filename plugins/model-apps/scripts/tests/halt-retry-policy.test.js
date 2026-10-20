@@ -68,6 +68,8 @@ const POLICY = {
   'pages-removed': { kinds: ['never'], via: 'sdk-build.test.js' },
   'pages-requires-app': { kinds: ['never'], via: PAGES },
   'pages-existence-failed': { kinds: ['by-failure'], via: PAGES },
+  // The read of a page a pending create left behind, throttled until the run's budget had no room to wait for it: a run again may find the service ready (the build's loop turns it into the budget's halt).
+  'pages-read-throttled': { kinds: ['by-failure'], via: PAGES },
   'pages-manifest-corrupt': { kinds: ['never'], via: 'sdk-build.test.js' },
   'pages-identity-conflict': { kinds: ['never'], via: PAGES },
   'pages-creation-receipt-failed': { kinds: ['never'], via: PAGES },
@@ -90,7 +92,8 @@ const POLICY = {
   'role-grant-failed': { kinds: ['by-failure'] },
   'bpf-role-unresolved': { kinds: ['never'] },
   'bpf-role-grant-failed': { kinds: ['by-failure'] },
-  // The build's own loop stops with it when the next wait a throttle costs does not fit the run's budget (build-model-app.js); held beside the loop's doubles.
+  // The build's own loop stops with it when the next wait a throttle costs does not fit the run's budget (build-model-app.js), and the engine's runner when a step would start after the budget refused a wait (entity-provision.js,
+  // makeRunner; throttle-engine-stop.test.js): held beside the loop's doubles.
   'throttle-budget-exhausted': { kinds: ['by-failure'], via: 'build-model-app.test.js' },
 };
 // The sites whose code is an expression, on purpose: the code is decided at run time, so the policy cannot be read off a literal.

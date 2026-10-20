@@ -256,12 +256,21 @@ works through.
 { "name": "Operations", "description": "Daily queue health for the support lead.", "tiles": [
   { "type": "chart", "chart": "Orders by Status", "view": "Active Orders" },  // chart needs both
   { "type": "list",  "view": "Active Orders", "name": "Recent" },             // list needs a view
-  { "type": "iframe", "url": "https://…", "name": "Map" },
+  { "type": "iframe", "url": "https://…", "name": "Map", "colspan": 2, "rowspan": 8 },  // optional size
   { "type": "webresource", "webResource": "new_widget.html", "name": "Widget" } ] }
 ```
 - A **chart** tile needs both a declared `chart` (the visualization) **and** a declared `view` (its
   data); a **list** tile needs a declared `view`. The target entity is derived from the view. `name`
-  defaults to the chart/view name; `colspan`/`rowspan` optional (default 1×4).
+  defaults to the chart/view name.
+- **Size (`colspan`/`rowspan`, optional): 1 column by 12 rows unless set.** A tile's height is its
+  `rowspan`, and the app draws a one-row tile as its title bar alone — no chart, no list — so give a
+  tile `rowspan: 1` only when it should be that thin. The grid is two columns wide and fills in tile
+  order, left to right: two `colspan: 1` tiles share a row, `colspan: 2` takes the full width (a list
+  with several columns), a tile too wide for what is left of a row starts the next one, and a
+  `colspan` above 2 is narrowed to 2. The platform's own dashboards give charts and lists 9 to 24
+  rows, most often 12, which is why 12 is the default. A rebuild reuses a dashboard that exists and
+  never resizes its tiles, so one an earlier version built keeps its one-row tiles until it is
+  created again under a new `name` or its tiles are resized in the dashboard designer.
 - **View and chart names are unique only per table.** When the tile's view name is declared on more
   than one table, set the tile's `entity` to say which; the chart must be declared on that **same**
   table. Both are rejected at the spec gate otherwise — a same-named chart on another table would
@@ -314,7 +323,11 @@ works through.
 Adds privileges for a table to a security role that **already exists** — typically the roles an
 existing solution ships. Use it when you add a table to an app whose access model somebody else owns:
 without it the table, its forms and its navigation deploy while every non-admin persona still cannot
-open the table, and nothing reports it.
+open the table, and nothing reports it. (Lint now does: a new table that no persona job and no
+`roleGrants[]` entry grants a privilege on is a "no access declared" warning, and a grant that covers it
+satisfies the check.) A grant is about **tables**: it does not associate the role with the app, and a
+spec with no `personas[]` leaves the roles an existing app has as they are — `write-app-spec-doc.js
+--env` lists them.
 
 ```jsonc
 "roleGrants": [

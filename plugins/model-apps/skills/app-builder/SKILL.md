@@ -1,7 +1,7 @@
 ---
 name: app-builder
 version: 1.0.0
-description: Builds and edits a model-driven Power Apps app from a natural-language intent — tables, columns, relationships, adaptive forms with sub-grids, views, Choice-column charts, business rules, business process flows, generative page intents for overview/dashboard surfaces (page `.tsx` generated in generate-pages after plan approval), and an app module + sitemap — via the headless cds-maker-sdk. Runs an interactive, multi-turn authoring flow (env selection, jobs-to-be-done first, then design-only App Spec authoring across confirmed levels, guardrail lint, plan-mode approval, generate-pages, full build) and a narrated build, and can download a deployed app back into an editable spec to change it. Use when the user says "build an app for X", "create a model-driven app", "make me an app to manage Y", "add a business process flow", or "edit/add to my app". This skill stands alone and does not require /genpage — but for a standalone generative page added to an app that already exists, use /genpage instead.
+description: Builds and edits a model-driven Power Apps app from a natural-language intent — tables, columns, relationships, adaptive forms with sub-grids, views, Choice-column charts, business rules, business process flows, generative page intents for overview/dashboard surfaces, and an app module + sitemap. Runs an interactive authoring flow with plan approval and can download a deployed app back into an editable spec to change it. Use when the user says "build an app for X", "create a model-driven app", "make me an app to manage Y", "add a business process flow", or "edit/add to my app". Do not use it for a generic web or React app or website, Power Pages, canvas apps, or Power Automate, or when the user rules out Power Platform, Dataverse, or model-driven apps (for example "no Power Platform"). This skill stands alone and does not require /genpage — but for a standalone generative page added to an app that already exists, use /genpage instead.
 author: Microsoft Corporation
 argument-hint: "<app description>"
 user-invocable: true
@@ -260,8 +260,12 @@ unless destructive authority was supplied independently.
    ```
    It writes `<working-dir>/model-app-plan.md` (jobs → surfaces traceability, data model, every
    surface, navigation, access model, sample data) and prints `{ ok, docPath, bytes, warnings }`.
-   **Surface those `warnings`** — they name design gaps such as a job with no covering surface or an
-   app with no generative pages. Tell the user where the document is; it's theirs to keep, and it's
+   **Surface those `warnings`** — they name design gaps such as a job with no covering surface, an
+   app with no generative pages, or a new table that no persona and no `roleGrants[]` entry grants a
+   privilege on. With `--env` the document also lists, read-only, the roles the app already has
+   associated with it, apart from the privileges on the tables the spec adds (opening the app and using
+   a table are two questions); a read that fails is reported in the document as "not checked" and does
+   not fail the command. Tell the user where the document is; it's theirs to keep, and it's
    regenerable after any spec edit.
 
 ### Phase 1.5 — Generate pages (main loop, headless workers)
@@ -446,19 +450,22 @@ reason: re-run it with the flag.
 FormXML carries, and it can return fewer than the form stores: a form built with Spanish (`3082`) captions in an
 English-language organization reads back, with the Spanish captions stored, with its labels in English only. Verify
 never calls a caption missing in a language the read does not carry, as long as the read carries labels in other
-languages — it lists the labels compared in that language as
-**unverified** (neither passed nor failed; the run's result and exit status are unchanged), naming the languages the
-read does carry, and for a `{ "1033": …, "3082": … }` label map it compares the languages the read carries and lists
-the others. Say so, and ask the user to check those captions in Power Apps with that language; do not rebuild to
-"fix" them. A language the read does carry is still compared strictly: a stale caption in it fails. A form whose read
-carries no label at all is not such a case: the captions the spec declares for it are missing, and fail.
+languages — it reads those captions from **one translation export of the app's solution** instead (a single extra request,
+made only when there is such a caption: 7–11 s for a solution of one table, more as the solution grows; it shows the
+published layer), so a right caption passes and a stale or empty one fails like any other, and a
+`{ "1033": …, "3082": … }` label map is compared language by language the same way. When the export fails or cannot say (a
+failed request, an archive it cannot read, no row for the form), verify lists the labels compared in that language as
+**unverified** (neither passed nor failed; the run's result and exit status are unchanged), with the reason and the
+languages the read does carry. Say so, and ask the user to check those captions in Power Apps with that language; do not
+rebuild to "fix" them. A language the read does carry is still compared strictly, from the read: a stale caption in it
+fails. A form whose read carries no label at all is not such a case: the captions the spec declares for it are missing, and fail.
 
 Narrate progress as it runs. Transient env errors (a 429 or 503, a customization lock, a concurrent-operation
 guard or a SQL timeout the service names by its error code, a timeout or reset of the connection) are
 **auto-retried** with backoff on `--apply` (the build is idempotent, so a retry reuses what's already created).
-A throttled service is waited for as long as it asks (`Retry-After`) — by the page writes and by the build's own re-runs of a phase — inside one budget of five minutes per run for the waiting
-the build itself adds: when the next wait does not fit, the build stops with a `throttle-budget-exhausted`
-halt that says what the service asked — run it again later and it continues. (The HTTP client's own re-sends of a throttled read or publish keep their own, shorter schedule and are not counted in it.) If the build still **halts** (`BuildHalt`) on an
+A throttled service is waited for as long as it asks (`Retry-After`) — by the HTTP client's re-sends of a throttled read or publish, by the page writes and by the build's own re-runs of a phase — inside one budget of five minutes per run for all the waiting
+a throttle costs: when the next wait does not fit, the build stops with a `throttle-budget-exhausted`
+halt that says what the service asked — run it again later and it continues. (A 5xx, a reset connection or a deadlock is not a throttle: those keep their own, shorter schedule and are not counted in it.) If the build still **halts** (`BuildHalt`) on an
 unrecoverable error, surface it and ask the user how to proceed via `AskUserQuestion` (adjust the
 spec / cancel), then re-run. Everything is scoped to a dedicated unmanaged solution; **`--publish`
 gates the final *bulk* publish**, which also carries the edits made to existing views and forms.
@@ -528,9 +535,15 @@ node "${PLUGIN_ROOT}/scripts/verify-model-app.js" --env <envUrl> --spec @<workin
 
 Pass `--language-code` only if the build was run with it. A line starting `⊘` under the verdict is a check verify
 could **not decide** (it is in the JSON result's `unverified` list): it is neither a pass nor a failure, so say what it
-was and what settles it — the language of the captions, which `--language-code` gives, or a language the environment's
-form read does not carry, whose captions only Power Apps can show — never report the run as "everything deployed" while
+was and what settles it — the language of the captions, which `--language-code` gives, or captions in a language the environment's
+form read does not carry that the translation export could not settle (the line says why), which only Power Apps can show — never report the run as "everything deployed" while
 one is listed.
+
+A `WARNING:` line on stderr — each one is repeated in the JSON result's `warnings` list, which is absent when there is
+none — is advice, not a verdict: a spec an earlier release accepted that the build would now refuse (it names the column
+or relationship and the fix for the next build), or a page workspace the run could not remove (it names the folder to
+delete by hand). It changes neither `ok` nor the exit status, so a run that passes can still carry one: pass each on to
+the user. A run that stops on an unexpected error prints that error and no JSON.
 
 Then open the app in the browser. Refine `app-spec.json` and re-run Phase 2 to iterate.
 
@@ -679,6 +692,13 @@ not everything:**
 - **Does NOT round-trip:** `forms[]`, `views[]`, `charts[]`, `commands[]` — they come back empty.
   All four **survive on the live app** (a rebuild preserves them by discovery), so a plain edit is
   safe; they just aren't editable through the downloaded spec. Change them in Maker or a fresh spec.
+- **Roles are not in the spec, and a rebuild leaves them as they are.** A download carries no
+  `personas[]`: the roles associated with the app stay as the environment has them. Keep `personas[]`
+  out when you extend an app whose roles somebody else owns — a persona's role is converged to exactly
+  the privileges declared, and a role the build did not author is refused. Give an existing role a new
+  table with a `roleGrants[]` entry (additive; it does not associate the role with the app). Lint and
+  the design document name each new table no persona and no grant covers, and `write-app-spec-doc.js
+  --env` lists the roles the app has.
 
 Then:
 
@@ -793,9 +813,9 @@ child view id. Each step emits `[n/total]`.
   or sort. A changed column type, and an edited command or dashboard, are not re-applied at all; an
   existing chart takes only a changed description, an existing app takes a changed name and description
   (an app that was never published keeps its text and the build warns it was not applied, and so does one whose name or
-  description is localized — the SDK writes the two together, so while either is localized the header is not edited at
-  all, a routing description included, and if the SDK's own read of the header fails while one is, the build stops with
-  `APP_HEADER_NOT_PLAIN_TEXT` before anything is sent or written: re-run it; the icon is set when the app is created: a
+  description is localized — only that text is held back: the other text and a routing description are applied, the SDK
+  writes only what changed, and a text that is not plain is never sent, even when the SDK's own read of the header fails;
+  the icon is set when the app is created: a
   different `app.icon` is reported as not applied), and an existing
   business process flow takes the stage and step edits that cannot move a record — a stage added or renamed,
   a step added, renamed, rebound or moved — and refuses, saying why, one that would remove a stage or a step

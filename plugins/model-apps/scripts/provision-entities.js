@@ -13,6 +13,7 @@ const { quickCreateEnabledFor, normalizeLanguageCode, askedPrimaryNameLength, ke
 const { createAzHttpClient } = require('./lib/sdk-http-client.js');
 const { parseArgs, validateFlags, readAliasedFlag, readJsonArg, emitResult, readProvisionedLanguages } = require('./lib/dataverse-auth.js');
 const { makeTempWorkspace } = require('./lib/temp-workspace.js');
+const { makeWritesBlocking } = require('./lib/output-redaction.js');
 
 // Construct the SDK against the vendored bundle + an az-token HttpClient. Two clients:
 //   sdk          — carries solutionUniqueName (metadata + record writes auto-join the
@@ -131,7 +132,8 @@ function buildPlan(input, opts) {
   }
   // Then the alternate keys over a name column whose length is set: the apply makes such a key once that length is right
   // (keyWaitsForNameLength, which depends on what the key's label is sent as and not on the language), where a table it creates has it.
-  // computeTotal counts them with the other keys.
+  // A key labelled in several languages that the environment made the name column too long to fit beside is made there too, which only the
+  // environment can say, so the plan lists it with its table and the apply makes it after the length step. computeTotal counts them with the other keys.
   for (const e of input.entities || []) {
     for (const k of e.alternateKeys || []) {
       if (keyWaitsForNameLength(e, k)) plan.push(`alt key ${e.schemaName}.${k.schemaName}`);
@@ -319,6 +321,7 @@ async function main() {
     needValue: ['env', 'input', 'language-code', 'languageCode'],
   });
   if (flagError) {
+    makeWritesBlocking(process.stdout, process.stderr);
     process.stderr.write(`✗ ${flagError}\n${USAGE}\n`);
     process.exit(1);
   }
@@ -338,6 +341,7 @@ async function main() {
   if (rawLang !== undefined) {
     languageCode = normalizeLanguageCode(rawLang);
     if (languageCode === null) {
+      makeWritesBlocking(process.stdout, process.stderr);
       process.stderr.write(`✗ --language-code / --languageCode must be digits only, a positive integer LCID up to 65535 (got '${rawLang}')\n`);
       process.exit(1);
     }

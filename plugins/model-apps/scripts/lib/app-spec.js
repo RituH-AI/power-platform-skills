@@ -929,12 +929,13 @@ function askedPrimaryNameLength(entity) {
 }
 
 // Whether an alternate key is over its table's primary name column while the spec asks that column for a length (askedPrimaryNameLength):
-// the key is then in the way of the length. The platform validates a key when it is created, and a key may hold at most 900 bytes — 2 for
-// each character of a text column.
+// the key is then in the way of the length. The platform validates a key when it is created, and a key may hold at most 1,700 bytes
+// (KEY_BYTES_LIMIT) — 2 for each character of a text column.
 // See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/define-alternate-keys-entity#create-alternate-keys
 // A new table's name column is created asking for a length, but some environments make it 850 characters (1,700 bytes) whatever is
-// asked (DEFAULT_PRIMARY_NAME_LENGTH, lib/entity-provision.js), so a key over it can be created only once the build has set the
-// length the spec asks for. Matched case-insensitively: a column's logical name is its schema name in lower case.
+// asked (DEFAULT_PRIMARY_NAME_LENGTH, lib/entity-provision.js) — the whole of what a key may hold, so a key over it and another column
+// can be created only once the build has set the length the spec asks for (keyHasRoomOnlyAfterLength). Matched case-insensitively: a
+// column's logical name is its schema name in lower case.
 function keyNeedsNameLength(entity, key) {
   if (askedPrimaryNameLength(entity) === undefined || !key || !Array.isArray(key.columns)) return false;
   const name = String(entity.primaryAttribute.schemaName || '').toLowerCase();
@@ -959,8 +960,10 @@ function labelGoesOutInOneLanguage(value) {
 //
 // The build sets the length LAST in the phase: the SDK's update reads the column with its labels, and a read that carries labels ahead of
 // a create that carries several languages is what makes Dataverse keep only the base one. A key with one label has nothing for such a read
-// to strip, so it may follow the step; a key labelled in several languages keeps the place it has always had, ahead of it — and where the
-// platform then refuses it for the length of its column, the build says so (alternateKeyAheadOfLength, lib/entity-provision.js).
+// to strip, so it may follow the step; a key labelled in several languages keeps the place it has always had, ahead of it — except where
+// the environment made the name column too long for the key to fit beside the others, which only the environment can say
+// (keyHasRoomOnlyAfterLength, decided by the build from the length it reads) — and where the platform then refuses it for the length of
+// its column, the build says so (alternateKeyAheadOfLength, lib/entity-provision.js).
 //
 // It does not depend on the language the build writes in, so the dry run and the apply cannot disagree about it however either is given one.
 //
@@ -969,6 +972,83 @@ function labelGoesOutInOneLanguage(value) {
 // attempt of the same build left unset) makes its keys wait.
 function keyWaitsForNameLength(entity, key) {
   return keyNeedsNameLength(entity, key) && labelGoesOutInOneLanguage(key.displayName);
+}
+
+// The most bytes an alternate key may hold. The platform's own answer to a key that is too large names the limit — HTTP 400, code 0x80060895:
+//   { "error": { "code": "0x80060895", "message": "Index size exceeded the size limit of 1700 bytes. The key is too large. Try removing some columns or making the strings in string columns shorter." } }
+// That was measured at 1,700 bytes: a key over a name column of 850 characters (2 bytes each, the most a name column may have: PRIMARY_NAME_MAX_LENGTH)
+// alone was accepted, and one that held any other column beside it — even one of a single character — was refused. Microsoft Learn documents 900
+// bytes, so this number is what one environment answered, not a promise about all of them: the build uses it only to know that a key CANNOT fit in a
+// place (keyHasRoomOnlyAfterLength) — never to refuse one, which the platform does.
+// See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/define-alternate-keys-entity#create-alternate-keys
+const KEY_BYTES_LIMIT = 1700;
+
+// The length the SDK gives a text column it is asked to create without one. The attribute it sends for a `string` and for an `autonumber` column
+// alike is built with `MaxLength: t.maxLength ?? 100` (vendor/cds-maker-sdk.cjs, for createColumn and createColumns).
+const SDK_TEXT_MAX_LENGTH = 100;
+
+// The `maxLength` the build passes on to the SDK when it creates a column of the spec, or undefined when it passes none: only a column that names its
+// type `Text` or `Memo` carries one, and only a value that is truthy, as written — the platform judges it. So an auto-number column, and a column that
+// gives no type (which the build creates as text all the same), are made SDK_TEXT_MAX_LENGTH characters long whatever `maxLength` the spec writes for
+// them. The ONE rule behind what the build sends (columnOptions, lib/entity-provision.js) and the length a key counts a column at (keyBytesAtLeast), so
+// that a key is never sized from a length the build does not create.
+function maxLengthSent(column) {
+  return column && (column.type === 'Text' || column.type === 'Memo') && column.maxLength ? column.maxLength : undefined;
+}
+
+// The types of the spec the build creates as a single line of text — a StringAttributeMetadata, which a key holds at 2 bytes a character: `Text`, which
+// is also what a column that gives no type is made as (SDK_COLUMN_TYPE[c.type || 'Text'], lib/entity-provision.js), and `AutoNumber`, a text column
+// with a format.
+const TEXT_COLUMN_TYPES = new Set(['Text', 'AutoNumber']);
+
+// How many characters long the build creates a column of the spec that it creates as a single line of text, or undefined for a column it creates as
+// something else (or not at all): the length it sends (maxLengthSent), else the SDK's. A value it sends that is not a whole number of characters is
+// the platform's to refuse or to read as it will, so it counts for the one character every text column has.
+function textLengthCreated(column) {
+  if (!column || typeof column !== 'object' || !TEXT_COLUMN_TYPES.has(column.type || 'Text')) return undefined;
+  const sent = maxLengthSent(column);
+  if (sent === undefined) return SDK_TEXT_MAX_LENGTH;
+  return Number.isInteger(sent) && sent > 0 ? sent : 1;
+}
+
+// The fewest bytes a key holds when its table's name column is `nameLength` characters long: a floor, so that what it shows is certain. Each column
+// counts as the build creates it. A single line of text takes 2 bytes for each character — the name column at the length the environment made it, and a
+// column of the spec at the length the build creates it with (textLengthCreated: a `Text` column's `maxLength`, else 100; an auto-number column, and a
+// column that gives no type, 100 whatever `maxLength` they carry). Every other column counts for 1 byte: a column of another type a key can hold —
+// Integer, Decimal, DateTime, Choice, a lookup — whose size the limit was not measured with, and one the spec does not describe. That can leave the
+// floor under what the platform counts, never over it, and it changes nothing for a key that fits at the length the spec asks: beside a name column of
+// 850 characters, 1,700 bytes by themselves, one byte is already too much, and at the length asked such a key's floor is within the limit whatever its
+// other columns take. A key whose floor is over KEY_BYTES_LIMIT cannot fit; one whose floor is under it may or may not, and the platform decides.
+// Never throws: a key or an entity that is not what it should be holds what can be counted of it.
+function keyBytesAtLeast(entity, key, nameLength) {
+  const name = String((entity && entity.primaryAttribute && entity.primaryAttribute.schemaName) || '').toLowerCase();
+  const declared = (entity && Array.isArray(entity.columns)) ? entity.columns : [];
+  let bytes = 0;
+  for (const column of (key && Array.isArray(key.columns)) ? key.columns : []) {
+    const logical = String(column).toLowerCase();
+    if (name !== '' && logical === name) {
+      bytes += 2 * (Number.isInteger(nameLength) && nameLength > 0 ? nameLength : 1);
+      continue;
+    }
+    const length = textLengthCreated(declared.find((c) => c && String(c.schemaName).toLowerCase() === logical));
+    bytes += length === undefined ? 1 : 2 * length;
+  }
+  return bytes;
+}
+
+// Whether the key cannot fit while the name column is `nameLength` characters long (see keyBytesAtLeast).
+const keyCannotFitAt = (entity, key, nameLength) => keyBytesAtLeast(entity, key, nameLength) > KEY_BYTES_LIMIT;
+
+// Whether the length of the name column decides where a key can be made: the key holds the name column (keyNeedsNameLength), cannot fit while that column
+// is as long as a name column can be — PRIMARY_NAME_MAX_LENGTH characters are KEY_BYTES_LIMIT bytes by themselves, so any other column in the key is
+// too much — and may fit at the length the spec asks. Only then can the length the environment made of the column (850 where it ignores the length asked
+// of the create) keep the platform from taking the key, and only then can setting the length first change the platform's answer. A key over the name
+// column alone always fits, and one that cannot fit at the length asked either would be refused after the length step as well: waiting helps neither.
+// This is the half the spec decides; the other is the length the environment made, which the build reads.
+function keyHasRoomOnlyAfterLength(entity, key) {
+  return keyNeedsNameLength(entity, key)
+    && keyCannotFitAt(entity, key, PRIMARY_NAME_MAX_LENGTH)
+    && !keyCannotFitAt(entity, key, askedPrimaryNameLength(entity));
 }
 
 // The keys the build READS on each `appShell` level (appDef, sdk-build.js), for the same reason as
@@ -1158,6 +1238,19 @@ function labelText(value, languageCode) {
   const first = localizedLabelLcids(value)[0];
   const hit = pick(wanted) ?? pick(1033) ?? pick(first);
   return typeof hit === 'string' ? hit : '';
+}
+
+// The plural a build gives a table whose spec sets no `pluralName`: its display name in the build's
+// language, else its schema name, plus "s" — "Ticket" -> "Tickets", "Tag" -> "Tags". This is the ONE
+// derivation, so nothing that relies on it can disagree with what the build writes: the build sends it
+// as the table's DisplayCollectionName (entity-provision.js), lint predicts the "Active <plural>"
+// default-view names with it (spec-lint.js), and a download leaves out exactly the plural that equals
+// it (download-model-app.js entityFromMetadata) — a "Tag Catalog" is kept, because a rebuild of a spec
+// without it would name the table "Tags". English only: appending "s" is not a plural rule in most
+// languages, which is why validateAppSpec requires an explicit `pluralName` beside a localized
+// `displayName` rather than reaching this.
+function derivedPluralName(entity, languageCode) {
+  return `${labelText(entity && entity.displayName, languageCode) || (entity && entity.schemaName)}s`;
 }
 
 // Every string a label can legitimately be NAMED by: a plain label is itself; a localized label is
@@ -4347,12 +4440,18 @@ module.exports = {
   askedPrimaryNameLength,
   keyNeedsNameLength,
   keyWaitsForNameLength,
+  KEY_BYTES_LIMIT,
+  maxLengthSent,
+  keyBytesAtLeast,
+  keyCannotFitAt,
+  keyHasRoomOnlyAfterLength,
   validateSampleDataRows,
   normalizePageSource,
   normalizeLanguageCode,
   validateChoiceOptionLabels,
   ambiguousChoiceAliases,
   labelText,
+  derivedPluralName,
   labelAliases,
   isLocalizedLabelMap,
   labelIsMissing,

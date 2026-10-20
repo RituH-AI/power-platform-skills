@@ -26,7 +26,7 @@ const { unreadableAnswer } = require('./collection-answers.js');
 // normalizePageSource: read the page source from the discriminated `source` field (v2) or the
 // legacy top-level `codeFile` (pre-migration). PHASES: canonical ordered phase list — imported
 // here so the engine and the stage layer can never drift.
-const { describeRelationship, readExact, sameRelationship, findRelationshipHolder } = require('./relationship-metadata.js');
+const { describeRelationship, describeIncomplete, readExact, compareRelationship, findRelationshipHolder } = require('./relationship-metadata.js');
 const {
   sampleRecordsFor,
   resolveSampleRecords,
@@ -141,7 +141,7 @@ const { appWriteTables, appPushTables, preAppTables, publishTablesXml, readSaved
 const { hasUnsyncedEdits } = require('./unsynced-edits.js');
 const { createSolutionMembership, ensureSolutionComponent } = require('./solution-membership.js');
 const { navigationEntryKind, navigationVerdict } = require('./app-navigation.js');
-const { isAppTextMap, appTextKind, localizedAppText, describeHeldAppText } = require('./app-header-text.js');
+const { isAppTextMap, appTextKind, localizedAppText } = require('./app-header-text.js');
 // The build's retry policy (retry-policy.js): every halt below is raised with what a run again may do — RETRY.NEVER, or a policy decided from the failure it wraps — and every failure the engine
 // raises itself is made by refusal() (deterministic) or serviceFailure() (the plugin's words around a failure of the service), because the build's retry reads a failure's STRUCTURE and the
 // service's words, never a message that quotes what the maker named. tests/halt-retry-policy.test.js enumerates the halts in this file and holds each to a table.
@@ -296,11 +296,21 @@ function dashboardTileOpts(spec, tile, result) {
 
 // Map a resolved dashboard tile (dashboardTileOpts output) to a canonical DashboardComponent for
 // addElement('dashboard', id, '/components', …). The adapter mints the cell/control ids and lays the
-// grid out from `position`; the caller supplies the classId (chart/list share the grid control id —
-// ChartGridMode disambiguates), the `<parameters>` map, and the placement. Tiles stack vertically
-// (one per row in the first section). Param keys match the Dataverse control XML; note that a chart
+// tiles out in the first section: a grid two columns wide, filled in tile order from left to right,
+// where a tile too wide for what is left of a row starts the next one and a `colspan` wider than the
+// grid is narrowed to it (measured on the bundled SDK; `dashboard-roundtrip.test.js` pins it). The
+// caller supplies the classId (chart/list share the grid control id — ChartGridMode disambiguates),
+// the `<parameters>` map, and the size. Param keys match the Dataverse control XML; note that a chart
 // tile keys its visualization as `VisualizationId`, NOT `ChartId` — see the comment on that line,
 // and `lcid-real-bundle.test.js`, which pushes this exact payload through the real bundle.
+//
+// A tile's height is its rowspan, in rows of the dashboard grid, and the app draws a one-row tile as
+// its title bar alone: no chart, no list. The platform's own dashboards give chart and list tiles 9 to
+// 24 rows, most often 12, so a tile the spec does not size gets that common height. The default used
+// to be 1, which rendered every tile of a generated dashboard as a bare title bar. The width stays 1
+// column, so two unsized tiles share a row. An authored `rowspan` or `colspan` wins, a `rowspan` of 1
+// included. Only a dashboard the build CREATES gets this: an existing one is reused as it is.
+const DEFAULT_TILE_ROWSPAN = 12;
 function dashboardComponent(t, index) {
   const parameters = {};
   if (t.type === 'chart') {
@@ -325,7 +335,7 @@ function dashboardComponent(t, index) {
   return {
     type: t.type, name: t.name || '', classId: TILE_CLASS_ID[t.type] || TILE_CLASS_ID.webresource,
     position: { tabIndex: 0, columnIndex: 0, sectionIndex: 0, rowIndex: index, cellIndex: 0 },
-    colspan: t.colspan || 1, rowspan: t.rowspan || 1, parameters,
+    colspan: t.colspan || 1, rowspan: t.rowspan || DEFAULT_TILE_ROWSPAN, parameters,
   };
 }
 
@@ -564,7 +574,9 @@ function planFor(spec, opts) {
     // (keyWaitsForNameLength, which depends on what the key's label is sent as and not on the language the build writes in, so the plan and the
     // apply cannot disagree about it). The plan lists it
     // where a table the build creates has it; a table that already exists is not written to, and
-    // its keys are made with the table — the same steps, in another place, so the count holds.
+    // its keys are made with the table — the same steps, in another place, so the count holds. The same goes for a key labelled in several
+    // languages that the environment made the name column too long to fit beside (keyMustWaitForShorterNameColumn, lib/entity-provision.js):
+    // only the environment can say, so the plan lists such a key with its table, and the apply makes it after the length step.
     for (const e of spec.entities) {
       for (const k of e.alternateKeys || []) {
         if (keyWaitsForNameLength(e, k)) items.push({ phase: 'data-model', label: `alt key ${e.schemaName}.${k.schemaName}` });
@@ -1340,11 +1352,11 @@ async function applyAppAiDescription(provision, spec, appId) {
 // the text each edit REPLACED — `{ description: 'Tickets' }`, `{}` when nothing was edited — which is what a refused push puts back
 // (pushAppHeader), and which says whether the artifact now needs a push.
 //
-// The SDK's header push writes `name` AND `description` — and the routing description, when the artifact says something new about it —
-// in ONE PATCH, conditioned on the row's own token, whenever the artifact holds any of them differently from the row (and no PATCH when
-// all three are equal). Whichever of them an edit changed, the others ride along as the artifact holds them: it writes the copy, not the
-// edit (pinned against the real bundle in app-header-text-real-bundle.test.js). So these edits ride the push the app already gets (the
-// sitemap rewrite): never a second push from the same fetch, which would race the first on its If-Match.
+// The SDK's header push writes only the texts that CHANGED: in ONE PATCH, conditioned on the row's own token, the artifact's `name`, `description` and routing
+// description that differ from the header it has just read (no PATCH when none does), and it neither compares nor writes a text REMOVED from the copy
+// (cds-maker-sdk 9a0c9f03; pinned against the real bundle in app-header-text-real-bundle.test.js). It used to write the whole copy, the texts an edit had not
+// changed included. So these edits ride the push the app already gets (the sitemap rewrite): never a second push from the same fetch, which would race the
+// first on its If-Match.
 //
 //   * Only a non-blank string is written, and only when it differs from the FETCHED artifact (the draft layer the push compares the
 //     header against). The two guards a view's and a chart's description already have: a spec that leaves the text out — or carries
@@ -1355,35 +1367,31 @@ async function applyAppAiDescription(provision, spec, appId) {
 //     app, which the app step creates, rather than renaming this one.
 //   * A fetched app always carries both keys (the adapter reads `description` as '' when the row has none), so updateElement has a
 //     path to write — unlike the routing description, which is added when the row has none.
-//   * The header is written only while BOTH texts are PLAIN TEXT. Both columns are localizable, and whether a plain write of the
-//     base-language text keeps a translation beside it has not been measured against an environment; the adapter hands back one
-//     string, so a translation held beside it is invisible here. What this can see is a value that is not a string at all — a text per
-//     language, as an LCID map, a list, a number — and that is never sent: not as it is (these are String columns, and a map-shaped
-//     PATCH of one is no write the platform defines), and not replaced by a scalar. It is not enough to leave that one field alone:
-//     the push would still send it, as the sibling of an edit of the other text or of the routing description. So while either text
-//     is not plain NO header edit is made at all — the other text's, and the routing description's (applyAppHeader) — and each edit the
-//     spec asked for is reported as not applied, with the reason. A localized value the spec's text already equals (the
-//     unchanged-name, changed-description case) needs no edit of its own and no word.
-//   * THAT WHOLE-HEADER HOLD IS THE CHOSEN POLICY, not a stopgap — and the SDK is the reason. It has no partial header write: its PATCH is
-//     built from the whole workspace copy, `{ name, description[, aiappdescription] }` (pinned in app-header-text-real-bundle.test.js, which fails
-//     if a re-vendored bundle makes it partial), and the row token it is conditioned on is private to it. So the one plain field that changed
-//     cannot be sent alone. A PATCH of the plugin's own would need a row token read afresh, which is a blind overwrite of whatever changed since
-//     the fetch. Taking the text that is not plain off the copy, for the SDK to leave out of its request, would lean on an SDK internal (the
-//     serializer dropping `undefined`) whose failure mode — a re-vendor that writes `name: ''` — blanks an app's name. Neither is done: a plain
-//     edit beside a text that is not plain is a warning and a navigation-only push. Writing only the changed field would need an SDK operation
-//     (a partial header write), which is a follow-up; the hold could then be narrowed to the one field.
-//   * The hold is on the workspace COPY, and the SDK decides for itself whether the header is written: when its own comparison read of the
-//     header cannot be made it writes the copy's header as it is, so "no header edit" is not "no header PATCH". The client every SDK is made
-//     with refuses that write (lib/app-header-text.js, APP_HEADER_NOT_PLAIN_TEXT, wired in lib/maker-sdk.js): a text that is not plain never
-//     reaches the wire, whatever the copy holds, and the push fails before its navigation is written (pushAppHeader).
+//   * A TEXT THAT IS NOT PLAIN is never edited and never sent, and holds nothing else back. Both columns are localizable, and whether a plain write of the
+//     base-language text keeps a translation beside it has not been measured against an environment; the adapter hands back one string, so a translation
+//     held beside it is invisible here. What this can see is a value that is not a string at all — a text per language, as an LCID map, a list, a number — and
+//     that is never sent: not as it is (these are String columns, and a map-shaped PATCH of one is no write the platform defines), and not replaced by a
+//     scalar. Its OWN edit is held back and reported as not applied, with the reason (a warning, never a halt); a localized value the spec's text already
+//     equals (the unchanged-name, changed-description case) needs no edit and no word. The other text, and the routing description (applyAppHeader), are
+//     applied as usual and written alone: that is what the SDK's partial write is for. (While the SDK wrote the whole copy, one text that was not plain held
+//     the whole header back, and this said so.)
+//   * It is kept off the wire by being kept off the COPY. The SDK decides for itself whether the header is written: when its own comparison read of the
+//     header cannot be made (503, 403, a thrown error, an empty 200) it writes EVERY text the copy holds. So the texts the copy holds that are not plain
+//     (`held`, answered by applyAppHeader) are taken off it with `removeElement('app', id, '/name')` right before the push (pushAppHeader), and the SDK
+//     then neither compares nor writes them — now its documented contract, where it was once an internal (the serializer dropping `undefined`) whose failure,
+//     a re-vendor that writes `name: ''`, would blank an app's name; the bundle's behaviour is pinned, and so is that nothing else of the copy changes. Not
+//     here, and not earlier: a copy holding an edit that no push follows is refused by the next run (refuseUnpushedAppCopy), and the routing description
+//     of a page-backed app is pushed only when it changed.
+//   * The client every SDK is made with still refuses a write of a text that is not plain (lib/app-header-text.js, APP_HEADER_NOT_PLAIN_TEXT, wired in
+//     lib/maker-sdk.js), whatever the copy holds: the last line of defence for a push of a copy the build did not clean (the page backend's, say).
 // name holds at most 100 characters and description 2,000 (validateDescription).
 // See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/appmodule
 async function applyAppHeaderText(provision, spec, appId, warn) {
   return (await editAppHeaderText(provision, spec, appId, warn)).replaced;
 }
 
-// applyAppHeaderText's work, which also answers `held` — the header's texts that are not plain, `[{ key, have }]` — for applyAppHeader to
-// hold the routing description back by.
+// applyAppHeaderText's work, which also answers `held` — the header's texts that are not plain, `[{ key, have }]` — for applyAppHeader to hand on to the push,
+// which takes them off the copy (see applyAppHeaderText).
 async function editAppHeaderText(provision, spec, appId, warn) {
   const app = (spec && spec.app) || {};
   const current = (await provision.getArtifact('app', appId)) || {};
@@ -1394,7 +1402,7 @@ async function editAppHeaderText(provision, spec, appId, warn) {
   for (const key of ['name', 'description']) {
     const want = app[key];
     if (typeof want !== 'string' || !want.trim() || have[key] === want) continue;
-    const kept = whyAppTextIsKept(key, have[key], want, held);
+    const kept = whyAppTextIsKept(key, have[key], want);
     if (kept !== undefined) {
       if (kept && typeof warn === 'function') warn(`app "${app.name}": its ${key} was not applied: ${kept}`);
       continue;
@@ -1405,19 +1413,14 @@ async function editAppHeaderText(provision, spec, appId, warn) {
   return { replaced, held };
 }
 
-// How a header text that is not plain reads in a warning (isAppTextMap, localizedAppText, appTextKind, describeHeldAppText) is lib/app-header-text.js's:
+// How a header text that is not plain reads in a warning (isAppTextMap, localizedAppText, appTextKind) is lib/app-header-text.js's:
 // the client refuses a write of such a text in the same words.
 
 // Why an app's name or description (`have`, as fetched) is NOT written over with the spec's text (`want`) — or `undefined` when it is
-// plain text and nothing else holds it back. `''` means the spec asks for nothing the header does not already say, so there is nothing to
-// report. `held` is what editAppHeaderText found not to be plain text: a plain text is held back too while another text of the header is,
-// because the SDK's one request writes both.
-function whyAppTextIsKept(key, have, want, held) {
-  if (typeof have === 'string') {
-    return held.length
-      ? `${describeHeldAppText(held)}, and the app's name and description are written in one request, so changing its ${key} would send the ${held[0].key} too — a rebuild never sends a text that is not plain. Change it in Power Apps.`
-      : undefined;
-  }
+// plain text, which nothing else holds back: not the other text of the header, plain or not. `''` means the spec asks for nothing the
+// header does not already say, so there is nothing to report.
+function whyAppTextIsKept(key, have, want) {
+  if (typeof have === 'string') return undefined;
   if (isAppTextMap(have)) {
     if (Object.values(have).includes(want)) return '';
     return `it is ${localizedAppText(have)}, and a rebuild does not replace a localized text — it cannot tell which language the spec's text is for, nor that the other translations would be kept. Change it in Power Apps.`;
@@ -1430,26 +1433,14 @@ function whyAppTextIsKept(key, have, want, held) {
 // already wrote the spec's (appDef), the compare would be a read the build never made for a new app. Answers
 //   changed   whether the artifact now holds any header change, and so needs a push;
 //   routing   whether one of them is the routing description — an explicit request that a never-published app's refusal must HALT on;
-//   replaced  the text the name / description edits replaced (applyAppHeaderText), for pushAppHeader to put back.
-// While a text of the header is not plain, no edit is made at all — the routing description's included: it is written by the same request
-// as the two texts, so it would send the one that is not plain (see applyAppHeaderText). That is a warning, not a halt: the navigation is
-// the app step's own work and goes on, and a text left for a maker costs the build nothing it could have kept.
+//   replaced  the text the name / description edits replaced (applyAppHeaderText), for pushAppHeader to put back;
+//   held      the texts of the copy that are not plain, `[{ key, have }]`, which pushAppHeader takes off the copy before it pushes it.
+// A text that is not plain holds back its own edit only, with a warning, never a halt: the other text and the routing description are applied as usual
+// (see applyAppHeaderText), and the navigation is the app step's own work and goes on.
 async function applyAppHeader(provision, spec, appId, { text = true, warn } = {}) {
   const { replaced, held } = text ? await editAppHeaderText(provision, spec, appId, warn) : { replaced: {}, held: [] };
-  const routing = held.length ? await holdBackAppRouting(provision, spec, appId, held, warn) : await applyAppAiDescription(provision, spec, appId);
-  return { changed: routing || Object.keys(replaced).length > 0, routing, replaced };
-}
-
-// The routing description is never edited while the header holds a text that is not plain. Says so when the spec asks for one the fetched
-// copy does not have; answers false, as applyAppAiDescription does for "nothing to push".
-async function holdBackAppRouting(provision, spec, appId, held, warn) {
-  const want = spec.app && spec.app.aiDescription;
-  if (typeof want !== 'string' || !want.trim() || typeof warn !== 'function') return false;
-  const current = (await provision.getArtifact('app', appId)) || {};
-  if (current.aiDescription !== want) {
-    warn(`app "${spec.app.name}": its routing description (app.aiDescription) was not applied: ${describeHeldAppText(held)}, and the app's name, description and routing description are written in one request, so changing it would send ${held.length === 1 ? `the ${held[0].key}` : 'both'} too — a rebuild never sends a text that is not plain. Change it in Power Apps.`);
-  }
-  return false;
+  const routing = await applyAppAiDescription(provision, spec, appId);
+  return { changed: routing || Object.keys(replaced).length > 0, routing, replaced, held };
 }
 
 // An app's tile icon is written when the app is created and a rebuild cannot replace it: the appmodule's `webresourceid` is effectively
@@ -1534,19 +1525,25 @@ async function haltOnUnpublishedAppHeader(provision, appId, pushed, name) {
 // with the header already put back (halted on, never looped on). A header that cannot be put back halts too: pushing a copy that
 // still holds the edit would be refused again.
 //
-// ANOTHER refusal comes from the HTTP client, not from the SDK, and it is not recovered from either: the SDK writes the copy's header whenever its own
-// comparison read of the header cannot be made, and a name or description that is not plain text never leaves the process (APP_HEADER_NOT_PLAIN_TEXT,
-// lib/app-header-text.js) — whether or not this run edited the header at all. It is thrown before the header or the navigation is written, so the generic
-// path below is the right one: the copy, which this push never recorded, is reset to the server's, and the typed error is thrown as it is. Its message says a
-// re-run normally succeeds, and `transient: false` keeps the build from running the phase again on its own: whether the read answers next time is for that
-// re-run to find out, and a retry of the same push here would hide the one thing the message tells.
+// A text of the copy that is not plain (`header.held`) is taken off it first (takeNonPlainTextOffCopy): the SDK writes every text the copy holds when its own comparison read of
+// the header cannot be made, and it neither compares nor writes a text that is not on the copy, so it has no text that is not plain to write. That is done here and not when the
+// header is edited because this is the one place the build pushes a copy: a copy that is taken from and then not pushed would be left holding an edit (refuseUnpushedAppCopy).
+//
+// The HTTP client still refuses a write of a text that is not plain, whatever pushes it, and that refusal is not recovered from: a name or description that is not plain text never
+// leaves the process (APP_HEADER_NOT_PLAIN_TEXT, lib/app-header-text.js). This push does not meet it — the text is off the copy — but a push the build does not make through here can: the page
+// backend's push of the app, say. It is thrown before the header or the navigation is written, so the generic path below is the right one: the copy, which that push never recorded, is
+// reset to the server's, and the typed error is thrown as it is. Its message says a re-run normally succeeds, and `transient: false` keeps the build from running the phase again on its own:
+// whether the read answers next time is for that re-run to find out, and a retry of the same push here would hide the one thing the message tells.
 async function pushAppHeader(provision, appId, name, header, mainFormsByTable, warn) {
-  const { routing, replaced } = header !== null && typeof header === 'object' ? header : { routing: header === true, replaced: {} };
+  const { routing, replaced, held } = header !== null && typeof header === 'object' ? header : { routing: header === true, replaced: {}, held: [] };
   const textKeys = Object.keys(replaced || {});
   const carriesHeader = routing || textKeys.length > 0;
   const attempt = async (first) => {
     try {
-      if (first) await applyAppMainForms(provision, appId, mainFormsByTable);
+      if (first) {
+        await applyAppMainForms(provision, appId, mainFormsByTable);
+        await takeNonPlainTextOffCopy(provision, appId, held);
+      }
       return { pushed: await explainAppPushWarnings(provision.dataverse, await provision.pushArtifact('app', appId), name) };
     } catch (thrown) {
       return { thrown };
@@ -1569,6 +1566,20 @@ async function pushAppHeader(provision, appId, name, header, mainFormsByTable, w
   if (carriesHeader) await haltOnUnpublishedAppHeader(provision, appId, pushed, name);
   if (pushFailed(pushed)) await discardUnrecordedEdits(provision, appId, pushed.error, false);
   return pushed;
+}
+
+// Take the texts of the copy that are not plain (applyAppHeader's `held`) off it, right before the push that would offer them to the SDK. The SDK neither compares nor writes a text that is
+// not on the copy — even when its own comparison read of the header fails, which makes it write every text the copy holds — so none of them can be in its request. A text with no value is not on
+// the copy: there is nothing to take off. A path the copy no longer has is as gone as it needs to be.
+async function takeNonPlainTextOffCopy(provision, appId, held) {
+  for (const { key, have } of held || []) {
+    if (have === undefined) continue;
+    try {
+      await provision.removeElement('app', appId, `/${key}`);
+    } catch (err) {
+      if (!err || err.code !== 'PATH_NOT_FOUND') throw err;
+    }
+  }
 }
 
 // Put the text a refused push's edits replaced (applyAppHeaderText's answer) back on the workspace copy, so the next push carries no
@@ -2260,11 +2271,18 @@ async function annotateLivePlan(plan, { spec, provision, warn } = {}) {
           // held by a 1:N). One exact-name read, no collection scan — the plan stays cheap.
           const exact = await readExact(provision && provision.dataverse, k.name);
           const declared = Object.assign({}, k.declared, { schemaName: (k.declared && k.declared.schemaName) || k.name });
-          if (exact.found === true && sameRelationship(declared, exact.holder)) item.state = 'reuse';
-          else if (exact.found === true) {
+          // A holder that exists is reused only when it states its whole identity. Otherwise the item is unknown, and the reason says
+          // whether the name belongs to another relationship or the environment's answer left a part out (compareRelationship).
+          const judgeHolder = (heldBy) => {
+            const verdict = compareRelationship(declared, heldBy);
+            if (verdict.state === 'same') { item.state = 'reuse'; return; }
             item.state = 'unknown';
-            item.stateWhy = `schema name '${k.name}' is already used by ${describeRelationship(exact.holder)}, not the declared relationship`;
-          } else if (exact.found === false) {
+            item.stateWhy = verdict.state === 'incomplete'
+              ? `schema name '${k.name}' exists, but ${describeIncomplete(verdict.missing)}, so it cannot be told from the declared relationship`
+              : `schema name '${k.name}' is already used by ${describeRelationship(heldBy)}, not the declared relationship`;
+          };
+          if (exact.found === true) judgeHolder(exact.holder);
+          else if (exact.found === false) {
             // The SchemaName key is case-sensitive. A differently-cased holder 404s here and would
             // otherwise be planned as create. The collection scan is case-insensitive; skipExact
             // because this read already 404'd that spelling.
@@ -2272,11 +2290,8 @@ async function annotateLivePlan(plan, { spec, provision, warn } = {}) {
               ? (k.relType === 'ManyToMany' ? [k.declared.entity1, k.declared.entity2] : [k.declared.referenced, k.declared.referencing])
               : [k.entity];
             const holder = await findRelationshipHolder(provision && provision.dataverse, k.name, { candidates: ends, cache: relationshipReads, skipExact: true });
-            if (holder.found === true && sameRelationship(declared, holder.holder)) item.state = 'reuse';
-            else if (holder.found === true) {
-              item.state = 'unknown';
-              item.stateWhy = `schema name '${k.name}' is already used by ${describeRelationship(holder.holder)}, not the declared relationship`;
-            } else if (holder.found === false) item.state = 'create';
+            if (holder.found === true) judgeHolder(holder.holder);
+            else if (holder.found === false) item.state = 'create';
             else {
               item.state = 'unknown';
               item.stateWhy = 'the relationship metadata read was inconclusive';
@@ -2660,7 +2675,8 @@ async function runSdkBuildPhases(spec, opts, owed) {
   // The full-build path never sets opts.changedOnly, so result.created.app stays null and app-shell
   // creates/updates it exactly as before — this branch is a no-op (byte-identical) on the normal path.
   if (opts.changedOnly && opts.changedOnly.resolvedAppId) result.created.app = opts.changedOnly.resolvedAppId;
-  const runner = makeRunner({ emit, total: plan.length });
+  // The runner stops the run at the next step once the budget has refused a wait (entity-provision.js, makeRunner): the build's retry loop does not run the phases again to meet the same answer.
+  const runner = makeRunner({ emit, total: plan.length, throttle: opts.throttle });
   const sol = spec.solution;
 
   // ADO 6691114: a view-filter label the environment already shows to be wrong stops the build here, before it
@@ -6130,9 +6146,10 @@ async function runSdkBuildPhases(spec, opts, owed) {
   // also avoids spinning up genpage enumeration for every page-less app build).
   if (has('pages') && ((spec.pages || []).length || appWasExisting)) {
     // The page backend: the SDK on a throwaway workspace of its own, removed in the finally below (never the app folder's, whose copies of a
-    // page would be stale the moment anyone saved it). `opts.genpage` is a seam for the tests, and is the caller's to dispose.
+    // page would be stale the moment anyone saved it). `opts.genpage` is a seam for the tests, and is the caller's to dispose. The run's throttle budget
+    // (`opts.throttle`) is handed to it, so the HTTP client it makes draws its waits for a throttled read or publish from the same five minutes as the page writes do.
     const ownGenpage = !opts.genpage;
-    const genpage = opts.genpage || makeGenpageSdk(opts.env);
+    const genpage = opts.genpage || makeGenpageSdk(opts.env, { throttle: opts.throttle });
     const appUnique = appUniqueName(spec);
     // Recovery guard: the app id is only populated by app-shell (this run). If pages runs without it
     // (e.g. --from pages), there is nothing to upload against — HALT and require a FULL rerun.
@@ -6234,6 +6251,12 @@ async function runSdkBuildPhases(spec, opts, owed) {
         try { page = await genpage.read(record.pageId); } catch (e) {
           // Gone since the listing: it is not there now, which settles nothing (see below), so it is resumed like any page that was not listed.
           if (e && e.code === 'GENPAGE_NOT_FOUND') { resume(); continue; }
+          // A read the service throttled and the run's budget had no room to wait for says nothing of the page (genpage-sdk.js reports it as the throttle's own error, which is not marked final): it is not a conflict that the maker has to settle by
+          // deleting a record, but a stop for a later run. The record stays, so the run that can read the page proves it and adopts it. A read that failed any other way is final (`transient: false`) and is the conflict it always was.
+          const judged = judgeFailure(e);
+          if (!judged.never && judged.transientStatus) {
+            throw new BuildHalt(`could not read page ${record.pageId}, which an earlier build started creating for "${key}", because the service throttled the read (${(e && e.message) || e}) — nothing was changed; the record of that create is kept, so a later run reads the page and settles it`, { phase: 'pages', code: 'pages-read-throttled', recoverable: true, ...retryFrom(e) });
+          }
           pendingConflicts.push({ key, reason: 'pending-create-unreadable', pageId: record.pageId, error: String((e && e.message) || e) });
           continue;
         }
@@ -7143,35 +7166,14 @@ async function runSdkBuildPhases(spec, opts, owed) {
     // An org without the AI template a row summary is built from. The SDK reads the template before its first write and refuses with its own
     // code (`configureRowSummary`: ROW_SUMMARY_TEMPLATE_NOT_FOUND, "Nothing was written"), where it used to publish a model that named no template and let the
     // platform answer. It is the same kind of environment gate as the licence refusal below — nothing in the spec can fix it — so it skips the same way.
+    // The code is the SDK's word for an EMPTY template list and for nothing else (cds-maker-sdk 9a0c9f03):
+    //   GET /msdyn_aitemplates?$select=msdyn_aitemplateid&$filter=msdyn_uniquename eq 'GptPowerPrompt'&$top=1   ->   { "value": [] }    the org has no template: this code
+    // Every other answer it cannot read as a template — no `value` list, a first row that is no row (`[ null ]`), a row without a GUID `msdyn_aitemplateid` (`[ {} ]`) — is a
+    // ConnectionError, which stops the build like any read that failed (and is run again when it was the service that failed it, lib/retry-policy.js). So the code needs no
+    // confirming read of the build's own: before that SDK it was raised for `[ {} ]` and `[ null ]` as well, and 2.16.0 read the list a second time to tell them apart.
     const NO_TEMPLATE_REASON = 'no row-summary AI template in this environment';
-    // The code alone does not prove that the org has no template, though. The SDK's lookup is
-    //   GET /msdyn_aitemplates?$select=msdyn_aitemplateid&$filter=msdyn_uniquename eq 'GptPowerPrompt'&$top=1   ->   { "value": [ { "msdyn_aitemplateid": "<guid>" } ] }
-    // and it raises the code whenever the FIRST row has no `msdyn_aitemplateid`, without checking that there is a row: `{ "value": [] }`, `{ "value": [ {} ] }` and
-    // `{ "value": [ null ] }` all raise it. Only the empty list says the org has no template; the other two are answers that cannot be read, and an answer that cannot be
-    // read stops the build (as it did before the skip) instead of passing for an environment gate. So the first time the code is seen, the build asks the same question
-    // through `queryRecords` — which refuses an answer without its `value` array — and skips only on an empty list. Rows, a row that is no row and a read that fails leave
-    // the SDK's own error to stop the build. The verdict is kept: every table's lookup is the same question, so one read settles the whole build.
-    // This mirrors the SDK's lookup (its template name, its select) and can go once the SDK raises the code for an empty list only and answers a malformed first row with a
-    // ConnectionError. If the SDK ever looks for another template, this read can only fail to confirm, which stops the build: the safe side.
-    // `msdyn_aitemplate` is the table behind the SDK's `/msdyn_aitemplates` set:
-    // https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/msdyn_aitemplate
-    // The verdict is `{ absent }` — true only for an empty list — and, when the read itself failed, `{ absent: false, failure }`, what it threw. The read is two requests, the first time:
-    // the one that names the template table's set (the SDK looks it up once and keeps it) and the one that reads the list; either can fail.
-    const ROW_SUMMARY_TEMPLATE_NAME = 'GptPowerPrompt';
-    let templateVerdict;
-    const confirmNoTemplate = async () => {
-      if (templateVerdict === undefined) {
-        try {
-          const rows = await provision.queryRecords('msdyn_aitemplate', { select: ['msdyn_aitemplateid'], filter: `msdyn_uniquename eq '${ROW_SUMMARY_TEMPLATE_NAME}'`, top: 1 });
-          templateVerdict = { absent: Array.isArray(rows) && rows.length === 0 };
-        } catch (failure) {
-          templateVerdict = { absent: false, failure };
-        }
-      }
-      return templateVerdict;
-    };
     const aiSummaryUnsupported = (err) => {
-      if (err && err.code === 'ROW_SUMMARY_TEMPLATE_NOT_FOUND') return templateVerdict && templateVerdict.absent ? NO_TEMPLATE_REASON : false;
+      if (err && err.code === 'ROW_SUMMARY_TEMPLATE_NOT_FOUND') return NO_TEMPLATE_REASON;
       const detail = `${(err && err.message) || ''} ${JSON.stringify((err && err.cause) || '')}`;
       // Match the platform's own error CODE, not the prose: the message is localized and the status
       // alone (403/400) is also what a plain privilege or validation failure returns, which must
@@ -7222,25 +7224,7 @@ async function runSdkBuildPhases(spec, opts, owed) {
         const override = summaryOverrides.get(String(logical).toLowerCase());
         await runner.run('ai-features', `row summary for ${logical}`, async () => {
           const promptSpec = buildPromptSpec(ent, { spec, override });
-          let res;
-          try {
-            res = await provision.configureRowSummary(promptSpec, { solutionUniqueName });
-          } catch (err) {
-            // `skipIf` is synchronous, so the read that confirms the template is absent is made here, before the error reaches it. The error is never replaced: when the
-            // read does not confirm it, it stops the build as it is — the SDK's own error, whole, as the halt's own cause.
-            if (err && err.code === 'ROW_SUMMARY_TEMPLATE_NOT_FOUND') {
-              const { failure } = await confirmNoTemplate();
-              // A read that FAILED is kept beneath the SDK's error. The runner decides from the chain of causes whether the build may run this attempt again (lib/retry-policy.js, judgeFailure): a throttle, an
-              // unavailable service or a reset connection that stopped the read has to be on that chain, or the halt is final whatever the read failed with — and the halt's text says that the read failed, and why
-              // (operatorRemedy). It is only a failure of the SERVICE that makes the halt transient: a missing template on its own, and a read that answered, however wrongly, stay final. The SDK's error has no
-              // cause of its own, so the one it has here is this one. `withCause` is the link a result carries for the same reason (a failure reported by value); an error that cannot take it (a frozen one)
-              // stops the build as it did before, final.
-              if (failure !== undefined) {
-                try { withCause(err, failure); } catch { /* nothing to carry it on */ }
-              }
-            }
-            throw err;
-          }
+          const res = await provision.configureRowSummary(promptSpec, { solutionUniqueName });
           result.created.ai.summaries[logical] = res;
           return res.modelId;
         }, {

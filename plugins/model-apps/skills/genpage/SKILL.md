@@ -1,7 +1,7 @@
 ---
 name: genpage
 version: 2.3.1
-description: Creates, updates, and deploys Power Apps generative pages for model-driven apps using React v17, TypeScript, and Fluent UI V9. Orchestrates specialist agents for planning, entity creation, and code generation. Use it when user asks to build, retrieve, or update a page in an existing Microsoft Power Apps model-driven app. Use it when user mentions "generative page", "page in a model-driven", or "genux". This skill stands alone and does not require /app-builder — but if the user wants a whole app built (tables, forms, views, sitemap) rather than pages for an app that already exists, use /app-builder instead.
+description: Creates, updates, and deploys Power Apps generative pages for model-driven apps using React v17, TypeScript, and Fluent UI V9. Orchestrates specialist agents for planning, entity creation, and code generation. Use it when user asks to build, retrieve, or update a page in an existing Microsoft Power Apps model-driven app. Use it when user mentions "generative page", "page in a model-driven", or "genux". Do not use it for a generic or standalone React or web app, website, or dashboard (including a Power Apps code app), for Power Pages, canvas apps, or Power Automate, or when the user rules out Power Platform, Dataverse, or model-driven apps (for example "no Power Platform"). A generative page only runs inside a model-driven app, and this skill cannot scaffold a standalone project. This skill stands alone and does not require /app-builder — but if the user wants a whole app built (tables, forms, views, sitemap) rather than pages for an app that already exists, use /app-builder instead.
 author: Microsoft Corporation
 argument-hint: "<page description> | edit"
 user-invocable: true
@@ -876,7 +876,10 @@ recorded it: the worker wrote nothing, and what is there is an earlier attempt's
 or `genpage-worker-output.js` returns `"ok":false`, do not re-dispatch that worker.
 Run the Phase 5b page-builder workflow inline for only the failed page, preserving
 the same plan and dispatch inputs. This is the same inline fallback path for missing
-and invalid worker output. The workers have no shell, so they cannot run the Griffel
+and invalid worker output. A `Task tool: none on this host` line in a worker's result
+is not a report of that kind: task tracking is optional for a worker
+(`references/agent-interaction-contract.md`), and the page is judged by its file and
+this gate. The workers have no shell, so they cannot run the Griffel
 check themselves; run it on every generated page, exactly as in step 9 of Phase 5b,
 
 ```powershell
@@ -1175,21 +1178,36 @@ imports the package and applies the settings in the same import. Each prints one
 `source` (`"sdk"`, or `"pac"` with a `fallback` that says why the SDK did not do the work). The import is
 sent once: a gateway's answer for an import the platform may have accepted is never answered with a second one.
 The one exception is the platform's refusal to start it because a publish, or another import, holds the
-environment's lock (HTTP 429 with one of the customization-lock error codes whose documented text is "Cannot
-start …", such as "Cannot start the requested operation [Import] because there is another [Publish] running"):
-the script then waits and sends it again under a new job id — only after it has read that no import job exists
-for the refused one — in at most five sends and at most five minutes in all, counted from the first refusal to
-the last send (10, 20, 40 and 60 seconds between the sends, or the longer wait the platform asks for in
-`Retry-After`, in seconds or as a date, waited whole; the time an import the platform accepted then takes is
-not counted) — and says so in its output (`importAttempts`, `importRefusals`). A `Retry-After` that does not
-fit in what is left of the five minutes ends the retry at once, with no send made early. When the sends or the
-time run out the failure is the platform's refusal, with a sentence that says which: run the import again when
-the other operation has finished. Every other refusal is sent once, the generic solution-concurrency one
-(error code `0x80071151`, documented as an installation or removal that "failed") included. The code decides, not
-the words: the platform has been measured to refuse an import that meets another import or a publish with
-`0x80071151` and the same "Cannot start the requested operation [Import] because there is another [Publish]
-running" words, and that import is sent once — tell the maker to run it again once the other operation has
-finished. A secret value
+environment's lock: HTTP 429 with one of the customization-lock error codes whose documented text is "Cannot
+start …" (such as "Cannot start the requested operation [Import] because there is another [Publish]
+running"), or with the generic solution-concurrency code `0x80071151` and a message that begins "Cannot start"
+("Cannot start another [Import] because there is a previous [Import] running" is what the platform has been
+measured to answer an import that meets another import). The script then waits and sends it again under a new
+job id — but only after the refused send's import job has proved that nothing of the package was applied. For
+a lock code the job does not exist (the script reads it after the wait). For `0x80071151` the code alone does not
+say that nothing started, so the job is read once, at once: it does not exist, or it is finished and its log
+says that the import failed with that error before it processed the solution or any component. The sends are at
+most five and the time at most five minutes in all, counted from the first refusal to the last send (10, 20,
+40 and 60 seconds between the sends, or the longer wait the platform asks for in `Retry-After`, in seconds or
+as a date, waited whole; the time an import the platform accepted then takes is not counted) — and the script
+says so in its output (`importAttempts`, `importRefusals`, and for `0x80071151` how the job proved it). A
+`Retry-After` that does not fit in what is left of the five minutes ends the retry at once, with no send made
+early, and a wait that ends after the five minutes (a timer that resumed late) ends it before the next send.
+When the time runs out, or the sends run out on a lock code, the failure is the platform's refusal, with a
+sentence that says which: run the import again when the other operation has finished. When the sends run out
+on a `0x80071151` refusal, the job of that last send was not read, so nothing shows that it applied nothing:
+do not run the import again until you have looked up the import job the failure names (`importjobs(<id>)`)
+and it does not exist (404), or it is finished (`completedon` set) and its log (`data`) is that of an import
+refused at the lock — the root says `succeeded="failure"` and `errorcode="-2147020463"`, every
+`solutionManifest` is `processed="false"`, and no element under the root but `upgradeHandler` and
+`validateHandler` has a `processed` other than `"false"` — and the other operation has finished; anything
+else means the import may be running or may have applied the package.
+When the job of a `0x80071151` refusal
+proves nothing — it is still running, the import failed after it began, its log is not what is expected, or it
+cannot be read — the import is sent once and the failure says why it was not sent again: do not run the import
+again until you have looked up the import job it names (`importjobs(<id>)`, or the solution history in Maker)
+and it shows that nothing was imported, and the other operation has finished. Every other refusal is sent once,
+`0x80071151` with any other words included. A secret value
 and a connection id are kept out of what they print — a text that quotes one is withheld, or has it
 replaced by `<redacted>` — with these limits: a value of fewer than six characters that is known not to be
 a secret is not hidden; one whose type is not known (the `pac` route, a name the package does not define)

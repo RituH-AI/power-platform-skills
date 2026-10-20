@@ -7,6 +7,9 @@ description: >-
   present for approval. Writes genpage-plan.md, for downstream agents to consume,
   once the orchestrator re-invokes it with the approval outcome.
   Called by the genpage skill — not invoked directly by users.
+  Works only on generative pages in a Power Apps model-driven app. Never use it for a
+  generic React or web app, or when the user rules out Power Platform, Dataverse, or
+  model-driven apps (for example "no Power Platform").
 color: cyan
 # Two naming schemes on purpose: Claude Code names first, then the portable
 # Copilot aliases for the same capabilities. Every host ignores tool names it
@@ -517,7 +520,8 @@ the user before continuing:
 
 ## Step 5 — Hand the Plan Back for Approval
 
-Create tasks via `TaskCreate`:
+If you have a task tool (`TaskCreate`, or `todo`), create tasks; if you have none, skip this
+and never say you created a task:
 1. "Design page plan and data strategy"
 2. "Write plan document (genpage-plan.md)"
 

@@ -84,13 +84,12 @@ sample data (incl. multi-parent junction links + status reasons), and publish.
   is put back to the spec's. Two cases leave the text as it is, and **warn that it was not applied** while the rest of
   the build goes ahead: an app that was **never published** (Dataverse takes no write to its name or description until
   it is — publish it in Power Apps and re-run), and a name or description that is **localized** (held as one text per
-  language), which a rebuild never replaces with one text: change it in Power Apps. The SDK writes the name and the
-  description in one request, so while either is localized (or is any other value that is not plain text) the app's
-  header is **not edited at all**: a changed plain text beside it, and an `app.aiDescription`, are reported as not
-  applied too, with the reason — a warning, never a halt; the navigation is written as ever. (The SDK has no partial
-  header write, so the one plain field that changed cannot be sent alone; that would need a new SDK operation.) And if the
-  SDK's own read of the header fails while a text is not plain, the build stops with `APP_HEADER_NOT_PLAIN_TEXT` before
-  anything is sent or written — the SDK writes the header it holds when that read fails — and a re-run normally succeeds.
+  language, or any other value that is not plain text), which a rebuild never replaces with one text: change it in
+  Power Apps. Only that one text is held back: the SDK writes just the texts that changed, so the other text, and an
+  `app.aiDescription`, are applied as usual — a localized name beside a changed plain description writes the
+  description alone and leaves every translation of the name as it is. A text that is not plain is never sent, even
+  when the SDK's own read of the header fails (the build takes it off the copy it pushes); the HTTP client still
+  refuses a write of one, with `APP_HEADER_NOT_PLAIN_TEXT`, for a push the build did not make itself.
 - **`app.newLook`** *(optional, default off)* — opt into the **modern ("new look") shell** for this app.
   Writes the per-app `NewLookAlwaysOn` setting, which Dataverse describes as enabling the new look and
   **hiding the user switch** — so the result is deterministic rather than a per-user preference. It is
@@ -199,9 +198,8 @@ sample data (incl. multi-parent junction links + status reasons), and publish.
   those texts saved in Maker and not yet published is kept: the build's push is saved with it. If the app
   changes while the build runs, the push is refused as a concurrent edit (`version-conflict`): download
   the app again and rebuild, which never overwrites the other edit.
-  While the app's name or description is **localized** (or otherwise not plain text) this is **not applied**
-  and the build warns — it is written in the same request as those two texts, which a rebuild never sends
-  in that state; it does not halt.
+  While the app's name or description is **localized** (or otherwise not plain text) that text is left as it is, and
+  this is still **applied**: the SDK writes only what changed, so the routing description is written alone.
   **Rules:** a non-empty string of at most 1,048,576 characters, the column's maximum.
 - **`languageCode`** *(optional)* — the [LCID](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-lcid/)
   stamped on the Dataverse labels the build creates: data-model labels (table, column, choice, status
@@ -216,14 +214,15 @@ sample data (incl. multi-parent junction links + status reasons), and publish.
   flag, and a build run with it needs it there**: the build writes a form's tab and section captions in that
   language, and `--verify` holds them to the language it is told (the flag, else this field, else the
   organization's base language) — so without the flag, or this field pinned in the spec, such a form is held to
-  the organization's language and its captions cannot be confirmed: they are reported missing, or listed as
-  unverified when the form's read carries no label in that language (below). (The build's own `--verify` is told
+  the organization's language and its captions cannot be confirmed: they are reported missing, or, when the form's
+  read carries no label in that language, looked up in a translation export (below). (The build's own `--verify` is told
   the language the build used.)
   When no language can be established at all — the organization cannot be read — those captions are listed
-  as **unverified**, neither passed nor failed. So are the captions compared in a language the environment's form
-  read does not carry: the platform decides which languages' labels the FormXML it returns carries (a form built
-  with Spanish captions in an English-language organization reads back with its labels in English only), and a
-  language no label of the form is in cannot be read back, whatever the form stores.
+  as **unverified**, neither passed nor failed. A caption compared in a language the environment's form
+  read does not carry is read from a **translation export** of the app's solution instead: the platform decides which
+  languages' labels the FormXML it returns carries (a form built with Spanish captions in an English-language organization
+  reads back with its labels in English only), and the export is the one read that carries them all. It is one request,
+  made only when such a caption is there to check; the captions it cannot settle stay **unverified**.
   If the organization has **not** provisioned the LCID you pin, the build stops at the start of the
   data-model phase and lists the ones it does have — Dataverse would otherwise accept the table and
   Choice labels (silently storing them under the org's base language) and then reject the first
@@ -313,7 +312,9 @@ languages resolves to the same artifact. One option, one value, several names.
 **Round-trip.** `download-model-app` reconstructs localized labels from Dataverse: a table, plural,
 column or option labelled in several languages comes back as a map, and one labelled in a single
 language comes back as a plain string (so no existing spec changes shape). The download emits
-`pluralName` alongside a localized `displayName`, so its own output re-validates.
+`pluralName` alongside a localized `displayName`, so its own output re-validates, and beside a plain one
+whenever it is not the `"<displayName>s"` a rebuild would derive — `"Tag Catalog"` for `"Tag"` comes back,
+`"Tags"` does not (it is the default).
 A navigation `label` or `title` is always a plain string (the spec has no map form for one), read in the
 language a rebuild writes it in: `--language-code`, else the `languageCode` the spec already on disk pins,
 else the environment's base language. When none of the three gives one — the base language could not be
@@ -556,23 +557,40 @@ spec with its last snapshot, not with the deployed row, so it does not notice).
   length the spec asks for (or cannot be read). A build that stops because the table was created but cannot
   be read back yet (`TABLE_METADATA_NOT_VISIBLE`) warns that the length may not have been applied, since a
   re-run leaves an existing table's name column alone.
-- **A key over the name column — give the column a `maxLength`.** A key may hold at most 900 bytes (2 for
-  each character of text), and some environments make a new name column 850 characters long whatever length
-  the table's create asks for, so Dataverse refuses a key over it. When the spec gives the name column a
-  `maxLength` and a table's `alternateKeys[]` entry holds that column, the build makes the key after it has
+- **A key over the name column — give the column a `maxLength`.** A key may hold only so many bytes (2 for
+  each character of text) and Dataverse refuses one that is too large: Microsoft Learn documents 900 bytes, and the
+  platform's own answer on the environment this was measured on named 1,700. Some environments make a new name
+  column 850 characters long whatever length the table's create asks for — 1,700 bytes by itself, so a key over that
+  column alone is accepted there, and a key that holds any other column beside it is refused. When the spec gives the
+  name column a `maxLength` and a table's `alternateKeys[]` entry holds that column, the build makes the key after it has
   set the length — so the first build succeeds — and does not send it when the length could not be set: it stops
-  with a message that says why and what to do instead of the platform's refusal. Keep the key within 900 bytes
-  (at most 450 characters when the name column is its only column). Without a `maxLength` the build leaves the
+  with a message that says why and what to do instead of the platform's refusal. Keep the key within 900 bytes to be
+  safe on every environment (at most 450 characters when the name column is its only column). Without a `maxLength` the build leaves the
   column as the environment made it and makes the key with its table, so on such an environment the key is
   refused: give one. This holds for a key whose `displayName` goes out in one language: a string, or a language
   map that names exactly one language, whichever it is — the SDK sends either as one label, the same request, and
   where the key is made does not depend on the language the build writes in. A key labelled in several languages
   (`{ "1033": "…", "3082": "…" }`) is made **before** the length is set,
   because the update that sets the length reads the column with its labels, and Dataverse keeps only the base
-  language of a create that comes straight after such a read. So where the platform refuses such a key for the
-  length of its column, the first build stops there; the build then **warns**, naming the key and what to do: run it
-  again (the length is set as the build stops, so the key is made then), or label the key in one language so that it
-  is made after the length. Nothing is said where the environment keeps the length asked and the key is made.
+  language of a create that comes straight after such a read. The exception is a key that holds the name column **and
+  another column** where the environment made the name column too long for it (the key then cannot fit beside the
+  column, and shortening the column is what lets it): the build reads the column's length once, before it asks for such
+  a key, and makes the key after the length is set — with both labels, so the first build succeeds. A key labelled in several
+  languages over the name column alone is made before the length is set whatever the column's length. Where the platform refuses a key made before
+  the length is set for its size all the same, the first build stops there, and the build **warns**, naming the key. What the
+  warning says depends on what the build can tell of the key's size. It counts the key's columns as it creates them, 2 bytes
+  for each character of text — a `Text` column at its `maxLength` (100 without one), an `AutoNumber` column at 100 (the build
+  gives it no other length) — and any other column at one byte, so the count is a minimum. When even that minimum is over
+  1,700 bytes at the length you give the name column, the key is **proven** too large: the warning says so, with its size, and
+  that running the build again does not create it — take a column out of the key, or make its text columns shorter. Otherwise
+  the count is **inconclusive** (a column that is not text can take more than one byte, and an environment may allow less than
+  1,700), so the warning promises nothing: running the build again may create the key, since the length is set as the build
+  stops, if the name column at the length you give leaves room for it; if that run is refused the same way, compare Dataverse's
+  error with the sizes of the key's columns. Labelling the key in one language changes where it is made, not its size. The
+  stop for a key that waited for a length the build could not set says the same of the key: proven too large, no run creates
+  it as the spec has it; otherwise, once the name column has the length you give (set it in Maker, or clear what stopped the
+  build), running the build again may create the key, which the build does not promise. Nothing
+  is said where the environment keeps the length asked and the key is made.
 
 ### `visualization` — custom grid rendering (optional, PREVIEW)
 
@@ -721,6 +739,10 @@ run the lint, so an unlinted spec hits the failure at build time instead).
 ```
 - A **plain N:N** (no extra fields on the link) — use `ManyToMany`. A form sub-grid can sit on
   *either* side (the builder resolves the N:N relationship name automatically).
+- `intersectEntityName` (optional) names the table that holds the links. Leave it out and the build names it
+  after the relationship (its schema name, lower-cased). A build and `verify-model-app.js` hold the relationship
+  to the name you give it: an N:N that already uses the schema name on another intersect table is refused by the
+  build and fails verify. With no `intersectEntityName` the relationship is reused whichever intersect table it has.
 - **N:N that needs attributes on the link** (e.g. a role/date per assignment) — model a
   **junction entity** with two `OneToMany` relationships into it, and put the payload columns on
   the junction. Sample rows then bind **both** parents via `$parents` (see sampleData). This is the
@@ -1294,12 +1316,16 @@ The same goes for a language the environment's form read does not carry: the pla
 into the FormXML it returns, and it can return fewer than the form stores (measured: a form built and published with Spanish
 (`3082`) captions in an English-language (`1033`) organization keeps both languages, yet its published FormXML carries every label in
 `1033` alone). When no label of the form — on any element — is in the language a label is compared in, while the read carries labels
-in other languages, the labels compared in it
-are reported **unverified** (what the read does carry, and what to do: check them in Power Apps with that language), a label map
-`{ "1033": …, "3082": … }` is compared at the languages the read carries and the others are listed the same way, and `ok` and the exit
-status are those of everything that could be compared. A language the read does carry is compared strictly: a stale caption in it
-fails. A form whose read carries no label at all names no language that could be missing from the read: the captions the spec
-declares for it are missing, and fail. Translations are not read another way (a translation export, `RetrieveLocLabels`).
+in other languages, the labels compared in it are read from **one translation export of the app's solution** — the one read that
+carries every provisioned language — by the `id` the tab or section has in the FormXML: the caption the spec declares passes, another
+text or an empty cell is a mismatch and fails, and a label map `{ "1033": …, "3082": … }` is compared language by language. What the
+export cannot settle (it fails or cannot be read, the form gives the element no id, the export has no row for it or no column for the
+language) is reported **unverified** with the reason (what to do: check those captions in Power Apps with that language), and `ok`
+and the exit status are those of everything that could be compared. **Cost:** one request per verify, made only when there is such
+a caption to check — measured at 7.5–11.2 s for a solution of one table, more as the solution grows (it exports every label of it) —
+and it shows the published layer: a caption saved and not published is not in it. A language the read does carry is compared
+strictly, from the read: a stale caption in it fails. A form whose read carries no label at all names no language that could be
+missing from the read: the captions the spec declares for it are missing, and fail.
 A label the spec does not write is not compared. Auto forms also require readable
 FormXML for the identity check. Repeated bindings of one field with distinct IDs are allowed.
 It does **not** check field order or `after` adjacency.
@@ -1876,8 +1902,17 @@ auto-selects tables that are good row-summary candidates and skips those that ar
 ## personas[] (optional — security roles)
 
 Authors one **security role per persona**, sized to the entity access that persona's
-**jobs-to-be-done** need. Without at least one role the generated app runs only for system
-administrators; `personas[]` produces a working access model so the app opens for real users.
+**jobs-to-be-done** need, and associates the app with it. A **new** app is associated with the System
+Administrator role only, so without a persona role users who have no maker-level role cannot open it;
+`personas[]` produces a working access model so the app opens for real users.
+
+An app that **already exists** keeps the roles associated with it: a spec with no `personas[]` leaves
+them as they are, which is how an extension of such an app is written (a download carries none). Do
+not list an existing role as a persona to silence the lint — a persona's role is converged to exactly
+the privileges declared, and a role the build did not author is refused. Give an existing role access
+to a table the spec adds with `roleGrants[]` (below). Opening the app and using a table are two
+questions: lint and `write-app-spec-doc.js` keep them apart, and flag a new table that no persona job
+and no `roleGrants[]` entry grants a privilege on ("no access declared").
 
 `personas[]` is captured **first** during authoring (Level (a0), before the data model): the jobs
 are what the app exists to do, so they drive which tables and surfaces exist. `privileges[]` is

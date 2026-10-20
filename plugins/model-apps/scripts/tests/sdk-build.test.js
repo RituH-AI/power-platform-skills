@@ -113,7 +113,8 @@ function seedForm(id, fields) {
     bag: { a: [], c: [] } };
 }
 
-// `existingTables`: { logical: { entitySetName, columns:[logical...], relationships:[schema...] } }
+// `existingTables`: { logical: { entitySetName, columns:[logical...], relationships:[row...] } }, a relationship row being what the SDK's
+// metadata projection lists for the table: { schemaName, type, relatedEntity, relatedAttribute } (a name alone does not identify one).
 const MEMBER_SOLUTION_ID = '5011c0de-0000-4000-8000-000000000001'; // a GUID: the membership read interpolates it unquoted
 function mockSdk(opts = {}) {
   const calls = [];
@@ -294,7 +295,7 @@ function mockSdk(opts = {}) {
     createSolution: async (o) => { calls.push({ name: 'createSolution', args: [o] }); return { id: 'sol-1' }; },
     findTables: async (q, o) => { calls.push({ name: 'findTables', args: [q, o] }); const t = ex[String(q).toLowerCase()]; return t ? [{ logicalName: String(q).toLowerCase(), schemaName: q, displayName: q, entitySetName: t.entitySetName, isCustom: true }] : []; },
     findColumns: async (logical) => { calls.push({ name: 'findColumns', args: [logical] }); const t = ex[logical]; return ((t && t.columns) || []).map((c) => ({ logicalName: c, schemaName: c, displayName: c, attributeType: 'String', isCustom: true })); },
-    fetchEntityMetadata: async (logical) => { calls.push({ name: 'fetchEntityMetadata', args: [logical] }); const t = ex[logical]; return { logicalName: logical, displayName: logical, entitySetName: (t && t.entitySetName) || `${logical}s`, attributes: ((t && t.columns) || []).map((c) => ({ logicalName: c })), relationships: ((t && t.relationships) || []).map((s) => ({ schemaName: s, type: 'OneToMany' })) }; },
+    fetchEntityMetadata: async (logical) => { calls.push({ name: 'fetchEntityMetadata', args: [logical] }); const t = ex[logical]; return { logicalName: logical, displayName: logical, entitySetName: (t && t.entitySetName) || `${logical}s`, attributes: ((t && t.columns) || []).map((c) => ({ logicalName: c })), relationships: (t && t.relationships) || [] }; },
     createTable: async (o) => { calls.push({ name: 'createTable', args: [o] }); if (opts.failTable === o.schemaName) throw new Error('boom'); return { logicalName: o.schemaName.toLowerCase(), entitySetName: `${o.schemaName.toLowerCase()}s`, metadataId: `tbl-${o.schemaName}` }; },
     updateTable: async (l, o) => { calls.push({ name: 'updateTable', args: [l, o] }); return {}; },
     createColumn: async (e, o) => { calls.push({ name: 'createColumn', args: [e, o] }); return { logicalName: o.schemaName.toLowerCase(), metadataId: `col-${o.schemaName}` }; },
@@ -671,7 +672,7 @@ test('idempotent: an existing table is reused — no createTable, and only missi
 });
 
 test('idempotent: an existing relationship is skipped', async () => {
-  const { sdk, calls } = mockSdk({ existingTables: { new_customer: { entitySetName: 'new_customers', columns: [], relationships: ['new_customer_new_ticket'] } } });
+  const { sdk, calls } = mockSdk({ existingTables: { new_customer: { entitySetName: 'new_customers', columns: [], relationships: [{ schemaName: 'new_customer_new_ticket', type: 'OneToMany', relatedEntity: 'new_ticket', relatedAttribute: 'new_customerid' }] } } });
   await runSdkBuild(makeSpec(), { sdk, apply: true });
   assert.strictEqual(find(calls, 'createRelationship').length, 0, 'existing relationship not re-created');
 });
@@ -1091,11 +1092,14 @@ test('app header: if the fetched header cannot be put back the build halts rathe
 
 // Both columns are localizable (https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/appmodule), and whether
 // a plain write of the base-language text keeps the translations beside it has not been measured against an environment. Until it has, a
-// header that is not plain text — a localized one, held as one text per language — is never replaced by a
-// scalar: the edit is left unapplied, with a warning, and nothing else about the push changes.
+// header text that is not plain — a localized one, held as one text per language — is never replaced by a
+// scalar: its own edit is left unapplied, with a warning, and nothing else about the push changes. The text is taken off the copy right before
+// the push (`removeElement`), so the SDK — which writes every text the copy holds when its own comparison read of the header fails — has none of it to write.
 const localized = (english, french) => ({ '1033': english, '1036': french });
+const headerRemovals = (calls) => appCalls(calls, 'removeElement', (c) => c.args[2] === '/name' || c.args[2] === '/description').map((c) => c.args[2]);
+const beforeTheFirstPush = (calls, call) => calls.indexOf(call) < calls.indexOf(appCalls(calls, 'pushArtifact')[0]);
 
-test('app header: a localized name and description are never replaced by a scalar — they are left as they are and the build says the edit was not applied', async () => {
+test('app header: a localized name and description are never replaced by a scalar — they are taken off the copy before the push, and the build says the edit was not applied', async () => {
   const name = localized('Support Desk', 'Bureau d\u2019assistance');
   const description = localized('Tickets', 'Billets');
   const { sdk, calls } = mockSdk({ artifactsExist: true, existingAppName: name, existingAppDescription: description });
@@ -1103,16 +1107,17 @@ test('app header: a localized name and description are never replaced by a scala
   const result = await runSdkBuild(describedSpec(), { sdk, apply: true, phases: appShellPhases, warn: (m) => warnings.push(m) });
   assert.strictEqual(result.ok, true);
   assert.deepStrictEqual(headerEdits(calls), [], 'no write to the header text at all');
+  assert.deepStrictEqual(headerRemovals(calls), ['/name', '/description'], 'both texts are taken off the copy');
+  assert.ok(appCalls(calls, 'removeElement').every((c) => beforeTheFirstPush(calls, c)), 'before the push that would otherwise offer them to the SDK');
   const held = await sdk.getArtifact('app', appCalls(calls, 'pushArtifact')[0].args[1]);
-  assert.deepStrictEqual(held.name, name, 'the name is still the map — the spec\u2019s name is its English text: the unchanged-name, changed-description case');
-  assert.deepStrictEqual(held.description, description, 'the description is still the map');
+  assert.deepStrictEqual([held.name, held.description], [undefined, undefined], 'neither is on the copy any more, and neither was ever replaced by a scalar');
   const notApplied = warnings.filter((w) => /was not applied/.test(w));
   assert.strictEqual(notApplied.length, 1, JSON.stringify(warnings));
   assert.match(notApplied[0], /^app "Support Desk": its description was not applied: it is localized \(2 languages: 1033, 1036\)/);
   assert.strictEqual(appCalls(calls, 'pushArtifact').length, 1, 'the sitemap push is as it always is');
 });
 
-test('app header: a localized name the spec changes is not applied either — and neither is the description beside it', async () => {
+test('app header: a localized name and a localized description the spec changes are each left as they are, and the build says so for each', async () => {
   const { sdk, calls } = mockSdk({ artifactsExist: true, existingAppName: localized('Support Desk', 'Bureau d\u2019assistance'), existingAppDescription: localized('Tickets', 'Billets') });
   const warnings = [];
   await runSdkBuild(makeSpec({ app: { name: 'Help Desk', uniqueName: 'new_supportdesk', description: DESCRIBED } }), { sdk, apply: true, phases: appShellPhases, warn: (m) => warnings.push(m) });
@@ -1120,83 +1125,78 @@ test('app header: a localized name the spec changes is not applied either — an
   assert.strictEqual(warnings.filter((w) => /was not applied/.test(w)).length, 2, JSON.stringify(warnings));
   assert.ok(warnings.some((w) => /^app "Help Desk": its name was not applied: it is localized/.test(w)));
   assert.ok(warnings.some((w) => /^app "Help Desk": its description was not applied: it is localized/.test(w)));
+  assert.deepStrictEqual(headerRemovals(calls), ['/name', '/description']);
 });
 
-// The SDK's header push writes the artifact's `name` AND `description` in ONE request, whichever of them an edit changed (pinned against the
-// real bundle in app-header-text-real-bundle.test.js, which also shows what goes over the wire). So an edit of the plain one beside a
-// localized sibling would send the localized one with it — a map in a String column, or a scalar over a text that carries translations.
-// The header is therefore held whole: while either text is not plain, no edit of the header rides the push, and the build says which
-// edits it left and why.
+// The SDK's header push writes only the texts that changed, and neither compares nor writes a text removed from the copy (pinned against the real bundle in
+// app-header-text-real-bundle.test.js, which also shows what goes over the wire). So a text that is not plain is taken off the copy and holds back its OWN edit
+// only: the plain text beside it, and a routing description, are applied as usual and written alone.
 const NOT_APPLIED = /was not applied/;
 const notAppliedOf = (warnings) => warnings.filter((w) => NOT_APPLIED.test(w));
-const WRITTEN_TOGETHER = /, and the app's name and description are written in one request, so changing its (name|description) would send the (name|description) too — a rebuild never sends a text that is not plain\. Change it in Power Apps\.$/;
 
-test('app header: a plain-text name or description beside a localized one is NOT applied either — the SDK would send the localized one with it', async () => {
+test('app header: a plain-text name beside a localized description IS applied, on its own — only the localized description\u2019s edit is left, and it is taken off the copy', async () => {
   const { sdk, calls } = mockSdk({ artifactsExist: true, existingAppDescription: localized('Tickets', 'Billets') });
   const warnings = [];
   const result = await runSdkBuild(makeSpec({ app: { name: 'Help Desk', uniqueName: 'new_supportdesk', description: DESCRIBED } }), { sdk, apply: true, phases: appShellPhases, warn: (m) => warnings.push(m) });
   assert.strictEqual(result.ok, true);
-  assert.deepStrictEqual(headerEdits(calls), [], 'the name is plain text, but it would be sent beside the localized description: nothing is written');
+  assert.deepStrictEqual(headerEdits(calls), [['/name', 'Help Desk']], 'the plain name is written; the localized description is not');
   const notApplied = notAppliedOf(warnings);
-  assert.strictEqual(notApplied.length, 2, JSON.stringify(warnings));
-  assert.ok(notApplied.some((w) => /^app "Help Desk": its description was not applied: it is localized \(2 languages: 1033, 1036\)/.test(w)), JSON.stringify(notApplied));
-  const blocked = notApplied.find((w) => /^app "Help Desk": its name was not applied: /.test(w));
-  assert.ok(blocked, JSON.stringify(notApplied));
-  assert.match(blocked, /^app "Help Desk": its name was not applied: the app's description is localized \(2 languages: 1033, 1036\)/);
-  assert.match(blocked, WRITTEN_TOGETHER);
-  assert.strictEqual(appCalls(calls, 'pushArtifact').length, 1, 'the sitemap push is made as it always is');
+  assert.strictEqual(notApplied.length, 1, JSON.stringify(warnings));
+  assert.match(notApplied[0], /^app "Help Desk": its description was not applied: it is localized \(2 languages: 1033, 1036\)/);
+  assert.deepStrictEqual(headerRemovals(calls), ['/description']);
+  assert.strictEqual(appCalls(calls, 'pushArtifact').length, 1, 'one push carries the name and the navigation');
   const held = await sdk.getArtifact('app', appCalls(calls, 'pushArtifact')[0].args[1]);
-  assert.deepStrictEqual([held.name, held.description], ['Support Desk', localized('Tickets', 'Billets')], 'the copy that push carries is the fetched header, untouched');
+  assert.deepStrictEqual([held.name, held.description], ['Help Desk', undefined], 'the copy that push carries holds the new name and none of the localized description');
 });
 
-test('app header: a localized name the spec leaves as it is, beside a description it changes — the description is not applied, and the name is not mentioned', async () => {
+test('app header: a localized name the spec leaves as it is, beside a description it changes — the description is applied, and the name is not mentioned', async () => {
   const name = localized('Support Desk', 'Bureau d\u2019assistance');
   const { sdk, calls } = mockSdk({ artifactsExist: true, existingAppName: name });
   const warnings = [];
   await runSdkBuild(describedSpec(), { sdk, apply: true, phases: appShellPhases, warn: (m) => warnings.push(m) });
-  assert.deepStrictEqual(headerEdits(calls), []);
-  const notApplied = notAppliedOf(warnings);
-  assert.strictEqual(notApplied.length, 1, JSON.stringify(warnings));
-  assert.match(notApplied[0], /^app "Support Desk": its description was not applied: the app's name is localized \(2 languages: 1033, 1036\)/);
-  assert.match(notApplied[0], WRITTEN_TOGETHER);
-  assert.deepStrictEqual((await sdk.getArtifact('app', appCalls(calls, 'pushArtifact')[0].args[1])).name, name);
+  assert.deepStrictEqual(headerEdits(calls), [['/description', DESCRIBED]]);
+  assert.deepStrictEqual(notAppliedOf(warnings), []);
+  assert.deepStrictEqual(headerRemovals(calls), ['/name']);
+  const held = await sdk.getArtifact('app', appCalls(calls, 'pushArtifact')[0].args[1]);
+  assert.deepStrictEqual([held.name, held.description], [undefined, DESCRIBED]);
 });
 
-test('app header: a header of ANY shape that is not plain text holds back the edit of the other one', async () => {
+test('app header: a header text of ANY shape that is not plain holds back its own edit only — the other text is applied', async () => {
   const unreadable = [['an array', ['Support Desk']], ['a number', 42], ['null', null], ['a localized text', localized('Support Desk', 'Bureau d\u2019assistance')]];
   for (const [what, shape] of unreadable) {
-    // …in the name, beside a changed plain description
+    // …in the name, beside a changed plain description: the description is written. The name's own edit is the spec's name, which an array, a number or a null does not hold — said once;
+    // the localized text holds it (it is one of its entries), so it needs no word.
     const inName = mockSdk({ artifactsExist: true, existingAppName: shape });
     const nameWarnings = [];
     await runSdkBuild(describedSpec(), { sdk: inName.sdk, apply: true, phases: appShellPhases, warn: (m) => nameWarnings.push(m) });
-    assert.deepStrictEqual(headerEdits(inName.calls), [], `${what} in the name`);
-    const blockedDescription = notAppliedOf(nameWarnings).filter((w) => /^app "Support Desk": its description was not applied: the app's name (is localized|could not be read as plain text)/.test(w));
-    assert.strictEqual(blockedDescription.length, 1, `${what} in the name: ${JSON.stringify(nameWarnings)}`);
-    assert.match(blockedDescription[0], WRITTEN_TOGETHER);
-    // …and in the description, beside a changed plain name
+    assert.deepStrictEqual(headerEdits(inName.calls), [['/description', DESCRIBED]], `${what} in the name`);
+    assert.deepStrictEqual(headerRemovals(inName.calls), ['/name'], `${what} in the name`);
+    const ownName = notAppliedOf(nameWarnings);
+    assert.strictEqual(ownName.length, what === 'a localized text' ? 0 : 1, `${what} in the name: ${JSON.stringify(nameWarnings)}`);
+    for (const w of ownName) assert.match(w, /^app "Support Desk": its name was not applied: the app's name could not be read as plain text \(it came back as /);
+    // …and in the description, beside a changed plain name: the name is written, and the description's own edit is said once.
     const inDescription = mockSdk({ artifactsExist: true, existingAppDescription: shape });
     const descriptionWarnings = [];
     await runSdkBuild(makeSpec({ app: { name: 'Help Desk', uniqueName: 'new_supportdesk', description: 'Tickets' } }), { sdk: inDescription.sdk, apply: true, phases: appShellPhases, warn: (m) => descriptionWarnings.push(m) });
-    assert.deepStrictEqual(headerEdits(inDescription.calls), [], `${what} in the description`);
-    assert.strictEqual(notAppliedOf(descriptionWarnings).filter((w) => /^app "Help Desk": its name was not applied: the app's description (is localized|could not be read as plain text)/.test(w)).length, 1, `${what} in the description: ${JSON.stringify(descriptionWarnings)}`);
+    assert.deepStrictEqual(headerEdits(inDescription.calls), [['/name', 'Help Desk']], `${what} in the description`);
+    assert.deepStrictEqual(headerRemovals(inDescription.calls), ['/description'], `${what} in the description`);
+    assert.strictEqual(notAppliedOf(descriptionWarnings).filter((w) => /^app "Help Desk": its description was not applied: (it is localized|the app's description could not be read as plain text)/.test(w)).length, 1, `${what} in the description: ${JSON.stringify(descriptionWarnings)}`);
     assert.strictEqual(appCalls(inDescription.calls, 'pushArtifact').length, 1, `${what}: the navigation is still pushed`);
   }
 });
 
-test('app header: a routing description is NOT applied while the header holds a text that is not plain — warned, never halted, nothing sent for it', async () => {
-  // Written by the same request as the name and the description, so it would send the localized one too. Held back like the text
-  // edits: the navigation is the app step's own work and goes on, and the warning says what to do.
+test('app header: a routing description is applied beside a text that is not plain — written alone, nothing warned, and the text taken off the copy', async () => {
+  // The SDK writes the routing description by itself when only it changed, so the localized name is neither in the request nor a reason to hold the routing description back.
   const { sdk, calls } = mockSdk({ artifactsExist: true, existingAppName: localized('Support Desk', 'Bureau d\u2019assistance') });
   const warnings = [];
   const result = await runSdkBuild(makeSpec({ app: { name: 'Support Desk', description: 'Tickets', aiDescription: ROUTING } }), { sdk, apply: true, phases: appShellPhases, warn: (m) => warnings.push(m) });
-  assert.strictEqual(result.ok, true, 'the build goes on');
-  assert.strictEqual(appCalls(calls, 'addElement', (c) => c.args[2] === '').length, 0, 'the routing description is not added to the copy');
-  assert.strictEqual(appCalls(calls, 'updateElement', (c) => c.args[2] === '/aiDescription').length, 0);
-  assert.strictEqual(appCalls(calls, 'pushArtifact').length, 1, 'the sitemap push, carrying no header edit');
-  const notApplied = notAppliedOf(warnings);
-  assert.strictEqual(notApplied.length, 1, JSON.stringify(warnings));
-  assert.match(notApplied[0], /^app "Support Desk": its routing description \(app\.aiDescription\) was not applied: the app's name is localized \(2 languages: 1033, 1036\), and the app's name, description and routing description are written in one request, so changing it would send the name too — a rebuild never sends a text that is not plain\. Change it in Power Apps\.$/);
-  // …and a routing description the app already has, or none in the spec, is not worth a word.
+  assert.strictEqual(result.ok, true);
+  assert.deepStrictEqual(appCalls(calls, 'addElement', (c) => c.args[2] === '').map((c) => c.args[3]), [{ aiDescription: ROUTING }], 'added at the artifact root, as for a plain header');
+  assert.deepStrictEqual(headerEdits(calls), []);
+  assert.deepStrictEqual(headerRemovals(calls), ['/name']);
+  assert.strictEqual(appCalls(calls, 'pushArtifact').length, 1, 'one push carries the routing description and the navigation');
+  assert.deepStrictEqual(notAppliedOf(warnings), []);
+  // …and a routing description the app already has, or none in the spec, writes nothing, as for a plain header.
   const quiet = [];
   for (const [app, over] of [[{ name: 'Support Desk', description: 'Tickets', aiDescription: ROUTING }, { existingAppAiDescription: ROUTING }], [{ name: 'Support Desk', description: 'Tickets' }, {}]]) {
     const m = mockSdk({ artifactsExist: true, existingAppName: localized('Support Desk', 'Bureau d\u2019assistance'), ...over });
@@ -1206,26 +1206,39 @@ test('app header: a routing description is NOT applied while the header holds a 
   assert.deepStrictEqual(notAppliedOf(quiet), []);
 });
 
-test('app header: with the pages phase the finalizer holds the header back the same way, and an app-shell-only run with a routing description pushes nothing', async () => {
+test('app header: with the pages phase the finalizer applies the header the same way, and an app-shell-only run pushes a routing description beside a text that is not plain', async () => {
   const held = { existingAppDescription: localized('Tickets', 'Billets') };
   // The finalizer is the sole existing-app writer when the pages phase runs.
   const withPages = mockSdk({ artifactsExist: true, ...held });
   const warnings = [];
   await runSdkBuild(describedSpec({ aiDescription: ROUTING }), { sdk: withPages.sdk, apply: true, phases: fullPhases, genpageCli: noPages, warn: (m) => warnings.push(m) });
-  assert.deepStrictEqual(headerEdits(withPages.calls), []);
-  assert.strictEqual(appCalls(withPages.calls, 'addElement', (c) => c.args[2] === '').length, 0, 'no routing description either');
+  assert.deepStrictEqual(headerEdits(withPages.calls), [], 'the localized description is not replaced');
+  assert.deepStrictEqual(appCalls(withPages.calls, 'addElement', (c) => c.args[2] === '').map((c) => c.args[3]), [{ aiDescription: ROUTING }], 'but the routing description is applied');
+  assert.deepStrictEqual(headerRemovals(withPages.calls), ['/description']);
   assert.strictEqual(appCalls(withPages.calls, 'pushArtifact').length, 1, 'the finalizer\u2019s sitemap push, as ever');
-  assert.strictEqual(notAppliedOf(warnings).filter((w) => /its routing description/.test(w)).length, 1, JSON.stringify(warnings));
-  assert.strictEqual(notAppliedOf(warnings).filter((w) => /its name|its description/.test(w)).length, 1, JSON.stringify(warnings));
-  // Without the pages phase, a page subarea defers the sitemap write, so the routing description would be the ONLY reason to push the app: held back, there is none.
+  assert.strictEqual(notAppliedOf(warnings).length, 1, JSON.stringify(warnings));
+  assert.match(notAppliedOf(warnings)[0], /^app "Support Desk": its description was not applied: it is localized/);
+  // Without the pages phase, a page subarea defers the sitemap write, so the routing description is the ONLY reason to push the app — and it is one, with the text taken off the copy.
   const spec = describedSpec({ aiDescription: ROUTING });
   spec.appShell.areas[0].groups[0].subAreas.push({ page: 'Overview', title: 'Overview' });
   const alone = mockSdk({ artifactsExist: true, ...held });
   const aloneWarnings = [];
   await runSdkBuild(spec, { sdk: alone.sdk, apply: true, phases: appShellPhases, warn: (m) => aloneWarnings.push(m) });
-  assert.strictEqual(appCalls(alone.calls, 'pushArtifact').length, 0, 'nothing to push: the only edit was held back');
+  assert.strictEqual(appCalls(alone.calls, 'pushArtifact').length, 1, 'the routing description rides a push of its own, as it does for a plain header');
   assert.deepStrictEqual(headerEdits(alone.calls), []);
-  assert.strictEqual(notAppliedOf(aloneWarnings).length, 2, JSON.stringify(aloneWarnings));
+  assert.deepStrictEqual(headerRemovals(alone.calls), ['/description']);
+  assert.strictEqual(notAppliedOf(aloneWarnings).length, 1, JSON.stringify(aloneWarnings));
+});
+
+test('app header: a text that is not plain is taken off the copy only when a push follows — a run that pushes nothing leaves the copy as the fetch read it', async () => {
+  // The same shape, with a routing description the app already has: nothing is edited, so no push is made, and an edit left on the copy would be refused by the next run (refuseUnpushedAppCopy).
+  const spec = describedSpec({ aiDescription: ROUTING });
+  spec.appShell.areas[0].groups[0].subAreas.push({ page: 'Overview', title: 'Overview' });
+  const { sdk, calls } = mockSdk({ artifactsExist: true, existingAppDescription: localized('Tickets', 'Billets'), existingAppAiDescription: ROUTING });
+  await runSdkBuild(spec, { sdk, apply: true, phases: appShellPhases, warn: () => {} });
+  assert.strictEqual(appCalls(calls, 'pushArtifact').length, 0, 'nothing to push');
+  assert.deepStrictEqual(headerRemovals(calls), [], 'so nothing is taken off the copy');
+  assert.deepStrictEqual(headerEdits(calls), []);
 });
 
 test('app header: a plain header is still edited whole — the guard changes nothing when no text is held', async () => {
@@ -1755,7 +1768,7 @@ test('apply progress total includes existing-column reconciliation steps', async
       new_customer: {
         entitySetName: 'new_customers',
         columns: ['new_name', 'new_tier', 'new_score'],
-        relationships: ['new_customer_new_ticket'],
+        relationships: [{ schemaName: 'new_customer_new_ticket', type: 'OneToMany', relatedEntity: 'new_ticket', relatedAttribute: 'new_customerid' }],
       },
       new_ticket: {
         entitySetName: 'new_tickets',
@@ -2721,6 +2734,28 @@ test('dashboards: chart + list tiles resolve the created view/visualization ids'
   assert.ok(find(calls, 'addSolutionComponent').some((c) => c.args[0].componentType === 60));
 });
 
+// A tile's height is its rowspan, and the app draws a one-row tile as its title bar alone, so a tile the spec does not
+// size is built 12 rows tall whatever its kind, and a size the spec states reaches the payload as written. The cells the
+// real bundle writes are read in dashboard-roundtrip.test.js; this drives the dashboards phase itself.
+test('dashboards: a tile the spec does not size is built 12 rows by 1 column, and an authored size is kept', async () => {
+  const spec = makeSpec();
+  spec.dashboards = [
+    { name: 'Ops', tiles: [
+      { type: 'chart', chart: 'By Priority', view: 'Active Tickets' },
+      { type: 'list', view: 'Active Tickets', name: 'Recent' },
+      { type: 'iframe', url: 'https://contoso.com/map', name: 'Map' },
+      { type: 'list', view: 'Active Tickets', name: 'Wide', colspan: 2, rowspan: 6 },
+      { type: 'list', view: 'Active Tickets', name: 'Strip', rowspan: 1 },
+    ] },
+  ];
+  const { sdk, calls } = mockSdk();
+  await runSdkBuild(spec, { sdk, apply: true });
+  const sizes = find(calls, 'addElement')
+    .filter((c) => c.args[0] === 'dashboard' && c.args[2] === '/components')
+    .map((c) => [c.args[3].name, c.args[3].rowspan, c.args[3].colspan]);
+  assert.deepStrictEqual(sizes, [['By Priority', 12, 1], ['Recent', 12, 1], ['Map', 12, 1], ['Wide', 6, 2], ['Strip', 1, 1]]);
+});
+
 test('app-shell: a live sitemap target absent from the gate approval halts before the app push', async () => {
   const spec = makeSpec();
   const existingSitemap = { areas: [{ groups: [{ subAreas: [
@@ -2826,6 +2861,24 @@ test('dashboards: a pin that names a form, not a dashboard, halts instead of wir
   answerPinned(sdk, { [PINNED_DASH]: { formid: PINNED_DASH, name: 'Account', type: 2 } });
   await assert.rejects(runSdkBuild(pinnedSpec(), { sdk, apply: true }), /dashboardId 280948ec-7bbb-5279-b106-2bdd09451a3a is a type-2 form, not a dashboard/);
   assert.ok(!find(calls, 'createArtifact').some((c) => c.args[0] === 'dashboard'));
+});
+
+// The build never applies tile edits to a dashboard that exists — it reuses the dashboard as it is — so a dashboard an
+// earlier version built keeps its one-row tiles when the default tile height changes. A rebuild adds no tile and pushes
+// nothing, whether it finds the dashboard by name or by the id a download recorded.
+test('dashboards: a rebuild does not resize the tiles of a dashboard that already exists', async () => {
+  const touched = (calls) => ['addElement', 'updateElement', 'removeElement', 'pushArtifact']
+    .flatMap((name) => find(calls, name))
+    .filter((c) => c.args[0] === 'dashboard');
+  const byName = makeSpec();
+  byName.dashboards = [{ name: 'Ops', tiles: [{ type: 'list', view: 'Active Tickets', name: 'Recent' }] }];
+  const named = mockSdk({ existingDashboards: ['Ops'] });
+  await runSdkBuild(byName, { sdk: named.sdk, apply: true });
+  assert.deepStrictEqual(touched(named.calls), [], 'a dashboard found by name is reused as it is');
+  const pinned = mockSdk();
+  answerPinned(pinned.sdk, { [PINNED_DASH]: { formid: PINNED_DASH, name: 'Command Center - Event operations', type: 0 } });
+  await runSdkBuild(pinnedSpec(), { sdk: pinned.sdk, apply: true });
+  assert.deepStrictEqual(touched(pinned.calls), [], 'a dashboard found by its pinned id is reused as it is');
 });
 
 // Names are neither unique nor compared exactly, so the lookup can return several dashboards. Reusing

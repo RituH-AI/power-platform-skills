@@ -2,7 +2,7 @@
 // Pure App Spec guardrail. Returns { ok, errors, warnings }. errors block the plan
 // gate; warnings teach. Bakes in the modeling lessons hit live — notably the
 // relationship schema-name vs lookup-name collision Dataverse rejects.
-const { relationshipSchemaName, relationshipFor, invalidChoiceSampleTokens, isPlatformIconRef, labelText, appMembershipWarnings, subgridPlacementProblems, subgridDuplicateProblems, subgridUnknownKeys } = require('./app-spec.js');
+const { relationshipSchemaName, relationshipFor, invalidChoiceSampleTokens, isPlatformIconRef, labelText, derivedPluralName, appMembershipWarnings, subgridPlacementProblems, subgridDuplicateProblems, subgridUnknownKeys } = require('./app-spec.js');
 const { compileFormIntent, formFieldLogicals, NON_FORM_RENDERABLE_TYPES } = require('./artifact-intent.js');
 const { normalizeSpecShape } = require('./spec-shape.js');
 const { resolveSurfaces, unresolvedSurfaceMessage } = require('./surface-resolver.js');
@@ -10,6 +10,7 @@ const { nearestName } = require('./nearest-name.js');
 const { isAppSourcePath } = require('./app-source-path.js');
 const { labelLintWarnings } = require('./view-filter-labels.js');
 const { navigationVerdict } = require('./app-navigation.js');
+const { noPersonasWarning, uncoveredTables, uncoveredTablesWarning } = require('./app-access.js');
 
 const CHOICE_OPTION_WARN = 12;
 const SEQNUM_RE = /\{SEQNUM(:\d+)?\}/i;
@@ -467,7 +468,7 @@ function lintAppSpec(spec) {
     // author picks a distinct name (or knowingly customizes the stock default).
     const ve = (spec.entities || []).find((x) => lc(x.schemaName) === lc(v.entity));
     if (ve && v.name) {
-      const plural = labelText(ve.pluralName, spec && spec.languageCode) || `${labelText(ve.displayName, spec && spec.languageCode) || ve.schemaName}s`;
+      const plural = labelText(ve.pluralName, spec && spec.languageCode) || derivedPluralName(ve, spec && spec.languageCode);
       if (lc(v.name) === `active ${lc(plural)}` || lc(v.name) === `inactive ${lc(plural)}`) {
         W(`View '${v.name}' has the same name as ${ve.schemaName}'s stock default view — it will MERGE onto that default (columns are unioned and the stock "Created On" is kept, but its filters/sort are ignored). Use a distinct name to author a separate view.`);
       }
@@ -609,10 +610,17 @@ function lintAppSpec(spec) {
     .filter((j) => j && typeof j === 'object')
     .map((j) => ({ persona: p.persona, job: j })));
   if (!personas.length) {
-    W('no personas[] — no jobs-to-be-done are recorded and no security role is authored, so the app opens only for system administrators. Capture who uses this app and what each of them needs to get done.');
+    // Says what the spec authors, and who can open the app only as a condition: no personas[] is also how an extension of an app that already has roles
+    // is written on purpose (a persona's role is converged to the declared privileges, so it is not how to add one table to somebody else's role), and
+    // a spec cannot tell the lint whether the app is new. See lib/app-access.js.
+    W(noPersonasWarning(spec));
   } else if (!jobs.length) {
     W('personas[] declares no jobs — a persona with no jobs-to-be-done neither documents the app nor sizes its security role.');
   }
+  // A table this spec creates is used by the users of a role only once a privilege on it is granted: by a persona, or by a roleGrants[] entry for a role that
+  // already exists. Whatever roles the app has, nothing here gives any of them this table.
+  const withoutAccess = uncoveredTables(spec);
+  if (withoutAccess.length) W(uncoveredTablesWarning(withoutAccess));
   for (const { persona, job } of jobs) {
     if (!(Array.isArray(job.surfaces) && job.surfaces.length)) {
       W(`persona "${persona}" job "${job.name}" is not mapped to a surface (jobs[].surfaces[]) — nothing in this app demonstrably lets that persona do the job.`);

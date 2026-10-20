@@ -20,18 +20,34 @@
 // A language is also one the form's READ may not carry. The platform decides which languages' labels go into the FormXML a caller reads, and it can
 // return fewer than the form stores (live: a form built with Spanish captions in an English-language organization, the Spanish captions stored, reads
 // back with every label in English). When no label of the form's FormXML is in the language a label is compared in, that label is not missing — the read
-// cannot show it — and it is listed under `unverified` as well, with the languages the read does carry and what to do (check it in Power Apps with that
-// language, or, for a label written as a string, verify in a language the read carries); a label map is compared at the languages the read carries and
-// listed for the others. A language the read does carry is compared strictly, as ever. Translations are not read another way (a translation export,
-// RetrieveLocLabels): what a caller's FormXML cannot show is not verified.
+// cannot show it — so it is read from a TRANSLATION EXPORT of the app's solution instead: one `ExportTranslation` request (readerFor's translationLabels,
+// lib/translation-labels.js), made only when such a caption is there to check and shared by the whole run, which carries every provisioned language — the
+// published layer — keyed by the id of each tab and section. A caption it shows right passes and one it shows different, or not at all, is a mismatch.
+// What it cannot settle (the export fails or cannot be read, or has no row for the element) is listed under `unverified` as before, with the reason, the
+// languages the read does carry and what to do (check it in Power Apps with that language, or, for a label written as a string, verify in a language the
+// read carries); a label map is compared at the languages the read carries, and for the others the same way. A language the read does carry is compared
+// strictly, as ever, from the read. COST: the export is one request — 7.5–11.2 s for a solution of one table, more as the solution grows, because it
+// exports every label of it — sent once and never again on a throttled or unavailable answer; a run with no such caption makes none.
 //
 // Result JSON: { ok, present, total, missing, errors } and, only when a check could not be decided, `unverified: [ "<kind>:<name> (<reason>)" ]`.
 // `unverified` does not change `ok` or the exit status.
+//
+// Every `WARNING:` line this prints on stderr is also in the result, as the optional `warnings: [ "<message>" ]`: the same messages, without the prefix,
+// in the order they were printed, and left out when there is none. They are the spec's own (validateAppSpec's — among them the findings that verification
+// alone downgrades from errors to warnings: a relationship-name collision and the two column rules) and, last, a page workspace the run could not remove.
+// A caller that reads only the JSON would otherwise lose what a person reads on stderr. `warnings` does not change `ok` or the exit status, and it is there
+// on a failed verification and on a refused spec ({ ok: false, errors, warnings }) as on a passed one. A run that stops on an unexpected error prints that
+// error on stderr and no JSON, as ever.
+//
+// The result is pure ASCII: every character above U+007E — the em dash of a warning, a Spanish label or a Japanese form name in a message, an accented folder name — is a `\uXXXX`
+// escape, which any JSON parser reads back as the original text. A raw one is garbled by the code page of the console that captures it (Windows PowerShell 5.1 reads a child's
+// stdout as OEM text), and an agent reads this off a console. stderr is for people and is not escaped.
 
 const fs = require('node:fs');
 const path = require('node:path');
 const { parseArgs, validateFlags, readLanguageCodeFlag, readJsonArg, emitResult, dataverseOrigin } = require('./lib/dataverse-auth.js');
 const { createAzHttpClient } = require('./lib/sdk-http-client.js');
+const { readTranslationLabels, isTranslationExport } = require('./lib/translation-labels.js');
 const { verifySpec } = require('./lib/verify-spec.js');
 const { readBaseline } = require('./lib/deployed-baseline.js');
 const { appUniqueName } = require('./lib/sdk-build.js');
@@ -47,6 +63,9 @@ const { depthFromMask } = require('./lib/role-privileges.js');
 const { appEntityComponentsFor, appMainFormsFor, appComponentRows } = require('./lib/app-components.js');
 const { readChoiceAttributes } = require('./lib/view-filter-labels.js');
 const { sameFormXmlAcrossLayers } = require('./lib/formxml-layers.js');
+// The app's id and the ids of the roles associated with it live in lib/app-roles.js: the design document reads the same relationship. Still exported from here.
+const { appIdFor, appRoleIdsFor } = require('./lib/app-roles.js');
+const { makeWritesBlocking } = require('./lib/output-redaction.js');
 
 // An SDK on a THROWAWAY workspace — a temporary folder `dispose()` removes — and never on the app folder's own.
 //
@@ -108,36 +127,6 @@ async function sitemapXmlFor(sdk, appUnique) {
   if (!smId) return '';
   const sms = await sdk.queryRecords('sitemap', { select: ['sitemapxml'], filter: `sitemapid eq ${smId}`, top: 1 });
   return (sms && sms[0] && sms[0].sitemapxml) || '';
-}
-
-// Resolve the app module id from its unique name.
-async function appIdFor(sdk, appUnique) {
-  const rows = await sdk.queryRecords('appmodule', { select: ['appmoduleid'], filter: `uniquename eq '${odataLit(appUnique)}'`, top: 1 });
-  return rows && rows[0] && rows[0].appmoduleid;
-}
-
-async function appRoleIdsFor(sdk, appUnique) {
-  try {
-    const appId = await appIdFor(sdk, appUnique);
-    if (!appId) return { ok: false, reason: `app '${appUnique}' could not be resolved` };
-    if (!sdk.dataverse || typeof sdk.dataverse.get !== 'function') return { ok: false, reason: 'SDK dataverse reader is unavailable' };
-    // The SDK has associate/disassociate helpers for `appmoduleroles_association`, but no modeled
-    // read for that N:N membership. Read the relationship navigation property directly so verify
-    // proves the deployed app<->role rows the model-driven app launcher uses, rather than inferring
-    // access from role existence or from the build result.
-    // See appmodule relationships: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/appmodule
-    const res = await sdk.dataverse.get(`/appmodules(${appId})/appmoduleroles_association?$select=roleid`);
-    if (!res || res.status < 200 || res.status >= 300) return { ok: false, reason: `HTTP ${res && res.status}` };
-    return {
-      ok: true,
-      roleIds: ((res.body && res.body.value) || [])
-        .map((r) => r && r.roleid)
-        .filter(Boolean)
-        .map((id) => String(id).toLowerCase()),
-    };
-  } catch (err) {
-    return { ok: false, reason: (err && err.message) ? String(err.message).slice(0, 200) : 'read failed' };
-  }
 }
 
 // How many pages readerFor's pageCodes reads at once. A page read is its rows' bytes and its conversation, a handful of requests, so a few at a
@@ -353,6 +342,11 @@ function readerFor(sdk, appUnique, opts) {
       const row = rows && rows[0];
       return (row && row.formxml) || null;
     },
+    // translationLabels(solutionUniqueName): the captions of the solution's forms in EVERY provisioned language, from ONE translation export of the solution
+    // (lib/translation-labels.js) — what a tab's or a section's caption is compared with in a language the form's own read does not carry. Answers
+    // { ok: true, languages, lookup } or { ok: false, reason } and never throws. verifySpec asks for it at most once a pass, and only when a caption needs it; it is not cached
+    // here, because the reader is reused across verifies and the export is the published layer, which a later verify must see change.
+    translationLabels: (solutionUniqueName) => readTranslationLabels(sdk.dataverse, solutionUniqueName),
     // servedMainForms(entity): the Main forms the platform serves the user running verify for a table,
     // first to last — the order a user without a remembered form opens them in (AB#6736948). The public
     // RetrieveFilteredForms function is the platform's own answer to "which forms may this user open,
@@ -399,6 +393,14 @@ function readerFor(sdk, appUnique, opts) {
     // differs — a tile, a cell, an attribute, a label in a language it carries — is a change, and a FormXML that is not
     // one well-formed XML document is one too. Two equal texts are the same dashboard, as before.
     //
+    // For a user whose own language is the organization's second one, the published read carries both languages, the
+    // user's own first, and words a caption another way than the draft read does, on a dashboard nothing has written since
+    // its publish — so no text says that it is the published one. The platform does: the published row and the draft each
+    // answer an `@odata.etag`, the same one until the draft is written (live-measured; the row's `queryRecords` answer carries
+    // it beside the FormXML). When the two are the same and the published read carries more than one language, the reads
+    // are compared in everything but their captions: a tile that differs is still a change. With another token, none, or a
+    // published read of one language (a user of the base language), the rule above decides, as it always did.
+    //
     // Equal FormXML before and after does not prove the fetch between them read it: a draft saved and then put
     // back (A, then B, then A again) leaves both checks reading A while the fetch read B, and B's tiles passed. So
     // each check also takes the draft's `@odata.etag`, which RetrieveUnpublished returns in the body and which
@@ -416,8 +418,8 @@ function readerFor(sdk, appUnique, opts) {
         if (!draft || draft.status < 200 || draft.status >= 300) throw new Error(`the draft of dashboard ${dashboardId} could not be read (HTTP ${draft && draft.status})`);
         const draftXml = draft.body && draft.body.formxml;
         if (!row || typeof row.formxml !== 'string' || typeof draftXml !== 'string') throw new Error(`the FormXML of dashboard ${dashboardId} could not be read`);
-        if (!sameFormXmlAcrossLayers(row.formxml, draftXml)) throw new Error(`dashboard ${dashboardId} has changes that are not published — publish it, then verify`);
         const version = draft.body['@odata.etag'];
+        if (!sameFormXmlAcrossLayers(row.formxml, draftXml, { published: row['@odata.etag'], saved: version })) throw new Error(`dashboard ${dashboardId} has changes that are not published — publish it, then verify`);
         if (typeof version !== 'string' || version === '') throw new Error(`the version of dashboard ${dashboardId} could not be read`);
         return { xml: row.formxml, version };
       };
@@ -583,6 +585,11 @@ function readerFor(sdk, appUnique, opts) {
   return base;
 }
 
+// An agent reads the result off a console, and Windows PowerShell 5.1 decodes a child's stdout with the OEM code page: the UTF-8 bytes of an em dash in a warning reach it as three other
+// characters, and a Spanish label or a Japanese form name in a message as others still. `ascii` writes every character above U+007E as a `\uXXXX` escape instead — the same JSON to any
+// parser, and nothing a code page can garble (asciiJson in lib/dataverse-auth.js). It is for the result only: stderr is for people and is written as it is.
+const RESULT_AS_ASCII = { ascii: true };
+
 async function main() {
   const argv = process.argv.slice(2);
   const { positional, flags } = parseArgs(argv);
@@ -595,6 +602,7 @@ async function main() {
     needValue: ['env', 'spec', 'workspace', 'language-code', 'languageCode'],
   });
   if (flagError) {
+    makeWritesBlocking(process.stdout, process.stderr);
     process.stderr.write(`✗ ${flagError}\n${USAGE}\n`);
     process.exit(1);
   }
@@ -613,6 +621,7 @@ async function main() {
   try {
     languageCode = readLanguageCodeFlag(flags);
   } catch (err) {
+    makeWritesBlocking(process.stdout, process.stderr);
     process.stderr.write(`✗ ${err.message}\n${USAGE}\n`);
     process.exit(1);
   }
@@ -628,8 +637,17 @@ async function main() {
   // `required: "true"` made not required) must still reach its deployment. The warning names the column and the fix for the next build. Not the
   // structural profile: that would also skip the checks of pages and forms that verification relies on.
   const v = validateAppSpec(spec, { profile: 'deploy', relationshipCollisions: 'warn', columnValues: 'warn' });
-  if (!v.ok) { emitResult(false, { ok: false, errors: v.errors }); return; }
-  for (const w of v.warnings || []) process.stderr.write(`WARNING: ${w}\n`);
+  // A warning is printed for a person and kept for the result JSON in one step, so the two cannot differ: a caller that reads only the JSON must not
+  // lose what stderr says. The spec's are found before it is judged, so a spec that is refused reports the warnings it also has.
+  const warnings = [];
+  const warn = (message) => {
+    warnings.push(message);
+    process.stderr.write(`WARNING: ${message}\n`);
+  };
+  // A refused spec ends the run right after its warnings, so they are made blocking first (lib/output-redaction.js).
+  if (!v.ok) makeWritesBlocking(process.stdout, process.stderr);
+  for (const w of v.warnings || []) warn(w);
+  if (!v.ok) { emitResult(false, { ok: false, errors: v.errors, ...(warnings.length ? { warnings } : {}) }, RESULT_AS_ASCII); return; }
   const workspaceDir = workspaceArg || path.join(path.dirname(specPath), '.maker-workspace');
   // Only the build's baseline is READ from here, so nothing is created: a folder that does not exist (or cannot be
   // inspected) is simply one with no baseline. A LINK at the folder is still refused, as everywhere else the plugin
@@ -642,7 +660,8 @@ async function main() {
       return;
     }
   }
-  const httpClient = createAzHttpClient(env);
+  // The one request this run sends once whatever answers it is the translation export (isTranslationExport): a long action, which a re-send would run a second time.
+  const httpClient = createAzHttpClient(env, { sendOnce: isTranslationExport });
   // The SDK works in a throwaway workspace (see throwawaySdk), never the app folder's `.maker-workspace`: verify
   // must run against any environment the app is deployed to, whichever one that folder was built against.
   const session = await throwawaySdk(env, httpClient, 'verify-');
@@ -668,7 +687,7 @@ async function main() {
     try {
       if (genpage && typeof genpage.dispose === 'function') {
         const leftOnDisk = leftOnDiskWarning(await genpage.dispose({ waitMs: PAGE_READS_END_WAIT_MS }));
-        if (leftOnDisk) process.stderr.write(`WARNING: ${leftOnDisk}\n`);
+        if (leftOnDisk) warn(leftOnDisk);
       }
     } catch { /* best-effort */ }
     session.dispose();
@@ -676,6 +695,8 @@ async function main() {
   // Show `detail` on a failing check. Without it a READ that failed (throttling, auth expiry, a 5xx)
   // is indistinguishable from an artifact that is genuinely absent — verifySpec records the cause
   // but the operator saw only "✗ view: Active Orders" and would chase a phantom deployment drift.
+  // The run's last writes: these lines, then the result and the exit, with no turn of the event loop between them — made blocking (lib/output-redaction.js).
+  makeWritesBlocking(process.stdout, process.stderr);
   for (const c of r.checks) process.stderr.write(`  ${c.present ? '✓' : '✗'} ${c.kind}: ${c.name}${!c.present && c.detail ? ` — ${c.detail}` : ''}\n`);
   process.stderr.write(`\n${r.ok ? '✓ verify PASS' : `✗ verify FAIL — ${r.missing.length} missing`} (${r.checks.length - r.missing.length}/${r.checks.length} present)\n`);
   // What verify could not DECIDE is neither a pass nor a failure: listed beside the verdict, with its reason, so a green run never reads as
@@ -687,7 +708,9 @@ async function main() {
   }
   // Include `errors` (alias of missing) so emitResult's failure note reports an accurate count.
   const missing = r.missing.map((m) => `${m.kind}:${m.name}${m.detail ? ` (${m.detail})` : ''}`);
-  emitResult(r.ok, { ok: r.ok, present: r.checks.length - r.missing.length, total: r.checks.length, missing, errors: missing, ...(unverified.length ? { unverified } : {}) });
+  // `warnings` repeats the `WARNING:` lines printed above for a caller that reads only this JSON. Like `unverified` it is left out when there is none, and it changes
+  // neither `ok` nor the exit status.
+  emitResult(r.ok, { ok: r.ok, present: r.checks.length - r.missing.length, total: r.checks.length, missing, errors: missing, ...(unverified.length ? { unverified } : {}), ...(warnings.length ? { warnings } : {}) }, RESULT_AS_ASCII);
 }
 
 if (require.main === module) {
