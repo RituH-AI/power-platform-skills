@@ -43,6 +43,12 @@ Reference from a column via `"globalChoice": "new_priority"` (built before the c
   resource that already exists is reused as-is, so changing `content` and rebuilding deploys nothing
   and the old script keeps running. Delete the web resource (or tear down) and rebuild to change it —
   note it cannot be deleted while a command or form handler still references it.
+- **An unconfirmed first write is different from an ordinary content edit.** A
+  `WEB_RESOURCE_UNVERIFIED` halt names the existing row; it does not mean the resource was lost.
+  Keep the same writable build workspace and run the full build again after resolving the cause:
+  its recovery record makes the build write the content again by that id, publish it, verify the
+  published content, and finish adding it to the solution. Do not delete or rename it to retry.
+  A conflicting name/id or an unwritable recovery record needs the explicit resolution in the halt.
 - **Never hardcode Choice (option-set) values in the script.** Values like `100000003` are assigned
   per publisher, so a literal that is correct in one environment silently selects nothing in another —
   and a `setValue` with an unknown value fails quietly. Resolve by label instead:
@@ -283,7 +289,8 @@ works through.
   than emit a spec that cannot be rebuilt: rename one in Maker and download again. Because a name can
   also match **another app's** dashboard, ownership comes from the app's solution, which holds every
   dashboard the build creates (one the build cannot add to it is removed again, or named in the halt
-  when that fails too). When several in the
+  when that fails too; one a build created and then stopped before adding is added by the next build,
+  which finds it by the id it recorded in its workspace before the create). When several in the
   environment match, the build reuses — and verify checks, its sitemap entry included — the one the
   solution holds, and halts if that does not single one out; a single match is used as it is. Teardown
   deletes only the ones the solution holds, never a namesake, and none when the spec has no real

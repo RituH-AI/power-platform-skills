@@ -62,7 +62,8 @@ prod-ready** app; don't under-build (a bare table list) or over-build (surfaces 
   `100000003`, because they are assigned per publisher. Resolve by label via `getOptions()`
   (see `references/app-spec-schema-advanced.md` → webResources). Note also that command and web-resource
   **edits do not redeploy on rebuild** — the phases reuse what exists, so changing a button or a
-  script means deleting it first.
+  script means deleting it first. This does not apply to recovery of the build's own
+  `WEB_RESOURCE_UNVERIFIED` row: keep that row and the same build workspace, then follow its halt.
 - **Form logic without code** — `businessRules[]`: show/hide, lock/unlock, set-required and
   set-value, driven by a condition on the record. **Reach for a business rule before form JS** when
   the requirement is field-level and declarative — it is visible in the maker, survives solution
@@ -326,9 +327,10 @@ After plan-mode approval (before the full build):
    The plan's `## Environment` carries `Mode: app-builder` and every page row carries a **Key**, so
    the worker emits `"PAGEREF_<key>"` for cross-page navigation (never a file-derived token — a
    downloaded page's `codeFile` is a path, not its identity). Custom nav ids go in `data:` — never
-   `recordId`. `Connectors: none` and `Telemetry: disabled` are constants here: the App Spec has no
-   connector-binding concept (so the projected plan always says `No connector bindings.`), and
-   `/app-builder` never runs the Phase 4.7 `custom-telemetry` probe. Both are stated explicitly
+   `recordId`. `Connectors: none` and `Telemetry: disabled` are constants here: `/app-builder` writes no
+   connector code (the App Spec's `connectorBindings` / `actionBindings` are lists a downloaded page already
+   holds, carried through a rebuild and never authored here, so the projected plan always says
+   `No connector bindings.`), and `/app-builder` never runs the Phase 4.7 `custom-telemetry` probe. Both are stated explicitly
    rather than omitted — the page-builder treats a missing line as the same fail-closed value, but
    an explicit line is what makes the dispatch contract checkable.
 
@@ -463,7 +465,7 @@ fails. A form whose read carries no label at all is not such a case: the caption
 Narrate progress as it runs. Transient env errors (a 429 or 503, a customization lock, a concurrent-operation
 guard or a SQL timeout the service names by its error code, a timeout or reset of the connection) are
 **auto-retried** with backoff on `--apply` (the build is idempotent, so a retry reuses what's already created).
-A throttled service is waited for as long as it asks (`Retry-After`) — by the HTTP client's re-sends of a throttled read or publish, by the page writes and by the build's own re-runs of a phase — inside one budget of five minutes per run for all the waiting
+A throttled service is waited for as long as it asks (`Retry-After`) — by the HTTP client's re-sends of a throttled read or service-protection-limited publish, by the page writes and by the build's own re-runs of a phase — inside one budget of five minutes per run for all the waiting
 a throttle costs: when the next wait does not fit, the build stops with a `throttle-budget-exhausted`
 halt that says what the service asked — run it again later and it continues. (A 5xx, a reset connection or a deadlock is not a throttle: those keep their own, shorter schedule and are not counted in it.) If the build still **halts** (`BuildHalt`) on an
 unrecoverable error, surface it and ask the user how to proceed via `AskUserQuestion` (adjust the
@@ -475,7 +477,12 @@ targeted artifact so the change takes effect (see *Notes & limits*).
 **Recovery from a failed or halted build: run the full build again.** The build is idempotent — every
 phase re-uses what's already created and only fills the gaps. SDK metadata is persisted under
 `<working-dir>/.maker-workspace/` (override with `--workspace`). There is no apply-safe
-`--from <phase>` shortcut; a full rerun is the correct and safe recovery path. One exception: an
+`--from <phase>` shortcut; a full rerun is the correct and safe recovery path — after a `WEB_RESOURCE_UNVERIFIED`
+halt too: a web resource was written but its publication could not be confirmed (often because another customization
+held the environment's lock), the build recorded it, and a rerun using the **same writable workspace** writes it
+again by its id; do not delete or rename it. If the halt says its recovery record could not be saved, or reports
+a conflicting name/id, follow that explicit resolution instead — automatic retry is unsafe without the identity.
+One exception: an
 `already-exists` halt recurs on a rerun until that workspace directory is deleted — follow its message.
 Another: that workspace belongs to the environment it was first opened for. Only `--apply` opens it — a dry
 run works in a temporary workspace, so it binds nothing, previews from any folder, and warns when an `--apply`
@@ -569,7 +576,9 @@ failed, so a re-run can still tell, keeps the page manifest while the generative
 re-run still finds the pages the app authored, and keeps a table — with its icon web resource and a global choice its
 columns bind, which the platform refuses to delete while the table exists, and its relationship to itself — while a
 business rule on it could not be deleted (the rule's activated copy can never be deleted once its table is gone), so
-a re-run deletes the rule first, then the table and what was kept with it. **Dry-run by default**; add `--apply
+a re-run deletes the rule first, then the table and what was kept with it. It never deletes the solution's
+**publisher** (the build reuses one by prefix, and other solutions may share it); its closing summary says so in one line,
+so tell the user the publisher stays and can be removed in Maker once nothing uses it. **Dry-run by default**; add `--apply
 --allow-destructive` to actually delete (`--clear-workspace` also prunes `.maker-workspace/`).
 **`--allow-destructive` is required for `teardown --apply`** — without it teardown refuses and
 touches nothing.
@@ -686,7 +695,8 @@ This reconstructs the app into `<working-dir>/app-spec.json`. **Round-trip scope
 not everything:**
 - **Round-trips:** the sitemap → `appShell` (all subareas + icons), **every** generative page (read
   through the SDK; the pages are the sitemap's `GenPage` subareas, so Maker-added pages
-  are included, and each keeps its own name and model) into `pages[]` + their `.tsx`, the referenced
+  are included, and each keeps its own name, model, and connector and Custom API bindings —
+  `connectorBindings` / `actionBindings`) into `pages[]` + their `.tsx`, the referenced
   entities (minimal — the build reuses existing tables), **classic dashboards** (id-passthrough tiles
   carrying the deployed view/chart ids), the icon web resources, and the solution.
 - **Does NOT round-trip:** `forms[]`, `views[]`, `charts[]`, `commands[]` — they come back empty.
@@ -699,6 +709,30 @@ not everything:**
   table with a `roleGrants[]` entry (additive; it does not associate the role with the app). Lint and
   the design document name each new table no persona and no grant covers, and `write-app-spec-doc.js
   --env` lists the roles the app has.
+
+**Page bindings and another environment.** A page's connector and Custom API bindings are in the spec, by the
+properties the references document — `logicalName`, `connectorId`, `dataset`, `tables`, `tableDisplayNames`,
+`operations` for a connector binding; `name`, `isFunction`, `boundEntityLogicalName`, `displayName`,
+`parameterKinds` for a Custom API binding — each with a value of a shape known to be safe, and by nothing else,
+so a rebuild writes them back into this environment and into another one. A list in which any binding holds
+anything else (a connection id, a credential, a property no spec states, a URL with a query) is **not** in the
+spec at all: the pull's `pageBindings.notCarried` names the page, the list and the entry's place (never a value),
+and the page keeps that list as it is. Tell the user, and that the page folder's own `config.json` still holds
+everything — they must not commit or share that folder if a value there is a credential. A spec that states such
+a binding is refused. A rebuild cannot make what the bindings *name*. When the pull's result carries
+`pageBindings`, tell the user what it says before any rebuild into another environment: `neededInTarget` lists
+the connection references (and the connections behind them), the Custom APIs and the service resources (a
+SharePoint site and its list ids, say) that environment must already have, and `notCarried` the lists the spec
+could not state (a rebuild into the same environment leaves those as they are; into another one, they are bound
+with `/genpage`). The rebuild itself reads that environment's references before it writes anything: it **stops**
+(`pages-binding-reference-conflict`, nothing written) at a connection reference of that name that is for another
+connector — give the binding the logical name of a reference that is for the right connector, or set the
+binding's `connectorId` to the one that environment has, and never pick a reference for the user — and its
+warnings say by name each reference or Custom API that is not there yet, a reference that has no connection, an
+operation the custom connector there does not define, and what it could NOT check (a row that did not say its
+connector or connection, or operations no custom connector definition could prove): relay them. Do not write bindings into a
+spec yourself — they come from a page a pull read — and when you reset a page to `intent` to regenerate it, delete
+its bindings from the spec: the generator writes no connector code.
 
 Then:
 
@@ -769,7 +803,9 @@ the SDK rewrites the sitemap once to add the `GenPage` subareas) → **AI featur
 **security** (one role per `personas[]` entry, sized from its jobs' declared access; injects an
 app-module read privilege and associates the app to each role so it opens for that persona) →
 publish (opt-in). When the app has generative-page subareas the app module is created first WITHOUT
-them (they can't resolve until the pages upload), then the pages phase rewrites the sitemap. All
+them (they can't resolve until the pages upload), then the pages phase rewrites the sitemap — except for a
+new app whose navigation holds ONLY page subareas: its pages are created first, and then the app, with them
+already in its first sitemap. All
 Dataverse access goes through the SDK, so the downloaded metadata lands in `.maker-workspace/`.
 Independent ops (columns, views/charts/forms) run with bounded parallelism; publish is one
 round-trip per entity + the app. Views/charts build **before** forms so a sub-grid can reference the
@@ -823,9 +859,10 @@ child view id. Each step emits `[n/total]`.
   independently).
   **To apply one of those edits, change it in Maker, or `teardown --apply` then rebuild fresh.**
   `--verify` catches what is **missing** — a spec view column, filter condition or sort key (authored
-  sort keys must also keep their order), a relationship, command or dashboard — as a loud
-  `verify FAIL`. It tolerates **extra** deployed content, so a view column, filter or sort key you
-  removed from the spec still passes, just as one a maker added by hand does.
+  sort keys must also keep their order), a relationship, a table's command bar, a status reason, an alternate key
+  or a dashboard — as a loud `verify FAIL`. It tolerates **extra** deployed content, so
+  a view column, filter or sort key you removed from the spec still passes, just as one a maker added
+  by hand does. Individual command controls are not verified.
 - Not in scope (later): **conditional** command visibility (Power-Fx-only), **titled
   command groups** (from-scratch — needs an SDK-synthesized parent row), lookup/associated views,
   multi-area sitemaps, **column-level (field) security**, and **access teams / hierarchy security**

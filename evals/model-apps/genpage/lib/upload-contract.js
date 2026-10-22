@@ -1,8 +1,9 @@
 'use strict';
 
 const { isDeepStrictEqual } = require('node:util');
+const path = require('node:path');
 const { currentContract, workflowCalls, isUpload, isObject, resultObject, unassociatedCallProblems } = require('./workflow-evidence.js');
-const { artifactText, artifactJson, commandInfo, isGuid } = require('./evidence-utils.js');
+const { artifactText, artifactJson, commandInfo, isGuid, scriptRuns, pathKey } = require('./evidence-utils.js');
 
 const sameJson = (left, right) => isDeepStrictEqual(JSON.parse(JSON.stringify(left)), JSON.parse(JSON.stringify(right)));
 const switchOn = (value) => value === true || value === 'true';
@@ -86,6 +87,112 @@ function sameBindings(left, right, idKey) {
   return sameJson(bindingSet(left, idKey), bindingSet(right, idKey));
 }
 
+function uploadResultIdentityMatches(flags, result) {
+  return isGuid(result?.pageId) && result.appId === flags['app-id']
+    && (!flags['page-id'] || result.pageId === flags['page-id']);
+}
+
+function pageIdentityProblems(event, flags, result, beforePage, afterPage, update) {
+  const problems = [];
+  if (afterPage.pageId !== result?.pageId || afterPage.appId !== result?.appId) {
+    problems.push(`${event}: read-back identity differs from the upload result`);
+  }
+  if (update && (beforePage.pageId !== flags['page-id'] || beforePage.appId !== flags['app-id'])) {
+    problems.push(`${event}: update does not target the downloaded page in its app`);
+  }
+  return problems;
+}
+
+function sameRecordedEnvironment(left, right) {
+  try { return typeof left === 'string' && typeof right === 'string' && new URL(left).origin === new URL(right).origin; }
+  catch { return false; }
+}
+
+// A repeated page ID does not identify a snapshot's source. The recorded destination associates
+// `--output-directory before` with `before/page.json` or `before/<pageId>/page.json`, not a sibling
+// `before-other/`. These are archive paths: normalize separators/dot segments, never inspect the
+// filesystem or infer a working directory. null means the source cannot be associated safely.
+function downloadContainsSnapshot(source, downloaded, snapshot) {
+  const directory = Object.hasOwn(source, 'output-directory') ? source['output-directory'] : downloaded.outputDirectory;
+  if (typeof directory !== 'string' || !directory.trim() || typeof snapshot !== 'string' || !snapshot.trim()) return null;
+  const folder = path.posix.normalize(pathKey(directory));
+  const file = path.posix.normalize(pathKey(snapshot));
+  if (folder === '.') return file !== '.' && file !== '..' && !file.startsWith('../')
+    && !path.posix.isAbsolute(file) && !/^[A-Za-z]:/.test(file);
+  return file.startsWith(`${folder.replace(/\/+$/, '')}/`);
+}
+
+// This is the identity slice of the upload contract, not the optional full upload assertion.
+// A binding-preservation consumer must call it itself before treating a before blob as authority.
+function beforePageIdentityProblems(fixture, row, call, beforeConfig, afterConfig) {
+  const event = call.id;
+  const { flags } = commandInfo(call);
+  const result = resultObject(call);
+  const problems = [];
+  if (row.mode !== 'update' || !isGuid(flags['page-id'])) {
+    problems.push(`${event}: before-config preservation requires an existing update page target`);
+  }
+  if (row.beforeConfig !== beforeConfig || row.afterConfig !== afterConfig) {
+    problems.push(`${event}: before-config identity evidence is associated with another snapshot`);
+  }
+  if (result?.ok !== true || !uploadResultIdentityMatches(flags, result)) {
+    problems.push(`${event}: upload result does not preserve the requested page/app identity`);
+  }
+  const beforePage = artifactJson(fixture, row.beforePage);
+  const afterPage = artifactJson(fixture, row.afterPage);
+  if (!isObject(beforePage) || !isObject(afterPage)) throw new Error(`${event}: before/after page identity evidence must be objects`);
+  problems.push(...pageIdentityProblems(event, flags, result, beforePage, afterPage, true));
+  const calls = workflowCalls(fixture);
+  const earlier = calls.slice(0, calls.findIndex((entry) => entry.id === call.id));
+  let recordedDownloads = 0;
+  const producers = [];
+  for (const download of earlier) {
+    const runs = scriptRuns(download, 'genpage.js');
+    const downloaded = resultObject(download);
+    if (!runs.some((run) => run.verb === 'download') || downloaded?.ok !== true) continue;
+    recordedDownloads += 1;
+    if (runs.length !== 1) {
+      problems.push(`${event}: ambiguous download context cannot establish before-page provenance`);
+      continue;
+    }
+    const { flags: source } = commandInfo(download);
+    const ids = typeof source['page-id'] === 'string' ? source['page-id'].split(',').map((id) => id.trim()) : [];
+    if (!ids.includes(beforePage.pageId)) continue;
+    const associated = downloadContainsSnapshot(source, downloaded, row.beforePage);
+    if (associated === false) continue;
+    producers.push({ source, ids, downloaded, associated });
+  }
+  // A known different directory is unrelated history. An unknown destination is still a possible
+  // producer, not permission to borrow a better-looking download or guess the first/latest match.
+  if (recordedDownloads && (producers.length !== 1 || producers[0].associated !== true)) {
+    problems.push(`${event}: before-page identity has no unique associated recorded download source`);
+    return problems;
+  }
+  if (producers.length === 1) {
+    const { source, ids, downloaded } = producers[0];
+    const hasPages = Object.hasOwn(downloaded, 'pages');
+    // Array.from also visits unreadable holes in direct object evidence; map would skip them.
+    const returnedIds = Array.isArray(downloaded.pages)
+      ? Array.from(downloaded.pages, (page) => isObject(page) ? page.pageId : undefined) : [];
+    const establishesBeforePage = (values) => values.length > 0 && values.includes(beforePage.pageId)
+      && values.every((id) => isGuid(id) && ids.includes(id));
+    // Current downloads return pages: [{ pageId, ... }]. A present empty/malformed list
+    // contradicts the download; only genuinely absent fields retain historical shorthand.
+    // Validate a recorded scalar independently so neither shape can hide a contradiction.
+    if ((hasPages && !establishesBeforePage(returnedIds))
+      || (downloaded.pageId !== undefined && !establishesBeforePage([downloaded.pageId]))) {
+      problems.push(`${event}: recorded download result does not establish the before-page identity`);
+    }
+    if (source.env !== undefined && !sameRecordedEnvironment(source.env, flags.env)) {
+      problems.push(`${event}: before-page environment context differs from the upload target`);
+    }
+    if (source['app-id'] !== undefined && source['app-id'] !== flags['app-id']) {
+      problems.push(`${event}: before-page app context differs from the upload target`);
+    }
+  }
+  return problems;
+}
+
 // The one update that is not an ordinary edit: `--page-id` naming a page that an earlier create of the SAME code file wrote and did not finish (its failure result carries the page's id;
 // the publish or the placement it was asked for failed). genpage-upload.js completes it by naming it again, and then the update may carry `--add-to-sitemap` and, for a page created with no
 // app, no `--app-id`. SKILL.md Phase 6, "A create that did not finish".
@@ -130,7 +237,7 @@ function uploadTransportProblems(fixture) {
     if (update && (!isGuid(flags['page-id']) || (placement && !completing))) problems.push('update must name a valid page id and omit sitemap placement');
     // A create that names an app places its page in it. One that names none (the first page of a new app, which apps.js create then builds the app around) has no app to place it in.
     if (!update && flags['app-id'] !== undefined && !placement) problems.push('a create that names an app must include --add-to-sitemap');
-    if (result?.ok && (!isGuid(result.pageId) || result.appId !== flags['app-id'] || (update && result.pageId !== flags['page-id']))) {
+    if (result?.ok && !uploadResultIdentityMatches(flags, result)) {
       problems.push('upload result does not preserve the requested app/page identity');
     }
     // Every upload consumes its own log entry, overwriting or not, so an entry an earlier upload
@@ -205,11 +312,10 @@ function uploadProblems(fixture) {
     const afterConfig = artifactJson(fixture, row.afterConfig);
     const afterPage = artifactJson(fixture, row.afterPage);
     if (!isObject(afterConfig) || !isObject(afterPage)) throw new Error(`${row.event}: after config/page metadata must be objects`);
-    if (afterPage.pageId !== result?.pageId || afterPage.appId !== result?.appId) problems.push(`${row.event}: read-back identity differs from the upload result`);
     const beforeConfig = update ? artifactJson(fixture, row.beforeConfig) : {};
     const beforePage = update ? artifactJson(fixture, row.beforePage) : {};
     if (!isObject(beforeConfig) || !isObject(beforePage)) throw new Error(`${row.event}: before config/page metadata must be objects`);
-    if (update && (beforePage.pageId !== flags['page-id'] || beforePage.appId !== flags['app-id'])) problems.push(`${row.event}: update does not target the downloaded page in its app`);
+    problems.push(...pageIdentityProblems(row.event, flags, result, beforePage, afterPage, update));
     if (update && afterPage.navigationTitle !== beforePage.navigationTitle) problems.push(`${row.event}: rename changed the untouched sitemap title`);
 
     // The page backend stores a name exactly as it is given — a `"`, a `%` or a `$(…)` is only text — and an update that gives none keeps the page's own, so the backend is sent
@@ -268,4 +374,7 @@ function uploadPreservationProblems(fixture, mode) {
   return uploadProblems(fixture);
 }
 
-module.exports = { uploadProblems, uploadPreservationProblems, uploadTransportProblems, desiredBindings, sameBindings };
+module.exports = {
+  uploadProblems, uploadPreservationProblems, uploadTransportProblems, desiredBindings, sameBindings,
+  uploadResultIdentityMatches, pageIdentityProblems, beforePageIdentityProblems, sameRecordedEnvironment,
+};

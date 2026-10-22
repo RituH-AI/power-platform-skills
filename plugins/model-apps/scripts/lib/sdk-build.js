@@ -55,8 +55,10 @@ const {
   subgridRelationshipName,
   lookupLabelFor,
   lookupParentNeedsEnvironment,
+  statedPageBindings,
 } = require('./app-spec.js');
 const { PHASES } = require('./stages.js');
+const { pagesStatingBindings, readBindingTargets, judgeBindingTargets } = require('./page-binding-targets.js');
 const { topoOrderEntities, entityByLogical } = require('./_graph.js');
 const {
   isMainForm,
@@ -140,7 +142,9 @@ const { tableRefs, pinAppTables, publishAppComponents, resolveMainForms, appComp
 const { appWriteTables, appPushTables, preAppTables, publishTablesXml, readSavedNotPublished, describeSavedNotPublished, readAppFormChartTables, describePreAppRefusal, describeUnreadAppComponents } = require('./table-publish.js');
 const { hasUnsyncedEdits } = require('./unsynced-edits.js');
 const { createSolutionMembership, ensureSolutionComponent } = require('./solution-membership.js');
-const { navigationEntryKind, navigationVerdict } = require('./app-navigation.js');
+const { openUnconfirmedWebResources } = require('./web-resource-records.js');
+const { openDashboardCreations } = require('./dashboard-creation-records.js');
+const { navigationEntryKind, navigationHolds, navigationIsPagesOnly, navigationVerdict } = require('./app-navigation.js');
 const { isAppTextMap, appTextKind, localizedAppText } = require('./app-header-text.js');
 // The build's retry policy (retry-policy.js): every halt below is raised with what a run again may do — RETRY.NEVER, or a policy decided from the failure it wraps — and every failure the engine
 // raises itself is made by refusal() (deterministic) or serviceFailure() (the plugin's words around a failure of the service), because the build's retry reads a failure's STRUCTURE and the
@@ -241,6 +245,111 @@ async function findPinnedDashboard(sdk, pin) {
     throw refusal(`dashboardId ${id} is a type-${row.type} form, not a dashboard — correct the id, or remove it to find the dashboard by name`);
   }
   return { id: String(row.formid), name: String(row.name === undefined || row.name === null ? '' : row.name) };
+}
+
+// One systemform row read by its id in the SAVED layer, through the SDK's own client:
+//   GET /systemforms(<id>)/Microsoft.Dynamics.CRM.RetrieveUnpublished()?$select=formid,name,type
+//   200 { "@odata.etag": "W/\"1234567\"", "formid": "11111111-1111-4111-8111-111111111111", "name": "Ops Overview", "type": 0 }
+//   404 { "error": { "code": "0x80040217", "message": "systemform With Id = 11111111-… Does Not Exist" } }
+// The saved layer answers for a row whether or not it was ever published — MEASURED by the bundled SDK, whose readSystemFormType reads the same function:
+// a never-published form, a new dashboard and an out-of-box form all answer with their type, and a missing id answers 404 0x80040217. A plain read
+// (`$filter=formid eq <id>`, or the name lookup) answers the PUBLISHED layer only, where a dashboard an interrupted build created is not, so a miss there
+// proves nothing. It is not read through the build workspace either: a fetch into it can hand back the local copy the interrupted run left there, which
+// is not the service's word. `dataverse.get` answers a non-2xx as a response (it throws only when no answer came), so the status is read here, and only
+// the documented "Does Not Exist" proves the row absent — any other answer, a 404 without that code included, proves nothing either way.
+// Answers { state: 'present', id, name, type } | { state: 'absent', id } | { state: 'unreadable', id, why, status?, answered?, error? }.
+// See: https://learn.microsoft.com/power-apps/developer/data-platform/webapi/reference/retrieveunpublished
+async function readSavedSystemForm(provision, id) {
+  const client = provision && provision.dataverse;
+  if (!client || typeof client.get !== 'function') return { state: 'unreadable', id, why: 'the SDK has no reader of the saved layer' };
+  let response;
+  try {
+    response = await client.get(`/systemforms(${id})/Microsoft.Dynamics.CRM.RetrieveUnpublished()?$select=formid,name,type`);
+  } catch (error) {
+    return { state: 'unreadable', id, why: (error && error.message) || String(error), error };
+  }
+  const status = response && response.status;
+  const body = response && response.body;
+  const answered = body && typeof body === 'object' && body.error && typeof body.error === 'object' ? body.error : undefined;
+  if (status === 404 && answered && answered.code === '0x80040217') return { state: 'absent', id };
+  if (status >= 200 && status < 300 && body && typeof body === 'object' && String(body.formid || '').replace(/[{}]/g, '').toLowerCase() === id) {
+    return { state: 'present', id, name: typeof body.name === 'string' ? body.name : '', type: body.type };
+  }
+  return { state: 'unreadable', id, status, answered, why: `HTTP ${status}${answered && typeof answered.message === 'string' ? `: ${answered.message}` : ' with no row the build can read'}` };
+}
+
+// A systemform `type` as the integer it is, strictly (the platform answers a number; a text of digits is read as one). Anything else is NaN, never 0 —
+// 0 is a real type, the standard dashboard the build creates.
+function systemFormType(raw) {
+  if (typeof raw === 'number') return Number.isInteger(raw) ? raw : NaN;
+  return typeof raw === 'string' && /^\s*\d+\s*$/.test(raw) ? Number(raw) : NaN;
+}
+
+// The dashboard an earlier, interrupted run of this build created for `dash` and never saw join the solution (lib/dashboard-creation-records.js), settled
+// before any dashboard is looked up by name. `ids` are what the record holds: `sent`, the id the create was sent with, then `reported`, the one its push
+// reported when that was another. The two are not equal evidence: after such a re-key the reported row is the one the create made, and the sent id was
+// never seen to make anything. Each is read in the saved layer (readSavedSystemForm):
+//   - none is there: the create never committed, or the row was deleted since — the record is cleared and the build goes on as it always did, looking the
+//     dashboard up by name (answers undefined). Unless another build sharing the workspace has changed the entry since this build read it — recorded the
+//     id its push reported, say, which names the row its create made: then the absence of the ids THIS build read proves nothing, the entry is left, and
+//     the step stops without creating a dashboard;
+//   - the row the create made is (the sent one, or the reported one after a re-key), a standard dashboard with this name: THAT row is added to the
+//     solution — idempotent: a component the solution already holds is not added twice — and reused, and the record cleared (answers its id). Its tiles
+//     are what the interrupted run pushed, and are not repaired;
+//   - anything else — a read that fails, a row of another kind, a dashboard renamed since, both ids answering, or, after a re-key, only the SENT id
+//     answering (a row the build never saw its create make: another maker can have made it since, and adding it would give teardown the authority to
+//     delete it): nothing is added and nothing deleted, no dashboard is created, the record is kept, and the step stops with what a maker can do —
+//     never asking for a row to be deleted that may be another app's. Creating a dashboard there could make the second one this record exists to
+//     prevent, and adding the row could adopt what the build does not know to be its own.
+// Never deletes anything: the record proves which ids the build sent and was answered with, not that a row which answers to one now is used by nobody else.
+async function recoverRecordedDashboard(provision, { dash, ids, sol, runner, creations }) {
+  const [sent, reported] = ids;
+  const reads = [];
+  for (const id of ids) reads.push(await readSavedSystemForm(provision, id));
+  const label = `dashboard "${dash.name}"`;
+  const created = reported ? `${sent} (the service reported ${reported})` : sent;
+  const stop = (error) => runner.run('dashboards', label, async () => { throw error; });
+  const unreadable = reads.find((r) => r.state === 'unreadable');
+  if (unreadable) {
+    // A run again may settle it: whether it does follows what the service answered (its status and its own error), never the dashboard's name.
+    return stop(serviceFailure(`dashboard "${dash.name}": an earlier build created it as ${created} and stopped before adding it to solution '${sol.uniqueName}', and whether it still exists could not be read (${unreadable.why}). Nothing was added to the solution or deleted, and no second dashboard was created; run the build again.`, { status: unreadable.status, answered: unreadable.answered, cause: unreadable.error }));
+  }
+  const present = reads.filter((r) => r.state === 'present');
+  if (!present.length) {
+    // Absent — but only by the ids this build READ. Another build sharing the workspace may have changed the entry since (recorded the id its own push
+    // reported, which names the row its create made): the clear then leaves the entry (it answers null), and nothing is created on the older word.
+    if (creations.clear(dash.name) === null) {
+      return stop(refusal(`dashboard "${dash.name}": the record this build read named ${created} for it — a create an earlier build had not seen join solution '${sol.uniqueName}' — and no row has ${reported ? 'either id' : 'that id'} now, but another build sharing this workspace has changed that entry of ${creations.path()} since this build read it. Nothing was added to the solution or deleted, and no dashboard was created: this build does not act on what it read. Run the build again once the other build has finished; it then reads the record as it is.`));
+    }
+    return undefined;
+  }
+  // The way out names the row the service reported and asks for no delete: either row may be another app's, and this record is no authority over it.
+  if (present.length > 1) {
+    return stop(refusal(`dashboard "${dash.name}": an earlier build stopped after creating it, and both ids it recorded for it name a row now — ${sent}, the id its create was sent with, and ${reported}, the id the service reported for the dashboard it made — so it cannot tell on its own which one is this app's. Nothing was added to the solution or deleted. Do not delete either dashboard to settle this: the other one may be another app's. Check in Maker which one this app's build made (the service reported ${reported}), add that one to solution '${sol.uniqueName}' and publish it there, then remove the entry '${dash.name}' from ${creations.path()} and run the build again: it then reuses the dashboard the solution holds and leaves the other as it is.`));
+  }
+  const [row] = present;
+  if (reported && row.id !== reported) {
+    return stop(refusal(`dashboard "${dash.name}": an earlier build stopped after creating it. Its create was sent as ${sent}, but the service reported the dashboard it made as ${reported}, which is gone now, and ${sent} names a row this build never saw its create make. Nothing was added to the solution or deleted, and no dashboard was created. That row is not known to be this app's: do not delete or change it on this build's account. Find out whose it is, then remove the entry '${dash.name}' from ${creations.path()} and run the build again: it then finds the dashboard by name, as it does when nothing is recorded.`));
+  }
+  const type = systemFormType(row.type);
+  if (type !== 0) {
+    return stop(refusal(`dashboard "${dash.name}": an earlier build recorded ${row.id} for it before it stopped, and that id now names ${Number.isNaN(type) ? 'a systemform whose type could not be read' : `a systemform of type ${type}`}, not a dashboard of the kind the build creates (type 0). Nothing was added to the solution or deleted. Check the id, then remove the entry '${dash.name}' from ${creations.path()} and run the build again.`));
+  }
+  if (dashboardNameKey(row.name) !== dashboardNameKey(dash.name)) {
+    return stop(refusal(`dashboard "${dash.name}": an earlier build created it as ${row.id} and stopped before adding it to solution '${sol.uniqueName}', and that dashboard is now named '${row.name}'. Nothing was added to the solution or deleted. If it is this app's, rename it back to '${dash.name}' in Maker and run the build again: it is then added to the solution and reused. If it is not wanted, delete it in Maker and run the build again: '${dash.name}' is then created afresh.`));
+  }
+  await runner.run('dashboards', `${label} (created by an interrupted build as ${row.id} — added to the solution, and reused)`, async () => {
+    try {
+      await provision.addSolutionComponent({ componentId: row.id, componentType: COMPONENT_TYPE.dashboard, solutionUniqueName: sol.uniqueName });
+    } catch (err) {
+      // Kept, and not undone: deleting the row on this record's word is what it must never do. A run again tries the add again.
+      throw serviceFailure(`dashboard "${dash.name}" (${row.id}), which an earlier build created and stopped before adding to solution '${sol.uniqueName}', could not be added to it now (${(err && err.message) || err}). Nothing was deleted, and the record of it is kept: run the build again to add it.`, {
+        status: err && (err.statusCode || err.status), words: judgeFailure(err).text, cause: err,
+      });
+    }
+    creations.clear(dash.name);
+  });
+  return row.id;
 }
 
 // Web-resource kinds (App Spec `type`) -> SDK createWebResource `type` token. The SDK maps
@@ -1046,12 +1155,124 @@ function defaultAppIconSvg(appName) {
     `</svg>`;
 }
 
+// --- web resources whose publication the SDK could not confirm ---------------------------------------------------------------------------------------------
+// The bundled SDK reads a web resource's PUBLISHED content back after every create and every write of content it publishes, and throws
+// WEB_RESOURCE_UNVERIFIED when its publish failed or the read-back could not confirm the content — AFTER the row exists, with its id:
+//   { code: 'WEB_RESOURCE_UNVERIFIED', id: '<guid>', webResourceName: '<name>' (after a create), message: "Web resource '<name>' (<id>) was written,
+//     but publishing it failed, so whether its published content is what was sent is unconfirmed (<the failure>). …", cause: <the failure, not enumerable> }
+// The row is therefore never created again (a second create of the name is refused), and its content may be what was written, the old content, or
+// none. What the build does about it is the same at every site that writes one (the spec's web resources, the generated app icon, the page manifest):
+// it records the row — in the run's result, and in the workspace (lib/web-resource-records.js), so that the run that follows writes its content again
+// by id instead of reusing it untouched — adds it to the solution as the success path does, and stops with what a run again does.
+const isUnconfirmedWrite = (e) => Boolean(e) && e.code === 'WEB_RESOURCE_UNVERIFIED' && typeof e.id === 'string' && e.id.length > 0;
+// The SDK's answer to a write by an id whose row is gone: HTTP 404 (`ensureSuccess` throws it as a ConnectionError).
+const isGoneRow = (e) => Boolean(e) && e.code === 'CONNECTION_ERROR' && e.statusCode === 404;
+const contentOf = (options) => (options.contentBase64 !== undefined ? { contentBase64: options.contentBase64 } : { content: options.content });
+
+// The error a step stops with for such a row: the SDK's own words (which name the row, its id, why its publication is unconfirmed, and the SDK call
+// that recovers it), then the plugin's — what this build did with the row and what a run again does, which makes that call. Its code is the SDK's, so the
+// runner's halt carries it, and the SDK's error is its cause: the build's retry reads that as the wrapper it is (lib/retry-policy.js, CAUSE_WRAPPER_CODES),
+// judged by the failure the SDK's error carries, and run again when it carries none.
+function unconfirmedWebResource(error, { name, recorded, inSolution }) {
+  const solution = inSolution === true ? 'added it to the solution' : `could not add it to the solution (${(inSolution && inSolution.message) || inSolution}; a run again adds it)`;
+  const remedy = recorded
+    ? `this build recorded the row as its own and ${solution}. Its publication is UNCONFIRMED, not lost: run the build again — it writes the content again by that id, publishes it and reads it back (the call the message names is made for you).`
+    : `this build ${solution}, but could not save its local recovery record. Its publication is UNCONFIRMED, not lost: this build will not automatically retry it without that record. Write its content again by the id above in Power Apps once the cause is resolved; keep the same writable build workspace for automatic recovery.`;
+  // SDK updates report only the id; the build also knows the authored name, which is what a maker needs to find the resource.
+  const detail = error.webResourceName ? error.message : `Web resource '${name}' (${error.id}): ${error.message}`;
+  const failure = Object.assign(serviceFailure(`${detail} — ${remedy}`, { cause: error }), { code: 'WEB_RESOURCE_UNVERIFIED', id: error.id });
+  // A phase replay without a saved identity could create the name again when the row has no published layer. Likewise, a permanent
+  // solution-add refusal must be resolved first even when the publish itself was transient.
+  if (!recorded || (inSolution !== true && retryPolicyFor(inSolution) === RETRY.NEVER)) failure.transient = false;
+  return failure;
+}
+
+// Records a row the SDK wrote and could not confirm, puts it in the solution, and answers the error to stop the step with (unconfirmedWebResource).
+// The record is written FIRST: it is local, and it is what the next run needs whatever happens to the add.
+async function keepUnconfirmedWebResource(error, { name, unconfirmed, addToSolution }) {
+  const recorded = unconfirmed.note(name, error.id);
+  let inSolution = true;
+  try { await addToSolution(error.id); } catch (e) { inSolution = e; }
+  return unconfirmedWebResource(error, { name, recorded, inSolution });
+}
+
+// A receipt authorizes only its original id, never a different row that came to hold the same name after it. This check costs nothing
+// on an ordinary rebuild: the manifest already reads by name; spec resources/icons check only after an update proves their recorded row gone.
+function assertUnconfirmedWebResourceIdentity(name, recordedId, foundId) {
+  if (!recordedId || !foundId || String(recordedId).toLowerCase() === String(foundId).toLowerCase()) return;
+  throw Object.assign(refusal(`Web resource '${name}' was recorded as ${recordedId}, but its name now belongs to ${foundId}. Refusing to overwrite or adopt that replacement; inspect both ids and resolve the local recovery record before rebuilding.`), { code: 'WEB_RESOURCE_IDENTITY_CONFLICT' });
+}
+
+async function checkRecordedWebResourceName(provision, name, id) {
+  let row;
+  try { row = await provision.getWebResource(id); } catch (e) {
+    // A plain GET can miss a never-published row; the receipt still proves which id this build wrote. Unpublished content
+    // is not ownership evidence, and a later publish may still serve old content. Only the subsequent PATCH's 404 proves the row gone.
+    if (isGoneRow(e)) return;
+    throw e;
+  }
+  if (row && typeof row.name === 'string' && row.name.toLowerCase() === String(name).toLowerCase()) return;
+  throw Object.assign(refusal(`Web resource '${name}' was recorded as ${id}, but that id now reads as ${row && typeof row.name === 'string' ? `'${row.name}'` : 'a row with no verifiable name'}. Refusing to overwrite it; inspect the row and resolve the local recovery record before rebuilding.`), { code: 'WEB_RESOURCE_IDENTITY_CONFLICT' });
+}
+
+// Write a web resource the build OWNS by name — the spec's, or the generated app icon — and add it to the solution: create it, or, when an earlier run
+// of this build wrote it and could not confirm its publication (`recordedId`, from the record), write its content again by that id, which publishes and
+// verifies it again. The entry is cleared only once that write verified and the row is in the solution. A row that is gone by then (404) is created as on
+// a first build. Answers the row's id. A web resource of that name that the record does not hold is the caller's to reuse untouched, as before.
+async function writeOwnedWebResource(provision, unconfirmed, sol, options, recordedId) {
+  const addToSolution = (componentId) => provision.addSolutionComponent({ componentId, componentType: COMPONENT_TYPE.webResource, solutionUniqueName: sol.uniqueName });
+  if (recordedId) {
+    await checkRecordedWebResourceName(provision, options.name, recordedId);
+    let gone = false;
+    try {
+      await provision.updateWebResource(recordedId, contentOf(options));
+    } catch (e) {
+      if (isUnconfirmedWrite(e)) throw await keepUnconfirmedWebResource(e, { name: options.name, unconfirmed, addToSolution });
+      if (!isGoneRow(e)) throw e;
+      gone = true;
+    }
+    if (!gone) {
+      // Keep the receipt when only the solution add fails. Its 404 is not proof that the web-resource row is gone.
+      await addToSolution(recordedId);
+      unconfirmed.clear(options.name);
+      return recordedId;
+    }
+    const rows = await provision.queryRecords('webresource', { select: ['webresourceid'], filter: `name eq '${odataLit(options.name)}'`, top: 1 });
+    assertUnconfirmedWebResourceIdentity(options.name, recordedId, rows && rows[0] && rows[0].webresourceid);
+    unconfirmed.clear(options.name);
+  }
+  let created;
+  try {
+    created = await provision.createWebResource(options);
+  } catch (e) {
+    if (isUnconfirmedWrite(e)) throw await keepUnconfirmedWebResource(e, { name: options.name, unconfirmed, addToSolution });
+    throw e;
+  }
+  await addToSolution(created.id);
+  return created.id;
+}
+
+// Runs a write of a web resource and hands the id of the row it leaves to `keep` — when the write stops the step because the row's publication
+// could not be confirmed too (isUnconfirmedWrite: the row exists, under `error.id`), so the run's result names the row either way.
+async function keepRowOf(write, keep) {
+  try {
+    const id = await write();
+    keep(id);
+    return id;
+  } catch (e) {
+    if (isUnconfirmedWrite(e)) keep(e.id);
+    throw e;
+  }
+}
+
 // Resolve the app's tile-icon web resource id, ensuring it lives IN this solution. Uses
 // spec.app.icon (a declared web resource) when set; otherwise generates a default SVG icon named
 // `<appUniqueName>_icon` and adds it to the solution (idempotent — reused by name on a re-run).
 // Returns the web-resource id, or undefined if it can't be resolved (the SDK then falls back).
+// A generated icon an earlier run created and could not confirm the publication of is written again by id
+// (writeOwnedWebResource), and is not looked up by name.
 async function ensureAppIcon(spec, created, deps) {
-  const { provision, sol, runner } = deps;
+  const { provision, sol, runner, unconfirmed = openUnconfirmedWebResources() } = deps;
   const findByName = async (name) => {
     const rows = await provision.queryRecords('webresource', { select: ['webresourceid'], filter: `name eq '${odataLit(name)}'`, top: 1 });
     return rows && rows[0] && rows[0].webresourceid;
@@ -1061,18 +1282,19 @@ async function ensureAppIcon(spec, created, deps) {
     return (created.webResources && created.webResources[spec.app.icon]) || (await findByName(spec.app.icon)) || undefined;
   }
   const name = `${appUniqueName(spec)}_icon`;
-  const existing = await findByName(name);
+  const recordedId = unconfirmed.idOf(name);
+  const existing = recordedId ? undefined : await findByName(name);
   if (existing) {
     created.webResources[name] = existing;
     runner.skip('app-shell', `app icon (generated) ${name} (exists — reuse)`);
     return existing;
   }
   let id;
-  await runner.run('app-shell', `app icon (generated) ${name}`, async () => {
-    const r = await provision.createWebResource({ name, displayName: `${spec.app.name} Icon`, type: 'svg', content: defaultAppIconSvg(spec.app.name) });
-    id = r.id;
-    created.webResources[name] = r.id;
-    await provision.addSolutionComponent({ componentId: r.id, componentType: COMPONENT_TYPE.webResource, solutionUniqueName: sol.uniqueName });
+  await runner.run('app-shell', `app icon (generated) ${name}${recordedId ? ' (written again: its publication was not confirmed)' : ''}`, async () => {
+    await keepRowOf(() => writeOwnedWebResource(provision, unconfirmed, sol, { name, displayName: `${spec.app.name} Icon`, type: 'svg', content: defaultAppIconSvg(spec.app.name) }, recordedId), (row) => {
+      id = row;
+      created.webResources[name] = row;
+    });
     return name;
   });
   return id;
@@ -1109,21 +1331,49 @@ async function readPageManifest(provision, appUnique) {
 // optional eighth that only spares the add when the solution is proven to hold the manifest already (see
 // solution-membership.js). Every call goes through it, including the one that creates the manifest, which is
 // why a first build that deploys pages makes the membership read.
-async function persistPageManifest(provision, spec, keyToId, sol, appUnique, existingId, lastContent, solutionMembers) {
+// `unconfirmed` (optional ninth) is the run's record of the web resources whose publication could not be confirmed (lib/web-resource-records.js). A write
+// the SDK could not confirm (WEB_RESOURCE_UNVERIFIED) is recorded and stops the step (keepUnconfirmedWebResource). The next run writes the manifest again
+// whenever its PUBLISHED copy — what readPageManifest reads, and `lastContent` is — is not what the run wants, by the id that read finds or, when no plain
+// read finds the row (a manifest created and never published), by the id the record holds; the name is never created again while the record holds it.
+async function persistPageManifest(provision, spec, keyToId, sol, appUnique, existingId, lastContent, solutionMembers, unconfirmed = openUnconfirmedWebResources()) {
   const name = manifestResourceName(appUnique);
   const content = serializeManifest(buildManifest(spec, keyToId));
-  let id = existingId;
+  const recordedId = unconfirmed.idOf(name);
+  assertUnconfirmedWebResourceIdentity(name, recordedId, existingId);
+  let id = existingId || recordedId;
+  const addToSolution = (componentId) => ensureSolutionComponent(provision, solutionMembers, { componentId, componentType: COMPONENT_TYPE.webResource, solutionUniqueName: sol.uniqueName });
+  const write = async (writeId) => {
+    try {
+      if (writeId) {
+        await provision.updateWebResource(writeId, { content });
+        return writeId;
+      }
+      return (await provision.createWebResource({ name, displayName: `${spec.app.name} Page Manifest`, type: 'js', content })).id;
+    } catch (e) {
+      if (isUnconfirmedWrite(e)) throw await keepUnconfirmedWebResource(e, { name, unconfirmed, addToSolution });
+      throw e;
+    }
+  };
   if (content !== lastContent) {
-    if (id) await provision.updateWebResource(id, { content });
-    else { const r = await provision.createWebResource({ name, displayName: `${spec.app.name} Page Manifest`, type: 'js', content }); id = r.id; }
+    try {
+      id = await write(id);
+    } catch (e) {
+      // The row the record names, which no plain read found, is gone: the manifest is created again, as on a first build.
+      if (!(recordedId && id === recordedId && isGoneRow(e))) throw e;
+      unconfirmed.clear(name);
+      id = await write(undefined);
+    }
   }
-  if (id) await ensureSolutionComponent(provision, solutionMembers, { componentId: id, componentType: COMPONENT_TYPE.webResource, solutionUniqueName: sol.uniqueName });
+  if (id) await addToSolution(id);
+  // Written and verified now, or its published copy already holds what this run wants: either way it is confirmed.
+  unconfirmed.clear(name);
   return { id, content };
 }
 
 // Add the app's sitemap (componenttype 62) to the solution. Adding the app module alone leaves the
 // sitemap only in the Default solution, so the app's own solution is incomplete on export. Resolve
-// the sitemap by its unique name (== the app's unique name) and add it. Best-effort + idempotent:
+// it by the naming convention of SDK-created apps (the app's unique name). This additive lookup is
+// not an ownership proof for a renamed or externally created sitemap. Best-effort + idempotent:
 // a re-add of an already-present component is tolerated so this never fails an otherwise-good build.
 async function ensureSitemapInSolution(provision, sol, appUnique, solutionMembers) {
   try {
@@ -1164,6 +1414,30 @@ function existingAppSitemapIsWritten(spec, phases, changedOnly) {
   return !appHasPageSubareas(spec);
 }
 
+// Whether this run creates a NEW app's pages BEFORE the app, so that the app's first navigation already holds its page entries — the one
+// way a new app whose navigation holds only pages can be built, since Dataverse refuses to CREATE a sitemap with no entry (app-navigation.js).
+// It mirrors what runSdkBuildPhases does for such an app, and the tests that drive the engine pin that it does:
+//   * the app step and the pages phase are both in the run: the app step leaves the create to the pages phase, which makes the app once
+//     the pages exist (`createAppWithPages`);
+//   * it is not a changed-only re-upload (`skipSitemapFinalize`), which uploads the changed pages of an app that exists and creates no app;
+//   * every page entry names a page of `pages[]` the run builds — a tsx source with a codeFile, the pages phase's `implemented` — because the
+//     app's first navigation is made from the pages the run created. Validation's deploy profile, which `--apply` uses, already demands that
+//     (a page entry names a declared page, and every page is implemented), so this guards a caller that did not validate.
+// Returns { newAppPagesFirst: true }, or { newAppPagesFirst: false, whyNotPagesFirst } — the rule navigationVerdict takes, with the words of
+// its refusal.
+function pagesFirstRule(spec, phases, changedOnly) {
+  if (!phases.includes('app-shell')) return { newAppPagesFirst: false, whyNotPagesFirst: 'this run has no app step' };
+  if (!phases.includes('pages')) return { newAppPagesFirst: false, whyNotPagesFirst: 'this run does not have the pages phase, which would create them first' };
+  if (changedOnly && changedOnly.skipSitemapFinalize) return { newAppPagesFirst: false, whyNotPagesFirst: 'this run only re-uploads changed pages, and creates no app' };
+  const built = new Set((spec.pages || []).filter((p) => {
+    const src = normalizePageSource(p);
+    return src && src.kind === 'tsx' && src.codeFile;
+  }).map((p) => p.key || p.name));
+  const unbuilt = navigationHolds(spec).pages.filter((key) => !built.has(key));
+  if (unbuilt.length) return { newAppPagesFirst: false, whyNotPagesFirst: `this run builds no page for ${unbuilt.map((key) => `'${key}'`).join(', ')} (a page of pages[] with source.kind 'tsx' and a codeFile)` };
+  return { newAppPagesFirst: true };
+}
+
 // The dry run's share of the navigation check: say, on the app step's own line, that an apply would stop there, and why.
 // The line is marked as a view the build would refuse is (annotateLivePlan): `? unknown` with the reason, and `wouldHalt` so
 // the summary counts it among the steps that would stop the build and not among those it could not read. Whether the app
@@ -1176,6 +1450,7 @@ function checkNavigationInPlan(plan, spec, { phases, changedOnly, warn }) {
   const verdict = navigationVerdict(spec, {
     appExists: item.state === 'create' ? false : item.state === 'reuse' ? true : undefined,
     existingAppIsWritten: existingAppSitemapIsWritten(spec, phases, changedOnly),
+    ...pagesFirstRule(spec, phases, changedOnly),
     whyUnknown: item.state === 'unknown' ? (item.stateWhy || 'the app could not be read') : 'this dry run did not read the environment',
   });
   if (verdict.outcome === 'refuse') {
@@ -1193,24 +1468,77 @@ function checkNavigationInPlan(plan, spec, { phases, changedOnly, warn }) {
 // exists, refused for a new one — which pays for one read of that, the very read the app step makes next. A read that fails
 // leaves the answer unknown: the build goes on as it always did and says what it could not check. Halts as the view-filter
 // pre-flight does (phase `preflight`, never retried).
+// A navigation of pages only, in a run that creates a new app's pages first (pagesFirstRule), builds whichever the answer is, and
+// the read is made all the same: so that a build of an app that exists makes exactly the requests it always made. What decides
+// whether the pages come first is the app step's own read, right before the create, never this one.
 async function checkNavigationBeforeWriting(spec, { provision, phases, changedOnly, warn }) {
-  const rule = { existingAppIsWritten: existingAppSitemapIsWritten(spec, phases, changedOnly) };
-  let verdict = navigationVerdict(spec, rule);
-  if (verdict.outcome === 'unknown') {
-    let appExists;
-    let whyUnknown;
+  const written = { existingAppIsWritten: existingAppSitemapIsWritten(spec, phases, changedOnly) };
+  const rule = { ...written, ...pagesFirstRule(spec, phases, changedOnly) };
+  const readsExistence = navigationVerdict(spec, written).outcome === 'unknown';
+  let appExists;
+  let whyUnknown;
+  if (readsExistence) {
     try {
       appExists = !!(await provision.findArtifact('app', { uniqueName: appUniqueName(spec) }));
     } catch (err) {
       whyUnknown = (err && err.message) || String(err);
     }
-    verdict = navigationVerdict(spec, { ...rule, appExists, whyUnknown });
   }
+  const verdict = navigationVerdict(spec, readsExistence ? { ...rule, appExists, whyUnknown } : rule);
   if (verdict.outcome === 'refuse') {
     // The message quotes the author's own page keys, so it must never be read as one of the texts the CLI retries on (isTransientHalt), and a re-run reads the same spec.
     throw new BuildHalt(`app "${spec.app.name}" cannot be built: ${verdict.message} The build stopped before writing anything.`, { phase: 'preflight', code: verdict.code, recoverable: false, retry: RETRY.NEVER });
   }
   if ((verdict.outcome === 'unknown' || verdict.outcome === 'warn') && typeof warn === 'function') warn(`app "${spec.app.name}": ${verdict.message}`);
+}
+
+// A page's bindings are written as the spec states them, and the spec cannot make what they name: a connection reference, which a page calls its connector through by its logical name, or a Custom API. So the
+// build reads what the environment has for the names the pages it writes state (lib/page-binding-targets.js) and judges it, before it writes anything:
+//   - a reference that is there for ANOTHER connector stops the build (phase `preflight`, never retried: a run again reads the same reference). The page would call that connector under this name, with the
+//     signed-in user's connection to it, and nothing in the name tells the two apart — so it is refused, and nothing is guessed or made: the author gives the binding the name of the right reference, or states
+//     the connector this environment has. Left to the pages phase it would stop after the solution, the tables, the views, the forms and the app were written, as the navigation check used to;
+//   - a reference or a Custom API that is not there, a reference that has no connection, an operation a binding calls that the custom connector there does not define, a Custom API of the other kind or bound
+//     to another table, and a read that failed are SAID, by name, and the build goes on: the page is written with its binding (a reference made, or given its connection, later makes the page work without a
+//     rebuild), and an ordinary read failure says only that the bindings were not checked. A refused throttle wait is still the attempt's budget stop, checked by its runner before any mutation.
+// Only a run that has the pages phase writes a binding, and a changed-only run writes the pages it selected (pagesStatingBindings). A spec that states none reads nothing.
+async function readPageBindingVerdict(spec, { provision, phases, changedOnly }) {
+  if (!phases.includes('pages')) return null;
+  const pages = pagesStatingBindings(spec, { changedOnly });
+  if (!pages.length) return null;
+  return judgeBindingTargets(pages, await readBindingTargets(provision, pages));
+}
+
+async function checkPageBindingsBeforeWriting(spec, { provision, phases, changedOnly, warn }) {
+  const verdict = await readPageBindingVerdict(spec, { provision, phases, changedOnly });
+  if (!verdict) return;
+  const refused = verdict.findings.filter((finding) => finding.severity === 'refuse');
+  if (refused.length) {
+    // The message quotes the author's own page and binding names, so it must never be read as one of the texts the CLI retries on (isTransientHalt); `retry: RETRY.NEVER` marks it outright.
+    throw new BuildHalt(
+      `${refused.length} connector binding(s) name a connection reference this environment already has for ANOTHER connector: ${refused.map((finding) => finding.text).join('; ')}. The build stopped before writing anything. `
+      + 'A page calls a binding through its reference\'s logical name, so each of these pages would call the other connector. Either give the binding the logical name of a reference that is for the right connector '
+      + '(create-connection-reference.js makes one), or, if the reference that is here is the one the page should call (a custom connector made separately in each environment has another id in each), set the binding\'s connectorId in the spec to the connector this environment has.',
+      { phase: 'preflight', code: 'pages-binding-reference-conflict', recoverable: false, retry: RETRY.NEVER },
+    );
+  }
+  if (typeof warn === 'function') for (const text of [...verdict.unchecked.map((u) => u.text), ...verdict.findings.map((finding) => finding.text)]) warn(text);
+}
+
+// The dry run's share: say on the page's own line that an apply would stop there, and why. The line is marked as a view the build would refuse is (annotateLivePlan): `? unknown` with the reason, and `wouldHalt` so
+// the summary counts it among the steps that would stop the build. What an apply would only say is said the same way.
+async function checkPageBindingsInPlan(plan, spec, { provision, phases, changedOnly, warn }) {
+  const verdict = await readPageBindingVerdict(spec, { provision, phases, changedOnly });
+  if (!verdict) return;
+  const refusedBy = new Map();
+  for (const finding of verdict.findings.filter((f) => f.severity === 'refuse')) refusedBy.set(finding.page.name, [...(refusedBy.get(finding.page.name) || []), finding.text]);
+  for (const [name, texts] of refusedBy) {
+    const item = plan.find((p) => p.phase === 'pages' && p.label === `page "${name}"`);
+    if (!item) continue;
+    item.state = 'unknown';
+    item.stateWhy = `the build would stop before writing anything: ${texts.join('; ')}`;
+    item.wouldHalt = true;
+  }
+  if (typeof warn === 'function') for (const text of [...verdict.unchecked.map((u) => u.text), ...verdict.findings.filter((f) => f.severity !== 'refuse').map((f) => f.text)]) warn(text);
 }
 
 // SINGLE-MACHINE advisory lockfile over the pages protocol (design §9, DESCOPED from a cross-machine guarantee).
@@ -2654,6 +2982,14 @@ async function runSdkBuildPhases(spec, opts, owed) {
       }
     }
     if (has('app-shell')) checkNavigationInPlan(plan, spec, { phases, changedOnly: opts.changedOnly, warn: opts.warn });
+    // What the environment has for the names the pages' bindings state (checkPageBindingsInPlan): it reads, so it is a part of the live plan and is left out of one that is asked not to read the environment.
+    if (canProbe && has('pages')) {
+      try {
+        await checkPageBindingsInPlan(plan, spec, { provision, phases, changedOnly: opts.changedOnly, warn: opts.warn });
+      } catch (err) {
+        if (typeof opts.warn === 'function') opts.warn(`could not check the bindings of the pages against this environment (${(err && err.message) || err})`);
+      }
+    }
     plan.forEach((p, i) => emit({ phase: p.phase, status: p.state === 'reuse' ? 'skip' : 'skip', label: p.label, state: p.state, stateWhy: p.stateWhy, n: i + 1, total: plan.length }));
     return {
       ok: true,
@@ -2664,9 +3000,14 @@ async function runSdkBuildPhases(spec, opts, owed) {
     };
   }
 
+  // Capture the attempt's checkpoint before best-effort preflight reads can swallow a refused throttle wait as unchecked metadata. The same runner then stops before any mutation, without counting refusals from earlier attempts.
+  const runner = makeRunner({ emit, total: plan.length, throttle: opts.throttle });
   // A navigation Dataverse will refuse stops the build here, before anything is written, rather than at the app step
   // after the solution, tables, columns, views and forms have been (app-navigation.js). Only a run that has the app step.
   if (has('app-shell')) await checkNavigationBeforeWriting(spec, { provision, phases, changedOnly: opts.changedOnly, warn: opts.warn });
+  // A binding whose connection reference is another connector's stops the build here too, before anything is written, for the same reason (checkPageBindingsBeforeWriting).
+  await checkPageBindingsBeforeWriting(spec, { provision, phases, changedOnly: opts.changedOnly, warn: opts.warn });
+  runner.stopIfRefused('preflight');
 
   const createdFormsThisRun = new Set();
   const result = { ok: true, created: { entities: {}, relationships: {}, records: {}, webResources: {}, views: {}, charts: {}, forms: {}, formIds: {}, businessRules: {}, businessProcessFlows: {}, bpfBackingTables: {}, commands: {}, dashboards: {}, pages: {}, pageDeployedShas: {}, pageSourceShas: {}, ai: { appFeatures: null, summaries: {} }, roles: {}, roleGrants: {}, bpfRoleGrants: {}, app: null }, skipped: { businessRules: [], aiSummaries: [], layout: [], unauthorizedRemovals: [] } };
@@ -2675,9 +3016,11 @@ async function runSdkBuildPhases(spec, opts, owed) {
   // The full-build path never sets opts.changedOnly, so result.created.app stays null and app-shell
   // creates/updates it exactly as before — this branch is a no-op (byte-identical) on the normal path.
   if (opts.changedOnly && opts.changedOnly.resolvedAppId) result.created.app = opts.changedOnly.resolvedAppId;
-  // The runner stops the run at the next step once the budget has refused a wait (entity-provision.js, makeRunner): the build's retry loop does not run the phases again to meet the same answer.
-  const runner = makeRunner({ emit, total: plan.length, throttle: opts.throttle });
   const sol = spec.solution;
+  // The web resources an earlier run of this build wrote and could not confirm were published (lib/web-resource-records.js), read at first use: the
+  // spec's web resources, the generated app icon and the page manifest are written again by id when they are in it. One per run of the phases, so the
+  // build's own re-run of a halt reads what the attempt before it recorded.
+  const unconfirmedWebResources = openUnconfirmedWebResources({ workspaceDir: opts.workspaceDir, environment: opts.env, warn: opts.warn });
 
   // ADO 6691114: a view-filter label the environment already shows to be wrong stops the build here, before it
   // writes anything — in any apply that writes the solution or the data model, whether or not it also builds the
@@ -2959,8 +3302,17 @@ async function runSdkBuildPhases(spec, opts, owed) {
   // 3b. Web resources (opt-in via spec.webResources) — JS/HTML/CSS shipped for form logic.
   //     Idempotent: an existing web resource of the same name is reused (and assumed already
   //     in the solution). Built before forms so a form event handler can bind its library.
+  //     One that an earlier run of this build created or wrote and could not confirm was published (WEB_RESOURCE_UNVERIFIED,
+  //     recorded in the workspace) is not reused: its content is written again by id (writeOwnedWebResource).
   if (has('web-resources')) {
     for (const wr of spec.webResources || []) {
+      const recordedId = unconfirmedWebResources.idOf(wr.name);
+      if (recordedId) {
+        await runner.run('web-resources', `web resource ${wr.name} (${wr.type || 'js'}) (written again: its publication was not confirmed)`, async () => {
+          await keepRowOf(() => writeOwnedWebResource(provision, unconfirmedWebResources, sol, webResourceOpts(wr, opts.appDir), recordedId), (id) => { result.created.webResources[wr.name] = id; });
+        });
+        continue;
+      }
       const existing = await provision.queryRecords('webresource', { select: ['webresourceid'], filter: `name eq '${odataLit(wr.name)}'`, top: 1 });
       if (existing && existing[0] && existing[0].webresourceid) {
         result.created.webResources[wr.name] = existing[0].webresourceid;
@@ -2968,9 +3320,7 @@ async function runSdkBuildPhases(spec, opts, owed) {
         continue;
       }
       await runner.run('web-resources', `web resource ${wr.name} (${wr.type || 'js'})`, async () => {
-        const r = await provision.createWebResource(webResourceOpts(wr, opts.appDir));
-        result.created.webResources[wr.name] = r.id;
-        await provision.addSolutionComponent({ componentId: r.id, componentType: COMPONENT_TYPE.webResource, solutionUniqueName: sol.uniqueName });
+        await keepRowOf(() => writeOwnedWebResource(provision, unconfirmedWebResources, sol, webResourceOpts(wr, opts.appDir)), (id) => { result.created.webResources[wr.name] = id; });
       });
     }
     // 3c. Table icons — set each entity's OWN icon to a declared web resource (SVG -> IconVectorName
@@ -2991,6 +3341,8 @@ async function runSdkBuildPhases(spec, opts, owed) {
         runner.skip('web-resources', `table icon for ${logical} (web resource ${missing.join(', ')} not built this run)`);
         continue;
       }
+      // A failed publish can leave this name in saved metadata already. Keep the SDK's
+      // specific-table publish on rerun; metadata equality is not publication proof.
       await runner.run('web-resources', `table icon for ${logical}`, async () => {
         await provision.setEntityIcon(logical, { vector: e.vectorIcon || undefined, medium: e.icon || undefined });
         return `${[e.vectorIcon && `vector=${e.vectorIcon}`, e.icon && `raster=${e.icon}`].filter(Boolean).join(', ')}`;
@@ -5861,6 +6213,10 @@ async function runSdkBuildPhases(spec, opts, owed) {
   //     views/charts already built), then push + add to the solution (systemform, component type 60).
   //     Global (no entity); placement in the app sitemap is manual for now.
   if (has('dashboards')) {
+    // The dashboards an earlier run of this build created and did not see join the solution (lib/dashboard-creation-records.js), read at first use. One
+    // per run of the phases, so the build's own re-run of a halt reads what the attempt before it recorded. Bound to this app and solution as the spec
+    // names them: a new app has no id yet, and its unique name is the spec's.
+    const creations = openDashboardCreations({ workspaceDir: opts.workspaceDir, environment: opts.env, appUniqueName: spec.app ? appUniqueName(spec) : '', solutionUniqueName: sol && sol.uniqueName, warn: opts.warn });
     for (const dash of spec.dashboards || []) {
       // AB#6726727: a DOWNLOADED dashboard is bound by the id it was read from before anything is tried
       // by name. Renamed in the designer since, its spec name finds nothing — and the name path below
@@ -5873,6 +6229,17 @@ async function runSdkBuildPhases(spec, opts, owed) {
         runner.skip('dashboards', `dashboard "${dash.name}" (exists — reuse by its dashboardId; tile edits aren't applied on rebuild, recreate to change)`);
         result.created.dashboards[dash.name] = pinned.id;
         continue;
+      }
+      // A dashboard an earlier run created and stopped before adding to the solution is settled by the id that run recorded, BEFORE the name lookup
+      // below: a row created and never published is in no plain read, so the lookup would create a second one, and a published one it would reuse
+      // outside the solution (recoverRecordedDashboard). With nothing recorded for the name this costs nothing — no request.
+      const recordedIds = creations.idsOf(dash.name);
+      if (recordedIds) {
+        const recovered = await recoverRecordedDashboard(provision, { dash, ids: recordedIds, sol, runner, creations });
+        if (recovered) {
+          result.created.dashboards[dash.name] = recovered;
+          continue;
+        }
       }
       // Additive discover-reconcile (design §14): a dashboard is global (identity = name), so a rebuild
       // or retry must REUSE the existing one instead of createArtifact-ing a duplicate every run (the old
@@ -5936,7 +6303,17 @@ async function runSdkBuildPhases(spec, opts, owed) {
         for (let ti = 0; ti < tiles.length; ti++) {
           await provision.addElement('dashboard', art.id, '/components', dashboardComponent(dashboardTileOpts(spec, tiles[ti], result), ti));
         }
+        // Recorded BEFORE the push: the SDK sends this id as the row's key (`systemform.formid`), so if the run stops anywhere after the create is
+        // sent — killed, its answer lost, the add below and its undo both failing — the next run still knows which row it made, which no name and no
+        // plain read can tell it (lib/dashboard-creation-records.js). A record that cannot be written is one warning, and the build goes on as it did
+        // before there was a record: refusing to create the dashboard would turn a local bookkeeping failure into a failed build for every dashboard,
+        // to guard against a crash in the moment between two requests.
+        creations.note(dash.name, art.id);
         const pushed = requireSuccessfulPush(await provision.pushArtifact('dashboard', art.id), `dashboard ${dash.name}`, opts.warn);
+        // The SDK prefers the id the service's answer names over the one it sent, and moves its copy there. When they differ, both are kept: the next
+        // run reads both, and neither is confirmed on the other's word.
+        const bareId = (id) => String(id).replace(/[{}]/g, '').toLowerCase();
+        if (bareId(pushed.id) !== bareId(art.id)) creations.observe(dash.name, pushed.id);
         try {
           await provision.addSolutionComponent({ componentId: pushed.id, componentType: COMPONENT_TYPE.dashboard, solutionUniqueName: sol.uniqueName });
         } catch (err) {
@@ -5952,6 +6329,10 @@ async function runSdkBuildPhases(spec, opts, owed) {
           } catch (e) {
             undoErr = e;
           }
+          // Proven removed only when the delete answered: the record goes with the row. When it did not, the record stays whatever the read below
+          // finds — that read answers the PUBLISHED layer, where a dashboard nobody has published is not, so it cannot prove the row gone; the next run
+          // reads the saved layer (recoverRecordedDashboard).
+          if (!undoErr) creations.clear(dash.name);
           // deleteRemoteArtifact removes the row and THEN the local workspace copy, so a failure can come
           // from either half. Only a row that is still there is left outside the solution; when that
           // cannot be read either, assume it is.
@@ -5964,9 +6345,14 @@ async function runSdkBuildPhases(spec, opts, owed) {
             } catch { /* cannot tell — keep assuming it is still there */ }
           }
           if (stranded) {
-            // Never auto-retried (isTransientHalt, build-model-app.js): a retry would reuse it as a lone
-            // name match without adding it, whatever transient text the causes quoted above carry.
-            throw refusal(`dashboard "${dash.name}" was created (${pushed.id}) but could not be added to solution '${sol.uniqueName}' (${why}), and removing it again failed (${(undoErr && undoErr.message) || undoErr}) — add it to the solution or delete it in Maker before re-running, or teardown will not recognise it as this app's`, { cause: err });
+            // Never auto-retried (isTransientHalt, build-model-app.js): the add and its undo were both refused just now, which is a person's to look
+            // at, whatever transient text the causes quoted above carry — and a dashboard the record does not hold would be reused by a retry as a lone
+            // name match without being added. One the record holds is added by the next run, so the halt says that instead of asking for Maker.
+            const recorded = (creations.idsOf(dash.name) || []).includes(bareId(pushed.id));
+            const remedy = recorded
+              ? 'this build recorded it, so running the build again adds it to the solution and reuses it; or delete it in Maker before running it again, and it is created afresh'
+              : "add it to the solution or delete it in Maker before re-running, or teardown will not recognise it as this app's";
+            throw refusal(`dashboard "${dash.name}" was created (${pushed.id}) but could not be added to solution '${sol.uniqueName}' (${why}), and removing it again failed (${(undoErr && undoErr.message) || undoErr}) — ${remedy}`, { cause: err });
           }
           // Nothing is left behind, so a retry is safe — when the SERVICE said it may be: the cause's HTTP
           // status (a 429/503 is still auto-retried as it was before the undo existed) and its own words
@@ -5975,6 +6361,8 @@ async function runSdkBuildPhases(spec, opts, owed) {
             status: err && (err.statusCode || err.status), words: judgeFailure(err).text, cause: err,
           });
         }
+        // Proven in the solution: nothing is left to recover.
+        creations.clear(dash.name);
         result.created.dashboards[dash.name] = pushed.id;
       });
     }
@@ -5988,9 +6376,15 @@ async function runSdkBuildPhases(spec, opts, owed) {
   let appWasExisting = false;
   let mainFormsP;
   const resolvedMainForms = () => mainFormsP || (mainFormsP = resolveMainForms(provision.dataverse, spec, result.created.formIds));
+  // Set by the app step when it leaves the create of a NEW app to the pages phase, because the app's navigation holds only page entries
+  // (pagesFirstRule): the pages are created first, and this makes the app with them already in its first navigation.
+  let createAppWithPages = null;
 
   // 7. App module + sitemap. When the app has generative-page subareas, create it WITHOUT them
   //    (they can't resolve until pages upload); the pages phase then rewrites the sitemap.
+  //    A NEW app whose navigation holds ONLY page entries cannot be created that way — its first sitemap would hold no
+  //    entry, which Dataverse refuses to create — so its create is left to the pages phase, which makes it once the pages
+  //    exist (`createAppWithPages`), with the pages in its first navigation.
   //    For an app that ALREADY exists (edit flow / retry), its sitemap + components are write-once
   //    on create, so a plain reuse would silently drop requested subarea add/rename/reorder edits.
   //    Fetch it into this session's workspace (also required before push/publish on a cross-session
@@ -6010,8 +6404,39 @@ async function runSdkBuildPhases(spec, opts, owed) {
     // author's spec.app.icon). Resolved BEFORE appDef so the id is embedded at create time — the
     // reliable path (an appmodule's webresourceid is effectively write-once). This replaces the
     // SDK's arbitrary external/managed icon fallback that broke import into a fresh environment.
-    const iconWebResourceId = await ensureAppIcon(spec, result.created, { provision, sol, runner });
+    const iconWebResourceId = await ensureAppIcon(spec, result.created, { provision, sol, runner, unconfirmed: unconfirmedWebResources });
     const def = appDef(spec, result.created, { omitUnbuiltPages: true, iconWebResourceId, mainFormsByTable });
+    // The create of a NEW app, made below — or, for a navigation of pages only, at the end of the pages phase (createAppWithPages): the
+    // same writes in the same order either way.
+    // Create: the full def (siteMap + explicit components + iconWebResourceId) serializes unchanged
+    // through createArtifact, and push emits appmodule -> sitemap -> AddAppComponents -> publish.
+    // The def leaves `published` unset on purpose, so that push publishes the app. The SDK can
+    // create a never-published draft (`published: false`) for the final publish to cover — one publish
+    // round trip less — but a draft answers 404 by id and is missing from the PUBLISHED projection that
+    // every probe here reads (findArtifact('app'), the collision gate, the sitemap/navigation reads of
+    // the pages phase that follows, verify, download). A failed first build would leave an app its own
+    // re-run cannot see (it would POST the same unique name again), the pages phase would find no sitemap
+    // and halt, and a build without --publish would never publish it. Pinned in sdk-opt-ins.test.js.
+    const createApp = async (createDef) => {
+      const pushed = requireSuccessfulPush(await explainAppPushWarnings(provision.dataverse, await appWriters.create(createDef), createDef.name), `app ${createDef.name}`, opts.warn);
+      // Join the solution straight after the push, before the hidden-table pin, its read-back and the
+      // publish that follows it can fail. A re-run finds the app and takes this step's reuse branch, which
+      // re-asserts the membership too, so a create interrupted here never leaves a solution without its app.
+      await provision.addSolutionComponent({ componentId: pushed.id, componentType: COMPONENT_TYPE.app, solutionUniqueName: sol.uniqueName });
+      // The app module and its sitemap are DISTINCT solution components — adding the appmodule does
+      // NOT pull the sitemap in (it lands only in the Default solution), so export/import from the
+      // app's own solution would be incomplete. Add the sitemap (componenttype 62) explicitly.
+      await ensureSitemapInSolution(provision, sol, createDef.uniqueName);
+      await pinTables(pushed.id, true);
+      return pushed.id;
+    };
+    // Whether a NEW app is created after its pages: decided from the spec and the run here, and from whether the app exists by the read
+    // the step makes next — the same read that decides create or reuse for every app, right before the write.
+    const pagesFirst = navigationIsPagesOnly(spec) && pagesFirstRule(spec, phases, opts.changedOnly).newAppPagesFirst;
+    // What the step throws to hand the create on. The runner then reports the step as SKIPPED, with the reason, rather than done (makeRunner
+    // `skipIf`, entity-provision.js): an app that does not exist yet is not one this step made, and a ✓ would say it was. It is taken back by
+    // identity and never leaves the step; it is a refusal (retry-policy.js) so that, were it ever to, it would say a run again changes nothing.
+    const createdAfterItsPages = refusal('the app is created after its pages, by the pages phase');
     result.created.app = await runner.run('app-shell', `app "${def.name}"`, async () => {
       // Whether the app exists says whether its components can be read to prove which tables it holds forms or charts of (publishTablesBeforeApp), so it is looked up first.
       const existingId = await provision.findArtifact('app', { uniqueName: def.uniqueName });
@@ -6111,40 +6536,35 @@ async function runSdkBuildPhases(spec, opts, owed) {
         await warnAppIconNotApplied(provision, spec, iconWebResourceId, opts.warn);
         return existingId;
       }
-      // Create: the full def (siteMap + explicit components + iconWebResourceId) serializes unchanged
-      // through createArtifact, and push emits appmodule -> sitemap -> AddAppComponents -> publish.
-      // The def leaves `published` unset on purpose, so the push above publishes the app. The SDK can
-      // create a never-published draft (`published: false`) for the final publish to cover — one publish
-      // round trip less — but a draft answers 404 by id and is missing from the PUBLISHED projection that
-      // every probe here reads (findArtifact('app'), the collision gate, the sitemap/navigation reads of
-      // the pages phase that follows, verify, download). A failed first build would leave an app its own
-      // re-run cannot see (it would POST the same unique name again), the pages phase would find no sitemap
-      // and halt, and a build without --publish would never publish it. Pinned in sdk-opt-ins.test.js.
-      const pushed = requireSuccessfulPush(await explainAppPushWarnings(provision.dataverse, await appWriters.create(def), def.name), `app ${def.name}`, opts.warn);
-      // Join the solution straight after the push, before the hidden-table pin, its read-back and the
-      // publish that follows it can fail. A re-run finds the app and takes the reuse branch above, which
-      // re-asserts the membership too, so a create interrupted here never leaves a solution without its app.
-      await provision.addSolutionComponent({ componentId: pushed.id, componentType: COMPONENT_TYPE.app, solutionUniqueName: sol.uniqueName });
-      // The app module and its sitemap are DISTINCT solution components — adding the appmodule does
-      // NOT pull the sitemap in (it lands only in the Default solution), so export/import from the
-      // app's own solution would be incomplete. Add the sitemap (componenttype 62) explicitly.
-      await ensureSitemapInSolution(provision, sol, def.uniqueName);
-      await pinTables(pushed.id, true);
-      return pushed.id;
-    });
+      if (pagesFirst) {
+        // A NEW app whose navigation holds only page entries: created with `def` it would have no entry at all (its pages do not
+        // exist yet), and Dataverse refuses to create such a sitemap. So the pages phase creates the pages first and then the app,
+        // through this, with the WHOLE navigation — appDef without `omitUnbuiltPages`, over `result.created.pages`, which by then
+        // holds every page's id. Everything this step does before a create has been done above: the icon, the Main-form list, the
+        // `app.tables` refs and the one request that publishes the tables before the app, which nothing in the pages phase undoes
+        // (it writes pages and the manifest, no table, view or form).
+        createAppWithPages = async () => {
+          result.created.app = await createApp(appDef(spec, result.created, { iconWebResourceId, mainFormsByTable }));
+          return result.created.app;
+        };
+        throw createdAfterItsPages;
+      }
+      return createApp(def);
+    }, { skipIf: (err) => err === createdAfterItsPages && 'created after its pages: its navigation holds only page entries' });
   }
 
-  // 7b. Pages (generative pages). The app now exists; implement the full §9 protocol: structural scan/parity
+  // 7b. Pages (generative pages). The app now exists — or, for a NEW app whose navigation holds only page entries, it is created at the
+  //     end of this phase, once its pages exist (`createAppWithPages`); implement the full §9 protocol: structural scan/parity
   //     BEFORE any write (fail-closed) → create-absent-first for nav targets (persist manifest after EVERY
   //     create, crash-safety) → resolve nav pagerefs into run-scoped staging (never mutate canonical source)
   //     → upload-once with UPDATE-identity guard → sitemap finalize. All under a single-machine advisory
   //     lockfile (courtesy, not a correctness guarantee — convergence spine is the safety guarantee).
   // Run the pages phase when the phase is enabled AND there is page work to do: the spec declares pages,
   // OR the app already existed (an existing app may still reference live pages the new spec dropped;
-  // the destructive-removal gate below must run even when spec.pages is now empty). A FRESH app with no
-  // spec pages has nothing to build and no pre-existing pages to remove, so it is correctly skipped (this
-  // also avoids spinning up genpage enumeration for every page-less app build).
-  if (has('pages') && ((spec.pages || []).length || appWasExisting)) {
+  // the destructive-removal gate below must run even when spec.pages is now empty), OR the app is still to be
+  // created here. A FRESH app with no spec pages has nothing to build and no pre-existing pages to remove, so it
+  // is correctly skipped (this also avoids spinning up genpage enumeration for every page-less app build).
+  if (has('pages') && ((spec.pages || []).length || appWasExisting || createAppWithPages)) {
     // The page backend: the SDK on a throwaway workspace of its own, removed in the finally below (never the app folder's, whose copies of a
     // page would be stale the moment anyone saved it). `opts.genpage` is a seam for the tests, and is the caller's to dispose. The run's throttle budget
     // (`opts.throttle`) is handed to it, so the HTTP client it makes draws its waits for a throttled read or publish from the same five minutes as the page writes do.
@@ -6152,8 +6572,9 @@ async function runSdkBuildPhases(spec, opts, owed) {
     const genpage = opts.genpage || makeGenpageSdk(opts.env, { throttle: opts.throttle });
     const appUnique = appUniqueName(spec);
     // Recovery guard: the app id is only populated by app-shell (this run). If pages runs without it
-    // (e.g. --from pages), there is nothing to upload against — HALT and require a FULL rerun.
-    if (!result.created.app) throw new BuildHalt('pages phase requires the app (app-shell) in the same run — the app id is not carried across invocations. Re-run a FULL build (do not use --from pages).', { phase: 'pages', code: 'pages-requires-app', recoverable: false, retry: RETRY.NEVER });
+    // (e.g. --from pages), there is nothing to upload against — HALT and require a FULL rerun. An app the app step left to this
+    // phase to create has no id yet, by design: it is made below, once the pages exist.
+    if (!result.created.app && !createAppWithPages) throw new BuildHalt('pages phase requires the app (app-shell) in the same run — the app id is not carried across invocations. Re-run a FULL build (do not use --from pages).', { phase: 'pages', code: 'pages-requires-app', recoverable: false, retry: RETRY.NEVER });
     const wsDir = opts.workspaceDir || path.join(path.resolve(opts.appDir || '.'), '.maker-workspace');
     // Advisory lease: acquired OUTSIDE the try so a failed acquire (pages-locked HALT) never triggers the
     // finally that would release a lease we never held. Correctness rests on the convergence spine, not this.
@@ -6174,14 +6595,22 @@ async function runSdkBuildPhases(spec, opts, owed) {
       // only when it is a proven member of THIS app). A page-bearing build has just created or is editing
       // the app, so the sitemap MUST be readable; ok:false is a real failure, never "empty". A fresh app's
       // sitemap is validly empty of genpages here → ids:[] (correct). Reused below for the removal gate.
-      const membership = await fetchSitemap(provision, appUnique);
-      if (!membership.ok) throw new BuildHalt(`could not read the app sitemap (${membership.reason}) — refusing to proceed without verifying the app's page set`, { phase: 'pages', code: 'pages-sitemap-read-failed', recoverable: true, ...retryFrom(membership.cause, membership.detail) });
-      const sitemapIds = membership.ids;
+      // An app this phase is still to create (`createAppWithPages`) has no sitemap: the app step's read found no app a moment ago, so
+      // nothing is a member of it and nothing is read. Its answer is the one fetchSitemap gives for an app that does not exist, which the
+      // conflict advice below (navigationProof) reads the same way. That proves no page: an id binds only through the creation receipt
+      // a build of this app wrote for it (reconcilePageIds) — the rule that already binds a page made by a build that stopped before its
+      // finalizer — and the removal gate has no live page of this app to protect.
+      const membership = createAppWithPages ? { ok: false, reason: 'app-not-found' } : await fetchSitemap(provision, appUnique);
+      if (!membership.ok && !createAppWithPages) throw new BuildHalt(`could not read the app sitemap (${membership.reason}) — refusing to proceed without verifying the app's page set`, { phase: 'pages', code: 'pages-sitemap-read-failed', recoverable: true, ...retryFrom(membership.cause, membership.detail) });
+      const sitemapIds = membership.ok ? membership.ids : [];
 
       // IDENTITY (the durable manifest, discriminated read). A PRESENT-but-unparseable manifest is CORRUPT
       // and must HALT fail-closed BEFORE reconcile — reconciling it as "no identity" would recreate the
       // app's existing pages as orphans. An ABSENT manifest (present:false) is normal for a fresh app.
       const { id: readId, manifest, text, present } = await readPageManifest(provision, appUnique);
+      const recordedManifestId = unconfirmedWebResources.idOf(manifestResourceName(appUnique));
+      assertUnconfirmedWebResourceIdentity(manifestResourceName(appUnique), recordedManifestId, readId);
+      if (recordedManifestId && !readId) await checkRecordedWebResourceName(provision, manifestResourceName(appUnique), recordedManifestId);
       if (present && !manifest) throw new BuildHalt(`the page manifest ${manifestResourceName(appUnique)} exists but is corrupt/unparseable — refusing to proceed (would risk recreating existing pages as orphans). Fix or delete the web resource and rebuild.`, { phase: 'pages', code: 'pages-manifest-corrupt', recoverable: false, retry: RETRY.NEVER });
       let manifestId = readId;
       let lastManifestContent = text;
@@ -6320,7 +6749,8 @@ async function runSdkBuildPhases(spec, opts, owed) {
           : '';
         const recovery = unproven.map((c) => {
           const name = JSON.stringify(c.storedName || c.requestedName || '(unreadable name)');
-          // The page verbs of scripts/genpage.js, ready to run: this app's id is known by now (the pages phase halts without the app), and the environment is the one the build runs in.
+          // The page verbs of scripts/genpage.js, ready to run: this app's id is known by now (the pages phase halts without the app — but for an app this
+          // phase is still to create, whose advice is its own, below), and the environment is the one the build runs in.
           const place = genpageCommand('add-to-app', { env: opts.env, pageId: c.manifestId, app: { id: result.created.app, note: "this app's id" } });
           if (inSavedNav.has(String(c.manifestId).toLowerCase())) {
             return `page ${c.manifestId} (${name}) is only in this app's saved but unpublished navigation: publish the app — ${place} publishes it, since the page is already in its saved navigation — then re-run. The build updates a page only when the app's published navigation or a local creation record proves it is this app's, so that other apps' navigation is checked before an update`;
@@ -6329,6 +6759,11 @@ async function runSdkBuildPhases(spec, opts, owed) {
             ? 'its local creation record does not corroborate the stored name'
             : 'this workspace holds no record that this app created it in this environment';
           const removal = genpageCommand('delete', { env: opts.env, pageId: c.manifestId, flags: ' --allow-destructive' });
+          // An app this phase is still to create has no navigation to add the page to, so the record is the only proof there can be: the
+          // workspace that created the page holds it (a build run from there adopts the page and creates the app with it).
+          if (createAppWithPages) {
+            return `page ${c.manifestId} (${name}) is in no navigation of this app — the app does not exist yet: its navigation holds only page entries, so the build creates it once its pages exist — and ${proofText}: if it is this app's page, run the build from the workspace that created it, which holds that record; if not, remove the stale id from the manifest/spec (or delete the page, after asking the user — it is permanent: ${removal}) and re-run`;
+          }
           return `page ${c.manifestId} (${name}) is not in this app's navigation${unreadDraft} and ${proofText}: if it is this app's page, add it to the app's navigation with ${place} (it publishes the app and proves the page in what runs) and re-run; if not, remove the stale id from the manifest/spec (or delete the page, after asking the user — it is permanent: ${removal}) and re-run`;
         });
         throw new BuildHalt(`generative-page identity conflict(s): ${JSON.stringify(conflicts)}${nameReadErrors.length ? `; stored-name reads failed: ${nameReadErrors.join('; ')}` : ''} — refusing to overwrite/misbind a page. ${recovery.length ? recovery.join('; ') : 'Resolve the duplicate/mismatched id(s) in the spec/manifest and rebuild.'}`, { phase: 'pages', code: 'pages-identity-conflict', recoverable: false, retry: RETRY.NEVER });
@@ -6444,7 +6879,17 @@ async function runSdkBuildPhases(spec, opts, owed) {
         }
       }
 
-      const persistNow = async () => { const pr = await persistPageManifest(provision, spec, keyToId, sol, appUnique, manifestId, lastManifestContent, solutionMembers); manifestId = pr.id; lastManifestContent = pr.content; };
+      // A write the SDK could not confirm leaves the manifest's row under the error's id: kept, so that this run's next persist — and the record, the next
+      // run's — writes it again by id rather than creating the name a second time (persistPageManifest).
+      const persistNow = async () => {
+        let pr;
+        try { pr = await persistPageManifest(provision, spec, keyToId, sol, appUnique, manifestId, lastManifestContent, solutionMembers, unconfirmedWebResources); } catch (e) {
+          if (isUnconfirmedWrite(e)) manifestId = e.id;
+          throw e;
+        }
+        manifestId = pr.id;
+        lastManifestContent = pr.content;
+      };
       const recordCreate = (p, id) => {
         // No workspace means no durable creation authority. Normal CLI builds always supply one.
         if (!opts.workspaceDir) {
@@ -6676,7 +7121,7 @@ async function runSdkBuildPhases(spec, opts, owed) {
           const first = await readRowVersions([pageId]);
           const before = first.ok ? first.versions.get(pageId) : null;
           if (!before) return null;
-          const copy = await genpage.publishedDiffers(pageId, fields, { runtimeSha256 });
+          const copy = await genpage.publishedDiffers(pageId, { ...fields, specBindings: true }, { runtimeSha256 });
           // `fingerprint` is the hash of the content the copy was compared with: it must be the hash the record keeps, or the answer is about other content.
           if (!copy.ok || copy.fingerprint !== fingerprint) return null;
           if (copy.differing.length) {
@@ -6690,10 +7135,19 @@ async function runSdkBuildPhases(spec, opts, owed) {
         } catch { return null; }
       };
       const rememberPublished = async (written, p, fields) => {
-        if (!opts.workspaceDir || !written.publish || written.publish.kind !== 'verified' || typeof written.fingerprint !== 'string') return;
+        if (!opts.workspaceDir || typeof written.fingerprint !== 'string') return;
         const pageId = String(written.pageId).toLowerCase();
-        const files = await provedVersions(p, pageId, fields, written.fingerprint, written.runtimeSha256);
-        publishedPages.set(pageId, { fingerprint: written.fingerprint, files });
+        if (written.receiptUpgraded) {
+          // The record of an earlier publish was made before the spec stated the page's binding lists, and the update found that it stands for them too (it read the published copy and it holds them): the page was not written
+          // and not published, so there is nothing new to prove — the record is renewed to the hash of what the spec states now, with the versions it already holds, which `publishesStillStanding` has just found to be the page's.
+          const standing = publishedPages.get(pageId);
+          if (!standing || !standing.files) return;
+          publishedPages.set(pageId, { fingerprint: written.fingerprint, files: standing.files });
+        } else {
+          if (!written.publish || written.publish.kind !== 'verified') return;
+          const files = await provedVersions(p, pageId, fields, written.fingerprint, written.runtimeSha256);
+          publishedPages.set(pageId, { fingerprint: written.fingerprint, files });
+        }
         const bound = new Set(Array.from(keyToId.values(), (id) => String(id).toLowerCase()));
         try {
           writePublishedPages(opts.workspaceDir, appUnique, opts.env, new Map([...publishedPages].filter(([id]) => bound.has(id))));
@@ -6738,7 +7192,7 @@ async function runSdkBuildPhases(spec, opts, owed) {
           for (const p of implemented) {
             const key = keyOf(p);
             if (keyToId.has(key) || !navTargets.has(key)) continue; // only ABSENT targets need pre-minting
-            const fields = { name: p.name, source: sourceByKey.get(key), prompt: p.prompt, agentMessage: p.agentMessage, dataSources: p.dataSources || [], model: p.model };
+            const fields = { name: p.name, source: sourceByKey.get(key), prompt: p.prompt, agentMessage: p.agentMessage, dataSources: p.dataSources || [], model: p.model, ...statedPageBindings(p) };
             const up = await createPage(p, fields);
             recordCreate(p, up.pageId);
             keyToId.set(key, up.pageId);
@@ -6835,11 +7289,14 @@ async function runSdkBuildPhases(spec, opts, owed) {
             // The spec's data sources are authoritative, as they always were: a page that lists none is bound to none. The model and name ride along
             // too, but the page's own are kept when the spec has none (the SDK writes only what differs; pac stored whatever `--model` it was
             // sent, so a re-upload without one used to wipe a deployed page's model id to ""). A downloaded spec carries the model (pages[].model).
+            // The connector and Custom API bindings go the same way, and only when the page states them: one it leaves out is the deployed page's own, and a list it states — `[]` too — replaces it. They are the spec's, which
+            // states each entry by the properties it can carry (lib/page-bindings.js), so the update reads them against the page's own entries (`specBindings`): a page that already holds what the spec states is not
+            // written, and an entry that is changed keeps what the spec could not state of it.
             // `caller: 'build'` words the advice for an UPDATE that may have landed: the build keeps no base marker, and reads every page again when it runs.
-            const fields = { name: p.name, source: deployedBytes, prompt: p.prompt, agentMessage: p.agentMessage, dataSources: p.dataSources || [], model: p.model };
+            const fields = { name: p.name, source: deployedBytes, prompt: p.prompt, agentMessage: p.agentMessage, dataSources: p.dataSources || [], model: p.model, ...statedPageBindings(p) };
             // `publishedFingerprint` is what this workspace recorded about the page's last publish, handed over only while the page's files still read as they did right after it (`publishesStillStanding`):
             // a page that already holds this very content, and was not touched from elsewhere since, is not published again.
-            const up = requestedId ? await genpage.update(requestedId, { ...fields, caller: 'build', runtimeEvidence: true, publishedFingerprint: standingPublishes.get(String(requestedId).toLowerCase()), ...(opts.throttle ? { throttle: opts.throttle } : {}) }) : await createPage(p, fields);
+            const up = requestedId ? await genpage.update(requestedId, { ...fields, caller: 'build', runtimeEvidence: true, specBindings: true, publishedFingerprint: standingPublishes.get(String(requestedId).toLowerCase()), ...(opts.throttle ? { throttle: opts.throttle } : {}) }) : await createPage(p, fields);
             if (!requestedId) recordCreate(p, up.pageId);
             // An UPDATE (requestedId set) must return the SAME id, else a resolved sibling could point at
             // a stale target. Case-insensitive (Dataverse may echo a differently-cased GUID).
@@ -6880,8 +7337,14 @@ async function runSdkBuildPhases(spec, opts, owed) {
       // empty) and STRIP the app's form/view/chart component registrations (:635). A pure content re-upload
       // leaves the key→pageId map unchanged, so the sitemap needs no rewrite — skip the finalize in that
       // submode. Any sitemap-changing apply (and every full build) still finalizes.
+      // A NEW app whose navigation holds only page entries does not exist yet: the app step left its create to this step, so the step
+      // CREATES it, with the whole navigation — every page now has its id — in its first sitemap (createAppWithPages). There is no live
+      // sitemap to fence or rewrite and no header to compare: the create writes the spec's name, description and routing description
+      // itself, as the app step's create does. It is the app step's work, so it is reported, and fails, in that phase.
       const skipSitemapFinalize = !!(opts.changedOnly && opts.changedOnly.skipSitemapFinalize);
-      if (!skipSitemapFinalize && (appHasPageSubareas(spec) || appWasExisting)) {
+      if (createAppWithPages) {
+        await runner.run('app-shell', `app "${spec.app.name}" (created with its pages)`, () => createAppWithPages());
+      } else if (!skipSitemapFinalize && (appHasPageSubareas(spec) || appWasExisting)) {
         await runner.run('pages', 'finalize sitemap (genpage subareas)', async () => {
           await provision.fetchArtifact('app', result.created.app);
           const mainFormsByTable = await resolvedMainForms();
@@ -7726,4 +8189,4 @@ async function runSdkBuildPhases(spec, opts, owed) {
   return result;
 }
 
-module.exports = { runSdkBuild, publishTargets, partialEnrichment, settleOwedPublishes, collectOwedPublishes, settleOwedLengths, normalizeFormId, planFor, annotateLivePlan, resolvePhases, PHASES, BuildHalt, SDK_COLUMN_TYPE, viewDef, defaultViewColumns, subgridLabel, enrichesDefaultViews, dashboardsInSolution, findDashboardsByName, findPinnedDashboard, artifactIdentityQuery, resolveExistingFormId, FORM_TYPE_CODE, chartDef, dashboardTileOpts, dashboardComponent, compileFormIntent, formFieldLogicals, appDef, appUniqueName, applyAppAiDescription, haltOnUnpublishedAppHeader, pushAppHeader, commandsByEntity, commandDef, businessRuleDef, businessRuleFilter, bpfDef, bpfFilter, webResourceOpts, WEB_RESOURCE_KINDS, FORM_EVENTS, acquireAppPagesLease, personaRoleSpecFor, resolveRoleBusinessUnit, roleBuClause, roleGrantLabel, resolveRoleGrantTarget, existingAppSitemapIsWritten, applyAppHeader, applyAppHeaderText, warnAppIconNotApplied, inspectBpfStages, applyBpfStages, refuseUnpushedAppCopy, assertAuthorizedSitemapRewrite, reconciledPublishHalt };
+module.exports = { runSdkBuild, publishTargets, partialEnrichment, settleOwedPublishes, collectOwedPublishes, settleOwedLengths, normalizeFormId, planFor, annotateLivePlan, resolvePhases, PHASES, BuildHalt, SDK_COLUMN_TYPE, viewDef, defaultViewColumns, subgridLabel, enrichesDefaultViews, dashboardsInSolution, findDashboardsByName, findPinnedDashboard, artifactIdentityQuery, resolveExistingFormId, FORM_TYPE_CODE, chartDef, dashboardTileOpts, dashboardComponent, compileFormIntent, formFieldLogicals, appDef, appUniqueName, applyAppAiDescription, haltOnUnpublishedAppHeader, pushAppHeader, commandsByEntity, commandDef, businessRuleDef, businessRuleFilter, bpfDef, bpfFilter, webResourceOpts, WEB_RESOURCE_KINDS, FORM_EVENTS, acquireAppPagesLease, personaRoleSpecFor, resolveRoleBusinessUnit, roleBuClause, roleGrantLabel, resolveRoleGrantTarget, existingAppSitemapIsWritten, pagesFirstRule, applyAppHeader, applyAppHeaderText, warnAppIconNotApplied, inspectBpfStages, applyBpfStages, refuseUnpushedAppCopy, assertAuthorizedSitemapRewrite, reconciledPublishHalt };

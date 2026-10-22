@@ -26,6 +26,7 @@
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { createFakeDataverse } = require('./fake-dataverse.js');
+const { appSitemapLinkRows } = require('./app-sitemap-link-rows.js');
 
 const ORIGIN = 'https://contoso.crm.dynamics.com';
 const LAYER_ID = '11111111-0000-4000-8000-000000000002';
@@ -63,6 +64,13 @@ function createFakeBuildOrg({ entities, solution = { uniqueName: 'ContosoReview'
     calls.push(recorded);
     const overridden = overrides.find((o) => o.match(recorded));
     if (overridden) return overridden.answer(recorded);
+    if (method === 'GET') {
+      const linked = appSitemapLinkRows(url, {
+        apps: app ? [{ ...app, appmoduleidunique: LAYER_ID }] : [],
+        components: components.map((c) => ({ ...c, _appmoduleidunique_value: LAYER_ID })),
+      });
+      if (linked !== undefined) return rows(linked);
+    }
     if (method === 'POST' && p === '/PublishXml') {
       if (refusal && /<entities>/.test(body.ParameterXml)) {
         const status = refusal;
@@ -72,6 +80,10 @@ function createFakeBuildOrg({ entities, solution = { uniqueName: 'ContosoReview'
       if (app && body.ParameterXml.includes(`<appmodule>${app.appmoduleid}</appmodule>`)) {
         app.componentstate = 0;
         appVersion += 1;
+      }
+      for (const [, id] of String(body.ParameterXml).matchAll(/<webresource>([^<]+)<\/webresource>/g)) {
+        const row = resources.get(id.toLowerCase());
+        if (row) row.publishedContent = row.content;
       }
       return fake.httpClient.post(url, body, options);
     }
@@ -93,19 +105,40 @@ function createFakeBuildOrg({ entities, solution = { uniqueName: 'ContosoReview'
     //   POST  /webresourceset                       { name, content, … }  ->  204, OData-EntityId: <API>/webresourceset(<id>)
     //   PATCH /webresourceset(<id>)                 { content }           ->  204
     //   GET   /webresourceset?$select=webresourceid,content&$filter=name eq '<name>'&$top=1
+    //   GET   /webresourceset(<id>)?$select=content                        (the SDK's read-back of what it published)
+    // A web resource has two layers, as the platform holds it: a POST or PATCH writes the SAVED content (`content`), a PublishXml that
+    // names the row (`<webresources><webresource><id></webresource></webresources>`) copies it to the PUBLISHED layer (`publishedContent`),
+    // and every plain read — by name or by id — answers the published content. A row no publish has named is in no plain read, as for the
+    // views, forms and charts above (assumed: the plain read of a never-published web resource is not measured; the SDK's create publishes).
     let m;
+    const publishedRow = ({ publishedContent, ...row }) => ({ ...row, content: publishedContent });
     if (method === 'POST' && /^\/webresourceset(\?|$)/.test(p)) {
-      const id = body.webresourceid || randomUUID();
+      // A name is unique in an environment: a second create of one is refused, whatever layer the first is in (the SDK says so of its own create; the
+      // platform's exact code for it is not measured).
+      if ([...resources.values()].some((row) => String(row.name).toLowerCase() === String(body.name).toLowerCase())) {
+        return { status: 400, headers: {}, body: { error: { code: '0x80040237', message: `A web resource named ${body.name} already exists.` } } };
+      }
+      const id = (body.webresourceid || randomUUID()).toLowerCase();
       resources.set(id, { ...body, webresourceid: id });
       return { status: 204, headers: { 'odata-entityid': `${ORIGIN}/api/data/v9.0/webresourceset(${id})` }, body: null };
     }
-    if (method === 'PATCH' && (m = /^\/webresourceset\(([0-9a-f-]{36})\)/i.exec(p)) && resources.has(m[1])) {
-      Object.assign(resources.get(m[1]), body);
+    if (method === 'PATCH' && (m = /^\/webresourceset\(([0-9a-f-]{36})\)/i.exec(p))) {
+      // A write by an id no row has any more is refused as the platform refuses it.
+      if (!resources.has(m[1].toLowerCase())) return { status: 404, headers: {}, body: { error: { code: '0x80040217', message: `webresource With Id = ${m[1]} Does Not Exist` } } };
+      Object.assign(resources.get(m[1].toLowerCase()), body);
       return { status: 204, headers: {}, body: null };
+    }
+    if (method === 'GET' && (m = /^\/webresourceset\(([0-9a-f-]{36})\)\?\$select=content$/i.exec(p))) {
+      const row = resources.get(m[1].toLowerCase());
+      return row && row.publishedContent !== undefined ? response({ webresourceid: row.webresourceid, content: row.publishedContent }) : { status: 404, headers: {}, body: { error: { message: 'Does Not Exist' } } };
+    }
+    if (method === 'GET' && (m = /^\/webresourceset\(([0-9a-f-]{36})\)\?\$select=name,displayname,webresourcetype,content,description$/i.exec(p))) {
+      const row = resources.get(m[1].toLowerCase());
+      return row && row.publishedContent !== undefined ? response(publishedRow(row)) : { status: 404, headers: {}, body: { error: { message: 'Does Not Exist' } } };
     }
     if (method === 'GET' && /^\/webresources(et)?\?/.test(p)) {
       const named = /name eq '([^']+)'/.exec(p);
-      const stored = named ? [...resources.values()].filter((row) => row.name === named[1]) : [];
+      const stored = named ? [...resources.values()].filter((row) => row.name === named[1] && row.publishedContent !== undefined).map(publishedRow) : [];
       return rows(stored.length ? stored : p.includes('_icon') ? [{ webresourceid: ICON_ID }] : []);
     }
     // The environment's generative pages, plain or in the saved layer: every page of the list, whatever the filter asks (a test that needs a narrower answer intercepts).

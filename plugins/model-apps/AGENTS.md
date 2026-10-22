@@ -455,6 +455,11 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
     `$batch` change set (the plugin's client has `postRaw`) and stays Active; a Draft flow as one PATCH. The
     Active/Draft state is converged AFTER the edit — a state change before it would move the row's version,
     and the SDK's push is conditioned on it (a 412).
+    When the customization lock refuses an Active edit's whole change set, the SDK waits and re-sends the
+    identical body for at most 180 seconds of scheduled waits. The guard keeps the original `If-Match`:
+    another maker's intervening edit fails it with 412 rather than being overwritten. The HTTP client
+    delivers each attempt once; an ambiguous 5xx envelope is not permission to replay it. These boundaries
+    are pinned over the real bundle in `bpf-stage-edits.test.js`.
   - *Refused — no stage or step edit of the flow is applied, never half of them*: a stage or step the flow has
     and the spec does not list (a build never removes either, and cannot tell a spec that dropped one from
     a maker who added it in Maker); the same stages in another order; a different number of stages where one
@@ -518,8 +523,10 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   no published layer, so whatever it holds is saved only. That list is fail-closed like the others: a read that fails halts as
   `pages-shared-check-failed`, and a never-published app whose layer, sitemap component or saved sitemap cannot be read is listed
   unreadable. A never-published app whose component read **succeeds** and finds **no sitemap component** is not yet shown to have no navigation: the
-  vendored SDK links an app to its sitemap **by name** — it looks the sitemap up with `sitemapnameunique eq '<the app's unique name>'` and takes one for the app only
-  while that column holds the app's name, and `ensureSitemapInSolution` (sdk-build.js) resolves it the same way — so such an app may hold a sitemap, and pages in it, that no component row links to it.
+  vendored SDK prefers a type-62 sitemap component on the app's **current** `appmoduleidunique` layer, but falls back to
+  `sitemapnameunique eq '<the app's unique name>'` when that component is absent and no other live app pins the candidate. So such an app may
+  hold a sitemap, and pages in it, that no component row links to it. `ensureSitemapInSolution` (sdk-build.js) still uses the naming convention
+  of SDK-created apps for its best-effort, additive solution membership; it is not an ownership or deletion proof.
   The saved-layer read the scan makes anyway (it asks for `sitemapnameunique` too — no further request) shows whether it does: a sitemap of that name is joined
   like any draft app's (case-insensitively, as Dataverse compares names), several sitemaps of the name leave the app unreadable, and **none** means the app has no
   navigation at all and holds no page, so it is skipped — one draft app saved with only a name must not stop every page update in the environment (a read that
@@ -927,8 +934,9 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   downloaded spec carries the app's own navigation, which can be empty, so a build of a new app used to fail at the app
   step, after the solution, tables, views and forms were written. `navigationVerdict` (`scripts/lib/app-navigation.js`)
   now decides from the spec alone, whenever the app-shell phase is in the run's range (never for `--stage data`, or an
-  `--only` without it). A NEW app needs one table, dashboard or url entry in a group in an area, because its first push
-  creates the sitemap: a navigation of pages only, or with no entry, is refused. An EXISTING app is refused for neither.
+  `--only` without it). A NEW app needs an entry its first push holds, because that push creates the sitemap: a navigation
+  with no entry is refused, and so is a navigation of pages only in a run that cannot create the pages first (below). An
+  EXISTING app is refused for neither.
   Its navigation is written from the whole spec once the pages exist, so a page entry counts; and an empty navigation is
   built (Dataverse accepts it on an update) with a WARNING that the app is left with no navigation entries — any it has
   now are removed, which the destructive-operation gate (`lib/op-diff.js`, wired in `buildModelApp`) asks
@@ -943,10 +951,13 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   would stop the build closes with "Fix the steps marked ? above, then re-run with --apply to execute." rather than
   inviting an apply that would stop; `--apply` (`checkNavigationBeforeWriting`, ahead of the view-filter pre-flight) halts
   with `BuildHalt` code `app-navigation-empty` (phase `preflight`, `recoverable: false`, `transient = false`, never
-  retried), saying what the platform requires and what to add — `{ entity: '<table>', title: '<label>' }` in a group, and
-  for a navigation of pages only that a page entry joins the navigation only once its page exists, so a new app needs one
-  other entry. A navigation that is fine for an app that exists and refused for a new one — pages only, or no entry at all
-  — depends on whether the app exists, so only it reads that: one `findArtifact('app')`, the read the app step makes next.
+  retried), saying what the platform requires and what to add — `{ entity: '<table>', title: '<label>' }` in a group (or,
+  in a run that creates the pages first, an entry for one of the spec's pages), and for a navigation of pages only why this
+  run cannot create the pages first. A navigation that is fine for an app that exists and refused for a new one — pages
+  only, or no entry at all — depends on whether the app exists, so only it reads that: one `findArtifact('app')`, the read
+  the app step makes next. The read is made for a navigation of pages only in a run that creates the pages first too, where
+  both answers build, so that an app that exists makes exactly the requests it made; the app step's own read decides the
+  order.
   A valid navigation adds no call, and its plan and requests are byte-identical to what they were. When that read cannot
   answer (`--no-live-plan`, a failed read) the stricter rule is not applied: the build warns what it could not check and
   goes on as before. A spec with no `appShell.areas` is refused whatever the answer. The destructive-operation gate in
@@ -954,12 +965,37 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   the removal is real, and the build then goes on — and it does not ask about a spec the check refuses outright:
   `discoverOpDiffState` reads the deployed navigation only for a spec that declares `appShell.areas`, so a maker is never
   asked to authorize the removal of entries from a navigation the build will not write.
-  `lint-app-spec` warns (`appShell: …`) for a navigation a new app cannot be built from, and says whether an app that
-  already exists is spared (not affected, or built with no entries). A test that builds a NEW app against a fake SDK must
-  give its navigation an entry that is not a page: the fakes do not model the platform's rule.
+  `lint-app-spec` warns (`appShell: …`) for a navigation a new app cannot be built from by the whole build — which creates
+  the pages first, so a navigation of pages only is not one — and says whether an app that already exists is spared (not
+  affected, or built with no entries). A test that builds a NEW app against a fake SDK must give its navigation an entry
+  that is not a page, or run the pages phase (which then creates the pages first): the fakes do not model the platform's
+  rule (`lifecycle-pages-first-real-bundle.test.js` adds it in front of its fake).
   Pinned by `app-navigation.test.js` (the rule, its agreement with `appDef`, validation, lint) and
   `app-navigation-build.test.js` (dry run and apply for every shape, with every call recorded, the summary line, and the
   order of the destructive gate and the check).
+  **A new app whose navigation is pages only is built by creating its pages FIRST** (`pagesFirstRule` and
+  `createAppWithPages`, `scripts/lib/sdk-build.js`). In a run that has the app step and the pages phase, is not a changed-only
+  re-upload, and builds every page an entry names, the app step does all it does before a create — the icon, the Main-form
+  list, the `app.tables` refs, its existence read, the one pre-app table publish — and, finding no app, leaves the create to
+  the pages phase: the step is reported `⊘ app "<name>" (created after its pages: its navigation holds only page entries)`,
+  never a ✓ for an app that does not exist yet. The pages phase runs as for any app, with no membership (there is no
+  sitemap to read, so an id binds only through this workspace's creation receipt — the rule that already binds a page whose
+  build stopped before its finalizer — and the removal gate has nothing of this app to protect), and in the finalizer's slot
+  it CREATES the app with `appDef(spec, result.created)` — the whole navigation, every page's id in it — through the app
+  step's own create (`createApp`: create and push, the app and its sitemap into the solution, the `app.tables` pin), reported
+  in the app-shell phase as `✓ app "<name>" (created with its pages)`. Its first sitemap holds the page entries, so no
+  navigation without them is ever sent and there is no temporary entry to remove; the pages' default views are pinned after
+  it as for any app. This is the order `apps.js create --page-id` has always used (a page made with no app, then the app
+  around it, live-verified). A stop between the pages and the app leaves the pages, their receipts and the manifest, and no
+  app: a re-run — or the CLI's own retry of a transient halt — adopts each page by its receipt (an unchanged page is neither
+  written nor published) and creates the app; a teardown deletes them by their receipts with the app absent. A build from
+  another workspace holds no receipt: it halts `pages-identity-conflict`, and its advice names that workspace rather than an
+  `add-to-app` for an app that does not exist. An app that EXISTS is not affected: the app step finds it and reuses it, and
+  its requests are byte-identical (pinned). A run that cannot create the pages first — no pages phase, a changed-only
+  re-upload, a page entry whose page it does not build — still refuses a new app of pages only, and says which. Pinned by
+  `lifecycle-pages-first-real-bundle.test.js` (over the real bundle: built from nothing, an unchanged rebuild, a stop between
+  the pages and the app then a re-run, the CLI's retry, another workspace, and a teardown after each, back to what the
+  environment held) and `app-navigation-build.test.js` (every request of the order, and the refusals).
   **An existing app's sitemap is rewritten ONTO its live nodes (AB#6726727).** The App Spec describes a
   node's label/title, target and icons only, and the SDK serializes a node without its fetched `bag` from
   scratch (new `Id`, `ResourceId="SitemapDesigner.NewSubArea"`, broad `Client`/`Sku`,
@@ -1132,7 +1168,7 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   in one `<entities>` PublishXml, with or without `--publish` — in the data-model phase, before anything can publish
   the app; a failed publish is a warning that names the tables. Nothing else in the build is sure to publish them:
   its other table publishes follow from what the spec puts on a table (a form, view, chart or icon, or its enriched
-  default views), and a downloaded spec carries no forms, views, charts or table icons and marks every table
+  default views), and a downloaded spec need not carry forms, views, charts or table icons and marks every table
   `existing: true`, whose default views the build leaves alone. No metadata read can confirm that publish: measured
   live, `RetrieveEntity` returns the new label right after the PUT even with `RetrieveAsIfPublished=false`, so a
   live check of it has to trace the request. The labels are read **once per child table**
@@ -1387,13 +1423,35 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   never published answers 404 without it; measured live, the platform DELETED such a row, so the read-back is insurance against an answer it has not been seen to give.
   Form-only page references are not scanned.
   **An app is TWO rows** — an `appmodule` AND a `sitemaps`
-  row, with no lookup between them and no server-side cascade; the only link is
-  `sitemap.sitemapnameunique === appmodule.uniquename`. Deleting only the appmodule strands the sitemap
+  row, with no server-side cascade. The sitemap is linked by a type-62 `appmodulecomponent` on the app's **current**
+  `appmoduleidunique` layer, not necessarily by equal unique names (first-party and renamed sitemaps may have different names).
+  Only an app with no sitemap component permits a same-name fallback, and only when no other live app's current layer pins that candidate.
+  Deleting only the appmodule strands the sitemap
   forever and, because `sitemapnameunique` is unique-constrained, permanently **burns that unique name**:
   a later build of an app with the same name fails with *"The name &lt;x&gt; is already in use by an
   existing site map"*, which the maker cannot act on. `deleteAppCascade` therefore resolves the sitemap
-  BEFORE deleting the app, deletes both rows in **one atomic OData `$batch`**, and **fails closed** — any
-  delete it cannot prove is rejected rather than guessed. Each row's delete is conditioned on its
+  BEFORE deleting the app, rechecks the current link after reading it, deletes both rows in **one atomic OData `$batch`**, and **fails closed**.
+  Missing, malformed, ambiguous or changed identity refuses as `APP_SITEMAP_UNRESOLVED`; a sitemap another live app currently pins refuses
+  deletion as `APP_SITEMAP_SHARED`. Fetch/push also refuse a shared same-name fallback rather than adopting another app's navigation, and
+  download returns the refusal with `ok:false` before writing output. A copy whose app was re-linked must be fetched again before pushing edits.
+  One `APP_SITEMAP_UNRESOLVED` refusal, and only that one, teardown gets past itself — for a published app whose teardown reaches the app step:
+  the app's SiteMap component names a sitemap that is GONE (`… sitemap '<id>' was not returned by the unpublished-aware read. … Retry.`). Before
+  2.18.0 the teardown of one app deleted a sitemap another app shared, and the other app's component outlives the row it names (measured live).
+  2.17.0's delete looked the sitemap up by the app's unique name and, when no sitemap had that name, deleted such an app alone; the component-aware 2.18.0 delete
+  refuses it on every run, and no retry can pass that. `scripts/lib/app-sitemap-dangling.js` reads the app's row version FIRST, then proves the
+  sitemap absent by its id in the published AND the saved layer, with no other app's current layer naming it and the link unchanged when read
+  again; then it deletes the app ALONE — one `DELETE` with `If-Match` on the version read before the proof, so a repair, relink or publish of
+  the app while the proof ran is refused (412, a final refusal), no sitemap written — reads it back gone from both layers, warns once, and
+  teardown goes on. A read that fails or is ambiguous, a sitemap a layer still holds, another app's pin, a relink, a moved version and an app with
+  no published row are each a final refusal (`transient: false`) that says what was found and asks the maker to delete the app in Power Apps and
+  run the teardown again — never "Retry". Every error of this path is `failClosed`: `deleteStep` passes it on before its not-found, dependency and
+  undeletable shortcuts, which read an error's words (an app's display name, a proxy's "not found"), so the steps that depend on the app are
+  never attempted after it. What the version cannot see — another app pinning the sitemap, or a row of its id made again, after the last read —
+  is the same snapshot limit as the SDK's reverse-owner check. Not reached: an app with live generative pages stops earlier, at the page proof
+  (its navigation is gone), as before — delete such an app in Power Apps, then run the teardown again. The SDK's sentence only chooses this path;
+  the proof decides (pinned against the real bundle in `scripts/tests/teardown-dangling-sitemap-real-bundle.test.js`).
+  The reverse-owner check is a snapshot, not a cross-app lock: another app adding a pin afterwards moves neither row token, so this does not
+  promise to prevent that race. Each row's delete is conditioned on its
   **row** token from a by-id read, not the unpublished-aware read's content token, which runs ahead
   of the row while a sitemap edit is unpublished (that made such an app impossible to tear down —
   412 every time). This is why
@@ -1404,6 +1462,10 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   The SDK re-sends an app delete itself when the platform's search-index insert race refuses it (HTTP
   400, SQL 547) — an answer this client never re-sends — so the two layers add and never multiply
   (counts pinned in `scripts/tests/sdk-resend-layers.test.js`).
+  An app-create rollback preserves the SDK's distinction between **KEPT** (a whole atomic change set was refused by the customization lock
+  and deleted nothing) and **unconfirmed** (its answer cannot prove what happened). Its advice is surfaced unchanged: verify that the rows
+  are this create's own before removing them; a raw outer 429 remains unconfirmed and retains its lock error, rather than proving KEPT.
+  Neither `PublishXml` nor an unguarded rollback is re-sent.
   Pinned by
   `scripts/tests/app-delete-real-bundle.test.js` against the real bundle — every other teardown test
   drives a mock and would stay green through a regression here. The teardown of an app that was created and never
@@ -1458,8 +1520,26 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   writes); dry-run lists every page candidate by id and stored name without writes, marking absent
   rows as "not found" with their manifest names only.
   Best-effort continue (a failed step is recorded, teardown proceeds). A not-found (already-gone)
-  error is treated as deleted, the table delete's **not-found-on-success** is tolerated (`tolerateNotFound`),
+  error is never a failure, the table delete's **not-found-on-success** is tolerated (`tolerateNotFound`),
   and system/managed artifacts that cannot be deleted are recorded as `skipped` rather than failing.
+  A step reports `(not found)` — and the closing line counts it so — only where it knows nothing was there
+  when it began (the handler's `absentOnNotFound`, or `foundNothing` for an answer): a default-view reset
+  that finds no default view, a relationship the SDK's own lookup does not find (it sends no delete), a
+  table its step's read did not list, and a global choice, whose delete is its step's only request. A
+  teardown run again therefore reads `0 deleted, N not found` (it read every one of those `(1 deleted)`),
+  and so does the relationship from a table to itself whose table this run deleted (it went with it). A
+  not-found answer after a read that SAW the artifact — a table's, which is the not-found a re-sent metadata
+  delete gets once its first send did the work, or a relationship's to its own delete — stays a deletion.
+  The deletes sent are unchanged, and so is the exit status. One case can still mislabel: a global
+  choice delete the client sent again (after a timeout or a gateway error) whose first send had removed it
+  reads "not found", since the step makes no read that could tell.
+  **A publisher is never deleted**, and no step plans one: the build reuses any publisher that carries the
+  spec's prefix (`provisionSolution`) and other solutions may share the one it made, so a teardown cannot
+  tell that this app alone uses it. Its closing summary says so in one line after the count, on a clean
+  run and a failed one alike — `▸ the publisher with prefix '<prefix>' is kept: teardown never deletes a
+  publisher, which other solutions may share — delete it in Power Apps (Solutions → Publishers) once nothing
+  uses it` — so the row a maker finds left behind is expected (`teardown-model-app.test.js`, and the
+  lifecycle matrix's teardown).
   `--clear-workspace` prunes `.maker-workspace/` after a clean apply (not while another teardown of it
   still holds the changed-only fence). It also refuses while any unconsumed ownership records remain,
   including another app/environment. The refusal names each file and explains that teardown retires it
@@ -1500,7 +1580,8 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   A missing SDK sitemap or a mismatch is refused with publish-then-download guidance, never emitted
   as hidden-table membership or lost Main restrictions. The immutable name is recovered from the
   fetched `uniqueName`/`uniquename` before manifest/prefix lookup; an unresolved identity is refused.
-  **Round-trip scope (be precise — do not claim "complete"):** tables, sitemap/appShell, generative pages,
+  **Round-trip scope (be precise — do not claim "complete"):** tables, sitemap/appShell, generative pages
+  (with their data sources, model and connector and Custom API bindings),
   classic dashboards, icons, and solution round-trip; **forms, views, charts, and commands do NOT yet
   round-trip.** (View hydration was tried and reverted — LIVE-verified that the deployed savedquery set
   can't reliably tell app-builder-authored views from Dataverse's auto-generated Active/Inactive/QuickFind
@@ -1519,12 +1600,154 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   `view-related-rows-filter.test.js` and `rebuild-writes-real-bundle.test.js`).
   All four survive on the live app (a rebuild into the SAME environment preserves them), but are absent
   from the downloaded spec, so edit them in Maker or a fresh spec.
-  **The omission is reported, not silent** (AB#6686423): every deployed form/view/chart is listed in the
+  **Portable schema is reconstructed, not only column types.** The download keeps Text format/length,
+  Memo length, Integer range/format, Decimal/Double range/precision, Money range, Boolean labels, DateTime
+  format, AutoNumber masks, and the primary name column's length/mask. Values equal to the SDK's
+  create defaults are left implicit; explicit defaults cannot be distinguished from omission on a
+  deployed column. Primary name lengths stay explicit even at 100, because the build's post-create
+  correction runs only for an asked length on environments that override the create's value.
+  Reads scale by the types present on each table, never by its column count:
+  String, Memo, Integer, Decimal, Double and DateTime each need one conditional cast; Money detail
+  rides its existing currency-twin read and Boolean labels ride the SDK projection. Money's
+  `PrecisionSource` is classified there too: the SDK always creates source 2 (transaction currency).
+  Only source 2 keeps numeric `Precision` metadata; its effective precision still depends on the
+  transaction currency's decimal places, so equal numeric metadata is not cross-environment
+  currency equivalence. Source 0 (column), source 1 (organization pricing), and missing/malformed/
+  unknown sources are diagnosed; the typed column and range remain, but precision is omitted.
+  Configure the required source in Power Apps on the target before relying on its behavior.
+  Custom unmanaged status reasons in Active/Inactive states keep their values, labels and colors
+  (stock reasons 1/2 are not re-declared; a stock table's reasons below the custom range are not
+  portable). Their single label is selected only in the resolved download authoring language
+  (flag, existing spec pin, then environment base), never the caller's UI language. A missing
+  requested translation is named and that reason omitted, not substituted from another LCID.
+  A read-time non-base-language flag must also be passed to the rebuild, or pinned in the spec.
+  One Status cast per table supplies the state the SDK's flattened choices omit.
+  Alternate keys, including names, columns and available display labels, ride the table-label read;
+  solution/global-choice display names and dashboard tile spans ride existing reads too. A
+  malformed or missing optional `Keys` array is diagnosed without losing the table, its primary
+  name, typed columns or navigation.
+  A table's `vectorIcon` is written only with a captured own-publisher, explicitly unmanaged SVG
+  that has content. The resource is `external: true`: shared table metadata is not proof this app
+  owns the file, so teardown of the downloaded spec must not delete it. Resource resolution may
+  need one set-name lookup plus one read per distinct SVG; navigation/table overlaps are deduplicated.
+  **Same-environment rebuilds do not re-send these schema writes when proven equal.** Scalar
+  key identities ride the existing table probe. Status-label comparisons run only after all
+  labelled schema creates (including deferred keys), so they cannot strip a later create's
+  non-base-language labels. A halted attempt leaves its queued existing-table status reasons for
+  the next successful attempt. A standalone Integer format is compared before its SDK update. Unknown
+  proof keeps the existing duplicate-protected create/update path; a missing reason/key or a
+  changed Integer format still writes. Table icons retain the SDK's assignment and specific-table
+  publish even when the saved name matches: a failed publish can leave that same saved name behind.
+  Existing status/key definitions are not rewritten on a
+  name/value conflict, and ordinary column lengths/ranges remain create-only, as before.
+  Missing, malformed or refused portable detail is named on stderr without dropping typed columns
+  or inventing defaults. This is not full environment cloning: script resources, raster/foreign/
+  managed table icons, `roleGrants[]`, `sampleData`, Boolean defaults, column capabilities and
+  BigInt ranges are not reconstructed. Neither are unsupported status states or managed reasons;
+  a non-primary AutoNumber's custom length/format and DateTime behavior are not authorable here.
+  Dashboard tiles still bind source view/chart ids; moving them to another environment also needs
+  those artifacts mapped, and removing a pinned source `dashboardId` when creating a new dashboard.
+  **Form/view/chart omissions are reported, not silent** (AB#6686423): every deployed form/view/chart is listed in the
   spec's `descriptionInventory`, and each run prints a note naming the counts, the tables and the
   artifacts, plus a `notRoundTripped` block on the JSON result. It is a NOTE, never a gate — every app
   has forms and views, so failing the download would break every download, and the omission is not
   destructive in the environment the app came from. Do not "fix" this by reconstructing `forms[]`
   without also solving the lossy-layout problem above.
+  **A page's connector and Custom API bindings are in the spec** (`pages[].connectorBindings`,
+  `pages[].actionBindings`; the format and the rebuild rules are in `references/app-spec-schema.md` →
+  `pages[]`). The page folder always held the raw lists in its `config.json`, but the spec carried only
+  `dataSources` and `model`: a rebuild into the same environment kept a page's bindings only because it sent none
+  (the SDK leaves a list a push omits as it is), and a copy of the spec rebuilt in another environment deployed
+  the pages without them. `parseDownloadedPages` now writes a list a page holds into the spec **only WHOLE, and only
+  what is known to be safe** (`lib/page-bindings.js`, whose header holds the threat model and lists every sink).
+  Declared Custom API kinds come from the pure `lib/custom-api-kinds.js` contract shared with discovery,
+  without loading a CLI; only the ten runtime primitives are declared, never structural lookups. Each key is
+  one of the documented properties (`logicalName`, `connectorId`, `dataset`, `tables`, `tableDisplayNames`,
+  `operations` for a connector binding; `name`, `isFunction`, `boundEntityLogicalName`, `displayName`, `parameterKinds`
+  for a Custom API binding) and each value of a conservative shape positively known to be safe — an identifier, a GUID,
+  a plain name or label, or an `http(s)` URL whose PARSED form (`new URL`) has no user-info, no query and no fragment and whose text is already that canonical form (a parser removes dot-segments before any check could see them, so the text that is persisted must be the text that is checked)
+  and whose decoded path is labels — none of it shaped like a token (a known token prefix, an authorization scheme, a
+  32+ run mixing letters and digits). **That is a security rule, not a tidiness one, and it fails closed**:
+  `genpage-upload.js` writes any JSON array into a binding, so an entry can hold a connection id or a credential as a
+  value, as a KEY, or inside a URL's user-info, query or fragment, encoded or not, and the spec is the artifact that is
+  committed and shared. A list in which any entry holds anything else is left out of the spec **whole** — nothing is
+  projected out of it, because an entry stated without its identity (or a property) would make a rebuild REPLACE the
+  page's entry with less — and reported in `pageBindings.notCarried` (stderr `WARNING:`) by the page, the list, the
+  entry's place and the vetted property, or "an unrecognized property": never a value, never an unrecognized key
+  (`bindingProblemText`). A list left out is one a rebuild does not send, so the page keeps it: no write, no publish.
+  The validator holds an authored spec to the same rule, as an ERROR in the same words, because refusing is the only
+  thing that keeps a credential out of the file. The page folder's own `config.json` is the page as the environment
+  holds it and is **not** rewritten, so it still holds everything — the `WARNING:` says so. A list that is no list of
+  objects (`pageBindingsProblem`, also the validator's) is left out whole too. An empty list and `null` (the page's
+  way of holding none) are nothing and are never written: a stated `[]` means "clear". Neither is a gate, as for a
+  model the spec cannot hold. **A rebuild must not strip what a spec does not state** (an author's list, or a page that
+  gained a property after its download), so the page backend reads a list a
+  spec states against the page's own entries (`update` and `publishedDiffers` take `specBindings: true`, the build
+  always passes it; `planEdits` → `mergeBindings`): an entry is matched by `logicalName` / `name`, the properties a
+  spec can state come from the spec, and the others stay on the entry. A page that already holds what the spec
+  states is therefore **not written and not published**, and an edit changes what it names and nothing else. Any
+  other caller of the backend keeps replacing a list with the one it gives. The build sends a list a spec page
+  states, and none it does not (`statedPageBindings`; the create that makes a page the others navigate to, and the
+  create or update of the pages loop, both pass them) — an omitted list is the deployed page's own, a stated one,
+  `[]` too, is the page's list. **The record of an earlier publish is recognised** (`lib/page-publish-records.js`):
+  it is the hash of the content the build sent, and every record made before a download stated the lists is the
+  hash of the content WITHOUT them (or without one of them, for a record made while the spec stated only the other).
+  With `specBindings`, when the page already holds what the spec states and the caller's record is the hash of that
+  content without one or both of the lists it states, `update` reads the PUBLISHED copy (read only) and, when it holds
+  the lists too, answers `publish.kind: 'skipped'` with `receiptUpgraded: true`; the build then renews the record to
+  the new hash with the versions it already holds (`rememberPublished`), so the next build reads nothing more. A
+  copy that does not hold them, or cannot be read, publishes as it always did, and a page the spec changes is
+  written and published whatever was recorded. Verify does not compare the lists, as it does not compare
+  `dataSources` or `model`. `--changed-only` reads a change to a list as a structural change to the page, so it
+  takes a full build. No `minimumPluginVersion` is set for them: an older plugin ignores the lists, which is what
+  it always did, and a floor above the running version makes `validateAppSpec` refuse the spec. **A rebuild
+  checks what the lists name before it writes anything** (`lib/page-binding-targets.js`, called from
+  `checkPageBindingsBeforeWriting` next to the navigation check, and in a dry run's plan): it reads the
+  environment's `connectionreference` rows and `customapi` rows for the names the pages it writes state —
+  the pages a changed-only run selects and the navigation targets it may have to make — and **stops**
+  (`BuildHalt`, phase `preflight`, code `pages-binding-reference-conflict`, never retried, nothing written) at a
+  connection reference of that name whose connector is another than the binding's `connectorId` (compared by the
+  connector's name, the last segment of its id). It never guesses and never makes a reference: the author gives the
+  binding another logical name, or states the connector this environment has (a custom connector made separately in
+  each environment has another id in each). It only SAYS, by name, a reference or Custom API that is not there (the
+  page is written with its binding, and a reference made afterwards makes it work without a rebuild), a reference
+  that is there with no connection (`connectionid` empty — what a solution import leaves when no settings file gives
+  one), an operation a binding lists that the custom connector of its reference does not define, a Custom API that is
+  the other kind or bound to another table (the runtime refuses that call itself), and a read that failed (the
+  bindings were not checked); a connector that is not named on both sides is never a conflict. The runner captures the
+  attempt's throttle checkpoint before these preflight reads: a wait refused by the shared budget stops preflight with
+  `throttle-budget-exhausted` before any SDK or page mutation, not just an unchecked-metadata warning. Refusals from
+  earlier attempts do not stop a new attempt unless it refuses another wait. **Missing evidence is
+  NOT CHECKED, never compatible**: a row that answers without its `connectorid`, its `connectionid`, or a GUID in
+  `_customconnectorid_value` (absent, null or invalid) — or with a value of another shape: a `connectorid` that is not
+  `/providers/Microsoft.PowerApps/apis/shared_<name>` (`referenceConnectorKey` checks the syntax before anything is
+  compared), a `connectionid` that is not a text or null — is said by name as not checked (`unchecked`, a warning): the
+  connector is not compared, the connection not judged, the operations not proven, and nothing is refused for it. The
+  conflict halt needs two VALID connector ids that differ.
+  Operations are read only for a CUSTOM connector: its definition is a row of the
+  environment (`connector.openapidefinition`, found through the reference's `_customconnectorid_value`, parsed by
+  `definedOperations` as Swagger 2.0 — every HTTP method's `operationId`, matched exactly, as the SDK matches them;
+  a definition it cannot read leaves the operations unchecked, and says so), and the copy there can be another
+  version than the page was made with. A reference whose row names no custom connector gets no definition read, and
+  its binding's operations are said as not checked: a null lookup is what a connector the platform publishes has, but
+  it is no proof of one (a reference made through the Web API can leave it unset).
+  **What a rebuild cannot bring to another environment is what the lists name,
+  and the download says so**: when any page holds a binding it prints `NOTE:` on stderr and returns
+  `pageBindings` — `pages` (each page's key, name and the connection references / Custom APIs its bindings go by),
+  `neededInTarget` (`connectionReferences`, `customApis`, and `serviceResources`: the references whose bindings
+  name a `dataset` or `tables`, which are the source environment's), `notCarried` and a
+  `note` — in the order the spec lists its pages, names sorted by `compareText`; the block is absent when no page
+  holds one and nothing was left out. The connection reference and the connection behind it (a user's sign-in, which
+  stays where it was made), the Custom API (a solution component) and the resources a connector binding points at
+  are not App Spec items; the `NOTE:` names the scripts that make each one there. The `custom-api` feature flag
+  gates what the `/genpage` agents author, not this: a download and a rebuild carry the bindings a page already
+  holds. `page-binding-contract.test.js` pins the allowlist, the projection and the merge,
+  `page-binding-targets.test.js` the reads and the judgement of the environment, `page-bindings.test.js` the
+  download, the validator, the build's write sites and its check of the environment, and
+  `page-bindings-real-bundle.test.js` what the real SDK does with the lists: a page read with them, a rebuild
+  that writes no row, a changed list that keeps what the spec could not state, a create in another environment, and
+  the record of an older publish (the build-level version, with the real pages phase, is in
+  `sdk-build-pages-deploy.test.js`).
   **A download is written in a fixed order, so two downloads of one app match byte for byte** and a diff
   between them shows only what changed. Dataverse promises no row order for a query without `$orderby`,
   and a directory listing is in the file system's order (name order on NTFS, hash order on ext4), so
@@ -1661,11 +1884,11 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   dropped and counted in `droppedSubareas`.
 - **`scripts/verify-model-app.js` → `scripts/lib/verify-spec.js`** — read-only reconcile of the App Spec
   against what actually deployed; exits non-zero and lists anything missing, catching silent partial
-  builds. It validates the spec first under the `deploy` profile, with two compatibility downgrades
-  (`relationshipCollisions: 'warn'` and `columnValues: 'warn'`): a spec an earlier release accepted and built — a 1:N and an N:N
-  that share a schema name, an AutoNumber column with no format, a `required` that is not `true`, `false` or `"recommended"` — is
-  verified, with a warning that names the fix, and is never refused before anything is read (the build, the lint and the
-  provisioning gate keep these as errors). **Every `WARNING:` line it prints on stderr — those findings, the spec's other warnings, and a page
+  builds. It validates the spec first under the `deploy` profile, with three compatibility downgrades
+  (`relationshipCollisions: 'warn'`, `columnValues: 'warn'` and `fieldOptionKeys: 'warn'`): a spec an earlier release accepted and built — a 1:N and an N:N
+  that share a schema name, an AutoNumber column with no format, a `required` that is not `true`, `false` or `"recommended"`, a key a form's
+  `fieldOptions` entry does not take — is verified, with a warning that names the fix, and is never refused before anything is read (the
+  build, the lint and the provisioning gate keep these as errors). **Every `WARNING:` line it prints on stderr — those findings, the spec's other warnings, and a page
   workspace it could not remove — is also in the result JSON's optional `warnings` array** (the same messages, without the prefix, in the order
   printed; left out when there is none, as `unverified` is), so a caller that reads only the JSON loses none of them. It is there on a failed
   verification and on a refused spec (`{ ok: false, errors, warnings }`, whose warnings are printed too) as on a passed one, and changes neither
@@ -1691,8 +1914,24 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   check fails and says what the answer lacked. It is not listed `unverified`, which leaves `ok` and the exit
   status as they were; a relationship nobody identified must not read as a pass. (A reader that lists plain
   names, as older test doubles do, stays a name-only reader; the plugin's own reader never does.)
+  **Status reasons and alternate keys** are checked too, each declared one by its name (`lib/status-reasons-keys.js`):
+  `status-reason <table>.<label>` passes when one of the table's status reasons carries the label (in any language the spec
+  writes it in) under the state the build gives it — Active unless the spec says Inactive — and at the `value` the spec pins,
+  when it pins one. The deployed option must carry a readable integer state: a missing, null or malformed state fails with
+  an explicit unreadable-state detail, never a guessed match. `alternate-key <table>.<schemaName>` passes when the table has a key of that name over exactly the
+  declared columns, in any order (live, a key read back answers its columns in an order of its own). One that is there but
+  different says how (the other state, another value, other columns), and a missing one says when the value the build gives
+  it is another label's — a rebuild inserts the reason at that value again, which the platform refuses as already there, so a
+  reason renamed in the environment stays renamed — or when a key of another name is over the same columns. The state and
+  value are the build's own (`statusReasonTargets`, `lib/entity-provision.js`), so verify cannot hold a reason to anything the
+  build did not write. Each is ONE narrow read on the SDK's client — the Status attribute's cast read (the one the view filter's
+  label resolution makes for the column, `optionCastUrl`) and `EntityDefinitions(…)/Keys?$select=LogicalName,SchemaName,KeyAttributes`
+  — made only for a table that declares any: a spec that declares neither sends no request for them
+  (`lifecycle-scenarios-real-bundle.test.js` pins the difference to exactly those two reads). A key's index status is not read:
+  right after its create a key is `Pending` (live-measured), and a key of the declared name over the declared columns is the
+  key the spec declares. A read that fails is a failed check with its reason, never a pass.
   Content checks are additive + reader-gated (they only fire when the reader supplies `layoutxml` /
-  `entityRelationships` / `commandBar`), so existence-only callers are unaffected. A view filter's
+  `entityRelationships` / `commandBar` / `statusReasons` / `alternateKeys`), so existence-only callers are unaffected. A view filter's
   Choice label is expected as the value the **environment** gives it, which needs the reader's
   `choiceAttributes` (one memoized read per table per pass); without it the spec-only expectation
   applies. A label whose option metadata could not be read is reported as **unresolved** with the
@@ -1842,7 +2081,13 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   and archival. It is **rendered, never hand-written** — the freehand version drifted from the spec
   and shrank to a counts summary. Also returns `warnings[]` naming design gaps (no jobs captured, a
   job with no covering surface, no generative pages, a new table no persona and no `roleGrants[]`
-  entry grants a privilege on) so the orchestrator surfaces them in chat. Its Security section keeps
+  entry grants a privilege on) so the orchestrator surfaces them in chat. A `roleGrants[]` entry the
+  build refuses because it does not name exactly one role — `role` and `roleId` both, neither, or one
+  of them malformed — is named there and in the document in lint's own words: one check decides it
+  (`roleGrantIdentityErrors`, `lib/app-spec.js`), which `validateRoleGrants` reports (the gate a build
+  and `lint-app-spec.js` run) and the document reads through `roleGrantRefusals` (`lib/app-access.js`).
+  The document shows such an entry as that refusal, never as rows of privileges the build would add,
+  and does not match it against the roles the app has. Its Security section keeps
   two questions apart — who can open the APP (the roles associated with it) and who can use the
   TABLES the spec introduces (privileges) — and never calls the app administrator-only on the
   strength of a spec with no personas alone: that is a claim about the deployed app. With `--env` it
@@ -1890,6 +2135,36 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   none, because a download never writes one and a relationship adopted with `existing: true` has the intersect
   table its maker chose — the answer still has to state it. The SDK's own relationship projection
   (`fetchEntityMetadata`) lists an N:N without its intersect table, so it never proves one.
+- **An "already exists" answer is also recognised by its error code, in any language.** A create the platform refuses because what it
+  asks for is already there is a skip for a status reason (its pinned value is taken), for an alternate key the build could not
+  prove from its table read, and for a column of a table whose columns could not be read; for a table and a relationship it is
+  the cue to read what exists, and only what that read finds — the declared relationship, by its whole identity — is reused.
+  The platform can word that answer in the caller's language: measured on an environment whose only language is Spanish, a key
+  created again was answered `Ya existe una clave de entidad con el nombre … en la entidad …` (HTTP 400, `0x80060893`), and a
+  rebuild that read only English words halted there (the same environment answered the other creates below in English). So each of
+  those creates also recognises the answer by the `error.code` of its body — `ALREADY_EXISTS_CODES` in `lib/entity-provision.js`, read
+  by `serviceCodeOf` (`lib/retry-policy.js`) from the SDK's `ConnectionError`: `0x80060893` for a key, `0x80044310` for a status
+  reason's value, `0x80047013` (measured, on 13 column types; not on a Customer column) and `0x80060304` for a column, `0x80044363`
+  (measured), `0x8009050d` (measured; not in the platform's reference) and `0x8004700b` for a table; for a 1:N `0x80072551`
+  (measured), the reference's name code `0x8004432B` and the column codes for its lookup column; for an N:N the name code only, as no
+  answer to the create of an existing N:N has been captured
+  ([web service error codes](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/web-service-error-codes)).
+  Two of them speak of something another component can hold, so each is listed for one create only, where the read that follows
+  decides. `0x80044363` ("The schema name … for type Entity is not unique. An … with same name already exists.", the answer to the
+  create of an existing table) is about a schema name: a name held by anything but a table finds no table on that read, and the
+  create's own error stops the build. `0x80072551` ("NavigationPropertyName … is not unique within an entity", the answer to the
+  create of an existing 1:N — in words no English rule matched, so such a relationship stopped the build in every language) is about
+  the navigation property the create names after the relationship: the build reuses only the declared relationship that the read of
+  the name, or of the lookup column's owner, proves, and any other relationship holding it — or an answer the read cannot prove —
+  stops the build.
+  The codes only add recognition, and prove no more than the English words of the same refusal: the 409 and English-word rules are
+  unchanged, and they apply whatever code the answer carries, an unlisted one included — an English `0x80060894` answer (another key
+  over the same columns, "An entity key with the selected attributes already exists on entity.") is still a skip, as it was. A code
+  another create answers, a generic code (`0x80040216`) and a code the message only quotes do not count by themselves: such an answer
+  stops the build unless the 409 or the English words read it as an already-exists one — an answer worded in another language, which
+  the English rule does not read, stops. Pinned by
+  `already-exists-codes-real-bundle.test.js`, which runs each of those creates through the real bundle answered in English and
+  in another language, and requires the same outcome.
 - **Bounded parallelism in the read-heavy and publish-heavy paths.** Each item below has tests that count
   requests and prove the overlap (`verify-parallel-checks`, `verify-page-code-batch`,
   `download-parallel-reads`, `teardown-publish-once`, `table-columns-in-create`, and the check-auth tests),
@@ -2032,12 +2307,12 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
     columns), and a PUT of the finished column — the SDK's `updateColumn`, with `MSCRM.MergeLabels: true` — is honored
     (850 → 120 → 850). So when the spec gives a length and THIS build created the table, it reads the length back with
     one typed `…/Attributes(LogicalName='…')/Microsoft.Dynamics.CRM.StringAttributeMetadata?$select=MaxLength` GET and
-    calls `updateColumn` only when it differs — LAST in the data-model phase, once every table, column, status reason,
+    calls `updateColumn` only when it differs — at the end of the data-model phase, once every table, column, new table's status reason,
     relationship and alternate key that needs no length has been created, and in the halt path too, so that a phase that
     halts after creating a table still sets that table's length (a run in a new process finds the table and leaves an
     existing table's name column alone; a length that cannot be set while the phase is halting is warned about as one such
     a run will not set either).
-    Last, because `updateColumn` starts by reading the column WITH its labels, and a label-bearing metadata read ahead of
+    There, because `updateColumn` starts by reading the column WITH its labels, and a label-bearing metadata read ahead of
     a labelled create is what strips non-base languages (measured; see `findExistingColumns`): within one attempt, nothing
     labelled in more than one language is created after it, except one kind of alternate key over the name column (below): the
     key labelled in several languages that cannot fit beside the name column before the step, which is made after it because it
@@ -2322,7 +2597,7 @@ scripts/
   list-connections.js          ← Connector discovery: the maker's connections + Dataverse connection references. The connections come from the SDK first (`listConnections`, with the Power Apps service token); `pac connection list --environment <origin>` runs only where the SDK refuses the route — and at once, with no SDK and no token read, for an environment outside the Public cloud, which the SDK has no route for (see "Connections, connector metadata and deployment settings") — and the output says which answered (`connectionsSource`, `connectionsFallback`)
   connector.js                 ← /genpage connector builder: a connector's operations, one operation's parameters and response, a tabular connector's table columns — `operations` and `schema --operation` from the SDK first (an environment outside the Public cloud goes to `pac` at once), `schema --dataset --table` and every SDK refusal through `pac model genpage`; one pure-ASCII JSON line with `source`
   create-connection-reference.js ← Creates Dataverse connectionreference rows for connector bindings
-  list-custom-apis.js          ← Discovers bindable Custom APIs (Global + entity-bound) + parameter kinds (custom-api gated)
+  list-custom-apis.js          ← Discovers supported public Custom APIs (Global + entity-bound), primitive kinds + separate lookup inputs (custom-api gated)
   list-languages.js            ← /genpage planner: the environment's base language and each provisioned language (LCID, culture code, right-to-left) — the SDK's `getEnvironmentLanguages()` over the az-token client, three reads and no write, printed as one pure-ASCII JSON line. The only source: no `pac model list-languages` stands behind it, because every /genpage page operation needs the Azure CLI
   apps.js                      ← the replacement for `pac model list` and `pac model create` that /genpage and /app-builder run (`pac-replaced-docs.test.js` pins that their text names this script, not the `pac` commands): the environment's model-driven apps and a new app that opens on generative pages, through the bundled SDK. `list` prints each app's id, name, unique name, description and two facts, apart: `published` (it has a row in the published layer: users can open it) and `unpublishedChanges` (it has a saved row that is not published) — drafts included; `pac`'s "(Saved - Not Published)" is neither of them (see the spec section) and never part of the name. `create --name --solution --page-id <guid> [--page-id …] [--unique-name] [--description] [--publish]` makes the app with one area "Main", one group "Pages" and a sub-area per page, titled with the page's stored name; the app and its sitemap join the solution (a system solution such as `Default` holds them already: `systemSolution: true`); it is published only with `--publish`. The default public view of each table the pages read (the tables come from each page's own configuration, the views from the page backend: the definition `placeInApp` pins with) joins the app's components in the create itself — `components.views` of the app the SDK creates, written by the same AddAppComponents that adds the sitemap — as `pac model genpage upload --app-id` pinned them; the output says what was pinned (`dataSources`, `pinnedViews`), a table with no default public view or a page held as raw files is named in `warnings`, and a page that cannot be read refuses the create before the first write. Every check — no page id, a page that does not exist, a solution that does not exist or is managed, a taken unique name, an unreadable base language — is a refusal printed as `{ ok: false, code, error, written: false }` before the first write; a failure after the push began reads the platform back and prints what is actually left of this create (its rows are recognised by their ids, and a row that holds the unique name under another id is named apart)
   list-tables.js               ← the replacement for `pac model list-tables` (the skills' and agents' text runs this script: `pac-replaced-docs.test.js`): the environment's tables — the SDK's `findTables(term)` for each comma-separated `--search` term, a few reads at a time, joined without repeats; `--exact` keeps the tables whose logical name IS a term and names the terms no table has (`missing`), from one read of every table; `--type custom|standard|all` is `pac`'s own filter, `custom` through the SDK's `customOnly` option. One pure-ASCII JSON line of `{ logicalName, displayName, schemaName, isCustom }` rows. An answer that is no list of tables — a 2xx with no `value` list: a sign-in page, `{}`, `null` — fails `TABLES_UNREADABLE` (exit 1) instead of reading as "no tables, every searched one missing" (`lib/collection-answers.js`)
@@ -2353,22 +2628,23 @@ scripts/
   capture-fixture.js           ← Copies /genpage working dir into an eval fixture and runs both runners
   lib/
     entity-provision.js        ← Shared entity-provisioning core (solution + data-model + sample-data): a new table is created with only its primary name attribute and its ordinary columns follow in one atomic change set (`createColumns`), falling back to one request per column (unless the run's throttle budget refused to wait for the change set: the phase then stops, `stop`); the primary name column's length is always sent (100 unless the spec gives one), its required level is asked in the create when the spec states one (and said applied only when the SDK confirms it) and, where the platform did not keep a length the spec gave, set last in the phase — a length a failed attempt left unset is owed to the build's retry (`owedLengths`, paid only to the table that attempt created: proved by its MetadataId, and then written by requests addressed with the ids, which a table made again cannot answer to), and an alternate key over that column is made after it; `makeRunner`, whose runner stops the phase at the next step once the run's throttle budget has refused a wait (`stopIfRefused`: `run` and each item of its `mapLimit`; a step that pays the name column length a table the run created is owed is let through); and `mapLimit`, the bounded fan-out every parallel path reuses
-    retry-policy.js            ← when the build runs a failed phase again, decided from what the SERVICE said and never from what the maker named: `RETRY` (`NEVER` — a refusal of the spec, an identity or ownership conflict, an approval, a prerequisite, a file on the maker's machine; `SERVICE` — what the failure it wraps says), `judgeFailure(error, { declares })` (an explicit `transient: false` anywhere along the causes wins; then the HTTP status 429, 502, 503, 504; then a condition the service names by the `error.code` of its answer — `TRANSIENT_SERVICE_CODES`, a SQL deadlock victim (the generic SQL error code `0x80044150` AND the platform's `Sql Number: 1205` — the last SQL number the answer gives — in the service's own answer, `isDeadlockVictimAnswer`), and the lag of a column the spec creates (`declares`) — on any status; then a timeout or reset of the transport (by Node's own code when the error carries one, by its words only when it has none); then **any other HTTP status is final** whatever the answer's words say; then the SDK's or plugin's own type — a refusal, whatever it quotes (bar the SDK's wrapper of a failed publish, read by the status of the answer it embeds); then, only for a failure that carries no status at all, the service's own words, never a halt's message), `throttleAskOf` (what a throttled failure asks of the next send: `retryAfterMs` and `retryNotBefore`), `retryPolicyFor` / `retryFrom` (the policy a halt is raised with), `refusal` / `serviceFailure` (the errors the engine itself makes; `serviceFailure`'s `answered` records the OData error of an answer the engine read with a request of its own — its `code` and `message`, nothing else — and the rule reads that code as it reads the SDK's) and `withCause` (the failure a by-value result carries); `BuildHalt` takes `retry`, `retryText` and `statusCode`; build-model-app.js `isTransientHalt` is its one reader, and `tests/halt-retry-policy.test.js` holds every halt in the sources to a row of its table
+    retry-policy.js            ← when the build runs a failed phase again, decided from what the SERVICE said and never from what the maker named: `RETRY` (`NEVER` — a refusal of the spec, an identity or ownership conflict, an approval, a prerequisite, a file on the maker's machine; `SERVICE` — what the failure it wraps says), `judgeFailure(error, { declares })` (an explicit `transient: false` anywhere along the causes wins; then the HTTP status 429, 502, 503, 504; then a condition the service names by the `error.code` of its answer — `TRANSIENT_SERVICE_CODES`, a SQL deadlock victim (the generic SQL error code `0x80044150` AND the platform's `Sql Number: 1205` — the last SQL number the answer gives — in the service's own answer, `isDeadlockVictimAnswer`), and the lag of a column the spec creates (`declares`) — on any status; then a timeout or reset of the transport (by Node's own code when the error carries one, by its words only when it has none); then **any other HTTP status is final** whatever the answer's words say; then the SDK's or plugin's own type — a refusal, whatever it quotes (bar the SDK's wrapper of a failed publish, read by the status of the answer it embeds); then, only for a failure that carries no status at all, the service's own words, never a halt's message), `throttleAskOf` (what a throttled failure asks of the next send: `retryAfterMs` and `retryNotBefore`), `retryPolicyFor` / `retryFrom` (the policy a halt is raised with), `refusal` / `serviceFailure` (the errors the engine itself makes; `serviceFailure`'s `answered` records the OData error of an answer the engine read with a request of its own — its `code` and `message`, nothing else — and the rule reads that code as it reads the SDK's) and `withCause` (the failure a by-value result carries); `BuildHalt` takes `retry`, `retryText` and `statusCode`; build-model-app.js `isTransientHalt` is its one reader, and `tests/halt-retry-policy.test.js` holds every halt in the sources to a row of its table; an error that WRAPS the failure it carries as its `cause` (`CAUSE_WRAPPER_CODES`: `WEB_RESOURCE_UNVERIFIED`) is judged by that cause, read whether or not it is enumerable, and never by its own code or words — and one that carries no cause is run again
     throttle-budget.js         ← the budget a run allows itself for the waiting it does when a service throttles — five minutes, shared by the HTTP client's waits before it sends a throttled read, publish, delete or column create again (`deps.throttle` of `lib/sdk-http-client.js`), the page backend's waits between the sends of a page write (a `$batch` the HTTP client never re-sends) and the build's own waits before it runs a phase again (the upload script makes one for its run) (`makeThrottleBudget({ totalMs, warn })`: `fits(ms, at)` and `spend(ms, at)`, which answers what the wait added — a wait the client PLACES on the clock (`at`) adds only what runs past the waits placed before it, because requests sent together are throttled together and wake together, while the backend's and the build's, which wait one at a time, place nothing and add whole; `announce` for a wait longer than five seconds, on the `warn` seam the build wires to stderr; `decline` / `declined`, where the client says that a wait did not fit — in the words of `refusedWait`: what the service asked and that the request was not sent again, with no advice on what to run, because a refused request can follow a write that committed — and the build's retry loop and the engine's runner read it (the loop to stop with the halt, the runner so that no step starts after it), since the answer the client hands back carries nothing of what the service asked; `note`; `waitDoesNotFit`, the sentence of the `throttle-budget-exhausted` halt: what the service asked, how much is spent, that a later run of the same command continues); it only counts, each layer waits with its own seam. What is not drawn from it is a wait that is not for a throttle — a 5xx, a reset connection, a deadlock victim's re-send — and the waits of a client given no budget
     provision-input.js         ← Input validation for entity provisioning (the entry gate of `/genpage` and `/app-builder`; it applies `app-spec.js`'s own `primaryNameLengthProblem`, `autoNumberFormatProblem` and `requiredValueProblem`, so a name-column length, an AutoNumber column with no format and a `required` that is not `true`, `false` or `"recommended"` are refused here exactly as in `validateAppSpec`)
     dataverse-auth.js          ← Shared auth + HTTP helpers (`az account get-access-token`, memoized per process and replaced on a 401 — a synchronous `az` call, which a caller running other probes beside the request opts out of with `refreshOn401: false`; responses decoded as UTF-8 once; a request that fails is reported as `{ error, code? }` — the message and, when Node gave one, Node's own error code (the failures this module words itself have none), which `lib/sdk-http-client.js` reads to decide whether the request is worth sending again; an answer that is not a success, and a transport failure's text, come back from `dataverseRequest` with every token the call sent taken out — the one `scrub` of `sdk-http-client.js`, a success untouched; every token read from the Azure CLI, and every one `dataverseRequest` sends, is noted in `lib/output-redaction.js`, which keeps it out of everything the process writes, and `emitResult` cleans its own text the same way; an environment URL is used only as a Dataverse https origin, `dataverseOrigin`; a request path must stay under `/api/data/v9.2/` as both the client and the server resolve it, `webApiUrl`), the Azure CLI token for the Power Apps service (`getPowerAppsToken`: the same read for another resource, memoized apart from the Dataverse token and asked for only by the Power Apps service client and the connectivity preflight), plus the CLI arg contract (parseArgs/validateFlags, and `readLanguageCodeFlag` — the `--language-code` / `--languageCode` flag as an LCID, which `verify-model-app.js` reads exactly as the build does) and the result printer (`emitResult`, whose `{ ascii: true }` option writes stdout JSON as pure ASCII for a script an agent reads off a console)
     process-runner.js          ← how every script starts az/pac/npm/npx/git: the executable is resolved to an absolute path on PATH, never the project folder, and started without a shell (a Windows batch shim runs through cmd.exe with its arguments checked — except a launcher that only forwards to the native program beside it, the Windows MSI's two-line `pac.cmd` (`@echo off` / `"%~dp0pac.launcher.exe" %*`): it is recognised by its exact lines — `@echo off` on a line of its own, then the forwarding line, as `cmd` reads lines, so a one-line `@echo off "%~dp0x.exe" %*`, which is an `echo`, is not one — and the program beside it (`forwardedProgram`) and that program is started directly, so a `%` or a double quote reaches it unchanged; every other batch file keeps the checked route and its refusal of them); `killProcessTree` ends a stalled child AND everything it started (`taskkill /T /F` on Windows, where `pac.cmd` is cmd.exe → pac.exe, looked up with the System32 folder first on PATH so a PATH without it cannot leave the tree running, and with its window hidden; SIGKILL to the descendants `ps` lists elsewhere, each only once `ps -o lstart= -p` shows its pid still has the start time the listing saw — a descendant that exited meanwhile can have its pid given to an unrelated process; best effort, since two processes can share a one-second start time and the moment between that read and the signal is not covered), through the same audited calls; a child that has already exited is only asked to die, never ended by its pid, which may be another process's by then; synchronous, and it never throws. `spawnResultTree` is `spawnResultSync`'s asynchronous twin (same result shape, never rejects) for a call that may have to be ended: one that outlasts its `timeout`, or writes past `maxBuffer`, has its whole tree ended through `killProcessTree` before the call settles (`ETIMEDOUT`, `ENOBUFS`), after a short wait for the pipes of what was ended; the error says whether they closed (`containment`: `confirmed`, or `unconfirmed` when a process that outlived the ended tree still holds them, with the `pid` the call was started as)
     cli-failure.js             ← how a CLI child failed (timeout / missing / failed), the Azure CLI budget (60 s, `POWER_PLATFORM_SKILLS_AZ_TIMEOUT_MS`), so a slow `az` is never reported as missing or signed out; `commandArg` writes an argument of a command a message tells you (or the agent) to paste so that, run from PowerShell (Windows PowerShell 5.1 or PowerShell 7) or a POSIX shell, the program gets it unchanged as one argument — bare when it is plain, single-quoted otherwise (a path from an untrusted checkout can hold `;`, `$(…)` or backticks) — or not at all when no spelling does that in every one of those shells: a quote or a line break, and the values Windows PowerShell changes on their way to a native program (a `"`, white space with a final `\`, the empty value) or both PowerShells read as the stop-parsing token (`--%`), all measured. `commandArgOrPlaceholder` then writes a placeholder and names the value outside the command
-    nearest-name.js            ← pure single-edit "did you mean" matcher for closed vocabularies (CLI flags, FetchXML operators)
+    nearest-name.js            ← pure single-edit "did you mean" matcher for closed vocabularies (CLI flags, FetchXML operators, `fieldOptions` keys)
     compare-text.js            ← `compareText`, the text order for any list a script writes and a diff between two runs then reads: UTF-16 code units after lower-casing, the raw text breaking a tie; never `localeCompare`, whose order follows the host's ICU locale and version (the download's lists use it)
     lcid-cultures.js           ← pure: a Windows language id (LCID) → culture code and right-to-left, from a table of Windows' own culture data (what `pac` printed; the SDK reports numbers only, and no Intl API maps an LCID); a language id with no entry stays numeric and is reported, never guessed (`list-languages.js`)
     supported-dependencies.js  ← Single source of truth for runtime + dev deps versions
-    feature-flags.js           ← Default-OFF feature flag probe + Custom API script backstop
+    feature-flags.js           ← Feature flag probe with fail-closed fallback + Custom API script backstop
     sdk-build.js               ← app-builder build engine (idempotent; incl. the pages phase). Every way it pushes or publishes the app is one of `appWriters`, which first awaits `publishTablesBeforeApp` (the one request that publishes, before the app, the tables whose forms or charts its publish ships)
     app-components.js          ← shared current/published app layers (`currentLayerRows`, and `currentLayerRow` — the authored layer wins — for a listing), component inventory (`readAppComponentInventory`: the download's read, with two opt-ins the build's pre-app proof makes — `savedLayer`, which looks the tables of the form and chart components up in the SAVED layer, and `requireIdentified`, which reads the answer strictly: a row counts for an id the list asked about, two tables for one id or a value no table has make the read incomplete, and a row of the component list that cannot be placed — no record, no GUID objectid, another component type — makes the list unreadable), hidden-table pin/proof, Main-form resolution/membership and push directives, `collectionRows`, the one reader of a paged collection, and `savedPageRows`, the one reader of the generative-page rows in the SAVED layer (RetrieveUnpublishedMultiple, 50 ids a read): a plain read of the page table answers the published layer only, so a page that was created and never published is "not found" by it — `apps.js` and teardown read pages here
     solution-membership.js     ← one read of a solution's components (the types the build adds, plus its tables: a table held with all its subcomponents vouches for its views, forms and charts, which have no rows of their own), so a rebuild adds just what the solution is not PROVEN to hold; every doubt reads as "add"
     unsynced-edits.js          ← the SDK's own dirty tracking (`diffArtifact`) as the one proof that a reconcile has nothing to push; every doubt reads as "push"
     table-publish.js           ← the tables a spec names (`specTables`, the wide READ-ONLY list a halted build reads), the tables the build publishes before the app (`preAppTables`: what it changed — reconciled tables, the tables of the charts it wrote — the tables whose Main forms its own write of the app adds (`appWriteTables`: the navigation's tables, from the spec and how the SDK writes the app, honouring `app.mainForms` — for a writer that sends the spec's navigation; `appPushTables` takes the Entity tables of the navigation a writer does send, the placement's and the routing-description push's, and the Main-form list that push carries), and the tables the app is PROVEN to hold a form or chart of; the spec decides nothing else, so never a table that is only declared, a lookup's target, read only by a page or only pinned in `app.tables`), the proof (`readAppFormChartTables`: the app's form and chart components on the server, looked up in the saved layer, complete and unambiguous or nothing), the ONE `PublishXml` that publishes tables by name (`publishTablesXml`: the build's pre-app publish, and the lookup-label repair's), the read of which of the spec's views, forms and charts are saved but not published (`readSavedNotPublished`, the SAVED layer through `RetrieveUnpublishedMultiple`, `componentstate` 1 and 3) with the line a halted build prints from it (`describeSavedNotPublished`), and the warnings for a refused pre-app publish and for an app whose components could not be read (`describePreAppRefusal`, `describeUnreadAppComponents`); every doubt in a read says so and names the tables, never a shorter list
+    publish-xml.js             ← the plugin's OWN publishes (`postPublishXml(dataverse, parameterXml)`: the tables `table-publish.js` publishes by name, and the app `app-components.js` publishes after pinning its tables) — the one place they are sent, and the one layer that re-sends one SQL rolled back as a deadlock victim (1 s / 2 s / 4 s, four sends at most, by `sdk-http-client.js`'s own predicate): the HTTP client sends a publish once, and the SDK's publishes are re-sent by the SDK's own `publishXml`
     stages.js                  ← stage→phase-range mapping + PHASES/STAGES constants
     op-diff.js                 ← destructive-op diff + --allow-destructive / --non-interactive gating
     artifact-intent.js         ← pure App Spec → canonical SDK intent compiler (new form topology; no SDK calls)
@@ -2387,17 +2663,20 @@ scripts/
     app-source-path.js         ← shared lexical + realpath confinement for app source reads/uploads and hashes
     page-ownership-records.js  ← local CREATE receipts and pre-delete ownership records, scoped to app/key/id; and the `pending` records of a page create that was started and not acknowledged (written before the create is sent, under the id it will use, with the name and the SHA-256 of the source it sends — one per create sent under the id; intent, never ownership: `readPageOwnership` does not see it, `readPendingCreations` / `completePendingCreations` settle it, and only evidence settles it — an acknowledged create, a page proven to be the one sent, a teardown that deleted the page — never an absence from a listing)
     page-publish-records.js    ← `page-published.<hash>.json`, one file per app and environment in the build workspace: per page, the hash of the content (`contentFingerprint`) it was last PUBLISHED with and the version number of every one of its file rows and of its own row (the plain reads `genpage.fileVersions` and `genpage.projectVersions`), written only after a publish seen to take effect, and with versions only when they were read on both sides of a read-back of the page's published copy (`genpage.publishedDiffers`), were the same set, and the copy held the content and the compiled output the draft held when it was published (`runtimeSha256`). The build hands the hash back to `genpage.update` as `publishedFingerprint` only for a page whose rows read now are exactly the recorded set at the recorded versions (`sameFileVersions`), so an unchanged page is not published again and a page published, renamed or saved from elsewhere is; a cache, never an authority — anything missing, damaged, for other content, without versions or with a moved version reads as "not known to be published" and costs one publish, and the schema (3) is the proof's version: a record of an earlier schema is read for its hashes and skips nothing; it grants and blocks nothing (`readPublishedPages` never throws, `writePublishedPages` failing is one warning)
+    web-resource-records.js    ← `web-resource-unconfirmed.<hash>.json`, one file per environment in the build workspace: the web resources this workspace's builds wrote and could not confirm were published (`WEB_RESOURCE_UNVERIFIED`), by name and id. `openUnconfirmedWebResources` is a run's view of it (`idOf`, `note`, `clear`; it never throws: a record it cannot read is "nothing recorded", said once, and a run with no workspace records nothing). A name it holds is written again by id by the next run (sdk-build.js `writeOwnedWebResource`, `persistPageManifest`) instead of being reused untouched; the entry is cleared once that write verified and the row is in the solution. Each change is made under the record's writer lease (`record-lease.js`) to the file as it is then, so builds sharing the workspace keep each other's entries: a note never replaces an entry with another row's id that another build recorded since this run read the file (said once; `note` answers false; a note of the same row is a later unconfirmed write of it and takes the entry's place with a revision of its own), and a clear removes only the entry its run knows — its id AND the revision of the note that made it (`revisions`, written beside the name-to-id map), so a later unconfirmed write of the same row that another build noted survives a clear by a build that verified an earlier one; an entry written without a revision is matched by its id, as before
+    dashboard-creation-records.js ← `dashboard-creation.<hash>.json`, one file per environment, app and solution in the build workspace: the dashboards this workspace's builds CREATED and have not yet seen join the solution, by name — the id the create was sent with (the SDK sends the workspace's own id as `systemform.formid`), noted before the push, and the id the push reported when that is another. `openDashboardCreations` is a run's view of it (`idsOf`, `note`, `observe`, `clear`, `path`; it never throws: a record it cannot read — an entry it does not write included — is "nothing recorded" and is never written over or removed, said once; a run with no workspace, environment or solution records nothing). Cleared once the row is in the solution or the build's own undo deleted it; the next run reads each recorded id in the saved layer before any name lookup and adds the row the create made to the solution — after a re-key only the reported one (sdk-build.js `recoverRecordedDashboard`) — never a namesake, never a delete, never teardown authority. Each change is made under the record's writer lease (`record-lease.js`) to the file as it is then, comparing the whole entry (both ids), so builds sharing the workspace keep each other's entries: `note` never replaces an entry another build recorded or changed since this run read the file (said once), and a note of the id the entry already holds keeps its reported id; `observe` adds only to the entry as its run noted it; `clear` removes only the entry as its run knows it, and answers null when another build has changed it since — when every id it recorded read as absent, `recoverRecordedDashboard` then stops instead of creating a dashboard on the word of the older entry (after the row joined the solution, a changed entry is left and the build goes on)
+    record-lease.js            ← the writer lease of a workspace record (`withRecordLease(root, file, change)`): the change runs while `<record file>.lock` is held — the workspace lease protocol (`apply-snapshot-store.js acquireLease`: exclusive create, exclusive reclaim, owner-checked release), stamped and judged as the pages lock is (`process-owner.js`: taken over only from a build proven gone, never by age). A lock another build holds is tried `LEASE_ATTEMPTS` (10) times `LEASE_WAIT_MS` (100 ms) apart and then given up — the change is not made and its record says so once — so a build never hangs on it. Used by `web-resource-records.js` and `dashboard-creation-records.js`; reads take no lease
     source-literals.js         ← TSX lexer (code/comment/string/template/regex/JSX) — see "Known limits" below
     sdk-teardown.js            ← app-builder teardown engine (planTeardown is pure)
-    sdk-http-client.js         ← az-token HttpClient for the vendored SDK; a caller can name requests that are sent exactly once (`sendOnce(method, url)`: no retry on a transport failure, a 429 or 5xx, or a 401 refresh, and none of the replays special to a record delete and a `$batch` either) — `solution-settings.js` does for the three long solution actions; a caller can hand it the run's throttle budget (`deps.throttle`, lib/throttle-budget.js): every wait it takes before it sends a throttled request (HTTP 429, alone or as every operation of a `$batch`) again is then drawn from the budget — the answer's `Retry-After` whole, past the cap of a minute, or the schedule's wait when that is longer, placed on the clock so that requests throttled together are charged once — and a wait that does not fit is not taken: the 429 comes back as it came and the budget is told what the service asked (`decline`); every other wait (a 5xx, a reset connection, a deadlock victim's re-send) keeps its own schedule, and the budget is duck-typed and never loaded here, so the pcf copy, which has none, waits as it always did; an answer that is not a success comes back with the access token taken out of it (and a transport failure's text too, the error that carries Node's code included), a success untouched — the one `scrub` / `scrubAnswer` the Power Apps client uses as well; `needlesOf(token)` and `TOKEN_MARKER` are `lib/output-redaction.js`'s: the one list of texts a scrubber takes out of one token (the token and each of its parts of 24 characters or more) and the one marker, so the client's scrubber and what the process writes are kept free of a token by the same list, and each token the client sends is noted there (`noteToken`); `throttleBackoffMs(attempt, random)` is the capped, jittered schedule every throttled request waits on (1 s, 2 s, 4 s, 8 s, 8 s), exported because the page backend waits out a throttled page write on it (the client never re-sends a page's `$batch`: `lib/genpage-sdk.js` does, a push at a time); `retryAfterMs(headers, now, cap)` and `batchRetryAfterMs(res, now, cap)` cap what a response asks at a minute for the client's own retries, and a caller with a bound of its own passes `Infinity`: the page backend spends it inside the run's budget, the client itself does when it has that budget, and `solution-settings.js` inside the one budget of its import resend; `completeBatchStatus(res)` is the one status a COMPLETE multipart answer reports for every operation (the page backend reads a change set refused as a whole with it); the parser behind it, `isBatchThrottled` and `isBatchDeadlockVictim` is strict — an answer is read only when its outer boundary closes, every change set in it closes, and every part is a complete response whose first line is a status line; a part that declares a change set (`Content-Type: multipart/mixed; boundary=…`) must open and close exactly that boundary before the outer one goes on, a part with no response in it is an operation nobody answered, and a body is as long as the `Content-Length` its response gives, counted by the line breaks the answer has; a part that declares a `Transfer-Encoding` (chunked or any other) is not read at all, whole stream or not — the delimiters around it say nothing of whether its chunk stream is finished, so it never certifies a refusal or a deadlock victim; anything missing or malformed makes the WHOLE answer unproven (an answer that closes its outer boundary and is incomplete inside proves nothing); `isTransientTransportFailure(text, code)` says which failures of the transport are sent again — decided by Node's own error code when `makeRequest` reported one (`TRANSIENT_TRANSPORT_CODES`: `ECONNRESET`, `ETIMEDOUT`, `ESOCKETTIMEDOUT`, `ECONNABORTED`, `EPIPE`, `EAI_AGAIN`; any other code is final whatever the words say) and by the words only when it did not (a certificate's own phrases first): a reset, a timeout, an answer cut off, a temporary DNS failure, the same list `lib/retry-policy.js` calls a blip, and nothing else — a certificate that does not verify (whatever names it quotes), an unknown host and a message nobody recognises return at once; the error it throws carries the code beside the same message (this file is copied into the pcf plugin, so a test holds the two lists equal). Copied verbatim into `plugins/pcf` (`scripts/validate-plugin-copies.js`)
+    sdk-http-client.js         ← az-token HttpClient for the vendored SDK; a caller can name requests that are sent exactly once (`sendOnce(method, url)`: no retry on a transport failure, a 429 or 5xx, or a 401 refresh, and none of the replays special to a record delete and a `$batch` either) — `solution-settings.js` does for the three long solution actions; a caller can hand it the run's throttle budget (`deps.throttle`, lib/throttle-budget.js): every wait it takes before it sends a throttled request (HTTP 429, alone or as every operation of a `$batch`) again is then drawn from the budget — the answer's `Retry-After` whole, past the cap of a minute, or the schedule's wait when that is longer, placed on the clock so that requests throttled together are charged once — and a wait that does not fit is not taken: the 429 comes back as it came and the budget is told what the service asked (`decline`); every other wait (a 5xx, a reset connection, a deadlock victim's re-send) keeps its own schedule, and the budget is duck-typed and never loaded here, so the pcf copy, which has none, waits as it always did; an answer that is not a success comes back with the access token taken out of it (and a transport failure's text too, the error that carries Node's code included), a success untouched — the one `scrub` / `scrubAnswer` the Power Apps client uses as well; `needlesOf(token)` and `TOKEN_MARKER` are `lib/output-redaction.js`'s: the one list of texts a scrubber takes out of one token (the token and each of its parts of 24 characters or more) and the one marker, so the client's scrubber and what the process writes are kept free of a token by the same list, and each token the client sends is noted there (`noteToken`); `throttleBackoffMs(attempt, random)` is the capped, jittered schedule every throttled request waits on (1 s, 2 s, 4 s, 8 s, 8 s), exported because the page backend waits out a throttled page write on it (the client never re-sends a page's `$batch`: `lib/genpage-sdk.js` does, a push at a time); `retryAfterMs(headers, now, cap)` and `batchRetryAfterMs(res, now, cap)` cap what a response asks at a minute for the client's own retries, and a caller with a bound of its own passes `Infinity`: the page backend spends it inside the run's budget, the client itself does when it has that budget, and `solution-settings.js` inside the one budget of its import resend; `completeBatchStatus(res)` is the one status a COMPLETE multipart answer reports for every operation (the page backend reads a change set refused as a whole with it); the parser behind it, `isBatchThrottled` and `isBatchDeadlockVictim` is strict — an answer is read only when its outer boundary closes, every change set in it closes, and every part is a complete response whose first line is a status line; a part that declares a change set (`Content-Type: multipart/mixed; boundary=…`) must open and close exactly that boundary before the outer one goes on, a part with no response in it is an operation nobody answered, and a body is as long as the `Content-Length` its response gives, counted by the line breaks the answer has; a part that declares a `Transfer-Encoding` (chunked or any other) is not read at all, whole stream or not — the delimiters around it say nothing of whether its chunk stream is finished, so it never certifies a refusal or a deadlock victim; anything missing or malformed makes the WHOLE answer unproven (an answer that closes its outer boundary and is incomplete inside proves nothing); `isTransientTransportFailure(text, code)` says which failures of the transport are sent again — decided by Node's own error code when `makeRequest` reported one (`TRANSIENT_TRANSPORT_CODES`: `ECONNRESET`, `ETIMEDOUT`, `ESOCKETTIMEDOUT`, `ECONNABORTED`, `EPIPE`, `EAI_AGAIN`; any other code is final whatever the words say) and by the words only when it did not (a certificate's own phrases first): a reset, a timeout, an answer cut off, a temporary DNS failure, the same list `lib/retry-policy.js` calls a blip, and nothing else — a certificate that does not verify (whatever names it quotes), an unknown host and a message nobody recognises return at once; the error it throws carries the code beside the same message (this file is copied into the pcf plugin, so a test holds the two lists equal); a publish (`PublishXml`, `PublishAllXml`) is sent ONCE but for a 401 and a 429 of the service protection limits (`isServiceProtectionRefusal`, `SERVICE_PROTECTION_CODES`: the three codes the api-limits page documents) — never for the customization lock's 429, a 5xx or a failure of the transport — and its deadlock victim is the layer above's to re-send (`isSqlDeadlockVictim` and `DEADLOCK_RESENDS` are exported for `publish-xml.js`). Copied verbatim into `plugins/pcf` (`scripts/validate-plugin-copies.js`)
     maker-sdk.js               ← the one way a script makes an SDK: the vendored bundle with the vendored TypeScript compiler as its page compiler, and with the client it is handed guarded by `app-header-text.js`; `connectivity: true` (opt-in) also gives the instance the Power Apps service client, so no script wires a credential-carrying client by hand; and the `httpClient` it is given is handed over with the read of the environment's TABLE LIST held to being a list (`lib/collection-answers.js` `guardTableLists`), so every script's `findTables()` meets a failure (`TABLES_UNREADABLE`, an `SdkError`, so `error.code`) where the bundle alone would read a sign-in page, `{}` or `null` as "no tables" — none can forget it; and the `workspaceStorage` it is given is handed over with every text it is asked to write taken clean of the access tokens the process obtained (`lib/output-redaction.js` `guardWorkspaceStorage`: the SDK writes every file of its workspace through `writeTextAtomic`, and the wrapper is the storage in everything else), so a token a service repeated in an answer cannot land in a workspace file. The SDK itself — its errors, its warnings, its results — is exactly what the bundle makes: what a script WRITES is what is cleaned
-    output-redaction.js        ← keeps every access token the process obtained out of everything it WRITES, and out of nothing the service or the SDK made: `noteToken(token)` (called where a token is read from the Azure CLI — `dataverse-auth.js`, both reads — and where `dataverseRequest` and the SDK's HTTP client send one) is the registry, and the first token noted guards the process: `guardStream` wraps `process.stdout.write` and `process.stderr.write` (every `console.*` call, every script's result and warning printer, a library's own output end there; text only, bytes pass), and `guardFatalErrors` prints — cleaned — what Node itself prints when an error ends the process, which never passes through `process.stderr.write` (only when nothing else handles the error: a test runner's own listener is left alone). `redactOutput(text)` is what the file writers call (`safe-fs.js` `writeFileSafe` and `appendFileSafe`, `apply-snapshot-store.js` `writeFileAtomic`) and `guardWorkspaceStorage` wraps the SDK's `writeTextAtomic` (`maker-sdk.js`). `redactTokens(text, tokens)` is the matcher: it reads the text as it SPELLS a token, one character at a time — the character itself or an escape of it (`\uXXXX` in either case, `\xXX`, `\/`), with a fold between any two of them (white space, `\r\n` `\t` `\b` and the like as JSON writes them, a run of backslashes before an escape: JSON inside JSON, a stray backslash, a terminal colour code, the quote-plus-line-break `util.inspect` prints between the pieces of a long string, in colours or not) and an escape that can also be a literal backslash and letters (`\n` before a signature that starts with `n`) read both ways — every needle (the token and each part of 24 characters or more: `needlesOf`) in ONE linear pass with a bounded set of readings beside it (a text that would need more is refused: the writer fails closed), the whole span from the token's first character to its last becoming `<token>`, so that JSON that was written is JSON still. It never touches an error, a warning or an answer: the SDK's errors keep every word the SDK gave them, and the strict `$batch` readers see the bytes the service sent. Not read: other encodings of a token (percent-encoding, base64, entities), a token another process obtained, bytes, a token written in two separate calls to `write`, and the end of a part a formatter cut short. `makeWritesBlocking(...streams)` makes a stream's writes blocking for the last writes of a process — `emitResult`, `guardFatalErrors`, and every printer of a script's own that ends the process after writing (a result, a usage error, a last-resort handler, a hook's message, the warnings a script prints right before its result) — because on Linux and macOS a pipe's writes are queued and `process.exit` does not wait for them, so a large result reached its reader cut short (`tests/result-whole-before-exit.test.js`, `tests/printers-whole-before-exit.test.js`: each process records the order in which it makes its streams blocking and writes to them — the check that fails on every runtime for a printer without the call — and the text a reader receives; nothing else about the stream changes, the guard included). `tests/exit-writes-inventory.test.js` is a syntactic tripwire, not a proof: it fails on a new exit with no such call before it in its block (or that is not listed with the bound that makes it safe: it writes nothing, or a constant), and on a call that comes after a write of its block or leaves out a stream written before the exit; it does not follow calls or control flow, and does not see writes made in an enclosing block, before an `await`, or through a helper. Copied verbatim into `plugins/pcf` (`scripts/validate-plugin-copies.js`), where it also cleans `pcf-push.js`'s receipt and guards the SDK workspace `makePcfSdk` makes
+    output-redaction.js        ← keeps every access token the process obtained out of everything it WRITES, and out of nothing the service or the SDK made: `noteToken(token)` (called where a token is read from the Azure CLI — `dataverse-auth.js`, both reads — and where `dataverseRequest` and the SDK's HTTP client send one) is the registry, and the first token noted guards the process: `guardStream` wraps `process.stdout.write` and `process.stderr.write` (every `console.*` call, every script's result and warning printer, a library's own output end there; a text cleaned as a string, bytes — a Buffer, a Uint8Array, a string in `base64` or `hex` — masked byte for byte with as many `*` in a copy, the very bytes when they hold none), and `guardFatalErrors` prints — cleaned — what Node itself prints when an error ends the process, which never passes through `process.stderr.write` (only when nothing else handles the error: a test runner's own listener is left alone). `redactOutput(text)` is what the file writers call (`safe-fs.js` `writeFileSafe` and `appendFileSafe`, `apply-snapshot-store.js` `writeFileAtomic`) and `guardWorkspaceStorage` wraps the SDK's `writeTextAtomic` (`maker-sdk.js`). `redactTokens(text, tokens)` is the matcher: it reads the text as it SPELLS a token, one character at a time — the character itself or an escape of it (`\uXXXX` in either case, `\xXX`, `\/`), with a fold between any two of them (white space, `\r\n` `\t` `\b` and the like as JSON writes them, a run of backslashes before an escape: JSON inside JSON, a stray backslash, a terminal colour code, the quote-plus-line-break `util.inspect` prints between the pieces of a long string, in colours or not) and an escape that can also be a literal backslash and letters (`\n` before a signature that starts with `n`) read both ways — every needle (the token and each part of 24 characters or more: `needlesOf`, and its base64, percent-encoded and HTML spellings: `spellingsOf`) in ONE linear pass with a bounded set of readings beside it (a text that would need more is refused: the writer fails closed), the whole span from the token's first character to its last becoming `<token>`, so that JSON that was written is JSON still. It never touches an error, a warning or an answer: the SDK's errors keep every word the SDK gave them, and the strict `$batch` readers see the bytes the service sent. The beginning of a needle, 24 characters or more, goes too where a text says it was cut (`util.inspect`'s `... N more characters`, an ellipsis) and at the end of a whole text the process writes, and the end of a needle at its start (`redactOutput`; `redactTokens(text, tokens, { edges: true })`); `maskTokenBytes(bytes, tokens)` is the same for bytes. Not read: a token another process obtained, a piece of a token shorter than 24 characters, a piece from the middle of one, and bytes given to a file writer. `makeWritesBlocking(...streams)` makes a stream's writes blocking for the last writes of a process — `emitResult`, `guardFatalErrors`, and every printer of a script's own that ends the process after writing (a result, a usage error, a last-resort handler, a hook's message, the warnings a script prints right before its result) — because on Linux and macOS a pipe's writes are queued and `process.exit` does not wait for them, so a large result reached its reader cut short (`tests/result-whole-before-exit.test.js`, `tests/printers-whole-before-exit.test.js`: each process records the order in which it makes its streams blocking and writes to them — the check that fails on every runtime for a printer without the call — and the text a reader receives; nothing else about the stream changes, the guard included). `tests/exit-writes-inventory.test.js` is a syntactic tripwire, not a proof: it fails on a new exit with no such call before it in its block (or that is not listed with the bound that makes it safe: it writes nothing, or a constant), and on a call that comes after a write of its block or leaves out a stream written before the exit; it does not follow calls or control flow, and does not see writes made in an enclosing block, before an `await`, or through a helper. Copied verbatim into `plugins/pcf` (`scripts/validate-plugin-copies.js`), where it also cleans `pcf-push.js`'s receipt and guards the SDK workspace `makePcfSdk` makes
     app-header-text.js         ← an app's header texts (`name`, `description`) held to plain text at the HTTP client every SDK is made with (wired in `maker-sdk.js`): a PATCH of an app module row that carries one that is not a string is refused before any byte is sent — `APP_HEADER_NOT_PLAIN_TEXT`, an `SdkError` marked `transient: false` — whether it is the SDK's `patch`, a `patchRaw`, or a PATCH inside a raw change set (`postRaw` / `post` to `$batch`), because the SDK writes every text its workspace copy holds whenever its own comparison read of the header cannot be made (503, 403, a thrown error, an empty 200). The build takes such a text off the copy before its push, so this is the last line of defence, for a push of a copy it did not clean. A batch that names the app module table and cannot be read is refused too. A delegating Proxy: every member it does not judge runs on the client itself. Also how such a text reads in a message (`describeHeldAppText`), which the guard's refusals share
     batch-request.js           ← a multipart `$batch` REQUEST read the way the service reads it — `readBatchRequest(text, contentType)`: the parts of the boundary the Content-Type declares, a change set one level down, one HTTP request in each part, answered as `{ operations: [{ method, target, contentId, body }] }`, or `{ problem }` for text it cannot read with confidence (cut short, another boundary, a part that is not a request). A body is only ever text: a line in it that looks like a request is not an operation. `app-header-text.js` reads a raw change set with it
     throwaway-sdk.js           ← `withThrowawaySdk({ env, prefix, httpClient? }, run)`: the bundled SDK, made through `maker-sdk.js`, over a throwaway workspace folder (made by `temp-workspace.js`) that is removed whichever way the run ends (a constructor, a storage or a module that throws included); `run(make)` gets a `make(extra)` for more instances over the same folder and the one client (`make({ languageCode })` is a writer). The one copy of what `apps.js`, `list-tables.js` and `list-languages.js` each wrote out
     collection-answers.js      ← `requireCollectionAnswers(client, { reads, unreadable })`: the HttpClient the SDK is given, with one addition — a 2xx answer to a read `reads(url)` selects must be a collection (`{ value: [...] }`), or the read throws what `unreadable` says; `unreadableAnswer(error)` finds that error, itself or under the SDK's `ConnectionError`. `guardTableLists(client, makeError)` is its policy for the one read of the environment's table list (`/EntityDefinitions?…`, which only `findTables()` makes), and `maker-sdk.js` applies it to every SDK a script makes: the SDK's `findTables()` is `body.value ?? []`, and the bundle is not edited
     temp-workspace.js          ← the one maker of the plugin's throwaway workspace folders, and the sweep of the ones a KILLED run left (`makeTempWorkspace(prefix)` in place of `fs.mkdtempSync(path.join(os.tmpdir(), prefix))`, at every entry point that makes an SDK workspace — the page backend, `withThrowawaySdk`, `sdkFirst`, build, download, teardown, verify, the `provision-*` scripts, `ai-preflight`, and `solution-settings`' pac scratch folder). A run killed outright (SIGKILL, "End task", a timeout) never reaches its `finally`, and what it left held the source of every page it read and the environment's address (`solution-settings`' pac scratch folder: a settings template, an exported package or a copy of the settings file, which can hold values; the sweep's note says which a folder held, by its prefix). The folders go together in one folder of the plugin's own, `<temp>/power-platform-skills-model-apps` (`-<uid>` after it on POSIX, where the temp folder is shared). That folder is a courtesy, never a reason for a run to fail: it must be a plain folder that only this user can change — POSIX: owned by the user and writable by no one else; Windows, which tells Node no owner and no permissions: a folder this process MAKES is given an explicit access list before anything is put in it — protected, with only this user, the system and the administrators on it, full control inherited by every workspace and record made inside — and read back, and one that cannot be made so is removed and not used; an EXISTING one is judged by its access list and its owner (`windows-folder-acl.js`) and used only if NO entry of the list, an inherit-only one too, lets anyone else add to it, write to it, delete it or take it over, and the user (or the administrators, who own what an elevated process makes) owns it) — and if it cannot be used, or will not take a new folder (mode 0500, an access list that denies this user; a Windows folder that is being removed refuses a new entry — and its access list cannot be got — for a moment, so the attempt is made again after short pauses, up to six in all, and a folder that is still refusing after the last is not asked again by that process), the workspace is made in the plain temp folder exactly as before, unrecorded and never swept, and an error is reported only when that fails too. Each folder is named for the process that made it (`genpage-4242-AbC123`: the prefix, the pid, `mkdtemp`'s six characters; a prefix that does not end in a hyphen is given one, so that the pid always follows the hyphen a sweep reads it from) and holds an owner record `.owner.json` (`process-owner.js`); the first workspace a process makes sweeps that folder (`sweepDeadWorkspaces`) — only a workspace whose owner is PROVABLY gone is removed (the name's pid must have no process — on Linux a pid that runs is looked into too, since the record's start time can show it was handed out again — and the record must agree with the name; the record is read again, and judged again, just before the removal; what is inside is removed first and the record last, and the record leaves the folder only for as long as the folder itself is being removed — it is renamed out to `<folder>.removing`, which Windows allows even while another process holds it open, and moved back if the folder will not go — and if even that is refused it stays beside the folder, whole, and is never WRITTEN into the folder instead, since a write can be cut off and a damaged record beside the whole one would strand the removal; a sweep that is killed between the move and the removal leaves that file and the empty folder, and the next sweep finishes the removal when the file is a record of the folder's own — its name, a record that names the pid in it, an owner that is gone — and the folder is empty or gone, and leaves anything that does not agree as it is — so a removal that fails, half way or at the very end, leaves a folder still known to be dead and found again by the next sweep (Windows with Node 20 keeps a file that was deleted while open, listed, until the holder lets go, and the folder cannot go meanwhile); at most 100 a run, out of 500 entries looked at: the entries are taken in name order and the next run starts after the last one looked at — a cursor, `.sweep-cursor.json`, one small file in the plugin's folder, written whole and there only while the folder holds more than a run looks at — so that a folder whose first 500 entries must be kept does not hide a dead run's workspace, or a removal a kill left half done, behind them for good), and a folder whose name names a pid that RUNS is not even opened (on Linux its record alone is read, for the start time that can show the pid was handed out again; Linux lets a file another process has open be removed) — on Windows a file that is deleted while another process has it open stays in its folder until that process lets go, so a sweep that read a live run's record could make that run's own removal fail — and the run says so on stderr (`⚠ removed 1 temporary workspace left in … by a run that is no longer running`). A run that may still be going, another machine's, a folder with no readable record (a release before this one's, a damaged record), a link, a file: left as they are. **A path inside a workspace that is given to a program of another make makes the workspace LENT, when it is made** (`makeTempWorkspace(prefix, { lent: true })`, as `solution-settings`' `templateThroughPac` does for pac): on POSIX such a program outlives a run that is killed, so the record — written ONCE, whole, to a file of its own and renamed into place, and never written again — says `lent: true`, and a sweep never takes a lent workspace because its maker is gone: only when its maker is gone AND it is old, neither the folder nor its record written to for seven days (`LENT_KEEP_MS`; pac gets an hour at most). Nothing follows the program or changes the record once it has started (a record that is changed later can be unreadable at that moment), and a record that is unreadable keeps the folder. Every caller that hands a path in a workspace to another program decides that when it makes the workspace. The plugin's folder is removed when the process ends with nothing in it, so a normal run leaves the temp folder as it found it — and so does a run that is cut short by `process.exit` or an error nothing catches (the `exit` event): it first removes the workspaces it made and did not lend that are still there, by the steps of a sweep (what is inside first, the record last), since it never reached the `finally` that would have; a LENT workspace is never taken at the end of the run that lent it, and what is not its own is never touched (`rmdir` takes the folder only when it is empty, and a run that loses the folder between making it and making its workspace in it makes it again); the one caller that removes a lent workspace itself, `solution-settings`, does it in a cleanup it registers with `lib/exit-cleanup.js`, which runs after the maker's listener has found the workspace still in the folder and left the folder, so that cleanup calls `pruneWorkspaceParents()` once its workspace is gone — the same `rmdir`, so a run that is cut short while pac runs leaves no empty plugin folder behind (a signal included: it ends a POSIX process with no `exit` event, and that cleanup is what runs). A POSIX signal is NOT one of these ends — its default action ends the process with no JavaScript run, and a listener, which would, replaces that default action in every script that makes a workspace (a process blocked in a synchronous `az` or `pac` call would no longer end when signalled, and the signal would have to be raised again to keep its status) — so a run that is signalled leaves its workspace for the next run's sweep, as a killed one does; a folder that cannot be used or a record that cannot be written costs the sweep, never the run. The sweep reads only the plugin's own folder, never the temp folder, which can hold hundreds of thousands of entries
-    process-owner.js           ← who made a lock or a workspace, and whether that process is gone — one place for the pages lock, the temporary workspaces and the snapshot lease's liveness check (`processAlive`, as it always was). `ownerStamp()` is what a maker records (pid, time, host, platform, and on Linux the pid namespace and the process's start time from `/proc`); `ownerState(stamp)` answers `gone` only when the stamp was made on this machine, by this kind of system, in this pid namespace, and no process has the pid (ESRCH) — or, on Linux, a zombie or a process with another start time has it (the pid was handed out again) — `alive` for a process that runs (this one included) and `unknown` for anything else: another machine, a stamp that is missing, damaged or not understood. **On Linux a pid is only a name inside its pid namespace, so the stamp AND the reader must both name theirs (`pid:[…]`, readable and well formed) and name the same one: a side that cannot (a hidden `/proc`: a container, hidepid, a sandbox), or two that cannot, is `unknown`, never "the same pid space".** A recorded `start` that is not `<boot id>:<ticks>` — empty, cut short, damaged inside a record that is still valid JSON — makes the record untrusted (`isOwnerStamp`: kept), and a start read from `/proc` that is not well formed is not compared: only two well-formed starts that differ show a pid handed out again, in the self-pid branch too. `ownerState` is a fact about the maker and only that: a workspace that was handed to a program that outlives its maker is kept by its age instead (`temp-workspace.js`, `lent`). Every doubt keeps; where no start time is cheap to read (Windows, macOS) a pid given to another process makes a dead run look alive, which keeps its lock or folder (the state of things before this module)
+    process-owner.js           ← who made a lock or a workspace, and whether that process is gone — one place for the pages lock, the recovery records' writer lease (`record-lease.js`), the temporary workspaces and the snapshot lease's liveness check (`processAlive`, as it always was). `ownerStamp()` is what a maker records (pid, time, host, platform, and on Linux the pid namespace and the process's start time from `/proc`); `ownerState(stamp)` answers `gone` only when the stamp was made on this machine, by this kind of system, in this pid namespace, and no process has the pid (ESRCH) — or, on Linux, a zombie or a process with another start time has it (the pid was handed out again) — `alive` for a process that runs (this one included) and `unknown` for anything else: another machine, a stamp that is missing, damaged or not understood. **On Linux a pid is only a name inside its pid namespace, so the stamp AND the reader must both name theirs (`pid:[…]`, readable and well formed) and name the same one: a side that cannot (a hidden `/proc`: a container, hidepid, a sandbox), or two that cannot, is `unknown`, never "the same pid space".** A recorded `start` that is not `<boot id>:<ticks>` — empty, cut short, damaged inside a record that is still valid JSON — makes the record untrusted (`isOwnerStamp`: kept), and a start read from `/proc` that is not well formed is not compared: only two well-formed starts that differ show a pid handed out again, in the self-pid branch too. `ownerState` is a fact about the maker and only that: a workspace that was handed to a program that outlives its maker is kept by its age instead (`temp-workspace.js`, `lent`). Every doubt keeps; where no start time is cheap to read (Windows, macOS) a pid given to another process makes a dead run look alive, which keeps its lock or folder (the state of things before this module)
     windows-folder-acl.js      ← who can change a folder on Windows, where Node reports no owner and no permissions, and the making of a folder that only this user can: `windowsFolderIsPrivate(folder)` saves the folder's access list with `icacls <folder> /save` (SDDL: SIDs, in every language, not names) and reads the user's SID with `whoami /user /fo csv /nh`, both started through `process-runner.js` with System32 first on PATH, and answers `{ ok, reason, owner? }` — private only when NO entry that grants a right to add to the folder, remove from it, delete it, write its attributes or extended attributes, change who may or take it over names anyone but this user, the system or the administrators (an INHERIT-ONLY entry counts too: it does not apply to the folder, but it is what every workspace and every owner record made in it is given; denials and audits grant nothing; SDDL writes the machine's own Administrator and Guest accounts as the aliases `LA` and `LG`, which are the user's own only for the user whose account that is, as a CI runner's renamed built-in Administrator is; an audit list after the access list, as Windows' own folders carry, is read and ignored) AND the folder is owned by this user or the administrators — whoever owns a folder can rewrite its list, so a list that names only the user does not make a foreign folder the user's. The owner is the one thing `icacls` cannot print (`/save` stores the list and nothing else), so it is read with PowerShell (`[IO.Directory]::GetAccessControl(folder, Owner)`, a SID; the folder goes in through the environment and the script is passed encoded) — half a second, which is why it is the last thing asked (a folder the list has refused never starts it), and PowerShell that cannot run is "not private". The administrators are accepted as owner because a process that runs elevated (a CI runner is one) owns what it makes through that group by default, and the list trusts them anyway. A list that icacls ran and could not save — Windows is removing the folder, which cannot be opened meanwhile — is `unreadable`, a "no" that `temp-workspace.js` does not keep: it asks again after a pause, and drops an answer about a folder that was replaced while it was being judged; whatever else cannot be read, run or understood is not private, and `temp-workspace.js` then makes its workspace in the plain temp folder as before. `makeWindowsFolderPrivate(folder)` is for a folder this process has just made: `icacls <folder> /inheritance:r /grant:r *<user>:(OI)(CI)F *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F` replaces its list, and the list is read back and must be exactly that — protected, nothing inherited, three grants, full control for the user
     power-apps-service-client.js ← the HttpClient for the SDK's connection and connector reads: GET only, https only, a host allowlist that is exactly the hosts the SDK's connectivity code calls, redirects never followed, the Azure CLI token for the Power Apps service read only for a request that passed and never in a message, a body, a header or a key the service answers with (it is scrubbed, in whole and by part)
     sdk-first.js               ← the rule `list-connections.js`, `connector.js` and `solution-settings.js` share: read through the SDK, and through `pac` for the SDK's typed refusals (`sdkFirst`, `CONNECTIVITY_REFUSALS`) — an error counts only when it IS the bundle's `SdkError` (an HTTP body that carries a refusal's code does not); any other failure is thrown with the SDK's own code. An environment outside the Public cloud is judged from its host first (`connectivityCloudOf`, pinned to the bundle by a table of hosts) and answered by `pac` at once, with the code the SDK would give. What the SDK could not clean up before it refused (`readCleanupWarnings`: a staged copy of the package it could not delete, with its upload id) is carried across the fallback — as `warnings` on the answer, or attached to the error `pac` throws when it fails — so `solution-settings.js` shows it for `template` and `import` alike (an import's, sanitized once)
@@ -2424,6 +2703,7 @@ scripts/
     safe-fs.js                 ← confined output writes and deletes: the named directory's final component must not be a link or junction (readlink, not a path-text compare, so an 8.3 name and a share root stay usable); write via exclusive temp + rename, or — with `exclusive: true` — never replace a name: the content goes to a sibling file this process created exclusively and is published with a hard link to the target name (which fails if the name exists, so the file system decides and a file that appeared meanwhile is never overwritten: `IO_ERROR` with `reason: 'exists'`; where hard links do not exist the write fails closed, `reason: 'no-hard-links'`), and only that sibling is ever removed — retried, and reported (a warning after a publish, the error after a failure) when it cannot be — and a later write of a file that still has its second name is refused naming it. Every text it writes or appends has the access tokens the process obtained taken out first (`lib/output-redaction.js` `redactOutput`; bytes are written as they are): it is the one writer of the build's journal and status file, of a download's files and of a page's file and its deployed copy. Shared by genpage markers and later callers
     hydrate-spec.js            ← reconstruct an App Spec from a deployed app (edit flow)
     verify-spec.js             ← spec-vs-deployed reconciliation core (checks are ordered tasks on a pool of 4)
+    status-reasons-keys.js     ← a table's status reasons (with their states) and alternate keys (with their columns), one narrow read each (`readStatusReasons`, `readAlternateKeys`: `{ state: 'ok' | 'absent' | 'error' }`, never a throw), and the checks of the declared ones against them (`statusReasonChecks`, held to the build's own `statusReasonTargets`; `alternateKeyChecks`) — verify's `status-reason` and `alternate-key` checks
     build-journal.js           ← durable JSONL build journal (resume diagnostics)
     form-preview.js            ← form wireframe renderer
     app-preview.js             ← whole-app design renderer (data model + sitemap + forms + page-intents + design)
@@ -2501,7 +2781,7 @@ Agents are invoked by skills via the `Task` tool — they are not user-invocable
 | `genpage-page-builder` | `genpage` (create flow) **and** `app-builder` (Phase 1.5) | Generates one complete `.tsx` page from a plan document and schema; runs in parallel with other builders for multi-page requests. `/app-builder` projects its App Spec into that plan format via `scripts/write-page-plan.js` and dispatches this same agent |
 | `genpage-edit-planner` | `genpage` (edit flow) | Reads downloaded artifacts as data, gathers changes, presents an edit plan and writes the same approved change list. The plan references prompt.txt without embedding it; the orchestrator applies only verified Requested Changes. |
 | `genpage-connector-builder` | `genpage` orchestrator (create **and** edit flows) | Performs connector discovery (connections, connection references, datasets, tables, operations, schema), creates Dataverse connection references, and writes the `## Connector Bindings` contract + `connectors.json`. The orchestrator forwards its output into the planner or edit-planner prompt. |
-| `genpage-customapi-builder` | `genpage` orchestrator (create **and** edit flows) | **Single owner of the custom-api feature gate.** Discovers the Dataverse Custom APIs a page can bind to (Global + entity-bound Actions/Functions) plus their parameter kinds via `list-custom-apis.js`, and writes the `## Custom API Bindings` contract + `actions.json`. The orchestrator forwards its output into the planner or edit-planner prompt. |
+| `genpage-customapi-builder` | `genpage` orchestrator (create **and** edit flows) | **Single owner of the custom-api feature gate.** Discovers supported public Dataverse Custom APIs (Global + entity-bound Actions/Functions), primitive declared kinds and separate lookup inputs via `list-custom-apis.js`, and writes the `## Custom API Bindings` contract + primitive-only `actions.json`. The orchestrator forwards its output into the planner or edit-planner prompt. |
 
 ## Key Concepts
 
@@ -2554,11 +2834,10 @@ What the skills ran through `pac model genpage` — the listing, the download, t
 
 ## Feature Flags
 
-Unreleased functionality is gated behind committed, **default-OFF** feature flags so
-the skill can merge ahead of its cross-repo dependencies. With a flag OFF, the
-**deployed page behavior is identical to before the feature existed** — the guarantee
-is about runtime/deploy output, not that every authoring artifact is byte-for-byte
-unchanged. The mechanism lives in `scripts/lib/feature-flags.js` with the committed
+Unreleased functionality can ship behind committed, **default-OFF** feature flags while
+dependencies roll out. **Supported public Custom API discovery now ships ON**, with the gate
+retained as an explicit opt-out. OFF stops new discovery/authoring; unrelated edits preserve
+existing page bindings, not silently clear them. The mechanism lives in `scripts/lib/feature-flags.js` with the committed
 values in `feature-flags.json` at the plugin root.
 
 **A flag is flipped to `true` FIRST and removed in a LATER change, not both at once.**
@@ -2569,14 +2848,13 @@ a permanently-on gate is dead weight that still has to be probed, branched on an
 about at every call site.
 
 Connector authoring no longer has a feature flag (the feature itself is in public preview). The
-remaining flags are `custom-api` and `custom-telemetry`; both currently ship **OFF** while their
-dependencies finish rolling out.
+remaining flags are `custom-api` (**ON**) and `custom-telemetry` (**OFF**).
 
-- **Source of truth:** `feature-flags.json` (e.g. `{ "custom-api": false }`). Flip a
+- **Source of truth:** `feature-flags.json` (e.g. `{ "custom-api": true }`). Flip a
   flag to `true` in a one-line PR once its dependencies are GA in PROD, then remove
   it in a follow-up that deletes its gates.
 - **Precedence (highest first):** env var `GENPAGE_ENABLE_<FLAG>` (e.g.
-  `GENPAGE_ENABLE_CUSTOM_API=1` for a single run) → committed
+  `GENPAGE_ENABLE_CUSTOM_API=0` to opt out for a single run) → committed
   `feature-flags.json` → default `false`
   (fail-closed). This mirrors the telemetry opt-out env-over-config convention.
 - **LLM gate:** skill/agent markdown probes a flag with
@@ -2603,14 +2881,16 @@ only the per-feature specifics are tabled below:
    never gate inline.
 2. **Scripts** — each entry-point script calls the shared `exitIf<Feature>Disabled()` helper (DRY —
    never an inlined gate) and fails closed with exit 3 when OFF.
-3. **Deploy** — the SKILL phase **re-probes** the flag and treats an absent/malformed bindings
-   section as *no bindings*, so a plan authored while the flag was ON cannot deploy after it goes OFF.
+3. **Deploy** — the SKILL phase **re-probes** the flag. A populated Custom API table under an
+   OFF probe halts before generation; a missing/malformed section halts too. Only the exact
+   `No custom API bindings.` sentinel means none, never a fallback that clears existing bindings.
 4. **ALM** — solution packaging honours the flag (or documents why it needs no gate).
 5. **Codegen** — `genpage-page-builder` emits feature code **only** when the plan carries an actual
    binding table, never on an absent/sentinel section.
 
 | | `custom-api` | `custom-telemetry` |
 |---|---|---|
+| **Committed default** | ON (`GENPAGE_ENABLE_CUSTOM_API=0` opts out) | OFF |
 | **Owner agent** | `genpage-customapi-builder` | none — codegen-only |
 | **Plan section** | `## Custom API Bindings` | none — driven by the maker request, not the plan |
 | **Gated scripts** | `list-custom-apis.js` | none |
@@ -2631,16 +2911,31 @@ produces the dispatch line. It also carries a second gate the other flags do not
 when `enabled`, `genpage-page-builder` instruments a page **only** when the maker explicitly
 asked to measure or track something. `enabled` is permission, not instruction.
 
-The two remaining flags currently ship **OFF**, each waiting on cross-repo dependencies:
+Feature dependencies remain separate from their committed defaults:
 
-- **`custom-api`** — the AIBuilder CoderAgent action prompt, the shared `pai-gen-ux-action-runtime`
+- **`custom-api` (ON)** — the AIBuilder CoderAgent action prompt, the shared `pai-gen-ux-action-runtime`
   plus the UCI and Controls host runtimes, the page `actionBindings` the plugin writes into `config.json`
   (through the SDK: `genpage-upload.js --actions`, and the build), and the `GenUxPluginActionAllowList` ECS setting.
   Note the maker-facing name is "Custom API" while the shipped wire contract stays
   `actionBindings` / `executeAction` (see `references/custom-api.md`).
-- **`custom-telemetry`** — the page telemetry facade in the UCI host runtime, the GenUX
+- **`custom-telemetry` (OFF)** — the page telemetry facade in the UCI host runtime, the GenUX
   authoring control (power-platform-ux), the AIBuilder CoderAgent telemetry prompt, and the
   `GenUxEnableCustomTelemetry` ECS setting (see `references/page-telemetry.md`).
+
+Custom API discovery selects public Global APIs and the page's entity-bound APIs in one inline
+request, including request and response types. It excludes collection-bound APIs and APIs with
+Entity/EntityCollection inputs or outputs. Missing, unreadable or incomplete required metadata is an error, not
+an empty successful result. `lookupParameters` retains exact lookup names, optionalness and an
+optional table hint for authoring; it never enters `actions.json`. Primitive declared kinds and
+structural `{ entityName, id }` lookup values remain separate. The builder/reference contract
+also requires known read semantics before automatic Function invocation; GET alone is not
+proof that an operation is harmless. See `references/custom-api.md` for the wire and call shapes.
+Single-level expanded collection links normally repeat the same related rows, so their presence
+alone is not a paging failure. Discovery validates the known relationship shape without following
+it, and refuses genuine/ambiguous paging or the 5,000-row expansion cap. Lookup names, boolean
+requiredness and supplied hint shapes must be read, not invented. The offline consumer accepts
+typed, provenance-checked record member IDs and exact unchanged before-config bindings; additions
+or replacements still need fresh eligible discovery.
 
 ## TSX source lexer — known limits
 
@@ -3498,9 +3793,10 @@ if (flagError) { process.stderr.write(`✗ ${flagError}\n${USAGE}\n`); process.e
 ```
 
 `validateFlags` (`scripts/lib/dataverse-auth.js`) rejects unknown flags with a single-edit "did you
-mean" (via `scripts/lib/nearest-name.js`, shared with the FetchXML operator lint), and rejects a
-value-bearing flag passed bare or empty. It reads flag names from `argv` rather than the parsed
-object, because `--__proto__` goes through the inherited setter and never becomes an own property.
+mean" (via `scripts/lib/nearest-name.js`, shared with the FetchXML operator lint and the spec gate's
+`fieldOptions` key check), and rejects a value-bearing flag passed bare or empty. It reads flag names
+from `argv` rather than the parsed object, because `--__proto__` goes through the inherited setter
+and never becomes an own property.
 
 Two consequences worth knowing:
 
@@ -3622,7 +3918,7 @@ client sends it) out of everything the process writes, and changes nothing else 
 
 | What the process writes | How the token is kept out |
 |---|---|
-| stdout and stderr — every `console.*` call, every script's result printer and warning printer, the progress lines, a library's own output, the SDK bundle's | `process.stdout.write` and `process.stderr.write` are wrapped when the first token is noted (a process that has none is untouched); text only, bytes pass. `emitResult` cleans its own text too, so a result is clean where a caller has replaced `write` |
+| stdout and stderr — every `console.*` call, every script's result printer and warning printer, the progress lines, a library's own output, the SDK bundle's | `process.stdout.write` and `process.stderr.write` are wrapped when the first token is noted (a process that has none is untouched); a text is cleaned as a string, bytes are masked byte for byte in a copy (as many `*`, so a frame keeps its length). `emitResult` cleans its own text too, so a result is clean where a caller has replaced `write` |
 | what Node itself prints when an error ends the process (an uncaught exception, an unhandled rejection) — it never passes through `write` | a handler prints it, cleaned, with the same exit status, when nothing else handles the error (a test runner has its own listener and is left alone) |
 | the build's journal and status file, a download's spec and pages, a page's file and its deployed copy, a plan, the settings template | `writeFileSafe` and `appendFileSafe` (`lib/safe-fs.js`) clean the text they write |
 | the apply snapshot, the baseline `last-applied.json`, the page ownership and publish records | `writeFileAtomic` (`lib/apply-snapshot-store.js`) cleans the text it writes |
@@ -3632,10 +3928,14 @@ client sends it) out of everything the process writes, and changes nothing else 
 no token), so a new writer fails there until it is classified; it also pins that the one raw write to a descriptor is `solution-settings.js`'s own, and that no script pipes a child's output to a stream. A token is looked for as
 the text SPELLS it: one character at a time, each the character itself or an escape of it, with a fold between any two (white space, `\r\n` as JSON writes it, a run of backslashes for JSON inside JSON, a stray backslash, a
 terminal colour code, the quote-plus-line-break `util.inspect` prints between the pieces of a long string, in colours or not), and an escape that can also be a literal backslash and its letters (`\n` before a part that starts
-with `n`) read both ways — in one linear pass over the text, every needle (the token and each of its parts of 24 characters or more) at once, with a bounded set of the second readings beside it (a text that would need more is
-refused, and the writer fails closed: a stream writes a notice, a file is not written), the whole span becoming `<token>` so that JSON that was written is JSON still. Not read: other encodings of a token (percent-encoding,
-base64, entities), a token another process obtained, bytes (a Buffer a writer is given is written as it is), a token written in two separate calls to `write`, and the end of a part a formatter cut short (`util.inspect`
-prints at most 10,000 characters of a string). Observe the boundary at the process's descriptors and files — `output-token-boundary.test.js` runs real processes (`tests/helpers/token-boundary-child.js`), in colours too — and not by replacing `process.stderr.write` in a
+with `n`) read both ways — in one linear pass over the text, every needle (the token, each of its parts of 24 characters or more, and its other spellings: base64 at each of the three byte alignments, standard and URL-safe, and the
+percent-encoded and HTML spellings where they differ from it) at once, with a bounded set of the second readings beside it (a text that would need more is refused, and the writer fails closed: a stream writes a notice, a
+file is not written), the whole span becoming `<token>` so that JSON that was written is JSON still. Where a text says it was cut (`util.inspect` prints at most 10,000 characters of a string and then `... N more
+characters`; an ellipsis, `...` or `…`), the run before it that begins a needle — 24 characters or more — goes too; and a whole text the process writes loses such a run at its end, and the end of a needle at its start
+(a token written in two pieces: nothing is held back for the next write; an escape cut between the two writes — `\` and `/`, `\u00` and `73` — is kept whole,
+because a guarded stream remembers the few characters of it, so JSON written in two pieces is JSON together). Bytes a stream is given (a Buffer, a Uint8Array, a string in `base64` or `hex`) are read byte for byte and each hit is masked with as many `*` in
+a copy, so a test runner's frames keep their lengths; bytes that hold none are the very object. Not read: a token another process obtained, a piece of a token shorter than 24 characters (the shorter piece of a token written
+in two), a piece from the middle of one, other spellings, a cut inside bytes, and bytes given to a file writer (the module's header lists them). Observe the boundary at the process's descriptors and files — `output-token-boundary.test.js` runs real processes (`tests/helpers/token-boundary-child.js`), in colours too — and not by replacing `process.stderr.write` in a
 process of your own, which replaces the guard itself. `output-redaction.test.js` holds the matcher (against an exact reference that follows every reading over random spellings, JSON validity, cost on a large text and on texts made of nothing but escapes), the registry and the guards,
 `output-token-real-bundle.test.js` the real bundle and the production client (the SDK's error is the SDK's own; the answer reaches the SDK byte for byte as the service sent it; a page write whose refusal proof and sends are
 those of a client that takes nothing out). `solution-settings.js` keeps its own guard on what it writes (below), which stacks with this one. The pcf plugin carries the copy of the module and notes the tokens it reads; its
@@ -3927,7 +4227,11 @@ runner names the manual reset every workspace-reset remedy shares
 (`RESET_WORKSPACE` in `lib/entity-provision.js`): stop other builds and teardowns on the workspace
 first — the changed-only snapshot holds their leases and a running teardown's registration — then
 delete everything except `last-applied.json` (the navigation baseline), `destructive-approval.json`
-(the approved removals) and the `page-ownership.*.json` records (a page's creation receipt, a teardown's
+(the approved removals), `web-resource-unconfirmed.*.json` (the durable ids of web resources whose publication
+could not be confirmed: a later build must rewrite and verify those same rows, not create again or reuse stale
+published content), `dashboard-creation.*.json` (the ids of the dashboards an interrupted build created before
+they joined the solution: a later build adds those same rows to it, where a name lookup would miss one nobody
+published and create a second) and the `page-ownership.*.json` records (a page's creation receipt, a teardown's
 record of the pages it is deleting, and the `pending` record of a page create that was started and never
 answered — the only trace of a page that may still land: without it the next build creates a second page
 for the spec entry), which no re-run can rebuild. The build does not reset the copy itself: the
@@ -4789,7 +5093,15 @@ real bundle, because a stub stays green through a change in the SDK's own rule.
     that file (`NAMED_ROUTES`), pinned to its one call and its `if (!request.env)` guard.
 - **Two layers re-send, and for a delete they add** (`scripts/tests/sdk-resend-layers.test.js` pins every
   count). The HTTP client re-sends a 429 or 5xx — except a record delete and a `$batch`, which it
-  re-sends only for a deadlock (SQL 1205) or a 429. The SDK re-sends a deadlock for reads, an app
+  re-sends only for a deadlock (SQL 1205) or a 429, and a publish (`PublishXml`, `PublishAllXml`), which it
+  sends ONCE but for a 401 (the token is refreshed) and a 429 of the service protection limits
+  (`0x80072322`/`21`/`26`, waited out inside the run's budget): a publish the customization lock refused
+  (429 `0x80071151`) is not shown to change nothing — measured under the lock, a later accepted publish
+  published a web resource's OLD content, and an accepted re-send answered 204 while publishing old content —
+  so it reaches the caller as it came. A publish's deadlock victim is re-sent by ONE layer: the SDK's
+  `publishXml` for its own publishes, `lib/publish-xml.js` (`postPublishXml`, 1 s / 2 s / 4 s) for the
+  plugin's raw table and app publishes — a persistent one costs four sends, not the client's six times the
+  SDK's four. The SDK re-sends a deadlock for reads, an app
   create, `PublishXml`, a form create, a view create, a publisher create and each delete of a row-summary
   removal (there a 400 quoting SQL's "chosen as the deadlock victim" counts too), and re-sends an app delete
   that hits the platform's search-index insert race (HTTP 400, SQL 547). An app delete's two triggers are
@@ -4819,6 +5131,67 @@ real bundle, because a stub stays green through a change in the SDK's own rule.
   with the kept steps, not the deleted ones, as its own step line does (`teardown-row-summary-removal.test.js` holds all
   of it over the real bundle). The table delete that follows reports the dependency if the skill row is still there, and
   a model left behind blocks only a later row summary for the same table, by name.
+- **A web resource whose publication the SDK cannot confirm is recorded, put in the solution, and written again by the
+  next run** (`scripts/tests/web-resource-unconfirmed.test.js`). The SDK reads a web resource's PUBLISHED content back
+  after every create and every content write it publishes — one GET per write (the lifecycle matrix's first build reads
+  four more) — and throws `WEB_RESOURCE_UNVERIFIED` when the publish failed or the read-back could not confirm the
+  content: after the row exists, with its id (`error.id`) and the failure as its non-enumerable `cause`. A second
+  create of the name is refused. Measured under the customization lock, a publish the lock refused was followed by a
+  later accepted publish of the OLD content, so the content has to be WRITTEN again, not only published. At each place
+  the build writes one — the spec's web resources, the generated app icon, the page manifest — it keeps the row's id
+  and records it in `web-resource-unconfirmed.<hash>.json`, one file per environment in the build workspace
+  (`lib/web-resource-records.js`), adds it to the solution as the success path does, and stops with the SDK's words
+  (the row, its id, why it is unconfirmed) and the build's: UNCONFIRMED, not lost — run the build again. The run that
+  follows — the build's own re-run of the halt, and a new invocation on the same workspace — writes the content again
+  by id (`updateWebResource`, which publishes and reads it back again) and clears the entry once that verified and the
+  row is in the solution — only the entry that run knows, its id and the revision of the note that made it, so a later
+  unconfirmed write of the same row that another build sharing the workspace recorded meanwhile stays for the next run;
+  a row that is gone by then is created again only if no conflicting replacement was found.
+  A receipt whose id and a live row's name disagree, or whose name now belongs to another id, stops recovery without
+  adopting or overwriting the other row. A failed solution add retains the receipt; its 404 is not a missing resource.
+  A web resource of that name the record does not
+  hold — another maker's, or one whose write was confirmed — is reused untouched, as before. The page manifest's own
+  dedup compares with its PUBLISHED copy (what `readPageManifest` reads), so an update whose publication was not
+  confirmed is written again whenever that copy is still old; the record supplies the id of a manifest created and never
+  published, which no plain read finds (assumed, not measured). The pages a halted run created are bound by their
+  creation receipts, so none is created twice. The build's retry reads the error as a wrapper of its cause
+  (`CAUSE_WRAPPER_CODES`, `lib/retry-policy.js`): a lock refusal, a 503 or a reset is run again, a 400, 401, 403, 404,
+  412 or a typed refusal is not, and no cause (the read-back differed or carried no content) is run again. An unchanged
+  rebuild reads one local file and sends nothing more. Recovery of a recorded spec resource or icon checks its published
+  name by id first (one extra GET; 404 can also mean unpublished, so only an update's 404 proves it gone). A recorded
+  manifest whose name lookup is empty makes that same identity check before any page writes. Without a writable recovery
+  record the build still attempts the solution add, but does not automatically replay the phase; the halt requires
+  recovery by the known id. Not covered: a process killed while the SDK publishes (no error,
+  so no record — the next run reuses the row as before), and another workspace (no record, and no page receipts).
+- **A dashboard created by a build that stops before adding it to the solution is added to it by the next run**
+  (`scripts/tests/dashboard-creation-recovery-real-bundle.test.js`). A new dashboard is two requests: the push POSTs the
+  `systemforms` row, and AddSolutionComponent puts it in the app's solution — the only later proof that it is the app's.
+  A run that stopped between them (killed, the create's answer lost, or the add and its undo both refused) left the row
+  outside the solution with nothing to remember it: the next build's name lookup reads the PUBLISHED layer, where a
+  dashboard nobody published is not, so it created a second one (or, once the first had been published, reused it
+  outside the solution); teardown kept the first and a solution export left it out. The SDK sends the workspace's own
+  id as `systemform.formid`, so the build notes that id in `dashboard-creation.<hash>.json` (`lib/dashboard-creation-records.js`,
+  one file per environment, app and solution) BEFORE the push, keeps the id the push reports beside it when that is another,
+  and clears it once the add answered or its own undo's delete did (a stranded halt keeps it, and says a run again adds it).
+  The next run — the build's own re-run of a halt, or a new invocation — reads each recorded id with
+  `GET systemforms(<id>)/Microsoft.Dynamics.CRM.RetrieveUnpublished()` (the saved layer, which answers a never-published row;
+  a missing id is 404 `0x80040217`) BEFORE the name lookup: none there clears the record and the build goes on as before —
+  unless another build sharing the workspace has changed the entry since this run read it (recorded the id its push reported):
+  then nothing is concluded from the older entry, and the step stops with nothing created, added or deleted;
+  the row the create made — the id it was sent with, or after a re-key ONLY the id the service reported — if it is a standard
+  dashboard of the spec's name, is added to the solution (an idempotent add), reused and cleared; anything else —
+  a read that fails, another kind of row, a dashboard renamed since, both ids answering, after a re-key only the sent id
+  answering (a row the build never saw its create make, which adding would hand to teardown), an add refused now — stops the step
+  with nothing added, deleted or created and the record kept, saying what a maker can do — never asking for a dashboard to be
+  deleted that may be another app's. The record is never a reason to
+  delete, never adopts a namesake (it holds only ids the build sent or was answered with — never a downloaded `dashboardId`,
+  a name match or a solution member), and teardown never reads it. A record that cannot be read — an entry the build does not
+  write included (an id that is no id, two names Dataverse compares as one) — is never written over or removed, and
+  one that cannot be read or written is one warning — the build is then the one it was before there was a record, which is
+  also why a record that cannot be written does not stop the create. An ordinary first build and an unchanged rebuild send
+  exactly what they sent before (no recorded id, no read). Not covered: a dashboard created by another workspace, or before
+  this release; a pinned (downloaded) dashboard, which is bound by its pin first and never consults the record; and
+  `teardown-model-app.js --clear-workspace`, which deletes the record with the workspace (it keeps the dashboard as it always did).
 - **Changes in the same SDK release that no plugin path reaches** — read these again before a plugin change
   reaches one. (`importSolution`, which now requires `overwriteUnmanagedCustomizations`
   and `publishWorkflows`, was on this list while no script called it. `solution-settings.js import` does, with

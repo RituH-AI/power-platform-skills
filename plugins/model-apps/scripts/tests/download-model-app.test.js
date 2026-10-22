@@ -250,7 +250,7 @@ test('readEntityWithDescriptions reads descriptions through the RAW dataverse cl
 
   // The $select also carries the DISPLAY labels now, so a table/column labelled in more than one
   // language round-trips (AB#6686428). The SDK's flattened `displayName` keeps only one.
-  assert.ok(gets.some((u) => /^\/EntityDefinitions\(LogicalName='new_order'\)\?\$select=LogicalName,Description,DisplayName,DisplayCollectionName$/.test(u)), `table read URL wrong: ${gets.join(' | ')}`);
+  assert.ok(gets.some((u) => u === "/EntityDefinitions(LogicalName='new_order')?$select=LogicalName,Description,DisplayName,DisplayCollectionName,IconVectorName&$expand=Keys($select=SchemaName,DisplayName,KeyAttributes,IsManaged)"), `table read URL wrong: ${gets.join(' | ')}`);
   assert.ok(gets.some((u) => /^\/EntityDefinitions\(LogicalName='new_order'\)\/Attributes\?\$select=LogicalName,Description,DisplayName,IsLogical,AttributeOf,AttributeTypeName$/.test(u)), `attribute read URL wrong: ${gets.join(' | ')}`);
   assert.strictEqual(e.description, 'Order table purpose.');
   const status = e.columns.find((c) => c.schemaName === 'new_status');
@@ -466,7 +466,7 @@ test('#564 a LOCAL option set downloads as a real Choice with inline options[], 
   // The cast segment is required: Attributes is a heterogeneous collection, so OptionSet can only be
   // expanded through it. Pin the exact URL so a silent shape change is caught here, not live.
   assert.ok(
-    urls.some((u) => u === "/EntityDefinitions(LogicalName='new_ticket')/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet($select=Name,IsGlobal,Options)"),
+    urls.some((u) => u === "/EntityDefinitions(LogicalName='new_ticket')/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet($select=Name,DisplayName,IsGlobal,Options)"),
     'picklist read URL wrong: ' + urls.join(' | ')
   );
 });
@@ -1103,11 +1103,9 @@ const { resolvePageRefs, reverseResolveNavIds } = require('../lib/pageref-resolv
 const { OBJECT_DIVISION_PAGE, LONG_KEY, lookBehindPage } = require('./helpers/misread-page.js');
 
 test('runDownload translates a fail-closed app read into a graceful error, not a raw SDK throw', async () => {
-  // `fetchArtifact('app')` fails closed (`APP_SITEMAP_UNRESOLVED`) rather than hand back an app whose
-  // navigation is untrustworthy. The sitemap IS this function's membership oracle, so that is a
-  // LOGICAL failure of the class its contract says it RETURNS rather than throws — otherwise the CLI
-  // surfaces an opaque SDK error for the very ordinary case of an unpublished app.
-  for (const code of ['APP_SITEMAP_UNRESOLVED', 'APP_UPDATE_NO_ETAG']) {
+  // An unresolved or shared sitemap is not a partial download: none of its navigation can be trusted
+  // as this app's membership. Preserve that refusal as a logical error before reading or writing pages.
+  for (const code of ['APP_SITEMAP_UNRESOLVED', 'APP_SITEMAP_SHARED', 'APP_UPDATE_NO_ETAG']) {
     const err = new Error('app sitemap could not be resolved');
     err.code = code;
     const sdk = { fetchArtifact: async () => { throw err; } };
@@ -1120,7 +1118,7 @@ test('runDownload translates a fail-closed app read into a graceful error, not a
 });
 
 test('runDownload still propagates a genuinely unexpected error (no blanket swallow)', async () => {
-  // Only the two fail-closed read codes are translated. An unexpected I/O error must keep propagating
+  // Only the fail-closed read codes are translated. An unexpected I/O error must keep propagating
   // to main().catch, or a real defect would be reported as an ordinary "download failed".
   const err = new Error('EACCES: permission denied');
   err.code = 'EACCES';

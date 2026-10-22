@@ -5,6 +5,207 @@ All notable changes to the **model-apps** plugin.
 Entries are deliberately short: what changed and why it matters to you. The reasoning,
 evidence and trade-offs behind a change live in its PR, in `docs/`, or in the linked issue.
 
+## [2.18.0]
+
+The bundled SDK is updated to power-platform-ux a3443479. An app whose sitemap's unique name is not the app's — first-party apps
+such as Sales Hub have one — is now read with its navigation (#746), and a web resource write is confirmed by reading back what was
+published. A new app whose navigation holds only generative pages can now be built, a download carries each page's connector and
+Custom API bindings and much more of each table's schema into the App Spec, and verify checks declared status reasons and alternate
+keys. Supported public Custom APIs are discovered by default. The HTTP client no longer re-sends a publish the customization lock
+refused, a web resource or dashboard that a stopped build left behind is finished by the next build instead of made again, and an
+unknown key in a form's `fieldOptions` is refused instead of ignored. An access token is now also kept out of bytes, out of its
+other spellings, and out of text cut short or split between two writes.
+
+### Added
+
+- **A new app whose navigation holds only generative pages is built.** Dataverse refuses to create a sitemap with no entry, so the
+  build refused such a spec before writing anything (`app-navigation-empty`), and lint warned about it. The build now creates the
+  pages first and then the app, with the pages already in its first sitemap — the order `apps.js create --page-id` uses: the app step
+  says `created after its pages`, and the app's create is reported in the app-shell phase. A build that stops between the pages and
+  the app is finished by running it again (the pages are adopted by their creation receipts, not created twice), and a teardown
+  removes the pages it made. An app that exists is not affected, and its requests are unchanged. A run that cannot create the pages
+  first — no pages phase, a `--changed-only` re-upload, a page entry whose page the run does not build — still refuses, and says
+  which.
+- **A download writes each generative page's connector and Custom API bindings into the App Spec, and a rebuild writes them back**
+  (`pages[].connectorBindings`, `pages[].actionBindings`). A copy of a spec rebuilt in another environment used to create its pages
+  without them. A list is written into the spec only whole, and only when every property is a documented one and every value has a
+  shape known to be safe — an identifier, a GUID, a plain name or label, a canonical `http(s)` URL with no user-info, query or
+  fragment, nothing shaped like a token, and for a Custom API only the ten primitive parameter kinds the runtime binds. Any other list
+  is left out of the spec, named by page, list, entry and property (never by a value), and stays on the page; a spec that states one
+  is refused. A secret written as plain words in a label cannot be told from a label. A list the spec does not state is not sent, so
+  the page keeps its own, and `[]` clears it. When a page already holds what the spec states and this workspace has a usable record
+  of its last publish, the build neither writes nor publishes it; a record from before the spec stated the lists counts only once
+  the page's published copy is read and found to hold them, and with no usable record the page is published (not written), as an
+  unchanged page always was. Before it writes anything (and in a dry run), a build reads the target environment's connection
+  references and Custom APIs, and the definition of a custom connector whose operations a binding calls: it stops
+  (`pages-binding-reference-conflict`, never retried) at a connection reference of that name for another connector; it names a
+  reference or Custom API that is not there, a reference with no connection, an operation the custom connector there does not
+  define, and a Custom API of the other kind or bound to another table. A read that fails, a reference row that does not say — in a
+  form the build can read — its connector, its connection or its custom connector, and a definition it cannot read are reported as
+  not checked, never as compatible; a Custom API row is taken as it reads (a kind it does not state counts as an Action, a table it
+  does not state as Global). A throttle wait the run's budget refuses during these reads stops the build before it writes. The
+  download's `pageBindings` result and a `NOTE:` on stderr list what the target must already have: the connection references and
+  their connections, the Custom APIs and the service resources the bindings point at.
+- **A download keeps much more of each table's schema**: Text format and length, Memo length, Integer range and format, Decimal and
+  Double range and precision, Money range, Boolean labels, DateTime format, AutoNumber masks, and the primary name column's length
+  (written even at 100, so a fresh build corrects an environment that overrides it; a lookup to that table made before the correction
+  keeps the overridden length on its name column) and mask; custom unmanaged Active and Inactive status reasons with their values and
+  colors, labelled in the download's authoring language; alternate keys with their columns and labels; solution and global-choice
+  display names; dashboard tile sizes; and a table's own unmanaged SVG icon, carried as `external: true` so a teardown of the
+  downloaded spec never deletes it. Values equal to the build's defaults are left out. A Money column's precision is kept only when it
+  follows the transaction currency, the only kind the build creates; for another source the download says so and leaves it out. A
+  detail it cannot read is named on stderr without dropping the column or table or guessing a default, and a status reason with no
+  label in the authoring language is named and left out. It is still not a clone: Boolean defaults, column capabilities, BigInt
+  ranges, DateTime behavior, script resources, raster, foreign or managed table icons, `roleGrants[]` and `sampleData` are not
+  carried. The download reads once more per table for its status reasons, once per column type present (Text, Memo, Integer, Decimal,
+  Double, DateTime) and once per icon it captures, plus one lookup of the web-resource table's entity set name before the first icon
+  when that name is not yet known.
+- **Verification checks declared status reasons and alternate keys** — `verify-model-app.js`, and the verification a build runs (with
+  `--verify`, and on every build that applies a spec's generative pages). A status reason passes when the table holds its label
+  under the state the build gives it and at the value the spec pins, if it pins one; a state the answer does not give readably
+  fails. An alternate key passes when a key of its name is over exactly its columns, in any order. Each is one read, made only for a
+  table that declares one. A build therefore now fails its verification, as it does for any other artifact, when the environment
+  holds a declared reason or key differently — a reason renamed in Maker, say, which a rebuild does not rename back — or the read
+  fails.
+
+### Changed
+
+- **The bundled SDK is updated (power-platform-ux a3443479).** What a maker can see of it:
+  - a web resource create, and an update that writes content, read the published content back once their publish succeeds (one
+    read), and fail with `WEB_RESOURCE_UNVERIFIED`, naming the row (which exists), when the publish fails (nothing is read back then)
+    or the content read back is missing, unreadable or not what was written (see Fixed for how a build recovers);
+  - a publish is never sent again by the SDK, except when SQL rolled it back as a deadlock victim;
+  - an edit of an Active business process flow that the customization lock refuses is sent again, unchanged and with its original
+    version check, for up to three minutes of waits, where it failed at once: another maker's edit in between makes it fail rather
+    than be overwritten;
+  - an app's sitemap is found by the SiteMap component on the app's current layer, not by the app's unique name (see Fixed). The link
+    is checked when an app is read — before and after its sitemap is read — and again before the app is written; each check is two
+    reads (the app's current layer and its SiteMap component) where a read of an app made one name lookup, and deleting an app also
+    reads which apps use its sitemap;
+  - an app create whose rollback the customization lock is shown to have refused or interrupted now names the lock as the reason — the
+    partial app kept because its rollback deleted nothing, or its removal unconfirmed because the rollback may not have run — and says
+    to check, once the lock frees, that its rows exist and are the create's own before removing them; a rollback answer that does not
+    show the lock, and other rollback outcomes, read as before.
+- **The HTTP client sends a publish (`PublishXml`, `PublishAllXml`) once.** It sent one again after a 429, 500, 502, 503 or 504 or a
+  reset or timed-out connection, up to six sends; measured under the customization lock, a refused publish is no proof that nothing
+  changed, and an accepted re-send published old content. A publish is still sent again after a 401 (with a new token) and after a
+  429 of the service protection limits, waited out as before. A deadlock victim is sent again by one layer only — the SDK for its own
+  publishes, the plugin for its table and app publishes — after 1, 2 and 4 seconds, four sends at most. pcf's copy of the client
+  changes the same way.
+- **Supported public Custom APIs are discovered by default** (`GENPAGE_ENABLE_CUSTOM_API=0` opts out for a run; a missing or
+  unreadable flag configuration still turns it off). `list-custom-apis.js` returns, in one request, the public Global APIs and the
+  public APIs bound to the page's tables; it leaves out private APIs, APIs bound to a table collection, and APIs with an Entity or
+  EntityCollection input or output. It refuses, rather than returning an empty or partial list, an API list, privacy flag, parameter
+  or response type, or lookup detail it cannot read — the metadata its eligibility checks need — and an answer or expansion whose
+  completeness it cannot prove (a continuation, or the platform's 5,000-row cap); the other fields of an API's own row are not
+  checked. This is Custom API discovery, not support for other Dataverse actions and functions. The page builders invoke a Function
+  automatically only when its read semantics are known — GET alone does not prove it harmless — and otherwise only on the user's
+  action.
+- **A rebuild no longer re-sends a status reason, an alternate key or an Integer format the environment already holds.** It reads a
+  table's status reasons once — after every labelled create, so the read cannot strip a later create's other-language labels — and
+  inserts only a reason whose value, state, label and color are not all there; it takes the keys from the table read it already
+  makes; and it reads an existing Integer column's format before updating it. Anything it cannot prove is written as before. A table
+  icon is still assigned and its table published on every build, as before: a saved name does not prove its last publish completed.
+- **Teardown says it keeps the publisher.** It never deletes the solution's publisher (the build reuses one by prefix, and other
+  solutions may share it); its closing summary now says so in one line.
+- **The design document shows a role grant the build refuses as refused.** A `roleGrants[]` entry that does not name exactly one
+  role (`role` and `roleId` both, or neither) is shown in `model-app-plan.md` and the `write-app-spec-doc.js` warnings in lint's
+  words, instead of as privileges the build would add.
+- **Lint warns on `ai.summaries.tables.<table>.prompt`**, a key the build never reads, and names the one that holds a row summary's
+  prompt (`instruction`); renaming it does not enable a summary.
+- **The genpage eval's offline Custom API check follows the new contract.** It accepts a lookup passed as `{ entityName, id }` with
+  no declared kind when its id is a string the page already holds, and refuses an invented or numeric id, a missing required lookup
+  and a parameter discovery did not return; a binding an edited page already held is accepted unchanged only for that same page, and
+  the page's earlier copy is judged by the download that saved it, not by another download of that page.
+
+### Fixed
+
+- **A download of an app whose sitemap's unique name is not the app's no longer fails on its sitemap** (#746). The SDK looked the
+  sitemap up by the app's unique name, found none, and the download failed with advice to publish the app, which did not help. The
+  sitemap is now the one the app's SiteMap component names. An app with no such component falls back to the sitemap of its name
+  only when no other live app uses that sitemap; otherwise the download returns `ok: false` and writes nothing. Deleting an app
+  whose sitemap another live app uses is refused, and so is a push of an app that was linked to another sitemap since it was read
+  (read it again). A build still adds a sitemap to the spec's solution only when it carries the app's unique name, as the sitemaps
+  the build creates do.
+- **A web resource whose publication could not be confirmed is recovered by its id on the next build**, not reused with stale
+  content or created a second time. At each place the build writes one — the spec's web resources, the generated app icon and the
+  page manifest — it records the row's id in the workspace (`web-resource-unconfirmed.*.json`), adds the row to the solution, and
+  stops saying the write is unconfirmed, not lost. The next run on that workspace — or the build's own retry — writes a spec web
+  resource's or the icon's content again by that id, publishes it and checks what was published; it writes the page manifest again
+  only when the manifest's published copy is not already what the run wants, and otherwise keeps it as it is. Either way the row
+  joins the solution and the record is cleared, and pages already created are adopted, not created twice. A row of that name the
+  record does not hold is reused as before, and a recorded id now under another name, or a recorded name now under another id,
+  stops recovery without touching the other row. When the record cannot be saved, the build does not retry on its own. The
+  workspace-reset advice keeps these records. Builds that share a workspace keep each other's entries: each change is made under a
+  short lock to the record as it is then, and a clear removes only the write its build verified, so a later unconfirmed write of the
+  same row stays for the next run. A note is not made when another build has meanwhile recorded another row under that name, or holds
+  the lock for more than about a second; that is said once, as when the record cannot be saved. Not covered: a process killed while
+  the SDK publishes, and another workspace.
+- **A dashboard a build created and then stopped before adding to the app's solution joins the solution on the next build.** A build
+  killed between the create and the add, one whose create's answer was lost, or one whose add and undo both failed left a row outside
+  the solution. The next build reused that row without adding it to the solution — or created a second dashboard if its name lookup
+  missed the row — and teardown kept it. The build now records the id it creates the dashboard with (`dashboard-creation.*.json`)
+  before the create; the next build reads that id in the saved layer and adds the same dashboard to the solution. Anything it cannot
+  prove — another kind of row, a rename, both the sent and the reported id answering, an add refused — stops the step with nothing
+  added, deleted or created, and it never asks to delete a dashboard that may be another app's. The record never adopts a namesake,
+  teardown never reads it, and the workspace-reset advice keeps it. Builds that share a workspace keep each other's entries: each
+  change is made under a short lock to the record as it is then and compares both ids. When recovery reads every recorded id as absent
+  and its clear then finds that another build changed the entry, it stops before creating a dashboard and asks for another run. A note
+  refused because another build changed the entry or held the lock for more than about a second is said once, and that build goes on
+  without the record. A first build and an unchanged rebuild send what they sent before. Not covered: a dashboard created before this
+  release or from another workspace, and an entry another build cleared after this build read it (the lock covers the record, not two
+  builds' dashboard steps).
+- **An unknown key in a form's `fieldOptions` entry is refused instead of ignored.** A misspelling such as `readOnlyy` or `colSpan`
+  passed validation and was dropped by the build, so the option was never applied. Lint, a dry run and a build now refuse it before
+  any write, naming the form, table, field and key, the option it most likely meant, and the keys an entry takes (`readOnly`,
+  `hidden`, `after`, `colspan`, `rowspan`); an entry takes no `name`, because its key names the field. A spec an earlier release
+  built with such a key can still be torn down and previewed, and `verify-model-app.js` verifies it with a warning.
+- **A Custom API with a lookup parameter is no longer bound in a way the runtime drops.** Discovery declared a lookup as
+  `EntityReference`, a kind the runtime does not take, so it dropped the whole binding. A lookup is now passed as
+  `{ entityName, id }` and kept out of the declared kinds; its name, whether it is required and its table are kept for the author in
+  a separate `lookupParameters` list, which is never written to the page.
+- **A teardown run again no longer reports what was already gone as deleted.** A default-view reset with no default view, a
+  relationship the SDK does not find, a table its read did not list and a global choice answered 404 now read `(not found)` and are
+  counted so. In any teardown, a relationship from a table to itself, which its table's delete takes with it, now reads
+  `(not found)` on its own step. The deletes sent and the exit status are unchanged.
+- **A download no longer carries the relationship a File or Image column brings** (`FileAttachment_<table>_<column>`), nor warns
+  that its name lacks the publisher prefix, nor reads the `fileattachment` table for it: the column makes it again on a rebuild.
+  Other relationships of those tables are kept.
+- **An access token the process obtained is also kept out of bytes, out of its other spellings, and out of text cut short or split
+  between two writes.** Bytes a script writes to stdout or stderr (a Buffer, or text written as base64 or hex) are read too, and a
+  token there is masked with `*` byte for byte, so framed output keeps its length. The token's base64 (standard and URL-safe),
+  percent-encoded and HTML spellings are taken out like the token itself. A piece of the token of 24 characters or more is taken out
+  where `util.inspect`'s `... N more characters` or an ellipsis cut the text, at the end of a write that begins the token, and at the
+  start of one that ends it; an escape split between two writes stays whole, so JSON written in two pieces is still JSON. Still left:
+  a piece shorter than 24 characters, the middle piece of a token written in three or more writes, a piece shorter than 24 characters
+  on the far side of an escape split between two writes, base64 of a part of the token, and bytes written to a file. pcf's copy of
+  the module changes the same way.
+- The capabilities document no longer says that a download leaves `relationships[]` out (#567).
+- **A rebuild no longer stops at something that already exists when the platform answers in another language, nor at a 1:N
+  relationship it did not see before creating it.** The build read only English words in an "already exists" answer, and the platform
+  can word that answer in the caller's language: on a Spanish environment the refusal of an alternate key the build could not prove
+  from its table read came back in Spanish, and the data-model phase stopped. A status reason, a column of a table whose columns could
+  not be read, or a table found only after its create stopped the same way wherever its refusal was worded in another language (on
+  that environment those came back in English). Each of those creates now also recognises the answer by its error code, which is the
+  same in every language (`0x80060893` key, `0x80044310` status reason, `0x80047013`/`0x80060304` column,
+  `0x80044363`/`0x8009050d`/`0x8004700b` table); a table is still reused only when it is read back. The create of an existing 1:N
+  relationship was answered `0x80072551` ("NavigationPropertyName … is not unique within an entity"), which no release recognised, so
+  a 1:N the build did not see before creating it stopped the build in every language. The build now reads that relationship and reuses
+  it only when the read proves it is the declared one; another relationship, or one the read cannot prove, still stops the build (the
+  reference's code for a taken relationship name, `0x8004432B`, leads to the same read). The codes add to the existing rules — a 409
+  and the English wording are still recognised whatever code the answer carries — and a code of another create, a generic code or a
+  code the message only quotes does not count by itself.
+- **Teardown removes a published app whose navigation names a sitemap that no longer exists, once it reaches the app.** Before 2.18.0,
+  tearing down one app could delete a sitemap another app shared, leaving that app's SiteMap component pointing at nothing. 2.17.0
+  then deleted such an app on its own (no sitemap had the app's name); the component-aware delete in 2.18.0 refused it with "… was not
+  returned by the unpublished-aware read … Retry.", which no retry could pass. Teardown now reads the app's row version, proves that
+  sitemap gone — by its id, in the published and the saved layer, with no other app's navigation naming it and the link unchanged —
+  and deletes the app on its own: the delete is conditioned on that version and touches no sitemap, and the app is then read back
+  gone. When it cannot prove that, or when the app was never published, it refuses with what it found and asks you to delete the app
+  in Power Apps and run the teardown again; when the app changed while it was proving it, it deletes nothing and asks you to run the
+  teardown again. An app with live generative pages still stops earlier, at the page check, because its pages are proven from the
+  navigation that is gone; delete such an app in Power Apps, then run the teardown again.
+
 ## [2.17.0]
 
 The bundled SDK is updated to power-platform-ux d603c799. Dashboard tiles the spec does not size now show their charts and lists, a

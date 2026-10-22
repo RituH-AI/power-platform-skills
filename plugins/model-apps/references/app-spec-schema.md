@@ -474,7 +474,7 @@ spec with its last snapshot, not with the deployed row, so it does not notice).
   Integer · BigInt · Decimal · Double · File · Image · AutoNumber · Customer`.
   **Lookups are NOT columns** — declare a `OneToMany` relationship instead.
 - **Per-type options** (all optional except an AutoNumber column's `autoNumberFormat`): `required: true` /
-  `"recommended"` / `false`; Text → `maxLength`,
+  `"recommended"` / `false`; Text/Memo → `maxLength`; Text →
   `format` (`Text`/`Email`/`Url`/`Phone`); numeric → `minValue`/`maxValue`/`precision`;
   Integer → also `integerFormat` (`None`/`Duration`/`TimeZone`/`Language`/`Locale` — e.g. render a
   raw minute count as a Duration picker instead of a plain number); DateTime → `dateFormat`
@@ -483,6 +483,27 @@ spec with its last snapshot, not with the deployed row, so it does not notice).
   `autoNumberFormat` (**required** on an AutoNumber column, e.g. `"C-{SEQNUM:5}"` — see the
   AutoNumber note below); Calculated/Rollup → `source: "Calculated"|"Rollup"` +
   `formula`.
+- **Downloaded column options are canonical, not a record of which defaults the author typed.**
+  Text format/length, Memo length, Integer range/format, Decimal/Double range/precision, Money range,
+  Boolean labels, DateTime format and AutoNumber masks are reconstructed, as are the primary name
+  column's length/mask. Options equal to the bundled SDK's create defaults are omitted: Text
+  length 100/format `Text`, Memo length 2000, Integer range -2147483648..2147483647/format `None`,
+  Decimal/Double range -100000000000..100000000000/precision 2, Money range 0..1000000000/precision 2,
+  Boolean `Yes`/`No` and DateTime `DateAndTime`. A primary name length stays explicit even at 100:
+  some environments override the length in a table create, and the post-create correction runs only
+  when `primaryAttribute.maxLength` is present. A missing or malformed detail read is named on
+  stderr; the typed column remains, but a fresh build cannot recover the missing option.
+  **Money precision is not generally portable.** The SDK always creates `PrecisionSource: 2`
+  (transaction currency). Download retains numeric `Precision` metadata only for source 2, and
+  even then the effective precision depends on the transaction currency's decimal places in the
+  target; equal numeric metadata does not prove currency equivalence. Source 0 (column precision),
+  source 1 (organization pricing), and missing/malformed/unknown sources are diagnosed with
+  precision omitted, without losing the typed Money column or its range. Configure the required
+  source in Power Apps on the target rather than relying on this spec to recreate it.
+  See [Money PrecisionSource](https://learn.microsoft.com/en-us/dotnet/api/microsoft.xrm.sdk.metadata.moneyattributemetadata.precisionsource).
+  This does not reconstruct `required`, Boolean `defaultValue`, `isValidFor*`, visualization,
+  BigInt ranges or DateTime behavior. A non-primary AutoNumber's custom length/format cannot be
+  authored through this spec; its number mask is carried.
 - **Write permissions** (optional, every column type **except Customer**): `isValidForCreate` /
   `isValidForUpdate` / `isValidForRead` — see `isValidForCreate / isValidForUpdate /
   isValidForRead` below.
@@ -512,13 +533,12 @@ spec with its last snapshot, not with the deployed row, so it does not notice).
   after the answer to its create was lost, or an existing table whose columns could not be read,
   warns — `false` too, since nothing shows what the column holds), and running the build again finds
   the table and sets the level as it does for any existing column — it never creates the table twice.
-- **`defaultValue`, `integerFormat`, and `isValidFor*` converge differently: by re-assertion, not
-  by diff.** Unlike `required` above, a rebuild does not read the column's current state first —
-  it simply re-sends whichever of these fields the spec sets explicitly, on every build, for both a
-  brand-new column and one that already exists. This is safe because re-sending an already-correct
-  value is a no-op on the wire; it does mean (unlike `required`) there is no "leave it alone if
-  omitted" behavior to rely on for a value set by hand in the portal — omit the field entirely to
-  leave portal-set state untouched, exactly as for `visualization` below.
+- **`defaultValue` and `isValidFor*` converge by re-assertion.** A rebuild re-sends whichever of
+  these fields the spec sets explicitly for an existing column; an omitted field leaves portal-set
+  state untouched, exactly as for `visualization` below. **A standalone `integerFormat` is
+  compared first:** an equal scalar format skips the SDK's read-mutate-write, while a different
+  or unreadable one keeps that update path. When other capabilities are authored alongside the
+  format, the existing combined update is still re-asserted.
 - **Choice / MultiChoice** need `options[]` (string labels) **or** a `globalChoice` reference
   (see `globalChoices` below). **Customer** is a polymorphic account/contact lookup.
 - **AutoNumber** can also be the **primary** column — put `autoNumberFormat` on `primaryAttribute`
@@ -656,6 +676,22 @@ without needing a business rule or a plug-in to enforce it.
 "alternateKeys": [ { "schemaName": "new_emailkey", "displayName": "Email Key", "columns": ["new_email"] } ],
 "mainFormOrder": ["Work Item", "Work Item — Summary"]   // the Main Form Set order — see forms[] → "Which form a table opens with"
 ```
+
+A download keeps unmanaged custom `statusReasons` with Active/Inactive state, label, color and
+value (omitting `value` only when the build would assign the same number by index). Stock values
+1/2, managed reasons and stock-table reasons below 100000000 are not re-declared. Other states or
+incomplete metadata are named rather than fabricated. `alternateKeys` keep their schema names,
+column sets and available display labels; managed keys are not re-declared. Status labels use only
+the resolved download language (`--language-code`, the existing spec's `languageCode`, then the
+environment base language), not the caller's UI language. A reason missing that translation is
+omitted with a diagnostic, never relabelled from another LCID. A non-base-language download flag
+is read-time only: pass the same flag on rebuild or pin `languageCode` in the spec.
+A malformed or missing optional `Keys` array is diagnosed and recovers no keys, without dropping
+the table, its primary name, typed columns or navigation. On rebuild an equal
+status value/state/label in the authoring language (and color, when authored), or an equal key
+name/column set, skips the insert. An unknown or conflicting answer keeps the existing
+duplicate-protected create path: it is not an instruction to rewrite a conflicting deployed
+definition.
 
 ## Conditional features — read `app-spec-schema-advanced.md` when you use one
 
@@ -1344,6 +1380,13 @@ A form field can carry these per-control options. Declare them **form-level** in
 (keyed by column logical name) — the only route under an `auto` layout, which has no field list —
 or **inline** on an explicit layout's `fields[]` entry as `{ "name": …, "readOnly": …, "hidden": … }`.
 Where both apply to one field the inline entry wins; a plain string entry keeps working unchanged.
+An entry takes only the options below — `readOnly`, `hidden`, `after`, `colspan` and `rowspan` — and
+an inline entry its `name` as well; a `fieldOptions` entry takes no `name`, because its key names the
+field. Any other key (a misspelling such as `readOnlyy` or `colSpan`) is **rejected** at author time —
+by the lint, a dry run and a build — naming the key it most likely meant, rather than accepted and
+silently ignored. A spec an earlier release built with such a `fieldOptions` key can still be read:
+`verify-model-app.js` reports the key as a warning, and teardown and `preview-form.js` accept it. The
+option stays unapplied until the key is fixed.
 
 - **`readOnly: true`** locks the control (`disabled="true"`), leaving it visible. Use it for a value
   the platform generates but does **not** make immutable — an AutoNumber column is writable through
@@ -1594,16 +1637,102 @@ custom control), but the spec validator emits a warning.
   highest identity authority (outranks the manifest), confirmed against EXISTENCE — so a downloaded
   app (including Maker-added pages) rebuilds against the correct existing page without duplication.
 - **What a page round-trip carries — and what it does not.** A download brings back each page's
-  code, prompt, `dataSources`, the id of the **model** that generated it (`pages[].model`) and its
+  code, prompt, `dataSources`, the id of the **model** that generated it (`pages[].model`), its
+  **connector and Custom API bindings** (`pages[].connectorBindings`, `pages[].actionBindings`, below) and its
   identity; the build sends the model with every update, and the page's own is kept when the spec has none
-  (the SDK writes only what differs). A page's **connector and Custom API bindings** have no App
-  Spec field, so they are not in the spec. The build writes pages without them, and the SDK leaves a page's
-  existing bindings in place when they are omitted: a rebuild in the **same environment** keeps the
-  bindings working, but that is preservation, not reconstruction — the same spec rebuilt in **another
-  environment** deploys the page without them (bind them there with `/genpage`).
+  (the SDK writes only what differs). What no spec can bring to **another environment** is what the bindings
+  *name* — the connection references, the Custom APIs and the service resources (below).
 - **`model` (optional).** The model id a page was generated with, e.g. `"gpt-4.1"` — letters, digits and
   `. _ : / @ + -`, at most 100 characters. A download writes it (an id outside that shape is left out, with
   a warning); an authored spec may omit it, and then a rebuild of an existing page keeps the model that page has.
+- **`connectorBindings` and `actionBindings` (optional).** The two lists a page holds in its `config.json`, each a
+  list of objects. A spec states an entry by **the properties the references document, each with a value of a
+  conservative shape known to be safe** — an allowlist (`references/connectors.md` and `references/custom-api.md`
+  say what they mean):
+  ```jsonc
+  { "connectorBindings": [ { "logicalName": "new_msnweather", "connectorId": "/providers/Microsoft.PowerApps/apis/shared_msnweather", "dataset": "", "operations": ["CurrentWeather"] } ],
+    "actionBindings":    [ { "name": "new_ApproveOrder", "isFunction": false, "boundEntityLogicalName": "salesorder", "displayName": "Approve Order", "parameterKinds": { "Comment": "String" } } ] }
+  ```
+  | List | Property | Its value |
+  |---|---|---|
+  | `connectorBindings` | `logicalName` | an identifier: a letter, then letters, digits, `_ . -` |
+  | | `connectorId` | `/providers/Microsoft.PowerApps/apis/<identifier>`, or the identifier |
+  | | `dataset` | `""`, a plain name (`server,database`, `default`), or an `http(s)` URL with no user-info, no query and no fragment, whose host is DNS labels and whose decoded path segments are labels, written in its canonical form — exactly as a URL parser gives it back: no `.` or `..` segment (plain or percent-encoded), a lower-case scheme and host, no default port |
+  | | `tables` | a list of GUIDs or plain names (`[dbo].[Orders]`) |
+  | | `tableDisplayNames` | a list of labels: letters, digits, dashes, spaces and `_ . , ; : ' ( ) & + !` — no URL, no `=` |
+  | | `operations` | a list of identifiers |
+  | `actionBindings` | `name`, `boundEntityLogicalName` | an identifier |
+  | | `displayName` | a label |
+  | | `isFunction` | `true` or `false` |
+  | | `parameterKinds` | a map from a parameter name (a letter or `_`, then letters, digits, `_`) to one of the ten declared primitive kinds the page runtime accepts (`Boolean`, `DateTime`, `Decimal`, `Float`, `Integer`, `Money`, `Picklist`, `String`, `StringArray`, `Guid`) |
+
+  `EntityReference`, `Entity` and `EntityCollection` are not declared kinds: an unsupported declared
+  kind makes the runtime drop the whole binding. Lookup inputs remain structural call values, not
+  entries in this map; lookup authoring hints are discovery-only metadata, never App Spec binding
+  properties. Sparse primitive maps are valid; a lookup-only API can state `parameterKinds: {}`.
+  To deliberately correct an existing bad map, state its verified primitive entries explicitly
+  (or `{}` for lookup-only inputs). Omitting `actionBindings` preserves the page's existing payload
+  instead of correcting it; no unsupported declaration is silently stripped or changed to `Guid`.
+
+  No text of any of them may be shaped like a token (a known token prefix such as `ghp_` or `eyJ`, an
+  authorization scheme such as `Bearer …`, or a run of 32 or more letters and digits that mixes both).
+  **Nothing else is in a spec, and a list is stated only WHOLE.** A binding a page holds can carry anything: a
+  connection id of the environment it was made in, a credential someone wrote into a `connectors.json`
+  (`genpage-upload.js` takes any JSON array) — as a value, as the NAME of a property, in a URL's user-info, query or
+  fragment — or a property a later runtime adds. The spec is what is committed and shared, so when ANY entry of a list
+  holds a key that is not on the allowlist, or a value without its shape, a download leaves the **whole list** out of
+  the spec — it never states part of an entry, because an entry stated without its identity or a property would make a
+  rebuild replace the page's entry with less — and reports it in `pageBindings.notCarried` (stderr: `WARNING:`) by the
+  page, the list, the entry's place and the vetted property, or "an unrecognized property": **never a value and never an
+  unrecognized key**. A list left out is one a rebuild does not send, so the page keeps it as it is, with no write and no
+  publish. The page folder's own `config.json` is the page as the environment holds it and is not rewritten, so it still
+  holds everything: keep that folder out of version control if a value there is a credential. A spec that states such a
+  property or value is **refused** by the validator, in the same words. A list that is not a list of objects is left out
+  whole too; neither is ever a refusal of the download.
+  A download writes the lists a page holds (an empty list, or `null`, is left out). The build writes a list a
+  spec states, and **leaves the page's own alone when the spec does not state it**; a list that is stated —
+  `[]` too — is the page's list, as `dataSources` is. It is read against the page's own entries: a page that
+  already holds what the spec states is **not written and not published**, and an entry the spec changes keeps
+  the properties the spec does not state (an entry is matched by `logicalName` / `name`). `logicalName` (a
+  connector binding) and `name` (a Custom API binding) is what the page's code finds an entry by, so an entry
+  without one draws a warning.
+  The spec carries the lists, which are text; it cannot carry what they name, and a rebuild creates none of it,
+  so each must already exist in the environment you rebuild into: the **connection reference** each connector
+  binding goes through, and the connection behind it, which holds a user's sign-in (create the reference with
+  `create-connection-reference.js`, or move it in a solution with `add-page-to-solution.js --connection-refs` and
+  `solution-settings.js`); the **Custom API** each action binding names, a solution component and not an App Spec
+  item; and, for a connector binding that names a `dataset` or `tables` (a SharePoint site and its list ids),
+  the same resources. A download names what it found, on stderr and as `pageBindings` in its JSON result.
+  **A rebuild checks them before it writes anything** (a build, and a dry run in its plan): it reads the
+  environment's connection references and Custom APIs for the names the pages it writes state, and
+  - **stops** — `pages-binding-reference-conflict`, phase `preflight`, nothing written — at a connection reference
+    of that name that is for **another connector** than the binding's `connectorId` (compared by the connector's
+    name, so `/providers/Microsoft.PowerApps/apis/shared_msnweather` and `shared_msnweather` agree): the page
+    would call that connector under that name. Give the binding the logical name of a reference that is for the
+    right connector, or, when the reference that is there is the one the page should call (a custom connector made
+    separately in each environment has another id in each), set the binding's `connectorId` to the one this
+    environment has. Nothing is guessed or made, and a connector that a binding or a reference does not name is
+    never a conflict;
+  - **says by name** (a warning, and the page is written with its binding all the same — a reference made, or given
+    its connection, later makes the page work without a rebuild) each reference and Custom API that is not there, a
+    reference that is there with **no connection** (what a solution import leaves when no settings file gives one), an
+    **operation** a binding lists that the **custom connector** of its reference there does not define, a Custom API
+    that is the other kind (Action or Function) or bound to another table, and a read that failed (the bindings were
+    then not checked);
+  - **says as NOT CHECKED**, by name, what the environment's answer did not prove — never reading it as compatible,
+    and never refusing for it: a reference row that does not say which connector it is for, or whether it has a
+    connection — or says it in a form the build cannot read (a `connectorid` that is not
+    `/providers/Microsoft.PowerApps/apis/shared_<name>`, a `connectionid` that is not text) — and the operations of a
+    binding whose reference names no custom connector. Only two valid connector ids that differ stop the build. Operations are checked
+    only through a custom connector's definition (its `connector` row), which is the environment's own and can be
+    another version than the page was made with; a reference whose custom connector lookup is absent, null or not a
+    GUID — which a connector the platform publishes also has — is not proof of which connector defines them.
+
+  `/app-builder` never authors these lists — it writes no connector or Custom API code — so they come from a page
+  a download read. A page you reset to `source.kind: "intent"` to regenerate it is generated without connector
+  code: delete its bindings from the spec too, or it keeps bindings its code no longer uses. The `custom-api`
+  feature flag gates what the `/genpage` agents author, not the download or the rebuild of bindings a page
+  already holds.
 - **Safety HALTs (pages phase).** The build halts on identity/safety violations rather than
   proceeding with potentially wrong state:
   - `pages-identity-conflict` — spec `pageId` and manifest disagree on a key, or a duplicate id is
@@ -1649,14 +1778,18 @@ custom control), but the spec validator emits a warning.
 - **The navigation needs an entry Dataverse will take — for a new app.** Dataverse refuses to **create** a sitemap with no
   non-empty area holding a non-empty group (HTTP 400: "SiteMap needs to have a non-empty Area with a non-empty Group"); it
   accepts the same navigation when the sitemap of an app that **already exists** is updated (measured: saved and published).
-  A **new** app is created before its pages exist, so its first navigation leaves every `page` entry out and the pages phase
-  writes them in afterwards: it needs **at least one `entity`, `dashboard` or `url` entry in a group in an area**, and pages
-  may sit beside it. An **existing** app is refused for neither a navigation of only `page` entries (its navigation is
+  A **new** app whose navigation has an `entity`, `dashboard` or `url` entry is created before its pages exist: its first
+  navigation leaves every `page` entry out, and the pages phase writes them in afterwards. A **new** app whose navigation
+  holds **only `page` entries** is built the other way round: the build creates the pages first and then the app, with them
+  already in its first navigation (as `apps.js create --page-id` makes an app around a page). So a new app needs **at least
+  one entry in a group in an area** — a table, dashboard, url or page entry. A run that cannot create the pages first (one
+  without the pages phase, or a changed-only re-upload) still refuses a navigation of only `page` entries for a new app. An
+  **existing** app is refused for neither a navigation of only `page` entries (its navigation is
   written from the whole spec once its pages are built) nor one with no entry at all: the build goes on, and for the empty
   one it **warns** that the app is left with no navigation entries — any it has now are removed, which the destructive-
   operation check asks `--allow-destructive` for. A spec with no `appShell.areas` is refused for every app, since there is no
-  navigation to build the app's sitemap from. A spec with no `appShell`, `areas: []`, an area with no group, a group with no
-  entry, or (for a new app) only `page` entries still **validates** — a data-only spec has no navigation, and a downloaded
+  navigation to build the app's sitemap from. A spec with no `appShell`, `areas: []`, an area with no group, or a group with
+  no entry still **validates** — a data-only spec has no navigation, and a downloaded
   spec carries the app's own, which can be empty — but a build that includes the app-shell phase refuses what a new app
   cannot be built from **before it writes anything**: the dry run marks the app step `? unknown` with the reason and counts it
   among the steps that would stop the build (with a live plan or without one), `--apply` halts with `app-navigation-empty`,
@@ -1898,6 +2031,7 @@ auto-selects tables that are good row-summary candidates and skips those that ar
 - **Lint warnings:**
   - `incident`, `lead`, and `opportunity` are Dynamics 365 app tables (Case / Lead / Opportunity) that provide their own row summaries — configuring one as a summary table warns, because the row-summary feature is not available for them.
   - A table with no descriptive columns (only lookups / system fields) warns that a row summary may not be useful.
+  - A table's entry is read for `enabled`, `instruction` and `columns` only, and validation rejects no other key — so any other key warns that it is ignored. The prompt is `instruction`: a `prompt` key warns and names it. When a summary is enabled, omitting `instruction` uses the default prompt; setting `instruction` alone does not enable a table under `default: "off"`.
 
 ## personas[] (optional — security roles)
 

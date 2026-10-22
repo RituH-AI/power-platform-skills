@@ -6,6 +6,8 @@ const { isAppSourcePath } = require('./app-source-path.js');
 const { normalizeSpecShape } = require('./spec-shape.js');
 const { isMainForm, selectDefaultForm, ordersByHand } = require('./form-order.js');
 const { AUTO_TAB_NAME, AUTO_SECTION_NAME, placementOf, resolvePlacement } = require('./form-subgrid-placement.js');
+const { PAGE_BINDINGS, pageBindingsProblem, statedPageBindings, statableBinding, bindingProblemText } = require('./page-bindings.js');
+const { nearestName } = require('./nearest-name.js');
 
 // URL scheme allowlist for spec-supplied URLs that the built app will RENDER (iframe dashboard tiles,
 // sitemap URL subareas). Only http(s) is allowed — a `javascript:`, `data:`, `vbscript:`, or `file:`
@@ -37,6 +39,9 @@ const FORM_GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 // A page's model id (`pages[].model`), e.g. `gpt-4.1` or `claude-3-5-sonnet@20240620`: a short token, stored as the page's
 // `model` in its config.json. Shared with download, which carries only a model the spec can hold.
 const PAGE_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,99}$/;
+
+// A generative page's connector and Custom API bindings: what a spec states of them (an allowlist of properties, each with the kind of value it holds) and how a rebuild reads it is defined in page-bindings.js.
+// The validator below holds a page to it, and the download holds what it writes to the same rule, so a download never writes a spec this refuses. Re-exported here for the callers that take them from the spec module.
 
 // Security-authoring enums (personas[]). These mirror the vendored SDK's security surface
 // (cds-maker-sdk src/types/security.ts) EXACTLY — the app-spec validator is a lint-time echo of the
@@ -1603,6 +1608,38 @@ function validateFormSecurityRoles(f, spec, errors) {
   }
 }
 
+// The per-field control options, ONE list for both routes that declare them: a form-level
+// `fieldOptions` entry takes exactly these, and an inline `fields[]` entry takes these plus its `name`
+// (FORM_FIELD_ENTRY_KEYS). A map entry takes no `name`, because its KEY names the field.
+//
+// It is also the list the compiler projects (artifact-intent.js `projectFieldOptions`), so validation
+// and the build cannot disagree about what an option is. A `fieldOptions` entry used to be checked only
+// for the values of these keys, so any other key (`readOnlyy`, `colSpan`, a subgrid's `before`)
+// validated clean and was then dropped by the projection: a green build that never applied the option.
+// Frozen, and in the order of the compiled entry.
+const FIELD_OPTION_KEYS = Object.freeze(['readOnly', 'hidden', 'after', 'colspan', 'rowspan']);
+// `readOnly?, hidden?, after?, colspan?, rowspan?`, for the messages that describe an entry's shape.
+const FIELD_OPTION_SHAPE = FIELD_OPTION_KEYS.map((k) => `${k}?`).join(', ');
+
+// What to write instead, for a key of a `fieldOptions` entry that a near spelling cannot explain.
+// Prototype-less for the reason ENTITY_KEY_HINTS is: the lookup key comes from the spec, and
+// `constructor` must not find Object's own function.
+const FIELD_OPTION_KEY_HINTS = Object.assign(Object.create(null), {
+  name: " — a fieldOptions entry is keyed by the field's logical name, so it takes no 'name'",
+  visible: " — to keep the field on the form but not show it, use 'hidden': true",
+});
+
+// The message suffix naming the option an unknown `fieldOptions` key most likely meant: a written hint
+// first, then the shared single-edit matcher, which also settles a casing slip (`colSpan` for
+// `colspan`). nearestName answers in lower case, so its match is mapped back to the spelling the spec
+// must use.
+function fieldOptionKeyHint(key) {
+  if (FIELD_OPTION_KEY_HINTS[key]) return FIELD_OPTION_KEY_HINTS[key];
+  const near = nearestName(key, FIELD_OPTION_KEYS.map((k) => k.toLowerCase()));
+  const meant = near && FIELD_OPTION_KEYS.find((k) => k.toLowerCase() === near);
+  return meant ? ` — did you mean '${meant}'?` : '';
+}
+
 // Allow-listed keys for an explicit form layout, with the reason each rejection exists.
 //
 // `tabs[]`/`sections[]` had no allow-list at all, so an invented or misspelled key validated clean
@@ -1622,7 +1659,7 @@ function validateFormSecurityRoles(f, spec, errors) {
 const FORM_TAB_KEYS = new Set(['name', 'label', 'expanded', 'visible', 'sections', 'columns']);
 const FORM_TAB_COLUMN_KEYS = new Set(['width', 'sections']);
 const FORM_SECTION_KEYS = new Set(['name', 'label', 'columns', 'showLabel', 'visible', 'fields']);
-const FORM_FIELD_ENTRY_KEYS = new Set(['name', 'readOnly', 'hidden', 'after', 'colspan', 'rowspan']);
+const FORM_FIELD_ENTRY_KEYS = new Set(['name', ...FIELD_OPTION_KEYS]);
 // Identity of a sample-data `matchOn` value, shared by the author-time gate in `validateAppSpec` and
 // the loader's own refusal in `chooseMatchOn`/`firstDuplicateNonEmpty` (entity-provision.js).
 //
@@ -2225,7 +2262,7 @@ function validateFormLayoutKeys(f, errors) {
   });
 }
 
-function validateFormFieldOptions(f, entityByLower, errors, warnings) {
+function validateFormFieldOptions(f, entityByLower, errors, warnings, unknownKeyFindings = errors) {
   const label = `form '${f.name || f.entity}'`;
   const entity = entityByLower.get(String(f.entity || '').toLowerCase());
   const columnType = (logical) => {
@@ -2263,7 +2300,7 @@ function validateFormFieldOptions(f, entityByLower, errors, warnings) {
         } else if (typeof entry === 'string') {
           listedByLayout.add(entry.toLowerCase());
         } else {
-          errors.push(`${label}: a field entry must be a column logical name or an object { name, readOnly?, hidden?, after? }`);
+          errors.push(`${label}: a field entry must be a column logical name or an object { name, ${FIELD_OPTION_SHAPE} }`);
         }
       }
     }
@@ -2276,8 +2313,17 @@ function validateFormFieldOptions(f, entityByLower, errors, warnings) {
       for (const key of Object.keys(f.fieldOptions)) {
         const v = f.fieldOptions[key];
         if (!v || typeof v !== 'object' || Array.isArray(v)) {
-          errors.push(`${label}: fieldOptions['${key}'] must be an object { readOnly?, hidden?, after?, colspan? }`);
+          errors.push(`${label}: fieldOptions['${key}'] must be an object { ${FIELD_OPTION_SHAPE} }`);
           continue;
+        }
+        // Only the entry's OWN keys (Object.keys): a key the entry does not take is reported here, worded
+        // like the inline entry's check (validateFormLayoutKeys), instead of being dropped by the compiler —
+        // as an error, or as a warning where validateAppSpec says the spec is only read (fieldOptionKeyFindings).
+        // A named form also names its table: a field belongs to a table, and two tables' forms can share
+        // a name.
+        for (const k of Object.keys(v)) {
+          if (FIELD_OPTION_KEYS.includes(k)) continue;
+          unknownKeyFindings.push(`${label}${f.name && f.entity ? ` (table ${f.entity})` : ''}: unknown key '${k}' on fieldOptions['${key}']${fieldOptionKeyHint(k)} (allowed: ${FIELD_OPTION_KEYS.join(', ')})`);
         }
         seen.push({ name: String(key).toLowerCase(), opt: v, where: `fieldOptions['${key}']`, inline: false });
       }
@@ -2436,6 +2482,12 @@ function validateAppSpec(spec, opts = {}) {
   // protect there, and the spec of an app an earlier release built from a value they refuse must still reach its deployment. The same arrangement as
   // `relationshipCollisions: 'warn'` at the end of this function; every other caller keeps the error.
   const columnValueFindings = opts.columnValues === 'warn' ? warnings : errors;
+  // Where an unknown key of a form's `fieldOptions` entry goes (validateFormFieldOptions). Every profile that builds or plans a build
+  // keeps it an error: the build drops such a key, so the option would never be applied. A release before that check accepted and built
+  // a spec carrying one (the key was ignored), and a spec that is only READ to act on its deployment must still be read — so the
+  // structural profile (teardown, preview) takes it as a warning in the same words, and so does read-only verification, which keeps the
+  // deploy profile and passes `fieldOptionKeys: 'warn'`, as it passes `columnValues: 'warn'`. Nothing else about the entry moves.
+  const fieldOptionKeyFindings = profile === 'structural' || opts.fieldOptionKeys === 'warn' ? warnings : errors;
   if (!VALIDATION_PROFILES.includes(profile)) {
     return { ok: false, errors: [`unknown validation profile '${profile}' (valid: ${VALIDATION_PROFILES.join(', ')})`], warnings };
   }
@@ -2965,7 +3017,7 @@ function validateAppSpec(spec, opts = {}) {
         }
       }
     }
-    validateFormFieldOptions(f, entityByLower, errors, warnings);
+    validateFormFieldOptions(f, entityByLower, errors, warnings, fieldOptionKeyFindings);
     validateFormLayoutKeys(f, errors);
     validateFormSecurityRoles(f, spec, errors);
     // `layout: 'explicit'` with no `tabs[]` is a spec that asks for one thing and builds another.
@@ -3472,6 +3524,25 @@ function validateAppSpec(spec, opts = {}) {
     // what a download writes back. A short token (e.g. `gpt-4.1`).
     if (p.model !== undefined && (typeof p.model !== 'string' || !PAGE_MODEL_RE.test(p.model))) {
       errors.push(`page '${p.key || p.name}': model must be a model id such as 'gpt-4.1' (letters, digits and . _ : / @ + -, at most 100 characters)`);
+    }
+    // The page's connector and Custom API bindings. That each is a list, and that none of its entries is missing, is reported above by normalizeSpecShape; an entry that is there and is no object (a string, a number) is
+    // reported here, by the rule a download holds a page's bindings to (pageBindingsProblem), so a download never writes a spec this refuses.
+    // An entry is stated by an allowlist of properties, each with a value of a shape known to be safe (page-bindings.js, which holds the threat model): a property outside it — a connection id, a credential,
+    // anything the runtime or a later version adds — or a value of another shape is an ERROR that names the vetted property or says "an unrecognized property", and never a value or an unrecognized key (a key
+    // can be the secret), because the spec is what is committed and shared, and refusing is the only thing that keeps a credential out of it.
+    // What the page finds an entry by is only a warning: an entry is written as it is given, and a page a download read the bindings of may hold one with no such property, which a refusal would leave with no spec at all.
+    for (const [kind, identity] of Object.entries(PAGE_BINDINGS)) {
+      if (!Array.isArray(p[kind])) continue;
+      const problem = pageBindingsProblem(kind, p[kind]);
+      if (problem) errors.push(`page '${p.key || p.name}': ${problem}`);
+      p[kind].forEach((entry, i) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return;
+        const unstated = new Set(statableBinding(kind, entry).leftOut.map((found) => `page '${p.key || p.name}': ${bindingProblemText(kind, i, found)}`));
+        for (const text of unstated) errors.push(text);
+        if (typeof entry[identity] !== 'string' || !entry[identity].trim()) {
+          warnings.push(`page '${p.key || p.name}': ${kind}[${i}] has no ${identity} — the page's code finds a binding by it, so this one can never be used`);
+        }
+      });
     }
     const src = normalizePageSource(p);
     // Track whether a structural source error was emitted so the profile check below doesn't
@@ -4210,6 +4281,39 @@ function canonicalPersonaName(persona) {
 // https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/addprivilegesrole
 const ROLE_GRANT_KEYS = new Set(['role', 'roleId', 'businessUnitId', 'privileges', 'description']);
 
+// How every roleGrants[] message names its entry: `roleGrants[1] (role "Viewer")`, `roleGrants[0] (roleId <guid>)`, or `roleGrants[2]`.
+// `i` is the entry's index in the spec's roleGrants[] as written.
+function roleGrantEntryLabel(g, i) {
+  const roleName = typeof g.role === 'string' ? g.role.trim() : g.role;
+  return `roleGrants[${i}]${roleName ? ` (role "${roleName}")` : g.roleId ? ` (roleId ${g.roleId})` : ''}`;
+}
+
+// The ONE check of which role a roleGrants[] entry names: exactly one of `role` (an existing role's display name) and `roleId` (its
+// GUID). Answers the gate's messages, [] for an entry that names one role. validateRoleGrants (the gate a build and lint-app-spec.js
+// run) reports them, and the design document repeats them word for word (lib/app-access.js roleGrantRefusals → lib/app-spec-doc.js and
+// the warnings of write-app-spec-doc.js), which used to show an entry with both as a grant the build would make.
+function roleGrantIdentityErrors(g, label) {
+  const describeValue = (v) => { try { return JSON.stringify(v); } catch { return Object.prototype.toString.call(v); } };
+  const errors = [];
+  const roleName = typeof g.role === 'string' ? g.role.trim() : g.role;
+  // Exactly one identity. Accepting both would let them disagree, and the apply path can only follow
+  // one — resolving the id and ignoring a mismatched name would grant on a role the author did not name.
+  const hasName = g.role !== undefined;
+  const hasId = g.roleId !== undefined;
+  if (hasName && hasId) {
+    errors.push(`${label}: set either 'role' (the existing role's display name) or 'roleId' (its GUID), not both — they can disagree and only one can be honoured`);
+  } else if (!hasName && !hasId) {
+    errors.push(`${label}: name the existing role to extend — set 'role' (display name) or 'roleId' (GUID)`);
+  }
+  if (hasName && (typeof roleName !== 'string' || !roleName)) {
+    errors.push(`${label}: role must be the non-empty display name of an EXISTING security role (got ${describeValue(g.role)})`);
+  }
+  if (hasId && (typeof g.roleId !== 'string' || !FORM_GUID_RE.test(g.roleId))) {
+    errors.push(`${label}: roleId must be a GUID (got ${describeValue(g.roleId)})`);
+  }
+  return errors;
+}
+
 function validateRoleGrants(spec, errors) {
   const grants = spec && spec.roleGrants;
   if (grants === undefined) return;
@@ -4217,7 +4321,6 @@ function validateRoleGrants(spec, errors) {
     errors.push('roleGrants must be an array of { role | roleId, privileges[] } entries');
     return;
   }
-  const describeValue = (v) => { try { return JSON.stringify(v); } catch { return Object.prototype.toString.call(v); } };
   // A role's identity is (trimmed+folded NAME, business unit) — the same key the SDK uses. Two roles
   // may legitimately share a name in different business units, so the BU must be part of the key or
   // that valid pair is rejected; an absent BU means "the org root", which is one specific BU.
@@ -4242,22 +4345,9 @@ function validateRoleGrants(spec, errors) {
       if (!ROLE_GRANT_KEYS.has(k)) errors.push(`roleGrants[${i}]: unknown key '${k}' (allowed: ${[...ROLE_GRANT_KEYS].join(', ')})`);
     }
     const roleName = typeof g.role === 'string' ? g.role.trim() : g.role;
-    const label = `roleGrants[${i}]${roleName ? ` (role "${roleName}")` : g.roleId ? ` (roleId ${g.roleId})` : ''}`;
-    // Exactly one identity. Accepting both would let them disagree, and the apply path can only follow
-    // one — resolving the id and ignoring a mismatched name would grant on a role the author did not name.
-    const hasName = g.role !== undefined;
+    const label = roleGrantEntryLabel(g, i);
+    errors.push(...roleGrantIdentityErrors(g, label));
     const hasId = g.roleId !== undefined;
-    if (hasName && hasId) {
-      errors.push(`${label}: set either 'role' (the existing role's display name) or 'roleId' (its GUID), not both — they can disagree and only one can be honoured`);
-    } else if (!hasName && !hasId) {
-      errors.push(`${label}: name the existing role to extend — set 'role' (display name) or 'roleId' (GUID)`);
-    }
-    if (hasName && (typeof roleName !== 'string' || !roleName)) {
-      errors.push(`${label}: role must be the non-empty display name of an EXISTING security role (got ${describeValue(g.role)})`);
-    }
-    if (hasId && (typeof g.roleId !== 'string' || !FORM_GUID_RE.test(g.roleId))) {
-      errors.push(`${label}: roleId must be a GUID (got ${describeValue(g.roleId)})`);
-    }
     if (g.businessUnitId !== undefined && (typeof g.businessUnitId !== 'string' || !FORM_GUID_RE.test(g.businessUnitId))) {
       errors.push(`${label}: businessUnitId must be a GUID`);
     }
@@ -4415,6 +4505,8 @@ function migrateAppSpec(spec) {
 }
 
 module.exports = {
+  roleGrantEntryLabel,
+  roleGrantIdentityErrors,
   rejectLocalizedGlobalChoice,
   sampleKeyIdentity,
   dashboardNameKey,
@@ -4460,10 +4552,14 @@ module.exports = {
   quickCreateEnabledFor,
   isPlatformIconRef,
   webResourceNameFromRef,
+  FIELD_OPTION_KEYS,
   FORM_TYPE_CODE,
   formIdentityKey,
   FORM_GUID_RE,
   PAGE_MODEL_RE,
+  PAGE_BINDINGS,
+  pageBindingsProblem,
+  statedPageBindings,
   ACCESS_LEVELS,
   PRIVILEGE_SCOPES,
   ROLE_GRANT_KEYS,

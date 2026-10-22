@@ -74,6 +74,7 @@ const { unreadableAnswer } = require('./collection-answers.js');
 const { fetchSitemap, navigationProof } = require('./sitemap-pages.js');
 const { unescapePacName } = require('./genpage-sdk.js');
 const { readPageOwnership, readPendingCreations, recordPageTeardown, completePageDeletions, completePendingCreations } = require('./page-ownership-records.js');
+const { danglingSitemapOf, deleteAppWithoutSitemap } = require('./app-sitemap-dangling.js');
 
 // OData v4 string-literal escaping lives in ./odata.js. `odataStr` is kept as a backward-compatible
 // alias because it is part of this module's exported (and unit-tested) surface.
@@ -87,12 +88,17 @@ function errMsg(err) {
   return String(err);
 }
 
+// The HTTP status of the answer an SDK error carries (its ConnectionError keeps it as `statusCode`), or 0 when the error is no
+// answer of the platform's — an SDK check that failed before any request was sent, such as a lookup that found nothing.
+function httpStatus(err) {
+  return (err && (err.statusCode || err.status || (err.cause && (err.cause.statusCode || err.cause.status)))) || 0;
+}
+
 // Detect if an SDK error is a "not found" (404-like) — used to treat already-gone artifacts
 // as skips rather than failures. The SDK throws typed errors with status codes.
 function isNotFound(err) {
   if (!err) return false;
-  const status = err.statusCode || err.status || (err.cause && (err.cause.statusCode || err.cause.status));
-  if (status === 404) return true;
+  if (httpStatus(err) === 404) return true;
   const msg = String((err && err.message) || '').toLowerCase();
   // "...but 0 were found" is Dataverse's signal that the record targeted for delete (e.g. a
   // RelationshipDefinitions metadata id that no longer resolves — already cascaded away) does not
@@ -121,6 +127,18 @@ function isUndeletable(err) {
   const msg = String((err && err.message) || '').toLowerCase();
   if (/referenced by/.test(msg)) return false; // dependency block — a real failure, not a system artifact
   return /system-defined|system managed|system-managed/.test(msg);
+}
+
+// Marks an error FAIL-CLOSED: what the step could not prove is itself the failure, so deleteStep passes it on before any of its shortcuts. Those read
+// an error's WORDS and status — "not found", "referenced by", "system-managed", a 404 — and the words of such an error can be a maker's (an app named
+// "System Managed Ops") or a proxy's ("Resource not found for the segment …"): read as a shortcut, it turned the refusal of a live app into an
+// undeletable skip or a confirmed delete, and the steps that depend on the app ran. The resolve step honours the same marker.
+function failClosed(err) {
+  if (err && typeof err === 'object') {
+    err.failClosed = true;
+    return err;
+  }
+  return Object.assign(new Error(String(err)), { failClosed: true });
 }
 
 // Solution component type codes used when reporting what still references a relationship.
@@ -281,6 +299,8 @@ async function restoreStockMainForm(sdk, entityLogical, formIdToDelete) {
 // never built). `del` deletes one. A not-found error on delete is tolerated as "already gone"
 // (e.g. a flyout appaction cascade removes its child buttons) — except for tables, whose
 // deleteTable throws a not-found error even on success, so we use isNotFound to treat it as gone.
+// Whether such a tolerated not-found is reported as a deletion or as "not found" is the handler's
+// `absentOnNotFound(err, item)` (see deleteStep): only a kind that knows nothing was there says so.
 const KIND_HANDLERS = {
   app: {
     async resolve(sdk, target) {
@@ -314,11 +334,27 @@ const KIND_HANDLERS = {
     // delete. Surface any GENUINE failure so the run reports ok=false with the exact leftovers. A
     // not-found failure means the row already cascaded away (not a leftover), so it is tolerated —
     // the same best-effort spirit as the step-level isNotFound handling in deleteStep.
-    async del(sdk, item) {
+    async del(sdk, item, ctx) {
       let result;
       try {
         result = await sdk.deleteAppCascade(item.id, item.appModuleIdUnique);
       } catch (err) {
+        // The one refusal a run again can never get past: the app's SiteMap component names a sitemap that is gone (a teardown, before 2.18.0, of another
+        // app that shared it can leave an app so). The app is deleted on its own only once lib/app-sitemap-dangling.js has proven that sitemap gone with
+        // reads of its own; otherwise it refuses, finally and without asking for a retry. Whatever it throws is fail-closed, so deleteStep can never read
+        // it as a row that is already gone or an artifact that cannot be deleted. Its note — the app went without its sitemap — is a warning, said once.
+        const dangling = danglingSitemapOf(err, item.id);
+        if (dangling) {
+          let outcome;
+          try {
+            outcome = await deleteAppWithoutSitemap(sdk.dataverse, { appId: item.id, appName: item.name, sitemapId: dangling.sitemapId, refused: err });
+          } catch (refusedHere) {
+            throw failClosed(refusedHere);
+          }
+          if (ctx && Array.isArray(ctx.warnings)) ctx.warnings.push(outcome.warning);
+          if (ctx && typeof ctx.warn === 'function') ctx.warn(outcome.warning);
+          return;
+        }
         // A rejection does not mean the app survived. The SDK's deleteAppCascade runs the remote
         // cascade and THEN tidies its local workspace copy (`workspace.readArtifact`/`deleteArtifact`),
         // so a failure in that local step arrives after the app is already gone — and reading it as
@@ -1006,6 +1042,13 @@ const KIND_HANDLERS = {
       }
     },
     tolerateNotFound: true, // a relationship already removed (e.g. by a prior table delete) is "gone"
+    // The SDK's deleteRelationship looks the relationship up by schema name before it deletes anything:
+    //   GET /RelationshipDefinitions?$filter=SchemaName eq '<schema>'&$select=MetadataId
+    // and, finding none, throws its InvalidArgumentError "relationship '<schema>' not found" — no HTTP status, because no delete was
+    // sent. That is the one not-found that says nothing was there: a re-run, or a relationship to itself its table's delete took with
+    // it. A not-found that IS an answer to the delete (a 404, or the 400 "…but 0 were found") came after the lookup found the
+    // relationship, so it stays the deletion it always was.
+    absentOnNotFound: (err) => !httpStatus(err),
   },
   // Gap 6: the build adds parent lookups to the built-in Active/Inactive default views, which can't be
   // deleted — a lookup column on them references the relationship and blocks its delete. Before the
@@ -1015,21 +1058,35 @@ const KIND_HANDLERS = {
     async resolve(sdk, target) {
       return [{ id: target.entityLogical, cols: target.cols }];
     },
+    // Answers `{ noView: true }` when the SDK found no default view of the table to reset — a table that is gone, as on a teardown run
+    // again — which `foundNothing` turns into a "not found" step. It can tell only on the deferred path, which the bundled SDK takes:
+    // `enrichDefaultViews(…, { publish: false })` answers `results`, one per view it found, e.g.
+    //   { updated: [], results: [], pendingPublish: [] }                                   (no default view)
+    //   { updated: ['<viewid>'], results: [{ saved: true, … }], pendingPublish: [ … ] }     (a view reset)
+    // or throws before it has found any (no partial record attached — see partialEnrichment) when its read of the table's views is
+    // answered not-found. The other path answers only `{ updated }`, which cannot tell "no view" from "nothing to change", so it reads
+    // as it always did.
     async del(sdk, item, ctx) {
       if (typeof sdk.enrichDefaultViews === 'function') {
         if (!ctx || !ctx.deferPublish) {
           try { await sdk.enrichDefaultViews(item.id, item.cols); } catch { /* best-effort — a reset that fails just leaves the surfacing lookup, which the delete will then report */ }
-          return;
+          return undefined;
         }
         try {
-          recordDeferredResetPublish(ctx, item.id, await sdk.enrichDefaultViews(item.id, item.cols, { publish: false }));
+          const outcome = await sdk.enrichDefaultViews(item.id, item.cols, { publish: false });
+          recordDeferredResetPublish(ctx, item.id, outcome);
+          return { noView: Boolean(outcome) && Array.isArray(outcome.results) && outcome.results.length === 0 && !(outcome.updated || []).length };
         } catch (err) {
-          recordDeferredResetPublish(ctx, item.id, partialEnrichment(err));
+          const partial = partialEnrichment(err);
+          recordDeferredResetPublish(ctx, item.id, partial);
           // Best-effort exactly as before: a reset failure is swallowed, because the relationship
           // delete that follows is what reports the actionable leftover.
+          return { noView: isNotFound(err) && !partial };
         }
       }
+      return undefined;
     },
+    foundNothing: (outcome) => Boolean(outcome) && outcome.noView === true,
   },
   webResource: {
     async resolve(sdk, target) {
@@ -1089,9 +1146,15 @@ const KIND_HANDLERS = {
         return { items: [], skipReason: 'reused table (existing: true) — not created by this build' };
       }
       let table = null;
+      // Whether the read said if the table was there before its delete: `true` it listed it, `false` it answered and listed no such
+      // table, `undefined` it could not tell — it failed, or its matches were cut at `top` (findTables reads every table and keeps the
+      // first 50 whose names contain the query, so a list of 50 may have left the table out).
+      let seen;
       try {
         const hits = await sdk.findTables(target.logical, { top: 50 });
         table = (hits || []).find((t) => String(t.logicalName).toLowerCase() === target.logical) || null;
+        if (table) seen = true;
+        else if ((hits || []).length < 50) seen = false;
       } catch (err) {
         const unreadable = unreadableAnswer(err);
         if (unreadable) {
@@ -1102,11 +1165,16 @@ const KIND_HANDLERS = {
       if (table && table.isCustom === false) {
         return { items: [], skipReason: 'system table — not created by this build' };
       }
-      return [{ id: target.logical, logical: target.logical }];
+      return [{ id: target.logical, logical: target.logical, ...(seen === undefined ? {} : { seen }) }];
     },
     del: (sdk, item) => sdk.deleteTable(item.logical),
     // deleteTable throws a not-found error even on success; treat any not-found as gone.
     tolerateNotFound: true,
+    // ...and which of the two it is, the step's own read says. The delete is sent whatever the read found (a table it cannot see is
+    // still asked for by name), and it is a METADATA delete, which the client sends again after a timeout or a gateway error
+    // (sdk-http-client.js): once the first send did the work, the next one is answered 404. So a not-found is "not found" only when the
+    // read had listed no such table; after a read that saw the table, or could not tell, it is the deletion it always was.
+    absentOnNotFound: (err, item) => item.seen === false,
   },
   globalChoice: {
     // Deleted by name (the SDK has no id lister); a synthetic item drives deleteStep, mirroring
@@ -1119,6 +1187,12 @@ const KIND_HANDLERS = {
     },
     del: (sdk, item) => sdk.deleteGlobalOptionSet(item.name),
     tolerateNotFound: true, // absent, or a shared choice already removed, is "gone"
+    // The delete, `DELETE /GlobalOptionSetDefinitions(Name='<name>')`, is the step's only request, so its not-found is the platform
+    // saying there is no choice of that name: "not found", as on a teardown run again. It can mislabel one case only: a delete the
+    // client sent again (a metadata delete is re-sent after a timeout or a gateway error) whose first send had already removed the
+    // choice. That reads "not found" for a choice this run deleted — the step succeeds either way, and telling the two apart would
+    // take a read this step does not make.
+    absentOnNotFound: () => true,
   },
   aiSummary: {
     // AI row-summary records reference the table and would block its delete; remove them first.
@@ -1507,10 +1581,12 @@ function planTeardown(spec) {
 // Reporting both as "undeletable" would send an operator hunting a platform problem that isn't
 // there. `skippedIds` is retained as the union of both for callers that only need the count.
 // A third reason, `failed` (with a `detail`), is a removal the handler tolerates (`tolerateFailure`).
-// A not-found error counts as already-gone. Throws only on a genuine failure.
+// A not-found error counts as already-gone. Throws only on a genuine failure — and on any error marked `failClosed`, before reading it at all.
 //
 // A removal that looks for its artifact itself answers whether there was one: the handler's `foundNothing(outcome)` says so (aiSummary: the SDK's `{ removed: false }`), and that id is
 // answered in `absentIds`. It is neither deleted nor skipped — nothing was there — and runTeardown reports it as a step that found nothing, like one whose resolver finds none.
+// So is a tolerated not-found the handler's `absentOnNotFound(err, item)` reads as "nothing was there" (a relationship the SDK's lookup did not find, a table its read did not list,
+// a global choice): a teardown run again used to report each of those `(1 deleted)`.
 async function deleteStep(sdk, handler, items, ctx) {
   const deletedIds = [];
   const absentIds = [];
@@ -1521,9 +1597,16 @@ async function deleteStep(sdk, handler, items, ctx) {
       if (typeof handler.foundNothing === 'function' && handler.foundNothing(outcome)) absentIds.push(item.id);
       else deletedIds.push(item.id);
     } catch (err) {
+      // A fail-closed error (failClosed, above) is passed on before every shortcut below: it says what could not be proven, and its words — a
+      // maker's names, a proxy's "not found" — are not a verdict of the platform's on this row. For the app step, passing it on is what stops the
+      // teardown before the steps that depend on the app (runTeardown).
+      if (err && err.failClosed === true) throw err;
       if (handler.tolerateNotFound && isNotFound(err)) {
-        // Table delete throws not-found even on success; treat as deleted
-        deletedIds.push(item.id);
+        // Table delete throws not-found even on success; treat as deleted — unless the handler can
+        // tell that nothing was there when the step began (`absentOnNotFound`): then it is a step
+        // that found nothing, reported "not found" and not counted as a deletion. Still a success.
+        if (typeof handler.absentOnNotFound === 'function' && handler.absentOnNotFound(err, item)) absentIds.push(item.id);
+        else deletedIds.push(item.id);
         continue;
       }
       if (isNotFound(err)) {
@@ -1780,7 +1863,7 @@ async function runTeardownSteps(spec, opts, deps, deferredResetPublishes) {
         emit({ phase: step.phase, status: 'skip', skip: 'kept', label: why, n: myN, total });
         continue;
       }
-      const { deletedIds, absentIds, skipped } = await deleteStep(sdk, handler, items, step.kind === 'resetDefaultViews' || step.kind === 'genpage' ? deferredResetPublishes : undefined);
+      const { deletedIds, absentIds, skipped } = await deleteStep(sdk, handler, items, step.kind === 'resetDefaultViews' || step.kind === 'genpage' || step.kind === 'app' ? deferredResetPublishes : undefined);
       // A removal that looked for its artifact itself and found none is a step that found nothing — the line and the counts a resolver that finds none gets — and not a deletion.
       if (!deletedIds.length && !skipped.length && absentIds.length) {
         result.skipped.push(step.label);
