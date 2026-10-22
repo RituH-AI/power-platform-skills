@@ -16,7 +16,7 @@ In both flows:
 - **A known connection ID wins.** If the caller or the user already supplied a connection ID, pass it with `-c <connection-id>`; the CLI then skips connection lookup.
 - **Never choose between connections yourself.** When a connector has several connections, ask the user which one to use.
 - **Don't record connections.** Never write connection names or IDs to the memory bank (see [memory-bank.md](./memory-bank.md)).
-- **Choose table or actions up front.** For connectors that support both (SharePoint, SQL Server), pass `--table` (or `--procedure` for SQL) to add a table, or `--as action` to add the connector's actions. From CLI 1.2.0, a non-interactive add that does neither fails. Older CLIs have no `--as`; add tables with `-d` and `--table`.
+- **Choose table or actions up front.** For connectors that support both (SharePoint, SQL Server, Excel Online), pass `--table` (or `--procedure` for SQL) to add a table, or `--as action` to add the connector's actions. From CLI 1.2.0, a non-interactive add that does neither fails. Older CLIs have no `--as`; add tables with `-d` and `--table`. To check whether a connector supports tables, read `isTabular` from `pa connector list --search '<connector name>' --json`.
 
 ### Inline connections (CLI 1.3.0 and later)
 
@@ -31,7 +31,7 @@ In both flows:
    pa app add data-source --connector <connector-id> -d '<dataset>' --table '<table>' --non-interactive
    ```
 
-   Listing datasets and tables (`pa connection list-datasets` / `list-tables`) needs a connection ID, so tabular skills such as `/add-sharepoint` look the connection up before the add.
+   Listing datasets and tables (`pa connection list-datasets` / `list-tables`) needs a connection ID (these commands don't find or create connections, and fail without `-c` in non-interactive mode), so tabular skills such as `/add-sharepoint` look the connection up before the add.
 
 3. **Act on the result:**
 
@@ -66,7 +66,7 @@ Creating a connection that needs a browser sign-in only works from an interactiv
    pa connection create --connector <connector-id>
    ```
 
-   If `pa` isn't recognized (the CLI is installed only in the project, not globally), they can run `npx --no-install pa connection create --connector <connector-id>` instead. Or they can create it in the maker portal: `https://make.powerapps.com/environments/<environment-id>/connections` → **+ New connection** (use the environment ID from `power.config.json`).
+   If `pa` isn't recognized (the CLI is installed only in the project, not globally), they can run `npx --no-install pa connection create --connector <connector-id>` instead; on `power-apps`-only projects it's `npx --no-install power-apps create-connection -a <connector-id>`. Or they can create it in the maker portal: `https://make.powerapps.com/environments/<environment-id>/connections` → **+ New connection** (use the environment ID from `power.config.json`).
 2. When they confirm it's done, re-run the same add. With exactly one connection for the connector, the CLI uses it automatically.
 
 Create connections only when the connector has none: every extra connection makes later adds ambiguous. Before running `pa connection create` yourself (for example with `--use-sso`), check `pa connection list --search <connector-id> --json` and ask the user first.
@@ -83,13 +83,11 @@ Look for the connector in the output. Note the **ConnectionId** column value. If
 
 #### Step 2: If No Connection Exists
 
-The user must create one first:
+Create it with the CLI:
 
-1. Construct the direct Connections URL using the active environment ID from context (from `power.config.json` or a prior step): `https://make.powerapps.com/environments/<environment-id>/connections`
-2. Share this link with the user and ask them to click **+ New connection**
-3. Search for and create the connector (e.g., "Office 365 Outlook", "Azure DevOps", "Teams")
-4. Complete the sign-in/consent flow
-5. Re-run `/list-connections` to get the new connection ID
+1. Ask the user to confirm, then run `pa connection create --connector <connector-id>` (`power-apps create-connection -a <connector-id>` on `power-apps`-only projects). Connectors whose only sign-in option is the user's Microsoft account are created silently, and the command prints the new connection ID.
+2. If the CLI says the connection needs a browser sign-in it can't do in non-interactive mode, follow [Create a connection with the user](#create-a-connection-with-the-user): the user runs the same command in their own terminal, with the maker portal as a fallback.
+3. Re-run `/list-connections` to get the new connection ID.
 
 #### Step 3: Use Connection ID
 
