@@ -96,7 +96,8 @@ Inspect `src/native/pushNotifications.ts` for `isPushNotificationsAvailable`,
 `registerForPushNotifications`, `showPushMessage`, `usePushNotifications`,
 `ALL_USERS_TOPIC`, `PushMessage`, and `PushResult`, the Firebase app check before
 the push modules load, the foreground and token-refresh handling, the topic
-unsubscribe on cleanup, and the permission-checked retry on return to the app. Inspect
+unsubscribe on cleanup with topic updates serialized at module scope (across
+remounts), and the permission-checked retry on return to the app. Inspect
 `app/(app)/_layout.tsx` for one unconditional `usePushNotifications` call. A
 wrapper that imports Firebase or `expo-notifications` statically, or calls
 Firebase without the check, is not compatible. An incompatible
@@ -188,6 +189,17 @@ export function showPushMessage({ notification }: PushMessage): void {
 }
 
 /**
+ * Topic (un)subscriptions run one at a time, across effect runs and across mounts: signing out
+ * unmounts the signed-in layout, so the next sign-in's registration must wait for the previous
+ * session's unsubscribe, which in turn waits for any registration still in flight.
+ */
+let topicUpdates: Promise<void> = Promise.resolve();
+
+function updateTopic(update: () => Promise<unknown>): void {
+  topicUpdates = topicUpdates.then(update).then(() => undefined, () => undefined);
+}
+
+/**
  * Registers the signed-in user's device for push notifications, hands notifications that arrive
  * while the app is open to `onForegroundMessage`, and keeps the topic subscription across token
  * refreshes, removing it on sign-out or when `topic` changes. A failed registration (for example,
@@ -201,9 +213,6 @@ export function usePushNotifications(
   topic: string = ALL_USERS_TOPIC,
 ): void {
   const foregroundHandler = useRef(onForegroundMessage);
-  // Topic (un)subscriptions run one at a time, across effect runs too: a sign-out or topic change
-  // unsubscribes only after any registration still in flight, and before the next one subscribes.
-  const topicUpdates = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     foregroundHandler.current = onForegroundMessage;
@@ -215,9 +224,6 @@ export function usePushNotifications(
     const { fcm, messaging, notifications } = push;
     let active = true;
     let registered = false;
-    const updateTopic = (update: () => Promise<unknown>) => {
-      topicUpdates.current = topicUpdates.current.then(update).then(() => undefined, () => undefined);
-    };
     const register = () =>
       updateTopic(async () => {
         if (!active || registered) return;

@@ -75,13 +75,16 @@ Inspect `src/native/scheduledNotifications.ts` for `syncScheduledNotifications`,
 `ScheduledNotification`, `TimeOfDay`, and `ScheduledNotificationsResult`; the lazy
 `expo-notifications` load; one-off, daily and weekly times; groups that preserve
 each source's desired entries while allocating the app-wide 48-notification cap
-by next occurrence; retained late entries; delivered one-off occurrence state;
+by next occurrence; pending entries kept while their alarm may be in its delivery
+window (late one-offs and, without exact alarms, repeating ones in their final
+hour); delivered one-off occurrence state;
 serialized syncs; the session hook's clear on sign-out and on unmount; the
 Android-only handler that presents this module's notifications; and
 the Android inexact-window adjustment with exact-alarm detection. Inspect `app/(app)/_layout.tsx` for one unconditional
 `useScheduledNotificationSession` call, and each owner screen for its
 `useScheduledNotifications` call. A wrapper that imports `expo-notifications`
-statically, cancels notifications outside its group, sets a notification handler
+statically, cancels notifications this module didn't schedule, replaces another
+group's notifications when one group syncs, sets a notification handler
 on iOS, or leaves Android presentation and timing to expo-notifications' defaults
 is not compatible. An incompatible artifact outside
 approval returns `NEEDS_CONTEXT` to the owner, or asks standalone.
@@ -327,9 +330,10 @@ function toEntry(group: string, { id, title, body }: Requested, when: When, next
  * What to schedule for `requested`. Without exact alarms a repeating time triggers an hour early
  * (see toTrigger), so a repeating notification first scheduled within that hour misses that
  * occurrence, which is then scheduled as a one-off of its own at the same time. A repeating
- * notification already pending before that hour shows the occurrence itself, so it gets none. Such
- * a one-off stays wanted until the occurrence after it passes: kept while late, and not rescheduled
- * once shown.
+ * notification already pending before that hour shows the occurrence itself, so it gets none, and
+ * reconcile keeps it pending through that hour, so cap reallocation can't cancel it and bring the
+ * fallback back. Such a one-off stays wanted until the occurrence after it passes: kept while late,
+ * and not rescheduled once shown.
  */
 function toEntries(group: string, requested: Requested, now: number, exact: boolean, scheduled: Scheduled): ScheduleEntry[] {
   const { when } = requested;
@@ -452,17 +456,20 @@ async function reconcile(
   // A one-off this module scheduled that is no longer pending has been shown: Android may show an
   // inexact one early, and it mustn't be scheduled again while unchanged.
   const shown = new Set(state.scheduledOnce.filter((identifier) => wanted.has(identifier) && !pendingIds.has(identifier)));
-  // Keep a pending one-off notification whose time has already passed while it's unchanged: its
-  // alarm may still be in its delivery window, and cancelling it now would lose it entirely.
-  const late = entries.filter(
-    (entry) => entry.when.kind === 'once' && entry.nextMs - now < MIN_LEAD_MS && pendingIds.has(entry.identifier),
-  );
+  // Keep, while unchanged, a pending notification whose alarm may be in its delivery window, even when
+  // sooner ones want its slot: cancelling it would lose that occurrence, or, if Android already showed
+  // it early, bring back the final-hour fallback (see toEntries) and show it twice. That is a one-off
+  // whose time has passed and, without exact alarms, a repeating one whose early trigger has passed.
+  const inWindow = (entry: ScheduleEntry) =>
+    pendingIds.has(entry.identifier) &&
+    (entry.when.kind === 'once' ? entry.nextMs - now < MIN_LEAD_MS : !exact && entry.nextMs - MAX_INEXACT_WINDOW_MS <= now);
+  const retained = entries.filter(inWindow);
   const upcoming = entries
-    .filter((entry) => entry.when.kind !== 'once' || entry.nextMs - now >= MIN_LEAD_MS)
+    .filter((entry) => !inWindow(entry) && (entry.when.kind !== 'once' || entry.nextMs - now >= MIN_LEAD_MS))
     .filter((entry) => !shown.has(entry.identifier))
     .sort((a, b) => a.nextMs - b.nextMs)
-    .slice(0, Math.max(0, MAX_SCHEDULED - unknownCount - late.length));
-  const selected = new Map([...late, ...upcoming].map((entry) => [entry.identifier, entry]));
+    .slice(0, Math.max(0, MAX_SCHEDULED - unknownCount - retained.length));
+  const selected = new Map([...retained, ...upcoming].map((entry) => [entry.identifier, entry]));
 
   for (const identifier of pending) {
     if (isKnown(identifier) && !selected.has(identifier)) await notifications.cancelScheduledNotificationAsync(identifier);
@@ -689,7 +696,7 @@ npx --no-install tsc --noEmit
 
 Execute the shared compatibility contract's Step 4 after type-checking. Recheck
 the lazy load, every export, one-off and repeating times, group isolation, the
-shared cap, retained late entries, delivered one-off state, the Android handler
+shared cap, pending entries kept in their delivery window, delivered one-off state, the Android handler
 and timing adjustment, the layout call, and each owner screen's call. Type-check success alone is
 insufficient; do not fix screen/generated files. Only after the requested
 artifact contract and TypeScript both pass, return the shared compatibility
