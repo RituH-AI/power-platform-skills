@@ -47,8 +47,8 @@ const FLAGS = {
       "the page's revision-bound actionBindings manifest.",
     dependencies:
       'the AIBuilder CoderAgent action prompt, the shared pai-gen-ux-action-runtime plus the UCI ' +
-      'and Controls host runtimes, a pac CLI `model genpage upload --actions` verb ' +
-      '(PowerPlatform-Scale-AdminTools) to persist actionBindings into config.json, and the ' +
+      'and Controls host runtimes, the page `actionBindings` the plugin writes into config.json ' +
+      '(through the SDK, from genpage-upload.js --actions and the build), and the ' +
       'GenUxPluginActionAllowList ECS setting — all live in PROD.',
     enableEnv: 'GENPAGE_ENABLE_CUSTOM_API=1',
   },
@@ -184,8 +184,8 @@ function customApiDisabledMessage() {
   return (
     'Dataverse Custom API support is disabled (feature flag "custom-api" is OFF). ' +
     'GenPage Custom API invocation requires the AIBuilder action prompt, the shared action ' +
-    'runtime, the UCI and Controls host runtimes, a pac CLI `model genpage upload --actions` ' +
-    'verb, and the GenUxPluginActionAllowList setting to all be live in PROD. To enable for a ' +
+    'runtime, the UCI and Controls host runtimes, and the GenUxPluginActionAllowList setting to ' +
+    'all be live in PROD. To enable for a ' +
     'single run set GENPAGE_ENABLE_CUSTOM_API=1, or flip "custom-api" to true in ' +
     'plugins/model-apps/feature-flags.json once the dependencies are released.'
   );
@@ -212,6 +212,9 @@ module.exports = {
 if (require.main === module) {
   const arg = process.argv[2];
   if (arg === '--list') {
+    // The list ends with a warning for each bad entry of the flags file, and the process exits right after it: the writes are
+    // made blocking first, or a pipe on Linux and macOS takes only what fits at once (output-redaction.js).
+    require('./output-redaction.js').makeWritesBlocking(process.stdout, process.stderr);
     for (const { flag, enabled, source, status } of describe()) {
       process.stdout.write(
         `${flag}: ${enabled ? 'enabled' : 'disabled'} (status: ${status}, source: ${source})\n`

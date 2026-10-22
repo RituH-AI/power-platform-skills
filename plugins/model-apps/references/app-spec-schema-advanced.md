@@ -228,9 +228,26 @@ works through.
   deploy as though it had never been written. Configure those in Maker after the flow deploys.
 - **Activation creates a backing table** (an org-owned table named after the flow's unique name)
   that the platform manages. Teardown deactivates and deletes the flow, which removes it.
-- **Rebuild behaviour is additive**, exactly like business rules — a flow is matched by
-  `(entity, name)` and reused if present; only its Active/Draft **state** is converged. Stage and
-  step edits are **not** re-applied: recreate the flow to change its structure.
+- **Rebuild behaviour is additive for the flow, with the stage edits that cannot move a record applied** — a
+  flow is matched by `(entity, name)` and reused if present; its Active/Draft **state** is converged, and its
+  stages and steps are compared with the spec's by name. These edits are applied **in place, in one push**,
+  and every stage and step keeps its id, so no record leaves the stage it is on: a stage added (anywhere) or
+  renamed, and a step added, renamed, rebound to another `field`, made `required` or optional, or moved. These
+  are **refused**: no stage or step edit is applied (none of the safe ones either), with a warning that says why
+  and what to do, and says "No stage or step edits were applied; the requested Active/Draft state is handled
+  independently." The state is not a stage edit: it is still converged, so a flow the spec asks to be Draft is
+  deactivated all the same. Refused: a stage or a step the flow has and the spec does not
+  list (a build never removes one — a record may sit on that stage, and the platform does not document what
+  becomes of it; it also cannot tell a spec that dropped it from a maker who added it in Maker), the same
+  stages in another order, a stage replaced by a different number of stages (a rename cannot be told from a
+  removal), and names that cannot be told apart. To go ahead with one of those, make the change in Maker
+  (move or finish the records on a stage before removing it) or delete and recreate the flow (which deletes
+  its backing table and the records in it). The SDK limits an advanced flow **per container**, not as a whole: it
+  refuses (before any request) to add, remove or reorder the stages of a flow whose primary composite holds something that is
+  not a stage — a branch, say — and to add, remove or move the steps of a stage that also holds something that is not a
+  step, such as a stage action. A stage action does not stop a stage being added, and a rename or a rebind keeps what the
+  SDK does not model. An edit the SDK refuses is reported as not applied on the same terms.
+  The flow's own `description` and `order` are not reapplied, and `--verify` does not compare stages.
 - Verified by `--verify` on three axes: it exists, there is exactly **one** of it (duplicates would
   offer users the same process twice), and its deployed state matches `status`.
 
@@ -239,12 +256,21 @@ works through.
 { "name": "Operations", "description": "Daily queue health for the support lead.", "tiles": [
   { "type": "chart", "chart": "Orders by Status", "view": "Active Orders" },  // chart needs both
   { "type": "list",  "view": "Active Orders", "name": "Recent" },             // list needs a view
-  { "type": "iframe", "url": "https://…", "name": "Map" },
+  { "type": "iframe", "url": "https://…", "name": "Map", "colspan": 2, "rowspan": 8 },  // optional size
   { "type": "webresource", "webResource": "new_widget.html", "name": "Widget" } ] }
 ```
 - A **chart** tile needs both a declared `chart` (the visualization) **and** a declared `view` (its
   data); a **list** tile needs a declared `view`. The target entity is derived from the view. `name`
-  defaults to the chart/view name; `colspan`/`rowspan` optional (default 1×4).
+  defaults to the chart/view name.
+- **Size (`colspan`/`rowspan`, optional): 1 column by 12 rows unless set.** A tile's height is its
+  `rowspan`, and the app draws a one-row tile as its title bar alone — no chart, no list — so give a
+  tile `rowspan: 1` only when it should be that thin. The grid is two columns wide and fills in tile
+  order, left to right: two `colspan: 1` tiles share a row, `colspan: 2` takes the full width (a list
+  with several columns), a tile too wide for what is left of a row starts the next one, and a
+  `colspan` above 2 is narrowed to 2. The platform's own dashboards give charts and lists 9 to 24
+  rows, most often 12, which is why 12 is the default. A rebuild reuses a dashboard that exists and
+  never resizes its tiles, so one an earlier version built keeps its one-row tiles until it is
+  created again under a new `name` or its tiles are resized in the dashboard designer.
 - **View and chart names are unique only per table.** When the tile's view name is declared on more
   than one table, set the tile's `entity` to say which; the chart must be declared on that **same**
   table. Both are rejected at the spec gate otherwise — a same-named chart on another table would
@@ -281,13 +307,27 @@ works through.
   An id-based chart tile needs `viewId` **and** `entity` (a visualization with no view has nothing
   to plot); an id-based list tile needs `viewId` and `entity`. Author specs by name; let downloads
   use ids.
+- **A tile a custom control hosts is not expressible.** A grid or chart that a custom control hosts (the
+  Power Apps grid, say) reads like a native tile, but the spec describes only the four tile types
+  above. A download leaves such a tile out and names it in a warning — it never emits the plain grid or
+  chart its parameters describe, which would replace the control wherever the dashboard is created from
+  the spec. A rebuild into the environment the spec was downloaded from keeps the dashboard as it is
+  (a build never edits an existing dashboard's tiles), so the control stays; in another environment the
+  dashboard is created without that tile, and the tile is added there in Maker. `--verify` leaves such a tile
+  alone too: it holds only a native chart tile to a chart and view of its table. A dashboard whose only
+  tiles are such tiles is dropped with its navigation entry, which the download refuses without
+  `--allow-lossy-download`.
 
 ## roleGrants[] (optional — extend a role you did NOT author)
 
 Adds privileges for a table to a security role that **already exists** — typically the roles an
 existing solution ships. Use it when you add a table to an app whose access model somebody else owns:
 without it the table, its forms and its navigation deploy while every non-admin persona still cannot
-open the table, and nothing reports it.
+open the table, and nothing reports it. (Lint now does: a new table that no persona job and no
+`roleGrants[]` entry grants a privilege on is a "no access declared" warning, and a grant that covers it
+satisfies the check.) A grant is about **tables**: it does not associate the role with the app, and a
+spec with no `personas[]` leaves the roles an existing app has as they are — `write-app-spec-doc.js
+--env` lists them.
 
 ```jsonc
 "roleGrants": [
