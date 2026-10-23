@@ -17,7 +17,7 @@
 // label never counts as code, and code is never taken for text. What each one does NOT judge is said
 // beside it; a person still judges the rest in the Layer 3 rubric.
 
-const { sourceView, jsxElements, jsxTextRuns, declarationSource, matchingClose } = require('./tsx-structure.js');
+const { sourceView, jsxElements, jsxTextRuns, declarationSource, matchingClose, withoutComments } = require('./tsx-structure.js');
 const { runtimeEnums } = require('./expectation-evidence.js');
 const { escapeRe } = require('./source-evidence.js');
 
@@ -366,33 +366,53 @@ function reviewSummaryProblems(content) {
 // (`label={translate('title')}`) is; the same goes for the children of a label element (childrenShowText).
 // A spread (`{...props}`) may carry a label the page does not show, so it is not reported. A hidden input
 // (`type="hidden"`) is no field. Returns null when the page has no form control.
-// Two known limits, left as they are on purpose (this grades eval evidence; it is no gate a page must pass): an
-// empty value that also holds a comment (`{/* hidden */ null}`, `label={/* none */ ''}`) counts as a label, because
-// STATIC_EMPTY is tested on the source with its comments; and a label element whose text is only character references
-// (`&#84;&#105;&#116;&#108;&#101;`) is not counted, because jsxTextRuns reads a character reference as a space.
+// A comment is no value, so `{/* hidden */ null}` and `label={/* none */ ''}` are no label either (staticallyEmpty);
+// and a character reference is the character it stands for (shownText), so a label written `&#84;&#105;&#116;&#108;&#101;`
+// or `&amp;` names its control, while one of `&nbsp;` or `&#32;` alone does not.
 const STATIC_EMPTY = /^\s*(?:(['"`])\s*\1|null|undefined|false)\s*$/;
-const names = (attr) => Boolean(attr) && ((attr.kind === 'string' && attr.value.trim() !== '')
-  || (attr.kind === 'expression' && attr.value.trim() !== '' && !STATIC_EMPTY.test(attr.value)));
+// Whether an expression can show nothing once its comments are left out: it is blank, or only '', "", ``, null,
+// undefined or false. The comments are the ones the plugin's lexer finds (withoutComments), so `'/* x */'` stays a string.
+const staticallyEmpty = (expression) => {
+  const bare = withoutComments(expression);
+  return bare.trim() === '' || STATIC_EMPTY.test(bare);
+};
+// JSX text, or a JSX attribute's string, as it is shown, read only to ask whether it shows anything. JSX decodes the
+// character references in both (https://react.github.io/jsx/#sec-jsx-string), as TypeScript and Babel do:
+// `&#<decimal>;` and `&#x<hex>;` (a lower-case x) up to 0x10FFFF, and the HTML 4 names. A reference is text unless
+// the character it stands for is white space: `&#84;` and `&#x54;` are a "T" and `&amp;` an "&", while `&#32;` shows
+// nothing, nor do `&nbsp;`, `&ensp;`, `&emsp;` and `&thinsp;`, the only HTML 4 names of white space. What JSX does not
+// decode is shown as written (`&nosuch;`, `&#X54;`), so it is text. jsxTextRuns reads every reference as a space
+// instead: the translate check counts no reference as a letter, but a label written in references would read as blank.
+const SPACE_REFERENCES = new Set(['nbsp', 'ensp', 'emsp', 'thinsp']);
+const shownText = (text) => String(text).replace(/&(?:#(\d+)|#x([\da-fA-F]+)|([A-Za-z][A-Za-z\d]*));/g, (reference, decimal, hex, name) => {
+  if (name !== undefined) return SPACE_REFERENCES.has(name) ? ' ' : reference;
+  const codePoint = decimal !== undefined ? Number(decimal) : Number.parseInt(hex, 16);
+  return codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : reference;
+});
+const names = (attr) => Boolean(attr) && ((attr.kind === 'string' && shownText(attr.value).trim() !== '')
+  || (attr.kind === 'expression' && !staticallyEmpty(attr.value)));
 
-// Whether an element's children can show any text: a run of JSX text that is not blank, or an expression
-// container that is not statically empty, at any depth of the markup inside it. `{null}`, `{''}`,
-// `{undefined}`, `{false}` and a container holding only a comment (`{/* … */}`, blank in the code view)
-// show nothing, and the tags and attributes of nested elements are no text:
+// Whether an element's children can show any text: a run of JSX text that is not blank once its character
+// references are read (shownText), or an expression container that is not statically empty (staticallyEmpty), at
+// any depth of the markup inside it. `{null}`, `{''}`, `{undefined}`, `{false}`, a container holding only a comment
+// (`{/* … */}`) and one of them beside a comment (`{/* hidden */ null}`) show nothing, and the tags and attributes
+// of nested elements are no text:
 //   <label htmlFor="t">Title</label>                  shows text
+//   <label htmlFor="t">&#84;&#105;&#116;&#108;&#101;</label>   shows text ("Title")
 //   <label htmlFor="t">{translate('title')}</label>   may show text (a computed value is not judged)
 //   <label htmlFor="t"><span>{null}</span></label>    shows nothing
 function childrenShowText(content, element) {
   const { src, code } = sourceView(content);
   const from = element.childrenStart;
   const to = element.childrenEnd;
-  if (jsxTextRuns(content).some((run) => run.start >= from && run.end <= to && run.text.trim() !== '')) return true;
+  if (jsxTextRuns(content).some((run) => run.start >= from && run.end <= to && shownText(src.slice(run.start, run.end)).trim() !== '')) return true;
   const nested = jsxElements(content).filter((e) => e.start >= from && e.start < to);
   const inTag = (i) => nested.some((e) => (i >= e.start && i < e.openEnd) || (!e.selfClosing && i >= e.childrenEnd && i < e.end));
   for (let i = from; i < to; i += 1) {
     if (code[i] !== '{' || inTag(i)) continue;
     const close = matchingClose(code, i);
     if (close < 0 || close > to) return true;
-    if (code.slice(i + 1, close).trim() !== '' && !STATIC_EMPTY.test(src.slice(i + 1, close))) return true;
+    if (!staticallyEmpty(src.slice(i + 1, close))) return true;
     i = close;
   }
   return false;
