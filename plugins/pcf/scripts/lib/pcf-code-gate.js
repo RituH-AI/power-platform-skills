@@ -647,16 +647,21 @@ function lexSource(file, text, lex, opts) {
 // A .ts file has no JSX, so a `<` where an operand starts can only open a type. Blank that `<…>` span
 // (types carry no calls) and lex again, until no such `<` remains. Only the span from the first
 // operand `<` on is in doubt after a pass, because the lexer read everything after it as JSX.
+// One lex per type made the cost the file size times its types, so a large control with a few hundred
+// casts went to the fail-closed path. Each pass now also blanks the later types a raw-text scan
+// proposes (proposedAngleTypes), lexes once, and keeps a proposal only when that lex confirms the
+// sequential loop would have blanked the same span (acceptedAngleTypes); the rest are dropped and
+// found again one pass at a time, so the result is the sequential loop's.
 // See TypeScript's TSX rules: https://www.typescriptlang.org/docs/handbook/jsx.html#the-as-operator
-const TS_ANGLE_TYPE_PASSES = 256;
-// Total characters lexed across passes. Past it, or past the pass limit, the file goes to the
-// lexer-failure path: one PCF_CODE_UNPARSEABLE warning, and its Pages API calls are treated as
-// unguarded (fail closed). Each pass re-lexes the whole file, because the lexer cannot restart midway
-// and its reading after the first JSX misread is not trusted, so the cost is the file size times its
-// angle-bracket types. 6M characters is a 40 KB control with 150 of them, about 1.5 s on a dev box.
+// Total characters lexed across passes. Past it the file goes to the lexer-failure path: one
+// PCF_CODE_UNPARSEABLE warning, and its Pages API calls are treated as unguarded (fail closed). Each pass
+// re-lexes the whole file, because the lexer cannot restart midway and its reading after the first JSX
+// misread is not trusted. 6M characters is a 40 KB control lexed 150 times, about 1.5 s on a dev box.
 const TS_ANGLE_TYPE_BUDGET = 6000000;
 // Longest `<…>` type read. A longer one is far more likely an unbalanced `<` than a type.
-const TS_ANGLE_TYPE_MAX_CHARS = 4096;
+const TS_ANGLE_TYPE_MAX_CHARS = 16384;
+// Passes whose proposals the lex did not confirm before the gate stops proposing for the file.
+const TS_ANGLE_TYPE_MISSES = 8;
 
 function isPlainTypeScript(file) {
   // .ts, .mts and .cts. A .tsx file keeps the lexer's JSX reading.
@@ -665,21 +670,170 @@ function isPlainTypeScript(file) {
 
 function lexTypeScriptAngleTypes(text, lex, opts) {
   let source = text;
+  let mask = null;
   let from = 0;
   let lexed = 0;
-  for (let pass = 0; ; pass += 1) {
-    lexed += source.length;
-    if (pass > TS_ANGLE_TYPE_PASSES || lexed > TS_ANGLE_TYPE_BUDGET) {
-      throw new Error('too many TypeScript angle-bracket types to analyze');
-    }
-    const mask = lex(source, opts);
+  let misses = 0;
+  const lexWithinBudget = (value, options = opts) => {
+    lexed += value.length;
+    if (lexed > TS_ANGLE_TYPE_BUDGET) throw new Error('too many TypeScript angle-bracket types to analyze');
+    return lex(value, options);
+  };
+  // Confirming a proposal relies on the shared lexer's report of every place it read by look-ahead
+  // (onAmbiguity); an injected lexer is read one type at a time.
+  const speculate = lex === blankNonCodePreservingTemplateExpressions;
+  for (;;) {
+    if (mask === null) mask = lexWithinBudget(source);
     const at = nextOperandAngle(mask, from);
     if (at === -1) return { source, mask };
     const end = angleTypeEnd(source, at);
     if (end === -1) throw new Error('unterminated TypeScript angle-bracket type');
-    source = blankKeepingLines(source, at, end + 1);
+    const spans = [[at, end], ...(speculate && misses < TS_ANGLE_TYPE_MISSES ? proposedAngleTypes(source, end + 1) : [])];
+    // A proposal must not remove a character that ends a literal or steers a regex scan (/ \ " ' ` [ ]):
+    // the lexer reads an earlier regex such as /Button>…</ to the first / it finds, so blanking that /
+    // in a later span would change the reading before the span (a span is balanced in ( ) { } < >).
+    const unsafe = spans.findIndex(([start, stop], i) => i > 0 && /[/\\"'`[\]]/.test(source.slice(start, stop + 1)));
+    if (unsafe !== -1) spans.length = unsafe;
+    const candidate = blankSpans(source, spans);
+    if (spans.length === 1) {
+      source = candidate;
+      mask = null;
+    } else {
+      let lookahead = Infinity;
+      const candidateMask = lexWithinBudget(candidate, { ...opts, onAmbiguity: (offset, kind) => {
+        lookahead = Math.min(lookahead, offset);
+        if (typeof opts?.onAmbiguity === 'function') opts.onAmbiguity(offset, kind);
+      } });
+      const accepted = acceptedAngleTypes(candidate, candidateMask, spans, lookahead);
+      if (accepted === spans.length) {
+        // The candidate's reading is trusted up to its next operand `<`, which the next pass finds.
+        source = candidate;
+        mask = candidateMask;
+      } else {
+        misses += 1;
+        source = blankSpans(source, spans.slice(0, accepted));
+        mask = null;
+      }
+      spans.length = accepted;
+    }
+    from = spans.at(-1)[1] + 1;
+  }
+}
+
+function acceptedAngleTypes(candidate, mask, spans, lookahead) {
+  // How many spans, in order, the sequential loop would also have blanked. The first was found in a
+  // trusted reading. The lexer reads a position from the text before it, except where it decides by
+  // look-ahead (`lookahead` is the first such place) or where a literal it opened needs a terminator
+  // further on (lexTypeScriptAngleTypes keeps those characters out of every later span). So a later
+  // span at `at` before that place is confirmed when every span before it is, so the candidate is read
+  // up to `at` exactly as the sequential loop reads it, and in that reading: no operand `<` is left
+  // between it and the previous span (the sequential loop would have taken that one first); the
+  // character before it is code the mask keeps, not a string, template, comment or regex (whose text
+  // the mask blanks, or whose delimiter it keeps: " ' ` /); and an operand starts there, so the `<`
+  // that stood there opened a type.
+  let accepted = 1;
+  for (; accepted < spans.length; accepted += 1) {
+    const at = spans[accepted][0];
+    if (at >= lookahead) break;
+    if (operandAngleBetween(mask, spans[accepted - 1][1] + 1, at)) break;
+    const before = previousNonSpaceIndex(mask, at);
+    if (before !== previousNonSpaceIndex(candidate, at)) break;
+    if (before !== -1 && (mask[before] !== candidate[before] || '"\'`/'.includes(candidate[before]))) break;
+    if (!expressionPosition(mask, at)) break;
+  }
+  return accepted;
+}
+
+function operandAngleBetween(mask, from, to) {
+  for (let i = mask.indexOf('<', from); i !== -1 && i < to; i = mask.indexOf('<', i + 1)) {
+    if (mask[i + 1] === '<' || mask[i + 1] === '=' || mask[i - 1] === '<') continue;
+    if (expressionPosition(mask, i)) return true;
+  }
+  return false;
+}
+
+// A `<` after one of these, or after one of the words below, is where an operand starts. Any other `<`
+// is a comparison, a shift or type arguments. A `/` is left out: it may end a regex.
+const ANGLE_TYPE_AFTER = new Set(['=', '(', ',', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '^', '~', '>', '']);
+const ANGLE_TYPE_AFTER_WORDS = new Set(['return', 'typeof', 'void', 'delete', 'await', 'yield', 'case', 'throw', 'else', 'do', 'in', 'of']);
+
+function proposedAngleTypes(source, from) {
+  // Proposals only: acceptedAngleTypes confirms each before it counts, so this scan may be wrong in
+  // either direction. It skips strings, comments, template text (keeping `${…}` code) and regexes, and
+  // stops once it has read twice the file's length in candidate types.
+  const spans = [];
+  const templates = [];
+  let previous = '>';
+  let word = '';
+  let budget = source.length * 2;
+  for (let i = from; i < source.length && budget > 0; i += 1) {
+    const c = source[i];
+    if (/\s/.test(c)) continue;
+    if (c === '"' || c === "'") {
+      i = quotedEnd(source, i, source.length);
+      if (i === -1) break;
+      previous = c;
+      word = '';
+    } else if (c === '`' || (c === '}' && templates.at(-1) === 0)) {
+      if (c === '}') templates.pop();
+      let j = i + 1;
+      for (; j < source.length && source[j] !== '`' && !(source[j] === '$' && source[j + 1] === '{'); j += 1) {
+        if (source[j] === '\\') j += 1;
+      }
+      if (j >= source.length) break;
+      if (source[j] === '$') { templates.push(0); j += 1; previous = '{'; } else previous = '`';
+      i = j;
+      word = '';
+    } else if (c === '/' && (source[i + 1] === '/' || source[i + 1] === '*')) {
+      // Comments are skipped without changing `previous`: `= /* cast */ <T>v` still proposes.
+      const close = source[i + 1] === '/' ? source.slice(i).search(/[\n\r\u2028\u2029]/) + i : source.indexOf('*/', i + 2) + 1;
+      if (close < i) break;
+      i = close;
+    } else if (c === '/' && (ANGLE_TYPE_AFTER.has(previous) || ANGLE_TYPE_AFTER_WORDS.has(word))) {
+      let j = i + 1;
+      for (let inClass = false; j < source.length && (inClass || source[j] !== '/'); j += 1) {
+        if (source[j] === '\\') j += 1;
+        else if (source[j] === '[') inClass = true;
+        else if (source[j] === ']') inClass = false;
+        else if (/[\n\r\u2028\u2029]/.test(source[j])) break;
+      }
+      i = j;
+      previous = '/';
+      word = '';
+    } else if (c === '<' && source[i + 1] !== '<' && source[i + 1] !== '=' && source[i - 1] !== '<'
+      && (ANGLE_TYPE_AFTER.has(previous) || ANGLE_TYPE_AFTER_WORDS.has(word))) {
+      const end = angleTypeEnd(source, i);
+      budget -= end === -1 ? Math.min(TS_ANGLE_TYPE_MAX_CHARS, source.length - i) : end - i;
+      if (end !== -1) {
+        spans.push([i, end]);
+        i = end;
+      }
+      previous = '>';
+      word = '';
+    } else if (IDENTIFIER_CONTINUE.test(c)) {
+      const start = i;
+      while (i + 1 < source.length && IDENTIFIER_CONTINUE.test(source[i + 1])) i += 1;
+      word = source.slice(start, i + 1);
+      previous = 'a';
+    } else {
+      if (c === '{' && templates.length) templates[templates.length - 1] += 1;
+      else if (c === '}' && templates.length) templates[templates.length - 1] -= 1;
+      previous = c;
+      word = '';
+    }
+  }
+  return spans;
+}
+
+function blankSpans(source, spans) {
+  // Line terminators stay, so lineOf() reports the same line for every later finding.
+  let blanked = '';
+  let from = 0;
+  for (const [start, end] of spans) {
+    blanked += source.slice(from, start) + source.slice(start, end + 1).replace(/[^\n\r\u2028\u2029]/g, ' ');
     from = end + 1;
   }
+  return blanked + source.slice(from);
 }
 
 function nextOperandAngle(mask, from) {
@@ -740,13 +894,6 @@ function quotedEnd(source, start, limit) {
     else if (quote !== '`' && /[\n\r\u2028\u2029]/.test(source[i])) return -1;
   }
   return -1;
-}
-
-function blankKeepingLines(source, start, end) {
-  // Line terminators stay, so lineOf() reports the same line for every later finding.
-  return source.slice(0, start)
-    + source.slice(start, end).replace(/[^\n\r\u2028\u2029]/g, ' ')
-    + source.slice(end);
 }
 
 function stringLikeRanges(src, mask) {

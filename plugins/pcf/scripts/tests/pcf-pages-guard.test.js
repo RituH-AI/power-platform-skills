@@ -1445,9 +1445,12 @@ test('.tsx sources keep TypeScript\'s JSX reading of angle brackets', () => {
 });
 
 test('.ts angle-bracket types the gate cannot blank fall back fail closed', () => {
+  // An unterminated type, and types the gate can only blank one lex at a time (each one after a
+  // comment) in a file large enough to pass the lexing budget.
+  const padding = `/*${' padding'.repeat(4000)} */\n`;
   for (const [name, text] of [
     ['unterminated type', `const value = <Record<string, unknown>raw;\n${CALL};`],
-    ['more types than the pass limit', `let v;\n${'v = <T>v;\n'.repeat(300)}${CALL};`],
+    ['types past the lexing budget', `let v;\n${padding}${'v = /* cast */ <T>v;\n'.repeat(300)}${CALL};`],
   ]) {
     assert.deepEqual(scanSource(FILE, text).map((finding) => finding.code), ['PCF_CODE_UNPARSEABLE'], name);
     const gated = gateSources({
@@ -1476,6 +1479,54 @@ test('Source analysis bounds a .ts control with many angle-bracket types', (t) =
   t.diagnostic(`.ts angle-type timing: ${elapsed.toFixed(3)} ms; ${Buffer.byteLength(text)} bytes`);
   assert.ok(elapsed < PATHOLOGICAL_SCAN_LIMIT_MS, `${elapsed.toFixed(3)} ms exceeds ${PATHOLOGICAL_SCAN_LIMIT_MS} ms`);
   assert.deepEqual(findings.map((finding) => [finding.code, finding.line]), [['PCF_PAGES_API', lines.length - 2]]);
+});
+
+test('.ts files with hundreds of angle-bracket types stay analyzable', (t) => {
+  const guarded = withinGuard(`${CALL};`);
+  const control = (casts) => {
+    const lines = ['export class C {', '  public run(context: ComponentFramework.Context<IInputs>): void {', '    let v: unknown;'];
+    for (let i = 0; i < 1500; i += 1) {
+      lines.push(i % 5 === 0 && casts-- > 0
+        ? `    const el${i} = <HTMLDivElement>document.createElement("div"); v = <unknown>el${i};`
+        : `    const value${i}: Array<number> = [${i}, ${i + 1}]; total += value${i}.length > 1 ? ${i} : 0;`);
+    }
+    lines.push(`    ${guarded}`, '  }', '}');
+    return lines.join('\n');
+  };
+  const longType = `{ ${Array.from({ length: 400 }, (_, i) => `field${i}: string;`).join(' ')} }`;
+  for (const [name, text] of [
+    ['300 casts in a small file', `let v;\n${'v = <T>v;\n'.repeat(300)}${guarded}`],
+    ['600 casts in a 100 KB control', control(300)],
+    ['nested, adjacent and grouped casts', `let v;\n${'v = <A><B<C>>(<D>v); const f = <T>(x: T): T => x;\n'.repeat(100)}${guarded}`],
+    ['a type longer than 4096 characters', `const shape = <${longType}>raw;\n${guarded}`],
+  ]) {
+    const started = performance.now();
+    const gated = gateSources({ manifestModel: { features: [{ name: 'Device.captureImage' }] }, sources: [{ file: FILE, text }], hosts: ['pages'] });
+    const elapsed = performance.now() - started;
+    t.diagnostic(`${name}: ${elapsed.toFixed(3)} ms; ${Buffer.byteLength(text)} bytes`);
+    assert.deepEqual(gated, { ok: true, errors: [], warnings: [] }, name);
+    assert.ok(elapsed < PATHOLOGICAL_SCAN_LIMIT_MS, `${name}: ${elapsed.toFixed(3)} ms exceeds ${PATHOLOGICAL_SCAN_LIMIT_MS} ms`);
+    const unguarded = text.replace(guarded, `${CALL};`);
+    const callLine = unguarded.split('\n').findIndex((line) => line.includes(CALL)) + 1;
+    assert.deepEqual(findingsFor(unguarded).map((finding) => [finding.code, finding.line]), [['PCF_PAGES_API', callLine]], name);
+  }
+});
+
+test('.ts angle-bracket types in strings, comments, template text and regexes never hide code', () => {
+  const lines = [
+    'let v;',
+    'const html = "(<b>" + `(<i>${v}<u>` + \'(<s>\' + `${`(<q>`}`;',
+    '// (<T> v = 1',
+    '/* = <T> */ const re = /(<T>)/g;',
+    ...Array(60).fill('v = <T>v; v = (<T>v); if (count < limit && other > 2) { v = <Array<T>>v; }'),
+    `${CALL};`,
+    'const note = `= <b>${v}</b> = <i>`; v = <T>v;',
+    `${CALL};`,
+  ];
+  const text = lines.join('\n');
+  assert.deepEqual(scanSource(FILE, text), []);
+  assert.deepEqual(findingsFor(text).map((finding) => [finding.code, finding.line]),
+    [['PCF_PAGES_API', lines.length - 2], ['PCF_PAGES_API', lines.length]]);
 });
 
 for (const relative of [
