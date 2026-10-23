@@ -1581,8 +1581,12 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   put Spanish text in the English label, in a fresh environment that had Spanish as much as in one that had not — and
   a rebuild into an environment without the language stops at the start of its data model and names it. A label in
   the authoring language stays a plain string, so an ordinary download is byte-identical
-  (`download-label-language-real-bundle.test.js`). Whether a lookup's label is left out is decided on its text, as
-  before. Two inline options sharing one such label keep the plain strings (as one-entry maps the validator would
+  (`download-label-language-real-bundle.test.js`). A lookup's label is left out only where its text is the label a
+  rebuild gives a lookup that sets none, as before, **and** that label is the same in every language — the parent's
+  downloaded label, or a stock parent's label in the authoring language (the one the build reads): an English
+  "Contact" on a lookup to a table labelled only in French "Contact" is carried, in English, where leaving it out
+  rebuilt it in French (`download-lookup-label-language-real-bundle.test.js`). Two inline options sharing one such
+  label keep the plain strings (as one-entry maps the validator would
   refuse the collision and the column would lose its type), and global-choice labels stay plain strings (the spec
   refuses a localized one).
   The fetched SDK navigation must agree with the selected current XML's full target multiset:

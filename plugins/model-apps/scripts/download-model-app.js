@@ -44,7 +44,7 @@ const { isRestrictedSolution } = require('./lib/system-solutions.js');
 const { isPlatformIconRef, webResourceNameFromRef, validateAppSpec, normalizeLanguageCode, isLocalizedLabelMap, derivedPluralName, ambiguousChoiceAliases, relationshipSchemaName, manyToManySchemaName, dashboardNameKey, PAGE_MODEL_RE, sitemapEntityTables, lookupLabelFor, isOldLookupColumnLabel } = require('./lib/app-spec.js');
 const { PAGE_BINDINGS, pageBindingsProblem, statableBindings, bindingProblemText } = require('./lib/page-bindings.js');
 const { getReviewedDataverseOperation } = require('./lib/dataverse-operations.js');
-const { labelsByLcid, sameLabel } = require('./lib/lookup-labels.js');
+const { labelsByLcid, pickLabel, sameLabel } = require('./lib/lookup-labels.js');
 const { odataGuid } = require('./lib/ai-app-settings.js');
 const { APP_COMPONENT_ENTITY_SOURCES, appComponentEntities, appComponentRows, currentAppLayer, readAppComponentInventory, downloadAppMainForms, setAppMembershipFloor } = require('./lib/app-components.js');
 const { mapLimit, DEFAULT_MAX_SIZE_KB } = require('./lib/entity-provision.js');
@@ -402,25 +402,44 @@ async function readRelationships(sdk, logicals, publisherPrefix, warn, { prefixU
   // is nothing to compare it with (no downloaded tables passed, or a stock parent whose label was not read):
   // omitting is a claim about what a rebuild writes.
   //   * a parent IN the app: its downloaded displayName, string or map, compared whole;
-  //   * a STOCK parent: its label in the one language the lookup's label is written in, because that is the
-  //     language a rebuild writes it in;
+  //   * a STOCK parent: its label in the one language the lookup's label is written in;
   //   * the OLD DEFAULT an earlier build left on the column — the parent's logical name — is omitted too. It is an
   //     identifier, never a label anyone chose, and an explicit label is never repaired on a
   //     rebuild: writing it out would carry the defect through download -> edit -> rebuild for good,
   //     where leaving it out lets the rebuild repair it (the data-model phase's lookup label repair). The
   //     lookup's own name is NOT one: that is what the SDK left on a form FIELD it could not resolve, and no
   //     build ever wrote it on a column, so a column carrying it is somebody's label and is carried.
-  const omitsDefaultLabel = (referenced, lookupLabel, rawLookupLabel) => {
+  // Those comparisons are made on the label's TEXT, the shape every download wrote before a label held in one language other than the
+  // authoring one kept its language (labelFromDataverse), and a parent in the app is compared the same way (singleLanguageText). But a
+  // label is a language too, and equal text no longer proves the label a rebuild writes: an English "Contact" on a lookup to a table
+  // labelled only in French "Contact" is rebuilt as the French label it inherits, and a French "Utilisateur" on a lookup to `systemuser`
+  // as the English "User" the build reads. So when the authoring language is known, a label is left out only where the text comparison
+  // leaves it out AND the label a rebuild writes is this one, language for language (rebuildsAs). Requiring both never leaves out a label
+  // that was carried before, and every label that is carried keeps its language. With no authoring language every label is written
+  // without its language, as before, so the text comparison alone decides, as before.
+  const authoring = normalizeLanguageCode(languageCode);
+  // What a rebuild writes on a lookup that sets no label, as { LCID: text } — the label the build sends (lookupLabelFor) in the language
+  // it sends it in (lib/entity-provision.js, relationships): a parent in the app gives its downloaded displayName, a map as it is and a
+  // plain string in the authoring language (the language a rebuild of this spec resolves, labelFromDataverse); a stock parent gives the
+  // label the build reads for it in that language (pickLabel, as lib/lookup-labels.js makeTableLabelReader reads it), written in that
+  // language — assuming, as the text comparison always has, that the target labels its stock tables as this environment does. Undefined
+  // for a name derived from the table's (lookupLabelFor's last step), which is no label a lookup holds.
+  const rebuildsAs = (referenced, stockRaw) => {
+    const live = stockRaw ? pickLabel(stockRaw, authoring) : null;
+    const would = lookupLabelFor({ entities }, { referenced }, { liveReferencedLabel: live || undefined });
+    if (would.source !== 'table' && would.source !== 'environment') return undefined;
+    return isLocalizedLabelMap(would.label) ? would.label : { [String(authoring)]: would.label };
+  };
+  const omitsDefaultLabel = (referenced, rawLookupLabel) => {
+    const lookupLabel = labelFromDataverse(rawLookupLabel);
     if (isOldLookupColumnLabel({ referenced }, lookupLabel)) return true;
     const lookupLanguages = Object.keys(labelsByLcid(rawLookupLabel));
     const stockRaw = stockLabels.get(lc(referenced));
     const live = stockRaw && lookupLanguages.length === 1 ? labelsByLcid(stockRaw)[lookupLanguages[0]] : undefined;
     const would = lookupLabelFor({ entities }, { referenced }, { liveReferencedLabel: live });
-    // `lookupLabel` comes without its language — a plain string when it is held in one language (the caller passes labelFromDataverse's
-    // form with no authoring language) — and a parent in the app is compared by its text the same way: a downloaded table keeps a label
-    // held in one language other than the authoring one as a one-entry map, which names the same text. So a label is left out exactly
-    // where it always was.
-    return (would.source === 'table' || would.source === 'environment') && sameLabel(lookupLabel, singleLanguageText(would.label));
+    const sameText = (would.source === 'table' || would.source === 'environment') && sameLabel(lookupLabel, singleLanguageText(would.label));
+    if (!sameText || !authoring) return sameText;
+    return sameLabel(labelsByLcid(rawLookupLabel), rebuildsAs(referenced, stockRaw));
   };
 
   const media = mediaRelationshipKeys(entities);
@@ -468,10 +487,9 @@ async function readRelationships(sdk, logicals, publisherPrefix, warn, { prefixU
       seen.add(key);
       const a = lookups.get(attr);
       const lookup = { schemaName: (a && a.SchemaName) || r.ReferencingAttribute };
-      // Whether the label is left out is decided on the label without its language (as it always was); the label written keeps a
-      // language other than the authoring one (labelFromDataverse).
+      // The label written keeps a language other than the authoring one (labelFromDataverse); whether it is left out is omitsDefaultLabel's.
       const displayName = a && labelFromDataverse(a.DisplayName, languageCode);
-      if (displayName && !omitsDefaultLabel(referenced, labelFromDataverse(a.DisplayName), a.DisplayName)) lookup.displayName = displayName;
+      if (displayName && !omitsDefaultLabel(referenced, a.DisplayName)) lookup.displayName = displayName;
       // Keep the deployed name whenever it is not the one this prefix would generate. Omitting a
       // foreign name used to rename it onto the generated default; the rebuild then created under
       // that name, the CREATE failed because the lookup already existed, and the name search found
