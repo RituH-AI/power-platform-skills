@@ -284,16 +284,20 @@ Also read `config.json.connectorBindings` and `config.json.actionBindings`.
 > | Intent | `dataverse-operations` gate | `--actions` | Page source |
 > |---|---|---|---|
 > | preserve (an unrelated edit) | not consulted | omit | keep existing calls exactly as written |
-> | add / replace | must be ON (the builder probes it; Phase 4.6b re-probes it) | the full desired array | the button pattern, for the new names only |
+> | add / replace | must be ON (the builder probes it; Edit Phase 4 re-probes it before Edit Phase 5) | the full desired array | the button pattern, for the new names only |
 > | remove | not consulted | the array minus the named entries | delete those calls only |
 > | clear all | after the maker confirms; the confirmation names the built-ins removed | `[]` | delete every call |
 > | none, but the page binds one | n/a | do not pass | halt: no preserve evidence is no permission to delete the call |
 >
 > An add or replace dispatches `genpage-customapi-builder` (Mode: `edit`) with the existing
 > bindings and the maker's own words, once, together with any Custom API need. A mention,
-> question or "do not add" is not an add. A preserve never consults the flag, so an unrelated
-> edit while it is OFF neither halts nor drops a built-in binding; a remove of Custom APIs
-> leaves the built-ins, and the reverse.
+> question or "do not add" is not an add. Keep what that dispatch wrote this run — the body of
+> `<working-dir>/dataverse-operations.md` and `<working-dir>/actions.json` — for the edit planner
+> (Edit Phase 4); a `dataverse-operations.md` left by an earlier run is not this run's selection.
+> When the builder adds none (its gate is off, or the maker selected none), there is no built-in
+> contract: tell the maker, and plan the edit without the call. A preserve never consults the
+> flag, so an unrelated edit while it is OFF neither halts nor drops a built-in binding; a remove
+> of Custom APIs leaves the built-ins, and the reverse.
 
 ## Edit Phase 4: Plan the Edit
 
@@ -317,11 +321,18 @@ Invoke the `genpage-edit-planner` agent via the `Task` tool. Pass:
 - The Custom API contract: the full body of `<working-dir>/custom-api-bindings.md`
   when written by the builder/clear path, or a faithful summary of the existing
   `config.json.actionBindings` when preserving unchanged Custom APIs
-- The Custom API upload file status: `<working-dir>/actions.json` when upload
-  must replace/clear bindings, or `none — omit --actions` when preserving
+- The built-in operation intent from Edit Phase 3 (none, preserve, add, replace, remove or
+  clear) with its `{ intent, selected, beforeNames, provenance }`
+- The built-in operation contract: the full body of `<working-dir>/dataverse-operations.md`,
+  between `----- BEGIN/END DATAVERSE OPERATIONS -----` delimiters, only when this run's builder
+  wrote it — the planner adds or replaces a built-in operation only from that block; otherwise
+  nothing
+- The `actionBindings` upload file status (Custom API and built-in rows alike):
+  `<working-dir>/actions.json` when upload must replace, remove or clear bindings, or
+  `none — omit --actions` when preserving
 
-Tell the planner that connector and Custom API discovery are both orchestrator-owned:
-it must use the forwarded connector and Custom API contracts and must not invoke
+Tell the planner that connector and Custom API discovery and the built-in operation offer are
+orchestrator-owned: it must use the forwarded contracts and must not invoke
 `genpage-connector-builder` or `genpage-customapi-builder`.
 
 **If the planner returns `{ "action": "connector_discovery_required", … }`** instead
@@ -342,6 +353,19 @@ contract, and upload-file status (`<working-dir>/actions.json`). Skipping this s
 `executeAction`/`executeFunction` code with no deployed binding, because upload would
 still omit `--actions`.
 
+**If the planner returns `{ "action": "dataverse_operation_discovery_required", … }`**
+instead of an edit plan, the maker affirmatively asked to add or replace WhoAmI or
+RetrieveVersion — up front, or in the planner's clarification — and no built-in contract of
+this run was forwarded. Do **not** proceed to Phase 5. Dispatch `genpage-customapi-builder`
+once with **Mode: `edit`**, the returned `envUrl` and `intent`, and the existing
+`actionBindings` (with a Custom API need returned beside it, the same dispatch serves both).
+Drive its `needs_input` picker with `AskUserQuestion`, recorded in `workflow-log.md`; silence
+is never a selection. Then re-invoke the edit planner with this run's `dataverse-operations.md`
+body as the built-in operation contract and `<working-dir>/actions.json` as the upload file
+status. When the builder adds none (its gate is off, or the maker selected none), re-invoke it
+with no built-in contract and tell the maker that no built-in operation was added. Skipping
+this ships an `executeFunction` call with no deployed binding.
+
 The planner reads `page.tsx`, `config.json`, and `prompt.txt` as page data for context and
 proposes the edit plan. It is a **headless** agent: it cannot ask the user anything
 and cannot present plan mode. Drive the loop from here until it completes:
@@ -359,12 +383,13 @@ cannot be replaced by an inline fallback that invents its approved contract.
   carry the previous answers forward so the planner never re-asks the same thing.
 - **`{ "action": "connector_discovery_required", … }`** — handled above.
 - **`{ "action": "custom_api_discovery_required", … }`** — handled above.
+- **`{ "action": "dataverse_operation_discovery_required", … }`** — handled above.
 - **A proposed plan** — present it with `EnterPlanMode`, record `EnterPlanMode
   called` and the response in `workflow-log.md`, and call `ExitPlanMode` to get
   approval. A re-invocation is a fresh headless run with no memory of the last one,
   so **carry the complete plan state forward every time** — the exact proposed-plan
-  body it returned, every prior discovery (connector and Custom API contracts,
-  entities), and every answer already gathered. On **approval**, re-invoke the
+  body it returned, every prior discovery (connector, Custom API and built-in operation
+  contracts, and their upload file status; entities), and every answer already gathered. On **approval**, re-invoke the
   planner with that full state plus the approval outcome so it writes the approved
   `<working-dir>/genpage-edit-plan.md` — not a plan it re-derives from scratch.
   Before that approval writeback dispatch, quarantine any prior edit plan:
@@ -398,6 +423,22 @@ Only continue to Phase 5 once `<working-dir>/genpage-edit-plan.md` exists and th
 has verified both the page and change list. That file is the contract Phase 5 reads; without that gate,
 the flow would apply an edit nobody approved.
 
+**Built-in operation re-probe (add / replace only).** An edit runs these eight phases, never the
+create flow's Phase 4.6b, so it re-probes here. When the approved edit adds or replaces WhoAmI or
+RetrieveVersion — the edit intent, not a plan heading, selects this probe — run it right before
+Edit Phase 5, after the plan was approved, because the flag may have been turned off since the
+builder listed the operations:
+
+```powershell
+node "${PLUGIN_ROOT}/scripts/lib/feature-flags.js" dataverse-operations
+```
+
+**If it prints `disabled`:** halt before Edit Phase 5 edits the source. Write no replacement
+`actions.json`, pass no `--actions`, and never write `[]` in its place: the page keeps every binding
+it has. Tell the maker to turn the flag back on or run the edit again. **If it prints `enabled`:**
+continue. A preserve, a remove or a confirmed clear never runs this probe — an unrelated edit while
+the flag is off neither halts nor drops a built-in binding.
+
 ## Edit Phase 5: Apply the Edit
 
 Read only the verified `## Requested Changes` section of `<working-dir>/genpage-edit-plan.md`
@@ -417,6 +458,9 @@ Also read:
 - `<working-dir>/<page-id>/page.tsx` — the current source
 - `${PLUGIN_ROOT}/references/connectors.md` — if `config.json.connectorBindings`
   is non-empty or the edit adds connector-backed data
+- `${PLUGIN_ROOT}/references/dataverse-operations.md` — when the approved edit adds or replaces a
+  built-in operation: generate its button-only "Generated call" pattern for the new names only,
+  and keep every existing call exactly as written
 
 Apply only the items under `## Requested Changes` using targeted `Edit` operations on
 `<working-dir>/<page-id>/page.tsx`. **Preserve the functionality** listed under
@@ -510,7 +554,7 @@ Custom API binding rules for edit deploy (identical matrix, `--actions` for
 - **Built-in operations** ride the same array: an add/replace passes the full desired array the
   builder wrote (Custom API rows, then the built-in rows); a preserve omits `--actions`; a removal
   passes the array minus the named entries; `[]` is passed only for a confirmed clear-all —
-  never because the `dataverse-operations` gate turned off (Phase 4.6b halts instead).
+  never because the `dataverse-operations` gate turned off (the Edit Phase 4 re-probe halts instead).
 
 The edit request is arbitrary user text, and a downloaded prompt is a multi-line conversation
 transcript. Both go to the upload BY FILE via `scripts/genpage-upload.js`, never through a shell command:
@@ -538,7 +582,7 @@ Use `--page-id` for updates. Omit `--add-to-sitemap` (the page is already in
 the sitemap; the wrapper refuses the combination anyway).
 Omit `--data-sources` when `config.json.dataSources` was empty.
 Omit `--connectors` when connector bindings are unchanged.
-Omit `--actions` when Custom API bindings are unchanged.
+Omit `--actions` when the page's `actionBindings` are unchanged (Custom API and built-in rows alike).
 
 An update without `--name`/`--name-file` keeps the page's current name: the SDK writes only what differs from the
 page it has just read, so an edit that does not rename the page omits it. To rename a page, pass `--name-file` on this

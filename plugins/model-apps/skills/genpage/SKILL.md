@@ -394,6 +394,8 @@ also stays the one writer of `actions.json` (Custom API rows first, then the bui
 - When the builder reports `dataverse-operations.md` written **this run**, forward its body to
   the planner as the `## Dataverse Operations` contract, delimited like the other contracts. A
   file left by an earlier run is not forwarded. With none, the plan has no such section.
+- In an edit, Edit Phase 4 of edit-flow.md handles this signal, forwards the contract through
+  every edit-planner round, and re-probes the gate before an add or replace is applied.
 
 #### Invocation prompt
 
@@ -1007,7 +1009,8 @@ Phase 3).
 The same array carries the built-in operation rows (`WhoAmI`, `RetrieveVersion`), so the same
 rules hold for them: `--actions` is passed only when the whole desired set changed, a preserve
 omits it, a removal passes the array minus the named entries, and `[]` is passed only for a
-confirmed clear-all — never as the result of a gate that turned off (Phase 4.6b halts instead).
+confirmed clear-all — never as the result of a gate that turned off (Phase 4.6b, or in an edit the
+Edit Phase 4 re-probe, halts instead).
 
 **Deploy through `scripts/genpage-upload.js`.** It writes the page through the SDK — the same page backend
 `/app-builder` uses, signed in with the Azure CLI — and takes the maker's text **by file**
@@ -1386,4 +1389,7 @@ For the edit flow (triggered when the `genpage-planner` returns
 The edit flow has its own 8 phases (Edit Phase 1-8): discover and select target
 app + page via `apps.js list` + `genpage.js list`, download (`genpage.js download`), generate
 RuntimeTypes (`genpage.js types`) if needed, invoke `genpage-edit-planner`, apply the edit inline,
-deploy, verify, summarize.
+deploy, verify, summarize. Built-in operations (`WhoAmI`, `RetrieveVersion`) are classified in Edit
+Phase 3; Edit Phase 4 handles `dataverse_operation_discovery_required`, forwards this run's
+built-in operation contract through every planner round, and re-probes `dataverse-operations`
+before an add or replace is applied — the create flow's Phase 4.6b is not visited.

@@ -178,3 +178,42 @@ test('a built-in-only create passes --actions with custom-api ON or OFF: Phase 4
   has(deploy, /pass `actions\.json` with `--actions` when Phase 4\.6c decided so/);
   has(deploy, /The same rule applies to `--actions` for the page's `actionBindings` — Custom API and built-in rows alike/);
 });
+
+// An edit runs its own eight phases; the create flow's Phase 4.6b is never visited. So the edit flow itself must take the edit planner's signal,
+// forward this run's built-in contract through every planner round, and re-probe the gate before it applies an add or replace — the three ways
+// a built-in operation arrives in an edit: asked for up front, found in the planner's clarification, and the flag turned off in between.
+test('the edit flow handles the built-in signal, forwards this run\'s contract through every planner round, and re-probes the gate before applying an add or replace', () => {
+  const edit = read('skills', 'genpage', 'edit-flow.md');
+  const intent = section(edit, '## Edit Phase 3:', '## Edit Phase 4:');
+  const planning = section(edit, '## Edit Phase 4:', '## Edit Phase 5:');
+  const apply = section(edit, '## Edit Phase 5:', '## Edit Phase 6:');
+  const deploy = section(edit, '## Edit Phase 6:', '## Edit Phase 7:');
+  // Asked for up front: the builder runs before planning, and what it wrote this run goes to the planner.
+  assert.ok(!/Phase 4\.6b re-probes it/.test(intent), 'the edit table does not send an edit to the create flow\'s Phase 4.6b');
+  has(intent, /\| add \/ replace \| must be ON \(the builder probes it; Edit Phase 4 re-probes it before Edit Phase 5\)/);
+  has(intent, /Keep what that dispatch wrote this run — the body of `<working-dir>\/dataverse-operations\.md` and `<working-dir>\/actions\.json` — for the edit planner/);
+  has(planning, /The built-in operation contract: the full body of `<working-dir>\/dataverse-operations\.md`, between `----- BEGIN\/END DATAVERSE OPERATIONS -----` delimiters, only when this run's builder wrote it/);
+  has(planning, /The `actionBindings` upload file status \(Custom API and built-in rows alike\)/);
+  // Found in clarification: the planner's signal is handled here, and the refreshed contract goes back to it.
+  has(planning, /\*\*If the planner returns `\{ "action": "dataverse_operation_discovery_required", … \}`\*\*/);
+  has(planning, /Dispatch `genpage-customapi-builder` once with \*\*Mode: `edit`\*\*/);
+  has(planning, /re-invoke the edit planner with this run's `dataverse-operations\.md` body as the built-in operation contract and `<working-dir>\/actions\.json` as the upload file status/);
+  has(planning, /- \*\*`\{ "action": "dataverse_operation_discovery_required", … \}`\*\* — handled above\./);
+  has(planning, /every prior discovery \(connector, Custom API and built-in operation contracts, and their upload file status; entities\)/);
+  // Turned off in between: the edit intent selects a re-probe right before the source is edited, and OFF halts without touching the bindings.
+  has(planning, /node "\$\{PLUGIN_ROOT\}\/scripts\/lib\/feature-flags\.js" dataverse-operations/);
+  has(planning, /the edit intent, not a plan heading, selects this probe/);
+  has(planning, /\*\*If it prints `disabled`:\*\* halt before Edit Phase 5 edits the source\. Write no replacement `actions\.json`, pass no `--actions`, and never write `\[\]` in its place/);
+  has(planning, /A preserve, a remove or a confirmed clear never runs this probe/);
+  has(apply, /`\$\{PLUGIN_ROOT\}\/references\/dataverse-operations\.md` — when the approved edit adds or replaces a built-in operation/);
+  assert.ok(!/Phase 4\.6b halts instead/.test(deploy), 'deploy: the edit\'s own re-probe halts, not the create flow\'s');
+  has(deploy, /the Edit Phase 4 re-probe halts instead/);
+  has(deploy, /Omit `--actions` when the page's `actionBindings` are unchanged \(Custom API and built-in rows alike\)\./);
+  // The create flow routes an edit to these phases and says so.
+  const skill = read('skills', 'genpage', 'SKILL.md');
+  has(section(skill, '## Edit Flow'), /Edit Phase 4 handles `dataverse_operation_discovery_required`, forwards this run's built-in operation contract through every planner round, and re-probes `dataverse-operations` before an add or replace is applied — the create flow's Phase 4\.6b is not visited/);
+  has(section(skill, '#### 1c.', '#### Invocation prompt'), /In an edit, Edit Phase 4 of edit-flow\.md handles this signal/);
+  // The edit planner takes the forwarded block as this run's selection; AGENTS.md names the edit's own re-probe.
+  has(squash(read('agents', 'genpage-edit-planner.md')), /unless your prompt carries this run's built-in operation contract \(the body of the builder's `dataverse-operations\.md` between `----- BEGIN\/END DATAVERSE OPERATIONS -----` lines\)/);
+  has(squash(read('AGENTS.md')), /an edit re-probes in edit-flow\.md, Edit Phase 4/);
+});

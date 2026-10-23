@@ -345,3 +345,26 @@ test('a value kept from the result — in state, a ref or a variable — logged,
     for (const [index, result] of verdicts(fixture(source)).entries()) assert.equal(result.status, 'pass', `${label}, layer ${index + 1}: ${result.reason}`);
   }
 });
+
+// ── An edit that adds a built-in operation ────────────────────────────────────────────────────────────────────────────────────────────
+// An edit never visits the create flow's Phase 4.6b, so its own re-probe is what stops an add the flag no longer allows (edit-flow.md, Edit
+// Phase 4): the gate is probed again after the listing — whether the need was asked for up front or found in the planner's clarification, the
+// builder lists the operations first — and before the source is written. A flip to OFF in between, no re-probe, or one after the write fails.
+test('an edit that adds a built-in re-probes the gate after the listing and before the source is written — a flip to OFF, no re-probe, or a late one fails in both layers', () => {
+  const add = () => editFixture({ before: [LEGACY_WHO_AM_I], add: [RETRIEVE_VERSION], source: LEGACY_CALL });
+  for (const [index, result] of verdicts(add()).entries()) assert.equal(result.status, 'pass', `layer ${index + 1}: ${result.reason}`);
+  for (const [label, mutate, reason] of [
+    ['the flag turned off before the source was edited', (f) => { f.events.find((call) => call.id === 'builtin-regate').result = 'disabled'; }, /^edit: a disabled or unreadable dataverse-operations gate must halt built-in authoring/],
+    ['no re-probe after the listing', (f) => { f.events = f.events.filter((call) => call.id !== 'builtin-regate'); }, /^edit: built-in authoring must re-probe the dataverse-operations gate after the listing/],
+    ['a re-probe after the source was written', (f) => {
+      const [regate] = f.events.splice(f.events.findIndex((call) => call.id === 'builtin-regate'), 1);
+      f.events.splice(f.events.findIndex((call) => call.id === 'write') + 1, 0, regate);
+    }, /^edit: the dataverse-operations re-probe must come before generation/],
+  ]) {
+    const bad = add();
+    mutate(bad);
+    const found = customApiProblems(bad);
+    assert.ok(found.some((problem) => reason.test(problem)), `${label}: ${JSON.stringify(found)}`);
+    for (const [index, result] of verdicts(bad).entries()) assert.equal(result.status, 'fail', `${label}, layer ${index + 1}`);
+  }
+});
