@@ -315,6 +315,7 @@ for (const [name, relative] of [
     assert.match(text, /parenthesized receivers/i);
     assert.match(text, /exact negation[^\n]*always leaves the block[^\n]*`return`, `throw`, `break` or `continue`/i);
     assert.match(text, /guard helper[^\n]*reported by design/i);
+    assert.match(text, /except a `const` bound to an object literal[^\n]*used only through member calls/i);
     assert.match(text, /parenthesized receivers[^\n]*`\.bind`[^\n]*`Reflect\.apply`[^\n]*detected like direct calls/i);
     assert.match(text, /runtime verification on the target Power Pages site[^.\n]*required/i);
   });
@@ -568,6 +569,41 @@ test('Pages proof keeps refusing exits and else branches that do not cover the c
     ['PCF_PAGES_API', 'PCF_PAGES_API']);
   // `!` binds to the operand alone: !typeof m === "function" is always false, so its else branch is unproven.
   assert.deepEqual(codesFor(`if (!typeof context.device?.captureImage === "function") { consume(); } else { ${CALL}; }`), ['PCF_PAGES_API']);
+});
+
+test('Pages detection ignores a context-named local object literal that is provably not the PCF context', () => {
+  for (const name of ['ctx', 'context', '_context', 'pcfContext']) {
+    const text = `function render() {\n  const ${name} = { device: { captureImage() { return 1; }, "pickFile": async () => [] }, utils: { lookupObjects: function () { return []; }, max: 3 } };\n  ${name}.device.captureImage(); ${name}.device.pickFile(); ${name}.utils.lookupObjects();\n}`;
+    assert.deepEqual(codesFor(text, null), [], name);
+    assert.deepEqual(codesFor(text, null, ['model']), [], name);
+  }
+  // A call inside the literal's own methods is still read on its own.
+  assert.deepEqual(codesFor('const ctx = { device: { captureImage: () => context.device.captureImage() } }; ctx.device.captureImage();'),
+    ['PCF_PAGES_API']);
+});
+
+test('Pages detection keeps the error for context-named objects it cannot prove local', () => {
+  for (const text of [
+    'let ctx = { device: { captureImage() {} } }; ctx.device.captureImage();',
+    'const ctx = { device: context.device }; ctx.device.captureImage();',
+    'const ctx = { device }; ctx.device.captureImage();',
+    'const ctx = { ...base }; ctx.device.captureImage();',
+    'const ctx = { [key]: {} }; ctx.device.captureImage();',
+    'const ctx = { get device() { return real; } }; ctx.device.captureImage();',
+    'const ctx = { device: { captureImage() {} } }; helper(ctx); ctx.device.captureImage();',
+    'const ctx = { device: { captureImage() {} } }; const d = ctx.device; ctx.device.captureImage();',
+    'const ctx = { device: { captureImage() {} } }; ctx.device.captureImage = real; ctx.device.captureImage();',
+    'const ctx = { device: { captureImage() {} } }; Object.assign(ctx.device, real); ctx.device.captureImage();',
+    'const ctx = { device: { captureImage() {} } }; (ctx).device.captureImage();',
+    'const ctx = { device: { captureImage() {} } }, other = 1; { const ctx = props.context; ctx.device.captureImage(); }',
+    'const ctx = { device: { captureImage() {} } } as unknown as Context; ctx.device.captureImage();',
+    'export const ctx = { device: { captureImage() {} } }; ctx.device.captureImage();',
+    'const ctx = useContext(PcfContext); ctx.device.captureImage();',
+    'function render(ctx) { ctx.device.captureImage(); }',
+    'class C { init(context) { this._context = context; } run() { this._context.device.captureImage(); } }',
+  ]) {
+    assert.ok(codesFor(text, null).includes('PCF_PAGES_API'), text);
+  }
 });
 
 test('Pages detection decodes escapes without evaluating malformed or non-identifier keys', () => {

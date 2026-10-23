@@ -1874,6 +1874,9 @@ function indexSource(text, mask) {
   indexDeclarations(index);
   indexWrites(index);
   index.members = indexedMembers(index);
+  // A context-named const bound to a closed object literal, used only through member calls, is that
+  // literal, not the PCF context: const ctx = { device: { captureImage() {} } }; ctx.device.captureImage().
+  index.members = index.members.filter((member) => !localObjectMember(index, member));
   const methods = new Map(index.members.filter((member) => member.call && ['device', 'utils'].includes(member.namespace))
     .map((member) => [member.names.join('.'), member.names]));
   for (const control of index.controls) {
@@ -2017,6 +2020,133 @@ function parenGroups(mask, opens = '([{', closes = ')]}') {
     }
   }
   return stack.length ? null : groups;
+}
+
+function localObjectMember(index, member) {
+  // The context is recognized by name (CONTEXT_NAME), so an unrelated object named ctx or context
+  // would read as the PCF context. Only a binding that provably holds a local object is set aside;
+  // a parameter, a field, a call result such as useContext(...) or anything else keeps the name rule,
+  // because it may hold the real context. Proven when all of these hold:
+  //   - the root's binding has exactly one declaration, `const <root> = { … }`, ending the statement;
+  //   - the literal is closed: every entry is a static key with a nested closed literal, a string,
+  //     number, true, false or null, a function or arrow expression, or a method (no accessor,
+  //     spread, shorthand or computed key), so no value comes from outside it;
+  //   - every other use of the binding is a member call such as ctx.device.captureImage(), and no
+  //     write reaches it, so no outside value can be stored into it or read out of it.
+  const { tokens } = index;
+  const root = member.names[0];
+  if (root === 'this' || tokens[member.token]?.kind !== 'identifier') return false;
+  const binding = bindingFor(tokens[member.token].scope, root);
+  index.localObjects ||= new Map();
+  const key = `${binding}:${root}`;
+  if (!index.localObjects.has(key)) index.localObjects.set(key, closedConstObject(index, binding, root));
+  return index.localObjects.get(key);
+}
+
+function closedConstObject(index, binding, root) {
+  const { tokens, mask } = index;
+  const declarations = index.scopes[binding].declarations.get(root) || [];
+  if (declarations.length !== 1) return false;
+  const keyword = tokenIndexAt(tokens, declarations[0]);
+  const name = keyword + 1;
+  const open = keyword + 3;
+  if (!tokenKeyword(tokens, keyword, 'const') || tokenKeyword(tokens, keyword - 1, 'export')
+    || tokens[name]?.kind !== 'identifier' || tokens[name].value !== root
+    || tokens[name + 1]?.value !== '=' || tokens[open]?.value !== '{' || tokens[open].match < 0) return false;
+  const close = tokens[open].match;
+  const after = tokens[close + 1];
+  // `{ … }` must end the initializer: `;`, `,` or `}` next, or a line break before a statement (ASI),
+  // not `as T`, a call or an index that would make the binding something else.
+  if (after && ![';', ',', '}'].includes(after.value) && !(LINE_TERMINATOR.test(mask.slice(tokens[close].end, after.start))
+    && after.kind === 'identifier' && !['as', 'satisfies', 'in', 'instanceof'].includes(after.value))) return false;
+  if (!closedObjectLiteral(index, open)) return false;
+  index.rootUses ||= rootUses(index);
+  for (const position of index.rootUses.writes.get(`${binding}:${root}`) || []) {
+    if (position !== tokens[name].start) return false;
+  }
+  for (const use of index.rootUses.reads.get(`${binding}:${root}`) || []) {
+    if (use === name) continue;
+    const path = indexedPath(index, use);
+    if (index.rootRoles.get(use) !== 'read' || !path.call || path.unknown || path.names.length < 2) return false;
+  }
+  return true;
+}
+
+function rootUses(index) {
+  // Every occurrence of a context-named root, and every recorded write, grouped by binding and root
+  // name, so proving several bindings costs one pass over the tokens and writes.
+  const reads = new Map();
+  const writes = new Map();
+  for (let i = 0; i < index.tokens.length; i += 1) {
+    const root = trackedRoot(index, i);
+    if (!root || root === 'this' || !CONTEXT_NAME.test(root) || index.patternKeys.has(i)
+      || index.rootRoles.get(i) === 'member') continue;
+    const key = `${bindingFor(index.tokens[i].scope, root)}:${root}`;
+    if (!reads.has(key)) reads.set(key, []);
+    reads.get(key).push(i);
+  }
+  for (const [key, positions] of index.writes) {
+    // Keys are `<binding>:<path>` with an optional `.*`; the root is the path's first name.
+    const separator = key.indexOf(':');
+    const root = key.slice(separator + 1).split('.')[0];
+    const target = `${key.slice(0, separator)}:${root}`;
+    if (!writes.has(target)) writes.set(target, []);
+    writes.get(target).push(...positions);
+  }
+  return { reads, writes };
+}
+
+function closedObjectLiteral(index, open) {
+  const { tokens } = index;
+  const literal = (at) => ['string', 'number'].includes(tokens[at]?.kind)
+    || ['true', 'false', 'null'].some((word) => tokenKeyword(tokens, at, word));
+  const staticKey = (at) => ['identifier', 'string', 'number'].includes(tokens[at]?.kind);
+  const group = (at, value) => tokens[at]?.value === value && tokens[at].match > at ? tokens[at].match : -1;
+  // A function or arrow expression filling [from, to): its body runs only when called.
+  const functionValue = (from, to) => {
+    let at = tokenKeyword(tokens, from, 'async') ? from + 1 : from;
+    if (tokenKeyword(tokens, at, 'function')) {
+      at += tokens[at + 1]?.value === '*' ? 2 : 1;
+      if (tokens[at]?.kind === 'identifier') at += 1;
+      const params = group(at, '(');
+      return params !== -1 && group(params + 1, '{') === to - 1;
+    }
+    const params = tokens[at]?.kind === 'identifier' ? at : group(at, '(');
+    return params !== -1 && tokens[params + 1]?.value === '=>' && params + 2 < to;
+  };
+  const pending = [open];
+  while (pending.length) {
+    const start = pending.pop();
+    for (const [from, to] of topLevelTokenRanges(tokens, start + 1, tokens[start].match, ',')) {
+      if (from === to) continue;
+      let at = from;
+      if (tokenKeyword(tokens, at, 'async') && tokens[at + 1]?.value !== '(' && tokens[at + 1]?.value !== ':') at += 1;
+      if (tokens[at]?.value === '*') at += 1;
+      if (['get', 'set'].some((word) => tokenKeyword(tokens, at, word)) && staticKey(at + 1)) return false;
+      if (!staticKey(at)) return false;
+      const params = group(at + 1, '(');
+      if (params !== -1) {
+        if (group(params + 1, '{') !== to - 1) return false;
+        continue;
+      }
+      if (at !== from || tokens[at + 1]?.value !== ':') return false;
+      const value = at + 2;
+      if (group(value, '{') === to - 1) pending.push(value);
+      else if (!(value === to - 1 && literal(value)) && !functionValue(value, to)) return false;
+    }
+  }
+  return true;
+}
+
+function tokenIndexAt(tokens, start) {
+  let lo = 0;
+  let hi = tokens.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (tokens[mid].start < start) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }
 
 function indexedMembers(index) {
