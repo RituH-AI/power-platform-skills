@@ -4,6 +4,9 @@
 // SDK itself accepts what the backend sends, the rows it writes are the ones a page is made of, an untouched push writes nothing, an
 // update writes only the rows that changed, a page that does not compile writes nothing, and a lost response on the one atomic
 // change set leaves exactly the two states the backend's settling logic assumes — landed, or nothing.
+// This file checks where lib/temp-workspace.js makes a workspace, so it works in a temp folder of its own (helpers/own-temp-folder.js): in the
+// suite's shared one, other test processes make and remove the plugin's workspace folder. Required first, so every path below is inside it.
+require('./helpers/own-temp-folder.js');
 const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');

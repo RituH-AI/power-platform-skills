@@ -2,6 +2,9 @@
 // scripts/solution-settings.js — deployment settings for a solution: the CLI contract, the checks made before any request, the SDK calls and
 // pac's defaults, which refusals fall back to pac and which do not, the long-running-action client, and what the sanitizer keeps out of what is printed (and what it leaves).
 // The SDK and pac are stood in for here; tests/solution-settings-real-bundle.test.js drives the real bundle and the real script.
+// This file checks where lib/temp-workspace.js makes a workspace, so it works in a temp folder of its own (helpers/own-temp-folder.js): in the
+// suite's shared one, other test processes make and remove the plugin's workspace folder. Required first, so every path below is inside it.
+require('./helpers/own-temp-folder.js');
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');

@@ -4117,7 +4117,13 @@ NODE20_BIN=/path/to/node20/bin node scripts/run-tests.js --with-sdk /path/to/pow
   The suite runs in a temporary folder of its own (TEMP, TMP and TMPDIR point into it), and the run
   FAILS when a test leaves a file or folder in it, naming what was left: a test removes everything it
   makes. `scripts/tests/helpers/temp-dirs.js` (`makeTempDir`) is the shared way — require it at the top
-  of the test file, and the folders it makes are removed after the file's last test. The folder the suite
+  of the test file, and the folders it makes are removed after the file's last test. Every test file of the
+  run shares that folder, and so the folder `lib/temp-workspace.js` makes the throwaway workspaces in, which
+  each process removes when it ends with nothing left in it; on Windows a folder being removed refuses a new
+  workspace for a moment, and under load for longer than the maker waits, so the workspace goes to the plain
+  temporary folder, as the code allows. A test file that checks WHERE a workspace is made therefore requires
+  `scripts/tests/helpers/own-temp-folder.js` first: it then works in a temporary folder of its own inside the
+  suite's, which the end of the file removes when it is empty (and leaves, for the run to name, when it is not). The folder the suite
   runs in is the plugin's own, so the run FAILS too, naming the folder, when a test makes a
   `.maker-workspace` there that was not there before the run (a build opens `<app folder>/.maker-workspace`
   unless it is given a workspace, so a test must never hand a build `process.cwd()`; `sdk-build.test.js`
