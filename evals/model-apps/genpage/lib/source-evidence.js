@@ -67,8 +67,9 @@ function objectFields(text) {
   return fields;
 }
 
-function actionCalls(code) {
-  const mask = blankNonCodePreservingTemplateExpressions(code);
+// The named `function` declarations of a masked source, as the receiver proof reads them: their parameter list and
+// their body's braces.
+function namedScopes(mask) {
   const scopes = [];
   for (const match of mask.matchAll(/\b(?:async\s+)?function\s+([\w$]+)\s*\(/g)) {
     const paramsOpen = match.index + match[0].length - 1;
@@ -76,6 +77,12 @@ function actionCalls(code) {
     const body = mask.indexOf('{', paramsEnd);
     if (body !== -1) scopes.push({ name: match[1], start: match.index, paramsOpen, paramsEnd, body, end: groupEnd(mask, body) });
   }
+  return scopes;
+}
+
+function actionCalls(code) {
+  const mask = blankNonCodePreservingTemplateExpressions(code);
+  const scopes = namedScopes(mask);
   const calls = [];
   for (const match of mask.matchAll(/\.\s*(executeAction|executeFunction)\s*(?:\?\.\s*)?\(/g)) {
     const open = match.index + match[0].length - 1;
@@ -574,6 +581,15 @@ function receiverIsDataApi(mask, scopes, expr, at) {
   return isDataApi(sourceContext(mask, scopes), expr, at);
 }
 
+// The PageBody the canonical page error wrapper forwards the page props to (forwardedPageBody), or null when the
+// default export is not exactly that wrapper. The page error evaluator (page-error-evidence.js) asks this, so the
+// boundary it requires and the props the receiver proofs trust are the same proof.
+function forwardedPageBodyOf(code) {
+  const mask = blankNonCodePreservingTemplateExpressions(code);
+  const scopes = namedScopes(mask);
+  return forwardedPageBody(mask, scopes, pageComponent(mask, scopes));
+}
+
 // Resolve only the identity-preserving forms already understood by the shared evidence reader.
 // Parameters keep a local identity and their recognized caller identities so writes through a
 // named helper or alias cannot conceal a changed member. Opaque expressions establish no identity.
@@ -727,4 +743,7 @@ function stringRecordMemberIsInput(mask, scopes, expr, at) {
   });
 }
 
-module.exports = { groupEnd, literalString, objectFields, actionCalls, receiverIsDataApi, stringRecordMemberIsInput, escapeRe, callSites, expressionEnd };
+module.exports = {
+  groupEnd, literalString, objectFields, actionCalls, receiverIsDataApi, stringRecordMemberIsInput, escapeRe, callSites, expressionEnd,
+  namedScopes, forwardedPageBodyOf,
+};
