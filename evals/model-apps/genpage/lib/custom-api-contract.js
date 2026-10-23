@@ -151,7 +151,12 @@ function lookupParameterProblems(parameters, lookups, operation, prefix, call) {
   return problems;
 }
 
-function runtimeProblems(code, bindings, declaredOutputs, lookupMetadata) {
+// `authoredBuiltIns`: the names of the built-in operations this stage adds or replaces. Only those are held to the catalogue's contract — a Function
+// with no input and no target, its outputs the catalogue's. Every other entry keeps the contract it declares: a Custom API, and a built-in the page
+// already held, a legacy or contradictory one included — an unrelated edit is no permission to reinterpret a preserved call (download and rebuild
+// warn about such an entry instead). A legacy entry may omit `isFunction`, which the runtime enforces only when it is a real boolean, so an omitted
+// kind constrains neither method; omitted `parameterKinds` declare no input.
+function runtimeProblems(code, bindings, declaredOutputs, lookupMetadata, authoredBuiltIns = new Set()) {
   const problems = pageStructureProblems(code);
   const calls = actionCalls(code);
   const known = new Map(bindings.map((binding) => [binding.name, binding]));
@@ -161,10 +166,11 @@ function runtimeProblems(code, bindings, declaredOutputs, lookupMetadata) {
     const binding = known.get(name);
     if (!binding) { problems.push(`runtime calls unbound or undiscovered Custom API ${name || '(dynamic name)'}`); continue; }
     used.add(name);
-    // A built-in operation is a Function whatever a preserved legacy entry declares (or leaves out), and it takes no inputs.
-    const builtIn = isBuiltInBinding(binding);
-    const kinds = builtIn ? {} : binding.parameterKinds;
-    if (call.method !== (builtIn || binding.isFunction ? 'executeFunction' : 'executeAction')) problems.push(`${name}: runtime method disagrees with discovered Action/Function kind`);
+    const canonical = authoredBuiltIns.has(name);
+    const kinds = canonical ? {} : (binding.parameterKinds || {});
+    const isFunction = canonical ? true : binding.isFunction;
+    const isAction = typeof isFunction === 'boolean' ? !isFunction : call.method === 'executeAction';
+    if (typeof isFunction === 'boolean' && call.method !== (isFunction ? 'executeFunction' : 'executeAction')) problems.push(`${name}: runtime method disagrees with discovered Action/Function kind`);
     const prefix = code.slice(call.scope.start, call.start);
     const prefixMask = call.mask.slice(call.scope.start, call.start);
     const post = code.slice(call.end + 1, call.scope.end);
@@ -190,7 +196,7 @@ function runtimeProblems(code, bindings, declaredOutputs, lookupMetadata) {
       if (!parameterMatches(parameters.get(parameter) || '', kind, prefix)) problems.push(`${name}.${parameter}: runtime value does not match ${kind}`);
     }
     problems.push(...lookupParameterProblems(parameters, lookups, name, prefix, call));
-    if (binding.boundEntityLogicalName && !builtIn) {
+    if (binding.boundEntityLogicalName && !canonical) {
       if (!call.fields.has('boundTo')) problems.push(`${name}: entity-bound operation omits boundTo`);
       else {
         const bound = objectFields(call.fields.get('boundTo'));
@@ -212,8 +218,11 @@ function runtimeProblems(code, bindings, declaredOutputs, lookupMetadata) {
       problems.push(`${name}: outputs/error handling must use outputs and sanitized error.message only`);
     }
     const outputs = [...postMask.matchAll(new RegExp(`\\b${result}\\.outputs(?:\\?\\.)?\\.?([A-Za-z_$][\\w$]*)`, 'g'))].map((entry) => entry[1]);
-    if (!Array.isArray(declaredOutputs?.[name]) || outputs.some((output) => !declaredOutputs[name].includes(output))) problems.push(`${name}: runtime reads an undeclared output`);
-    if (!binding.isFunction && !builtIn) {
+    // A built-in's response is the catalogue's; a preserved one is read against what the scenario declares for it, when it declares anything.
+    const catalogue = Object.hasOwn(BUILT_IN_OUTPUTS, name) ? BUILT_IN_OUTPUTS[name] : undefined;
+    const readable = canonical ? catalogue : (declaredOutputs?.[name] ?? catalogue);
+    if (!Array.isArray(readable) || outputs.some((output) => !readable.includes(output))) problems.push(`${name}: runtime reads an undeclared output`);
+    if (isAction) {
       if (!/\bif\s*\(\s*(?:pending\.current|isSubmitting)(?:\s*\|\|[^)]*)?\)\s*(?:return\b|\{\s*return\b)/.test(prefixMask)
         || !/\bpending\.current\s*=\s*true\b|\bsetIsSubmitting\s*\(\s*true\s*\)/.test(prefixMask)
         || !/\bfinally\b[\s\S]*(?:pending\.current\s*=\s*false\b|setIsSubmitting\s*\(\s*false\s*\))/.test(postMask)) {
@@ -339,13 +348,11 @@ function customApiProblems(fixture) {
     const code = artifactText(fixture, stage.source);
     const write = calls.slice(0, uploadIndex).filter((entry) => /^Write\s+/.test(entry.command) && fileName(entry.command.slice(6)) === stage.target).at(-1);
     if (!write || artifactText(fixture, write.artifact) !== code) problems.push(`${stage.id}: uploaded API source is not the actual preceding generated snapshot`);
-    // A built-in operation's outputs are its catalogue response's properties, whatever a fixture declares.
-    problems.push(...runtimeProblems(code, desired, { ...contract.outputs, ...BUILT_IN_OUTPUTS }, lookupMetadata));
-    // A stage that authors a built-in call holds it to the generated pattern; a preserved call is kept as it was written.
-    if (authoring.includes(stage.upload)) {
-      const authored = stage.beforeConfig ? (stage.change?.add || []).filter(isBuiltInBinding) : partitionBindings(desired).builtIns;
-      problems.push(...builtInRuntimeProblems(code, authored.map((binding) => binding.name)));
-    }
+    // The built-ins this stage authors are held to the catalogue's call contract and the generated pattern; a preserved call is kept as it was written.
+    const authoredBuiltIns = !authoring.includes(stage.upload) ? []
+      : (stage.beforeConfig ? (stage.change?.add || []).filter(isBuiltInBinding) : partitionBindings(desired).builtIns).map((binding) => binding.name);
+    problems.push(...runtimeProblems(code, desired, contract.outputs, lookupMetadata, new Set(authoredBuiltIns)));
+    if (authoredBuiltIns.length) problems.push(...builtInRuntimeProblems(code, authoredBuiltIns));
   }
   const last = contract.stages.at(-1);
   if (artifactText(fixture, last.target) !== artifactText(fixture, last.source)) problems.push('final API TSX differs from the final lifecycle stage');

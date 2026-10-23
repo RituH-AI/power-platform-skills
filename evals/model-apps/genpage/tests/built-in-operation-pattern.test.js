@@ -12,6 +12,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { builtInRuntimeProblems } = require('../lib/action-binding-union.js');
+const { customApiProblems } = require('../lib/custom-api-contract.js');
 const { PHASE_EXPECTATIONS } = require('../lib/assertions-layer-1.js');
 const { PHASE5_EXPECTATIONS } = require('../lib/assertions-layer-2.js');
 const { getDataverseOperationCatalogue } = require('../../../../plugins/model-apps/scripts/lib/dataverse-operations.js');
@@ -109,35 +110,90 @@ test('each button is disabled while its own call is pending, ignores a stale ans
   }
 });
 
-// A page that binds only the two built-ins, through the whole Phase 5 evaluator: create with an enabled built-in gate, the listing and a re-probe.
-test('a built-in-only lifecycle with the reference page passes the Phase 5 evaluator in both layers, and the same page reading outputs before success fails', () => {
-  const RULE = 'Phase 5: Custom API discovery, gate, bare bindings, runtime calls and update preservation or explicit clear agree';
-  const rows = getDataverseOperationCatalogue().operations.map((operation) => ({ name: operation.name, isFunction: true, displayName: operation.displayName, parameterKinds: {} }));
-  const fixture = (source) => ({
-    contractVersion: 2,
-    files: [{ name: 'page.tsx', content: source }],
-    artifacts: { 'stages/page.tsx': source, 'actions.json': JSON.stringify(rows), 'created/config.json': JSON.stringify({ actionBindings: rows }) },
-    genpagePlan: `## Custom API Bindings
+// ── Through the whole Phase 5 evaluator (custom-api-contract.js), in both layers ────────────────────────────────────────────────────────
+const RULE = 'Phase 5: Custom API discovery, gate, bare bindings, runtime calls and update preservation or explicit clear agree';
+const PAGE = '99999999-9999-4999-8999-999999999999';
+const APP = '88888888-8888-4888-8888-888888888888';
+const ENV = 'https://contoso.crm.dynamics.com';
+const ROWS = getDataverseOperationCatalogue().operations.map((operation) => ({ name: operation.name, isFunction: true, displayName: operation.displayName, parameterKinds: {} }));
+const [WHO_AM_I, RETRIEVE_VERSION] = ROWS;
+const TABLE_ROWS = {
+  WhoAmI: '| WhoAmI | Function | (Global) | Current Dataverse identity | (none) | BusinessUnitId, UserId, OrganizationId | button |',
+  RetrieveVersion: '| RetrieveVersion | Function | (Global) | Dataverse server version | (none) | Version | button |',
+};
+// The plan of a run that adds the named built-ins (none: the plan has no `## Dataverse Operations` section).
+const planFor = (names) => `## Custom API Bindings
 No custom API bindings.
-
+${names.length ? `
 ## Dataverse Operations
 Verification: environment not-checked, runtime not-checked, privileges not-checked.
 | Name | Kind | Bound Entity | Display Name | Parameters | Response fields | Invoke |
 |------|------|--------------|--------------|------------|-----------------|--------|
-| WhoAmI | Function | (Global) | Current Dataverse identity | (none) | BusinessUnitId, UserId, OrganizationId | button |
-| RetrieveVersion | Function | (Global) | Dataverse server version | (none) | Version | button |
-`,
-    workflowLog: 'Built-in operation create with the gate enabled.',
-    manifest: { customApi: { outputs: {}, stages: [{ id: 'create', target: 'page.tsx', source: 'stages/page.tsx', actions: 'actions.json', afterConfig: 'created/config.json', upload: 'create' }] } },
+${names.map((name) => TABLE_ROWS[name]).join('\n')}
+` : ''}`;
+const listingEvent = () => ({ id: 'listing', command: 'node list-dataverse-operations.js', result: { ok: true, ...structuredClone(getDataverseOperationCatalogue()) } });
+const verdicts = (fixture) => [PHASE_EXPECTATIONS, PHASE5_EXPECTATIONS].map((map) => map.get(RULE)({ fixture, files: fixture.files, eval: { id: 24 } }));
+
+// A page that binds only the two built-ins: create with an enabled built-in gate, the listing and a re-probe.
+const fixture = (source) => ({
+  contractVersion: 2,
+  files: [{ name: 'page.tsx', content: source }],
+  artifacts: { 'stages/page.tsx': source, 'actions.json': JSON.stringify(ROWS), 'created/config.json': JSON.stringify({ actionBindings: ROWS }) },
+  genpagePlan: planFor(['WhoAmI', 'RetrieveVersion']),
+  workflowLog: 'Built-in operation create with the gate enabled.',
+  manifest: { customApi: { outputs: {}, stages: [{ id: 'create', target: 'page.tsx', source: 'stages/page.tsx', actions: 'actions.json', afterConfig: 'created/config.json', upload: 'create' }] } },
+  events: [
+    { id: 'custom-api-gate', command: 'node feature-flags.js custom-api', result: 'disabled' },
+    { id: 'builtin-gate', command: 'node feature-flags.js dataverse-operations', result: 'enabled' },
+    listingEvent(),
+    { id: 'builtin-regate', command: 'node feature-flags.js dataverse-operations', result: 'enabled' },
+    { id: 'write', command: 'Write page.tsx', artifact: 'stages/page.tsx' },
+    { id: 'create', command: 'node genpage-upload.js --code-file page.tsx --actions actions.json --add-to-sitemap', result: { ok: true, pageId: PAGE } },
+  ],
+});
+
+// An edit of a downloaded page that already holds `before`. With nothing in `add` it is an unrelated edit: both gates OFF, no `--actions`, the
+// bindings preserved. With rows in `add`, this run adds them (or replaces an entry of the same name, in its place): the built-in gate ON, the
+// listing, a re-probe, and the full array uploaded.
+function editFixture({ before, add = [], source }) {
+  const after = [
+    ...before.map((entry) => add.find((row) => row.name === entry.name) || entry),
+    ...add.filter((row) => !before.some((entry) => entry.name === row.name)),
+  ];
+  const identity = JSON.stringify({ pageId: PAGE, appId: APP });
+  const authoring = add.length > 0;
+  return {
+    contractVersion: 2,
+    files: [{ name: 'page.tsx', content: source }],
+    artifacts: {
+      'stages/page.tsx': source, 'actions.json': JSON.stringify(after),
+      'before/config.json': JSON.stringify({ actionBindings: before }), 'after/config.json': JSON.stringify({ actionBindings: after }),
+      'before/page.json': identity, 'after/page.json': identity,
+    },
+    genpagePlan: planFor(add.map((row) => row.name)),
+    workflowLog: authoring ? 'An edit that adds a built-in operation the maker selected.' : 'An unrelated edit of a page that already binds built-in operations; its bindings are preserved.',
+    manifest: {
+      customApi: {
+        outputs: {},
+        stages: [{
+          id: 'edit', target: 'page.tsx', source: 'stages/page.tsx', beforeConfig: 'before/config.json', afterConfig: 'after/config.json', upload: 'edit',
+          ...(authoring && { actions: 'actions.json', change: { add } }),
+        }],
+      },
+      uploads: [{ event: 'edit', mode: 'update', beforeConfig: 'before/config.json', afterConfig: 'after/config.json', beforePage: 'before/page.json', afterPage: 'after/page.json' }],
+    },
     events: [
+      { id: 'download', command: `node genpage.js download --env ${ENV} --page-id ${PAGE} --app-id ${APP} --output-directory before`, result: { ok: true, pages: [{ pageId: PAGE }] } },
       { id: 'custom-api-gate', command: 'node feature-flags.js custom-api', result: 'disabled' },
-      { id: 'builtin-gate', command: 'node feature-flags.js dataverse-operations', result: 'enabled' },
-      { id: 'listing', command: 'node list-dataverse-operations.js', result: { ok: true, ...structuredClone(getDataverseOperationCatalogue()) } },
-      { id: 'builtin-regate', command: 'node feature-flags.js dataverse-operations', result: 'enabled' },
+      { id: 'builtin-gate', command: 'node feature-flags.js dataverse-operations', result: authoring ? 'enabled' : 'disabled' },
+      ...(authoring ? [listingEvent(), { id: 'builtin-regate', command: 'node feature-flags.js dataverse-operations', result: 'enabled' }] : []),
       { id: 'write', command: 'Write page.tsx', artifact: 'stages/page.tsx' },
-      { id: 'create', command: 'node genpage-upload.js --code-file page.tsx --actions actions.json --add-to-sitemap', result: { ok: true, pageId: '99999999-9999-4999-8999-999999999999' } },
+      { id: 'edit', command: `node genpage-upload.js --env ${ENV} --page-id ${PAGE} --app-id ${APP} --code-file page.tsx${authoring ? ' --actions actions.json' : ''}`, result: { ok: true, pageId: PAGE, appId: APP } },
     ],
-  });
+  };
+}
+
+test('a built-in-only lifecycle with the reference page passes the Phase 5 evaluator in both layers, and the same page reading outputs before success fails', () => {
   for (const [map, layer] of [[PHASE_EXPECTATIONS, 1], [PHASE5_EXPECTATIONS, 2]]) {
     const good = fixture(REFERENCE);
     const result = map.get(RULE)({ fixture: good, files: good.files, eval: { id: 24 } });
@@ -155,4 +211,62 @@ Verification: environment not-checked, runtime not-checked, privileges not-check
     assert.equal(verdict.status, 'fail');
     assert.match(verdict.reason, /WhoAmI: called from an effect, a memo or a timer/);
   }
+});
+
+// ── A built-in entry the page already held keeps the contract it declares ──────────────────────────────────────────────────────────────
+// Only a built-in this run adds or replaces is held to the catalogue's contract — a Function with no input and no target — and to the generated
+// pattern. An entry downloaded with the page and preserved by an unrelated edit keeps what it declares: an input of its own, or no `isFunction` at
+// all (legacy: the runtime enforces the kind only when it is a real boolean). Its call is still checked against that, as a Custom API's is.
+const LEGACY_WHO_AM_I = { ...WHO_AM_I, displayName: 'Legacy identity', parameterKinds: { Legacy: 'String' } };
+const LEGACY_CALL = mutated("api.executeFunction({ name: 'WhoAmI' })", "api.executeFunction({ name: 'WhoAmI', parameters: { Legacy: 'kept' } })");
+// A call that also reads an output by member — one the catalogue does not list.
+const READS_EXTRA = (source, output) => {
+  const find = "const userId = ownString(outputs, 'UserId');";
+  assert.ok(source.includes(find));
+  return source.replace(find, `const userId = ownString(outputs, 'UserId') ?? String(res.outputs?.${output});`);
+};
+
+test('a preserved built-in entry keeps the contract it declares — an input of its own, or no kind at all — through an unrelated edit with both gates OFF', () => {
+  for (const [label, before, source, outputs = {}] of [
+    ['a declared input and its matching call', [LEGACY_WHO_AM_I, RETRIEVE_VERSION], LEGACY_CALL],
+    ['an output the scenario declares for it', [LEGACY_WHO_AM_I, RETRIEVE_VERSION], READS_EXTRA(LEGACY_CALL, 'Legacy'), { WhoAmI: ['UserId', 'Legacy'] }],
+    ['no isFunction and no parameterKinds', [{ name: 'WhoAmI', displayName: 'Legacy identity' }, RETRIEVE_VERSION], REFERENCE],
+    ['the catalogue projection itself', ROWS, REFERENCE],
+  ]) {
+    const edit = editFixture({ before, source });
+    edit.manifest.customApi.outputs = outputs;
+    for (const [index, result] of verdicts(edit).entries()) {
+      assert.equal(result.status, 'pass', `${label}, layer ${index + 1}: ${result.reason}`);
+    }
+  }
+  // Kept is not unchecked: the call must still agree with what the entry declares.
+  const missingInput = customApiProblems(editFixture({ before: [LEGACY_WHO_AM_I, RETRIEVE_VERSION], source: REFERENCE }));
+  assert.ok(missingInput.includes('WhoAmI: runtime parameter names differ from the declared kinds and discovered lookups'), JSON.stringify(missingInput));
+  const declaredAction = customApiProblems(editFixture({ before: [{ ...WHO_AM_I, isFunction: false }, RETRIEVE_VERSION], source: REFERENCE }));
+  assert.ok(declaredAction.includes('WhoAmI: runtime method disagrees with discovered Action/Function kind'), JSON.stringify(declaredAction));
+});
+
+test('a built-in this run adds or replaces is held to the catalogue\'s contract, beside a preserved legacy entry that keeps its own', () => {
+  // RetrieveVersion added this run; the page's legacy WhoAmI, with an input of its own, stays as it was written.
+  for (const [index, result] of verdicts(editFixture({ before: [LEGACY_WHO_AM_I], add: [RETRIEVE_VERSION], source: LEGACY_CALL })).entries()) {
+    assert.equal(result.status, 'pass', `layer ${index + 1}: ${result.reason}`);
+  }
+  // A WhoAmI this run puts in place of the legacy entry is new authoring: its call takes no input.
+  const replaced = customApiProblems(editFixture({ before: [LEGACY_WHO_AM_I, RETRIEVE_VERSION], add: [WHO_AM_I], source: LEGACY_CALL }));
+  assert.ok(replaced.includes('WhoAmI: runtime parameter names differ from the declared kinds and discovered lookups'), JSON.stringify(replaced));
+  assert.ok(replaced.includes('WhoAmI: the request must be exactly { name } — no parameters and no boundTo'), JSON.stringify(replaced));
+  // On create, an authored call with an input, as an Action, or with a target is refused.
+  for (const [label, source, problem] of [
+    ['an input', LEGACY_CALL, 'WhoAmI: runtime parameter names differ from the declared kinds and discovered lookups'],
+    ['an Action', mutated("api.executeFunction({ name: 'WhoAmI' })", "api.executeAction({ name: 'WhoAmI' })"), 'WhoAmI: runtime method disagrees with discovered Action/Function kind'],
+    ['a target', mutated("api.executeFunction({ name: 'WhoAmI' })", "api.executeFunction({ name: 'WhoAmI', boundTo: { entityName: 'systemuser', id: 'x' } })"), 'WhoAmI: global operation must omit boundTo'],
+  ]) {
+    const found = customApiProblems(fixture(source));
+    assert.ok(found.includes(problem), `${label}: ${JSON.stringify(found)}`);
+  }
+  // A scenario that declares more outputs for WhoAmI does not widen what a NEW call may read: its response is the catalogue's.
+  const widened = fixture(READS_EXTRA(REFERENCE, 'SystemUserName'));
+  widened.manifest.customApi.outputs = { WhoAmI: ['UserId', 'SystemUserName'] };
+  const read = customApiProblems(widened);
+  assert.ok(read.includes('WhoAmI: runtime reads an undeclared output'), JSON.stringify(read));
 });
