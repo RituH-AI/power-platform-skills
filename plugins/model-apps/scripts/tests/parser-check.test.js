@@ -75,7 +75,8 @@ test('parser check: the views built from TypeScript\'s parse are the lexer\'s ow
   };
   // The structure checks, from either view: on every committed page, and on one generated page in five.
   for (const [file, code] of committedPages()) compare(file, code, true);
-  validPages().forEach((page, index) => compare(`${page.group}: ${page.name}`, page.code, index % 5 === 0));
+  let index = 0;
+  for (const page of validPages()) compare(`${page.group}: ${page.name}`, page.code, index++ % 5 === 0);
   assert.deepEqual(differ.slice(0, 8), [], `${differ.length} differences`);
   assert.ok(stats.compared >= 25000 && stats.structure >= 5000, JSON.stringify(stats));
 });
