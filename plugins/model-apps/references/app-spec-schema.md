@@ -400,6 +400,14 @@ difference and the next full build restores the spec's value (a `--changed-only`
 spec with its last snapshot, not with the deployed row, so it does not notice).
 
 ## entities[]
+
+**An app with no tables of its own** — one whose navigation holds only generative pages, dashboards over
+tables the environment already has, or URLs (an app made with `apps.js create --page-id` is one) — is a
+valid spec with `"entities": []`. The build makes it (a navigation of pages only is built pages first), and
+`download-model-app.js`, `--verify` and teardown take it as they take any other spec. A spec with no table
+**and** no navigation entry has nothing to build an app from, and is refused: `at least one entity is
+required`.
+
 ```jsonc
 {
   "schemaName": "new_ticket",            // publisher-prefixed; logical name is its lowercase

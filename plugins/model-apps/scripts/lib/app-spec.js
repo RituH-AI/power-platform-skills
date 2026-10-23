@@ -8,6 +8,7 @@ const { isMainForm, selectDefaultForm, ordersByHand } = require('./form-order.js
 const { AUTO_TAB_NAME, AUTO_SECTION_NAME, placementOf, resolvePlacement } = require('./form-subgrid-placement.js');
 const { PAGE_BINDINGS, pageBindingsProblem, statedPageBindings, statableBinding, bindingProblemText } = require('./page-bindings.js');
 const { nearestName } = require('./nearest-name.js');
+const { navigationHolds } = require('./app-navigation.js');
 
 // URL scheme allowlist for spec-supplied URLs that the built app will RENDER (iframe dashboard tiles,
 // sitemap URL subareas). Only http(s) is allowed — a `javascript:`, `data:`, `vbscript:`, or `file:`
@@ -2777,8 +2778,12 @@ function validateAppSpec(spec, opts = {}) {
       }
     }
   }
-  if (!entityNames.size) {
-    errors.push('at least one entity is required');
+  // A spec with no table is an app only when its navigation shows something else: generative pages, dashboards over tables
+  // the environment already has, or URLs. Such an app is real — `apps.js create --page-id` makes one, and the build makes one
+  // from a navigation of pages only by creating the pages first (app-navigation.js) — so a download of it must give a spec the
+  // build takes. Without a table AND without a navigation entry there is nothing to build an app from.
+  if (!entityNames.size && !navigationHolds(spec).entries) {
+    errors.push('at least one entity is required — or, for an app with no tables, an entry in appShell (a page, a dashboard or a URL)');
   }
   // Web resources (optional — JS/HTML/CSS shipped for form logic).
   const WEB_RESOURCE_KINDS = new Set(['js', 'html', 'css', 'xml', 'png', 'jpg', 'gif', 'xsl', 'ico', 'svg', 'resx']);

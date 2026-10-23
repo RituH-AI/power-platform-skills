@@ -1580,6 +1580,11 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   A missing SDK sitemap or a mismatch is refused with publish-then-download guidance, never emitted
   as hidden-table membership or lost Main restrictions. The immutable name is recovered from the
   fetched `uniqueName`/`uniquename` before manifest/prefix lookup; an unresolved identity is refused.
+  **An app with no tables downloads too**: one whose navigation holds only generative pages, dashboards or URLs
+  (`apps.js create --page-id` makes one) is written as a spec with `"entities": []`, which the build, `--verify` and
+  teardown take (`lifecycle-no-tables-real-bundle.test.js`). The validator used to refuse every spec with no table, so
+  such a download wrote the page folders and then stopped without a spec or a baseline; it now refuses only a spec with
+  no table and no navigation entry (`at least one entity is required`), before anything is written.
   **Round-trip scope (be precise — do not claim "complete"):** tables, sitemap/appShell, generative pages
   (with their data sources, model and connector and Custom API bindings),
   classic dashboards, icons, and solution round-trip; **forms, views, charts, and commands do NOT yet
