@@ -42,6 +42,10 @@ Open GitHub Copilot CLI or Claude Code in any folder and run the following comma
 
 Start with `/create-code-app` — it walks you through everything.
 
+## Connections
+
+Connectors other than Dataverse use a connection: the saved sign-in a connector uses to call its service. New projects get Power Apps CLI 1.3.0 or later installed automatically, so the plugin can reuse your existing connection or create one for you. It tells you before a connection might be created with your account, and asks before creating one that signs in with single sign-on. When a connector needs a browser sign-in, the plugin may ask you to run `pa connection create` in your own terminal. Projects on an older CLI keep working: the plugin looks up the connection ID first.
+
 ## Uninstall
 
 ```
