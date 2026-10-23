@@ -895,6 +895,12 @@ const UNREAD_STYLE_CONSTANTS = [
   ['a `let`', "let base = { color: 'red' };\nconst useStyles = makeStyles({ root: { ...base } });\n", ['unread-style-object@3:40']],
   ['a `var`', "var base = { color: 'red' };\nconst useStyles = makeStyles({ root: { ...base } });\n", ['unread-style-object@3:40']],
   ['a use before the declaration', "const useStyles = makeStyles({ root: { ...base } });\nconst base = { color: 'red' };\n", ['unread-style-object@2:40']],
+  // A shorthand member reads the binding of its name as a slot's value does: before the declaration ends it is not yet set (TypeScript's transpile hands Griffel
+  // `{ root: undefined }`), whichever way the slot is written, and in every call that holds such a use.
+  ['a shorthand slot before the declaration', "const useStyles = makeStyles({ root });\nconst root = { color: 'red' };\n", ['unread-style-object@2:32']],
+  ['a slot\'s value before the declaration', "const useStyles = makeStyles({ root: root });\nconst root = { color: 'red' };\n", ['unread-style-object@2:32']],
+  ['a shorthand slot before the declaration and one after it', "const a = makeStyles({ root });\nconst root = { color: 'red' };\nconst b = makeStyles({ root });\n",
+    ['unread-style-object@2:24', 'unread-style-object@4:24']],
   ['a parameter of the same name', "const base = { color: 'red' };\nfunction make(base) { return makeStyles({ root: { ...base } }); }\n", ['unread-style-object@3:51']],
   ['a variable of the same name in a function', "const base = { color: 'red' };\nfunction make() { const base = { borderWidth: 1 }; return makeStyles({ root: { ...base } }); }\n", ['unread-style-object@3:80']],
   ['a constant inside a function', "function make() { const base = { color: 'red' }; return makeStyles({ root: { ...base } }); }\n", ['unread-style-object@2:78']],
@@ -975,6 +981,36 @@ test('griffel-styles: a page the check passes hands Griffel no key it drops, con
   }
   // Pages of every kind are met: the check reads constants (and passes the clean ones) and refuses the rest.
   assert.ok(passed > 20 && pages - passed > 300, `${passed} of ${pages} pages passed`);
+});
+
+// A constant used before its declaration ends is not yet set where it is used. Run as TypeScript's transpile emits the page (`const` becomes `var`), Griffel is handed
+// `undefined` there; so the check passes no page with such a use — a shorthand member (`{ root }`) included, which reads the binding as `{ root: root }` does — and every
+// page it passes hands Griffel a style object wherever a constant stands.
+test('griffel-styles: a page the check passes uses no constant before its declaration ends, a shorthand member\'s use included', () => {
+  const vm = require('node:vm');
+  const received = (body) => {
+    const calls = [];
+    vm.runInNewContext(body.replace(/\bconst /g, 'var '), { makeStyles: (s) => { calls.push(s); return () => ({}); } });
+    return calls;
+  };
+  // Whether every style object Griffel is handed is an object, down to each slot, selector and spread it reaches.
+  const allObjects = (value) => value !== null && typeof value === 'object' && Object.values(value).every((v) => typeof v !== 'object' || v === null || allObjects(v))
+    && Object.values(value).every((v) => v !== undefined);
+  const uses = ['makeStyles({ root })', 'makeStyles({ root: root })', 'makeStyles({ root: { ...root } })', "makeStyles({ root: { ':hover': root } })", 'makeStyles(root)',
+    'makeStyles({ root, other: { color: 1 } })', 'makeStyles({ other: { ...root }, root })'];
+  let passedAfter = 0;
+  for (const use of uses) {
+    for (const before of [true, false]) {
+      const declaration = "const root = { color: 'red' };";
+      const body = before ? `const useStyles = ${use};\n${declaration}\n` : `${declaration}\nconst useStyles = ${use};\n`;
+      const problems = names(`${IMPORT}${body}`);
+      if (before) assert.ok(problems.includes('unread-style-object'), `${JSON.stringify(body)}: ${JSON.stringify(problems)}`);
+      if (problems.length > 0) continue;
+      if (!before) passedAfter += 1;
+      for (const styles of received(body)) assert.ok(allObjects(styles), `the check passed ${JSON.stringify(body)}, and Griffel gets ${JSON.stringify(styles)}`);
+    }
+  }
+  assert.ok(passedAfter >= 5, `${passedAfter} pages that use the constant after it is declared pass`);
 });
 
 test('griffel-styles: a call that never closes is reported, not skipped', () => {

@@ -1031,7 +1031,8 @@ function declarationEnd({ mask, match }, from) {
 }
 
 // Whether every use of the constant `name`, declared as `binding`, is one the check reads (topLevelStyleConsts): a style value it reached, after the declaration ends,
-// or the key of an object it reached. The name's own declaration and a property name after a `.` (`x.base`, `x?.base`; not a spread's `...base`) are no uses.
+// or the key of an object it reached. The name's own declaration and a property name after a `.` (`x.base`, `x?.base`; not a spread's `...base`) are no uses. A
+// shorthand member (`{ base }`) is a use of the name as a value — it reads the binding — never a key alone (scanStyleObject).
 function constUsesAreRead(ctx, name, binding) {
   const { keep, styleConsts } = ctx;
   const uses = new RegExp(`(?<![\\p{ID_Continue}$\\u200c\\u200d])${escapeRegExp(name)}(?![\\p{ID_Continue}$\\u200c\\u200d])`, 'gu');
@@ -1164,8 +1165,9 @@ function scanStyleObject(ctx, open, findings, slotObject, trail = [], arms = [])
     return;
   }
   for (const { member, within, arms: heldArms, slot, trusted } of heldMembers(ctx, open, findings, slotObject, trail, false, 0, arms)) {
-    // The key of a member of an object the check reads where it stands is a property's name, never a binding (topLevelStyleConsts).
-    if (trusted && member.nameAt !== undefined && ID_START.test(ctx.mask[member.nameAt] || '')) ctx.styleConsts.keySites.add(member.nameAt);
+    // The key of a member of an object the check reads where it stands is a property's name, never a binding (topLevelStyleConsts) — but a shorthand member's name
+    // (`{ root }`) is also its value, a read of the binding of that name, which must be a style value the check reads, after the declaration ends (constUsesAreRead).
+    if (trusted && !member.shorthand && member.nameAt !== undefined && ID_START.test(ctx.mask[member.nameAt] || '')) ctx.styleConsts.keySites.add(member.nameAt);
     if (!slotObject && member.name !== null && UNSUPPORTED_GRIFFEL_SHORTHANDS.has(member.name)) {
       findings.push({ name: member.name, at: member.nameAt, longhands: UNSUPPORTED_GRIFFEL_SHORTHANDS.get(member.name), within, arms: heldArms, value: valueText(ctx, member) });
     }
