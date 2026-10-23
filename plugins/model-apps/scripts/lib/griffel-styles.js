@@ -982,8 +982,13 @@ function topLevelStyleConsts(ctx, guessed) {
   if (guessed) return candidates;
   const twice = new Set();
   const declaration = new RegExp('(?<![\\p{ID_Continue}$.])const(?![\\p{ID_Continue}$])', 'gu');
+  // Whether a declaration is at the top of the page is read from the page's top-level spans (topLevelSpans), found once, in the order the declarations come: asking
+  // enclosed of each would read the page before it again, and a page of a thousand constants would be read a thousand times.
+  const top = topLevelSpans(ctx);
+  let span = 0;
   for (let m = declaration.exec(mask); m; m = declaration.exec(mask)) {
-    if (enclosed(ctx, m.index)) continue;
+    while (span < top.length && top[span][1] <= m.index) span += 1;
+    if (span === top.length || top[span][0] > m.index) continue;
     const prior = identifierEndingAt(mask, previousSignificant(mask, m.index) + 1);
     if (prior && (prior.name === 'export' || prior.name === 'declare')) continue;
     const nameAt = skipSpace(mask, m.index + m[0].length);
@@ -999,6 +1004,24 @@ function topLevelStyleConsts(ctx, guessed) {
   }
   for (const name of twice) candidates.delete(name);
   return candidates;
+}
+
+// The offsets at the top of the page — inside no bracket pair — as sorted [from, to) spans: what enclosed says of each offset, for all of them in one pass. A bracket
+// pair's opener and closer are at the top (enclosed asks about the brackets before an offset), what is between them is not, and a bracket that is never closed holds
+// everything after it.
+function topLevelSpans({ mask, match }) {
+  const spans = [];
+  let from = 0;
+  for (let k = 0; k < mask.length; k += 1) {
+    const c = mask[k];
+    if (c !== '{' && c !== '(' && c !== '[') continue;
+    spans.push([from, k + 1]);
+    if (match[k] === -1) return spans;
+    k = match[k];
+    from = k;
+  }
+  spans.push([from, mask.length]);
+  return spans;
 }
 
 // The `;` that ends the initializer starting at `from` at the top of the page, or -1: where a `,` comes first (another declarator), or a word that begins a statement
@@ -1035,25 +1058,41 @@ function declarationEnd({ mask, match }, from) {
 // shorthand member (`{ base }`) is a use of the name as a value — it reads the binding — never a key alone (scanStyleObject).
 function constUsesAreRead(ctx, name, binding) {
   const { keep, styleConsts } = ctx;
-  const uses = new RegExp(`(?<![\\p{ID_Continue}$\\u200c\\u200d])${escapeRegExp(name)}(?![\\p{ID_Continue}$\\u200c\\u200d])`, 'gu');
-  for (const m of keep.matchAll(uses)) {
-    if (m.index === binding.nameAt || styleConsts.keySites.has(m.index)) continue;
-    const before = previousSignificant(keep, m.index);
+  for (const at of constUses(ctx).get(name)) {
+    if (at === binding.nameAt || styleConsts.keySites.has(at)) continue;
+    const before = previousSignificant(keep, at);
     if (before >= 0 && keep[before] === '.' && keep[before - 1] !== '.') continue;
-    if (!styleConsts.requests.has(m.index) || m.index < binding.end) return false;
+    if (!styleConsts.requests.has(at) || at < binding.end) return false;
   }
   return true;
 }
 
+// Where each style constant's name stands in the executable view (`keep`), by name: one pass over the page for all of them, made once — where a search per constant
+// read the whole page once for each. A name is a whole word: no letter, digit, `$`, `_` or joiner touches it on either side.
+const WORD = /(?<![\p{ID_Continue}$\u200c\u200d])[\p{ID_Start}$_][\p{ID_Continue}$\u200c\u200d]*/gu;
+function constUses(ctx) {
+  const consts = ctx.styleConsts;
+  if (consts.uses) return consts.uses;
+  const uses = new Map();
+  for (const name of consts.candidates.keys()) uses.set(name, []);
+  for (const m of ctx.keep.matchAll(WORD)) {
+    const at = uses.get(m[0]);
+    if (at) at.push(m.index);
+  }
+  consts.uses = uses;
+  return uses;
+}
+
 // One round of topLevelStyleConsts: the constants every use of which the rounds so far have read become readable. The places only ever grow (a place the check reads
-// is one whatever round finds it), so the readable constants do too; true while they still grow.
+// is one whatever round finds it), so the readable constants do too; true while they grow by one that a style value names — a constant no style value names changes
+// nothing a round reads, so it calls for no other round.
 function settleStyleConsts(ctx) {
   const consts = ctx.styleConsts;
   let grew = false;
   for (const [name, binding] of consts.candidates) {
     if (consts.resolvable.has(name) || !constUsesAreRead(ctx, name, binding)) continue;
     consts.resolvable.add(name);
-    grew = true;
+    if (constUses(ctx).get(name).some((at) => consts.requests.has(at))) grew = true;
   }
   return grew;
 }
@@ -1434,9 +1473,11 @@ function griffelStyleProblems(source) {
   const angles = matchAngles(mask);
   const { local, helpers, helperNamespaces } = styleFunctionBindings(mask, src);
   const ctx = { mask, src, match, angles, helpers, helperNamespaces, keep, trusted: new Set(), trustedValue: false };
-  ctx.styleConsts = { candidates: topLevelStyleConsts(ctx, guess !== null), resolvable: new Set(), requests: new Set(), keySites: new Set() };
   const starts = lineStarts(src);
   const calls = styleFunctionCalls(mask, src, match, angles);
+  // The style constants are looked for only on a page with a style call to read them: a page with none has nothing they could change, and a page of a thousand
+  // constants (data, not styles) does no work for them.
+  ctx.styleConsts = { candidates: calls.length > 0 ? topLevelStyleConsts(ctx, guess !== null) : new Map(), resolvable: new Set(), requests: new Set(), keySites: new Set() };
   // Each call is told by the name its hook is bound to (bindingNameOf): every call starts its own slots, so two hooks both have a `root`, and a page compared with an earlier version of itself
   // (griffelProblemsNotIn) must know a key's call to say it is the one the page had. Only a name the page proves, and uses once, tells: every call is counted, the ones that are not read as well, so a call that
   // cannot be read does not make a name look unique; a name two calls are bound to — a `var` redeclared, an assignment made twice — says nothing of which is which, and neither call is anybody's (`owner` null).
