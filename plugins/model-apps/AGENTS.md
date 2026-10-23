@@ -3181,26 +3181,28 @@ Where TypeScript reads `(…)` as a function type is its own rule (`isUnambiguou
 is one, `(A | B)` is not, and nor is a parenthesised object type whose key is an index signature's or a mapped
 type's — `({ [key: string]: T })`, `({ [K in keyof T]: boolean })` — since that key holds no expression and so
 makes no binding pattern, where `({ [key]: v })` and `({ [K in T]: v })` do), and a return type nested deeper than
-any page (200 levels) is refused rather than read. **Known limit:** a default value in a binding pattern of a
-function type's parameter is passed over to the next `,` or closing bracket at its own level, and the comma between
-a generic call's type arguments is taken for one (`({ a = f<T, U>() }) => R`): the pattern then reads as none, the
-parentheses as a parenthesised type and the function type's `=>` as the arrow, so a write cut right after such a
-return type (`export default <T,>(p: T): ({ a = f<T,T>() }) => T`) is accepted — the page compile refuses it
-(TypeScript: `'=>' expected`), and `source-literals.test.js` pins it. With the call in parentheses the cut is refused.
-**Known limits, refused although TypeScript parses them** (both rare; 2.18.0 refused every synchronous generic-arrow
-default export, so neither is a regression there; it did admit the `async` forms of both — it took any `async` arrow
-text with an `=>` and something after it — and those are now refused too), pinned in `source-literals.test.js`:
-- a mapped type whose key type is in parentheses, inside a parenthesised return type — `(p): ({ [K in (keyof T)]: boolean }) => …`,
-  and so `((keyof T))`, `(keyof T) as K` and a parenthesised conditional key type. The key's reading takes any group in
-  parentheses for an operand, so `K in (keyof T)` reads as an expression, the braces as a binding pattern, the parentheses
-  as a function type's parameters and the arrow as that function type's, and the page as cut off. Write `[K in keyof T]`,
-  drop the parentheses around the return type (`(p): { [K in (keyof T)]: boolean } => …`), or name the type with a type
-  alias (`type Flags<T> = { [K in (keyof T)]: boolean }`, then `(p): Flags<T> => …`);
-- a return type that is a function type whose parameter has a computed key the reading does not know — one that starts with
-  a regular expression, `({ [/key/.source]: value }: Record<string, T>) => …` — and whose own return type starts with a
-  leading `|` (`=> | typeof value | null`). The key is taken for no expression, the parentheses for a parenthesised type,
-  the function type's `=>` for the arrow, and the `|` after it begins no body. Drop the leading `|`, write the key as a name
-  or a string, or name the function type with a type alias.
+any page (200 levels) is refused rather than read. A default value in a binding pattern of a function type's
+parameter is passed over to the `,` or closing bracket that ends it, a generic call's type arguments included: where
+TypeScript's parser takes a list of types after an operand (`parseTypeArgumentsInExpression`: types between `<` and
+`>`, then a `(`, a template, or the end of the value), the comma between them is the call's
+(`({ a = f<T, U>() }) => R`), the pattern is read, the parentheses hold a function type's parameters, and a write cut
+right after such a function type (`export default <T,>(p: T): ({ a = f<T,T>() }) => T`) is refused as TypeScript
+refuses it (`'=>' expected`). The types are read strictly, each with what its groups hold; anything else between the
+angle brackets is a comparison, as TypeScript reads it, and the value ends at its first comma. A computed key that holds
+an expression is one even where it starts with a regular expression (`({ [/key/.source]: value }: R) => | T | null`
+is a function type, whose `=>` and leading `|` are its own). And a mapped type whose key type is in parentheses, inside
+a parenthesised return type — `(p): ({ [K in (keyof T)]: boolean }) => …`, `((keyof T))`, `(keyof T) as K`, a
+parenthesised conditional key type, `[keyof T]` — is a parenthesised type, as TypeScript reads it: the braces are tried
+as a binding pattern first, whose key `K in (keyof T)` holds two names side by side in parentheses, which is no
+expression, so the pattern fails (`parenthesizedMappedType`; the mapped type is read strictly to the `)` that closes the
+parentheses around it, and `K in (T)` and `K in (Extract<keyof T, string>)`, which are expressions, still make a pattern).
+**Known limits** (rare, pinned in `source-literals.test.js`, each checked against TypeScript's parser): a type argument
+that the strict reading does not read — a function type, an object type with members, a template literal type, an import
+type — leaves the default value read to its first comma, so a write cut right after a function type whose parameter has
+`{ a = f<(x: T) => U, V>() }` is accepted (the page compile refuses it); and a mapped type whose key type is an object
+type with members or a function or constructor type in parentheses (`[K in ({ a: keyof T })]`, `[K in (new () => T)]`)
+is refused although TypeScript parses it — write the key type without the parentheses, drop the parentheses around the
+return type, or name the type with a type alias.
 The export pattern once took no `<` after `default`, and every such page was refused as having no default export.
 And `endsMidStatement` catches the cuts that leave every bracket balanced: the
 lexer reports when a file stops inside a string, template, comment or JSX element, and a file
