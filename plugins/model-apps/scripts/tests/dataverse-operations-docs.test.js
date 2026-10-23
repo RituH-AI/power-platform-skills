@@ -149,3 +149,32 @@ test('removing every Custom API keeps the built-in rows — `[]` only clears a p
   has(squash(read('agents', 'genpage-edit-planner.md')), /Clearing the Custom APIs of a page that also binds a built-in operation removes each Custom API row and keeps the built-in calls and bindings/);
   has(squash(read('references', 'dataverse-operations.md')), /Removing every Custom API is a remove of each Custom API row: the built-in rows stay, byte for byte/);
 });
+
+// A create that binds only built-in operations, followed through the create flow's own words with `custom-api` either way: the Custom API gate
+// governs Custom API rows only, both gates come first, then one decision writes and passes the whole array — so the built-in rows are bound.
+test('a built-in-only create passes --actions with custom-api ON or OFF: Phase 4.6 governs Custom API rows only, and one decision after both gates writes and passes the array', () => {
+  const skill = read('skills', 'genpage', 'SKILL.md');
+  const customGate = section(skill, '### Phase 4.6:', '### Phase 4.6b:');
+  // custom-api OFF: the sentinel continues, adding no Custom API row — not a ban on the whole actions file.
+  assert.ok(!/Do not create or pass `actions\.json`/.test(customGate), 'Phase 4.6 OFF: no ban on the whole actions file');
+  assert.ok(!/never add `--actions` on upload/.test(customGate), 'Phase 4.6 OFF: no ban on --actions');
+  has(customGate, /\*\*If it prints `disabled`:\*\* Custom API support is OFF\. Add no Custom API row/);
+  has(customGate, /only a body of exactly `No custom API bindings\.` continues, with no Custom API rows/);
+  // custom-api ON: the sentinel continues with no Custom API rows — not "no actions".
+  assert.ok(!/continue with no actions/.test(customGate), 'Phase 4.6 ON: not "no actions"');
+  has(customGate, /continue with no Custom API rows only when its body is exactly `No custom API bindings\.`/);
+  has(customGate, /This phase governs the Custom API rows only/);
+  // Both gates, then one decision.
+  const decision = section(skill, '### Phase 4.6c:', '### Phase 4.7:');
+  has(decision, /Decide once, after Phase 4\.6 and Phase 4\.6b/);
+  has(decision, /the create passes `--actions '<working-dir>\/actions\.json'` whatever `custom-api` printed/);
+  has(decision, /a page that binds only built-in operations is created with them bound, with `custom-api` enabled or disabled/);
+  has(decision, /\*\*Empty:\*\* the create passes no `--actions`/);
+  // The upload follows that decision, not Phase 4.6 alone.
+  const deploy = section(skill, '### Phase 6: Deploy', '### Phase 6.5:');
+  assert.ok(!/`--actions` line when Phase 4\.6 did not write `actions\.json`/.test(deploy), 'Phase 6: the omission is not keyed to Phase 4.6');
+  assert.ok(!/or Phase 4\.6 wrote `<working-dir>\/actions\.json`/.test(deploy), 'Phase 6: passing is not keyed to Phase 4.6');
+  has(deploy, /the `--actions` line when Phase 4\.6c decided an empty array/);
+  has(deploy, /pass `actions\.json` with `--actions` when Phase 4\.6c decided so/);
+  has(deploy, /The same rule applies to `--actions` for the page's `actionBindings` — Custom API and built-in rows alike/);
+});

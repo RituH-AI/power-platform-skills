@@ -668,19 +668,19 @@ authored while the flag was ON must not deploy Custom API bindings after it is t
 node "${PLUGIN_ROOT}/scripts/lib/feature-flags.js" custom-api
 ```
 
-**If it prints `disabled`:** Custom API support is OFF. Do not create or pass `actions.json`,
-and never add `--actions` on upload. The plan's `## Custom API Bindings` section still decides
+**If it prints `disabled`:** Custom API support is OFF. Add no Custom API row: none may reach
+`actions.json` or an upload. The plan's `## Custom API Bindings` section still decides
 whether the run may go on: only a body of exactly `No custom API bindings.` continues, with no
-Custom APIs. For an **actual binding table** (a `| Name | Kind | …` header with at least one data
+Custom API rows. For an **actual binding table** (a `| Name | Kind | …` header with at least one data
 row), **halt before page generation**. That plan was made while the flag was on, and page
 generation takes the table as permission to emit `executeAction` / `executeFunction` calls —
 deploying them with no bindings leaves pages calling Custom APIs that are not bound. Tell the user
-to turn the flag back on, or re-run planning (the Custom API builder writes no bindings while the
-flag is off). A missing, empty, or malformed section halts too, exactly as in the `enabled`
+to turn the flag back on, or re-run planning (the Custom API builder writes no Custom API bindings
+while the flag is off). A missing, empty, or malformed section halts too, exactly as in the `enabled`
 branch. (Backstop: `list-custom-apis.js` also fails closed with exit 3 if invoked while OFF.)
 
 **If it prints `enabled`:** read the plan's `## Custom API Bindings` section. The section is
-mandatory: continue with no actions only when its body is exactly `No custom API bindings.`.
+mandatory: continue with no Custom API rows only when its body is exactly `No custom API bindings.`.
 Treat it as bindings only when it contains an actual binding table (a `| Name | Kind | …`
 header with at least one data row). If the section is missing, empty, or malformed, **halt**
 before page generation; do not interpret a planner/schema failure as "no Custom APIs".
@@ -695,6 +695,10 @@ it is missing, derive it as a **bare JSON array** of
 Compare only the **Custom API rows** of `actions.json` with this table: a built-in operation row
 (`WhoAmI`, `RetrieveVersion`) belongs to Phase 4.6b, never fails this match, and is never
 uploaded by this branch alone.
+
+This phase governs the Custom API rows only. Whether `actions.json` is written and passed at all
+is decided once, after both gates, in Phase 4.6c — a disabled `custom-api` flag adds no Custom API
+row, and never takes away a built-in operation row the plan selected.
 
 ### Phase 4.6b: Built-in Dataverse Operations (Conditional)
 
@@ -715,6 +719,21 @@ preserve-only edit never consults this gate.
 four-key projection the builder wrote (Custom API rows first, then the built-in rows in
 catalogue order). If the builder selected a built-in operation but the plan lost its table,
 halt and re-invoke the planner — do not generate.
+
+### Phase 4.6c: The actions file, decided once (both gates)
+
+Decide once, after Phase 4.6 and Phase 4.6b, from the complete desired array: the Custom API
+rows of the plan's `## Custom API Bindings` table (none when Phase 4.6 printed `disabled`, or the
+body is `No custom API bindings.`), then the built-in operation rows of its
+`## Dataverse Operations` table (none when that section is absent or `No Dataverse operations.`;
+Phase 4.6b has already halted the run if its gate was off).
+
+- **Not empty:** `actions.json` must hold exactly that array, as the builder wrote it (Custom API
+  rows first, then the built-in rows in catalogue order) — verify it, and halt rather than
+  generate if it does not. Then the create passes `--actions '<working-dir>/actions.json'`
+  whatever `custom-api` printed: a page that binds only built-in operations is created with them
+  bound, with `custom-api` enabled or disabled.
+- **Empty:** the create passes no `--actions`.
 
 ### Phase 4.7: Page Telemetry (Conditional)
 
@@ -960,8 +979,8 @@ exited 0 is not deployed.
 
 For each `.tsx` file produced, deploy to Power Apps.
 
-If Phase 4.5 wrote `<working-dir>/connectors.json`, or Phase 4.6 wrote `<working-dir>/actions.json`,
-pass the file to the upload (`--connectors` / `--actions`). `genpage-upload.js` writes the bindings into
+If Phase 4.5 wrote `<working-dir>/connectors.json`, pass it with `--connectors`; pass `actions.json` with `--actions` when Phase 4.6c decided so
+(its desired array is not empty — Custom API rows, built-in operation rows, or both). `genpage-upload.js` writes the bindings into
 the page's `config.json` through the SDK, so there is no `--help` to pre-flight and no minimum `pac`
 build for them; a file that is not a JSON array is refused before anything is written. Never silently
 drop bindings.
@@ -978,7 +997,8 @@ Connector deployment matrix:
   `--connectors`, which clears the page's `connectorBindings`.
 
 Custom API deployment follows the **identical matrix** as connectors, substituting
-`--actions '<working-dir>/actions.json'` for `--connectors`: pass it on create; on an edit only
+`--actions '<working-dir>/actions.json'` for `--connectors`: pass it on create when Phase 4.6c's
+array is not empty; on an edit only
 when bindings changed/added/removed (full replace); omit it on an unrelated edit (the page keeps
 its deployed `actionBindings`); write `[]` and pass it to clear all `actionBindings` — on a page
 that also binds a built-in operation (`WhoAmI`, `RetrieveVersion`) only after the maker confirmed
@@ -1075,7 +1095,8 @@ node "${PLUGIN_ROOT}/scripts/genpage-upload.js" `
 ```
 
 Omit the `--connectors` line when Phase 4.5 did not write `connectors.json`, and the
-`--actions` line when Phase 4.6 did not write `actions.json`.
+`--actions` line when Phase 4.6c decided an empty array — a page that binds only built-in
+operations keeps it, whatever the `custom-api` flag says.
 
 **A new app** (the plan says `create new`): there is no app to name yet. Create the app's **first page with no
 `--app-id` and no `--add-to-sitemap`** — a page needs no app, and one created without it is added to none — and make
@@ -1127,8 +1148,9 @@ node "${PLUGIN_ROOT}/scripts/genpage-upload.js" `
 
 For updates, include the `--connectors` line only when this upload intentionally
 replaces or clears connector bindings; otherwise omit it to preserve the
-deployed page's current bindings. The same rule applies to `--actions` for Custom
-API bindings: include it only when this upload intentionally replaces or clears them.
+deployed page's current bindings. The same rule applies to `--actions` for the page's
+`actionBindings` — Custom API and built-in rows alike: include it only when this upload
+intentionally replaces, removes or clears them.
 
 An update that gives no `--name-file`, `--model`, `--data-sources`, `--connectors` or `--actions` keeps the page's own
 name, model, data sources and bindings: the SDK writes only what differs from the page it has just read, so an edit

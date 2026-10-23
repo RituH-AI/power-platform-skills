@@ -2980,7 +2980,7 @@ only the per-feature specifics are tabled below:
 | **Owner agent** | `genpage-customapi-builder` | none — codegen-only | `genpage-customapi-builder` (the same one writer of `actions.json`) |
 | **Plan section** | `## Custom API Bindings` | none — driven by the maker request, not the plan | `## Dataverse Operations` — OPTIONAL; absent means no new built-in operation |
 | **Gated scripts** | `list-custom-apis.js` | none | `list-dataverse-operations.js` |
-| **Deploy phase** | SKILL Phase 4.6 | SKILL Phase 4.7 (probe only) | SKILL Phase 4.6b — only for an add/replace; a preserve never consults it |
+| **Deploy phase** | SKILL Phase 4.6 | SKILL Phase 4.7 (probe only) | SKILL Phase 4.6b — only for an add/replace; a preserve never consults it; SKILL Phase 4.6c then decides once, from both partitions, whether a create passes `--actions` |
 | **ALM** | none needed — `config.json`'s `actionBindings` travels inside the page's `uxagentprojectfile` rows automatically (the Custom APIs themselves are a separate deployment prerequisite, bound by name) | none — telemetry rides the host runtime, nothing is packaged | none — the built-in operations are the platform's own; nothing to deploy |
 | **Emits** | `executeAction` / `executeFunction` / `listBoundActions` | `props.appInsights` calls (`trackEvent` / `trackMetric` / `trackTrace` / `trackException` / `trackDependency` / `startTrack` / `stopTrack`) | `executeFunction({ name: 'WhoAmI' \| 'RetrieveVersion' })` from a button only |
 

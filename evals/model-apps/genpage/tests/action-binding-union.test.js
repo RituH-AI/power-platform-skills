@@ -295,6 +295,18 @@ test('the two gates are independent at the authoring consumer: either one OFF st
   assert.equal(verdict(mixedFixture()).status, 'pass');
 });
 
+test('a built-in-only create binds its rows with --actions whatever custom-api says, and one that omits --actions fails in both layers', () => {
+  for (const customApi of ['enabled', 'disabled']) {
+    for (const layer of [1, 2]) {
+      const bound = score(createFixture({ rows: [WHO_AM_I], plan: SENTINEL_PLAN, source: BUILT_IN_ONLY, customApi, builtIns: 'enabled' }), layer);
+      assert.equal(bound.status, 'pass', `custom-api ${customApi}, layer ${layer}: ${bound.reason}`);
+      const omitted = createFixture({ rows: [WHO_AM_I], plan: SENTINEL_PLAN, source: BUILT_IN_ONLY, customApi, builtIns: 'enabled' });
+      event(omitted, 'create').command = 'node genpage-upload.js --code-file page.tsx --add-to-sitemap';
+      assert.equal(score(omitted, layer).status, 'fail', `custom-api ${customApi}, layer ${layer}: a create without --actions leaves WhoAmI unbound`);
+    }
+  }
+});
+
 test('a removal drops only the named entries and needs no built-in gate: WhoAmI out keeps the Custom API, and the reverse', () => {
   const removal = (removed, kept, source) => {
     const fixture = mixedFixture();
