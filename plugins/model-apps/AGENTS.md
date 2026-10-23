@@ -1672,7 +1672,9 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   label; `readCommandInventory`): the unmanaged modern commands (`appaction` rows, read by the table's logical name,
   20 tables to a request) that are table-scoped or scoped to this app — not another app's, not a Group container, not
   an inactive row. They used to be named nowhere, so a rebuild in another environment dropped them without a word. A
-  failed read is reported as `commands` under the classes that could not be inventoried, never as "no commands".
+  failed read is reported as `commands` under the classes that could not be inventoried, never as "no commands". A
+  command bound to no table (global scope, or an app-scoped command of a bar no table has) is not read: the App Spec's
+  `commands[]` has no form for one either.
   **A page's connector and Custom API bindings are in the spec** (`pages[].connectorBindings`,
   `pages[].actionBindings`; the format and the rebuild rules are in `references/app-spec-schema.md` →
   `pages[]`). The page folder always held the raw lists in its `config.json`, but the spec carried only
