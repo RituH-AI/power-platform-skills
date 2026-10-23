@@ -357,7 +357,7 @@ async function readRelationshipMetadataForTable(sdk, logical, mediaKeys) {
   return { logical, rows, rowsFailure, lookups, manyToManyRows, manyToManyFailure };
 }
 
-async function readRelationships(sdk, logicals, publisherPrefix, warn, { prefixUnknown = false, entities = [], concurrency } = {}) {
+async function readRelationships(sdk, logicals, publisherPrefix, warn, { prefixUnknown = false, entities = [], concurrency, languageCode } = {}) {
   concurrency = validatedDownloadConcurrency(concurrency);
   const inApp = new Set((logicals || []).map((l) => String(l).toLowerCase()));
   const lc = (s) => String(s || '').toLowerCase();
@@ -416,7 +416,11 @@ async function readRelationships(sdk, logicals, publisherPrefix, warn, { prefixU
     const stockRaw = stockLabels.get(lc(referenced));
     const live = stockRaw && lookupLanguages.length === 1 ? labelsByLcid(stockRaw)[lookupLanguages[0]] : undefined;
     const would = lookupLabelFor({ entities }, { referenced }, { liveReferencedLabel: live });
-    return (would.source === 'table' || would.source === 'environment') && sameLabel(lookupLabel, would.label);
+    // `lookupLabel` comes without its language — a plain string when it is held in one language (the caller passes labelFromDataverse's
+    // form with no authoring language) — and a parent in the app is compared by its text the same way: a downloaded table keeps a label
+    // held in one language other than the authoring one as a one-entry map, which names the same text. So a label is left out exactly
+    // where it always was.
+    return (would.source === 'table' || would.source === 'environment') && sameLabel(lookupLabel, singleLanguageText(would.label));
   };
 
   const media = mediaRelationshipKeys(entities);
@@ -464,8 +468,10 @@ async function readRelationships(sdk, logicals, publisherPrefix, warn, { prefixU
       seen.add(key);
       const a = lookups.get(attr);
       const lookup = { schemaName: (a && a.SchemaName) || r.ReferencingAttribute };
-      const displayName = a && labelFromDataverse(a.DisplayName);
-      if (displayName && !omitsDefaultLabel(referenced, displayName, a.DisplayName)) lookup.displayName = displayName;
+      // Whether the label is left out is decided on the label without its language (as it always was); the label written keeps a
+      // language other than the authoring one (labelFromDataverse).
+      const displayName = a && labelFromDataverse(a.DisplayName, languageCode);
+      if (displayName && !omitsDefaultLabel(referenced, labelFromDataverse(a.DisplayName), a.DisplayName)) lookup.displayName = displayName;
       // Keep the deployed name whenever it is not the one this prefix would generate. Omitting a
       // foreign name used to rename it onto the generated default; the rebuild then created under
       // that name, the CREATE failed because the lookup already existed, and the name search found
@@ -1597,8 +1603,9 @@ function optionSetFromRow(row) {
 // `labelFromDataverse` reads only `LocalizedLabels`, so a Label carrying just
 // a `UserLocalizedLabel` falls back to the single-string unwrap rather than emitting `undefined`,
 // which would fail validation with "options[i] must be a non-empty string".
-function localizedSpecLabel(label) {
-  const localized = labelFromDataverse(label);
+// `languageCode` is the download's authoring language (labelFromDataverse).
+function localizedSpecLabel(label, languageCode) {
+  const localized = labelFromDataverse(label, languageCode);
   return localized !== undefined ? localized : descriptionFromDataverse(label);
 }
 
@@ -2051,10 +2058,17 @@ function entityFromMetadata(meta, logical, { unexpressible, incomplete, schemaOm
     //
     // The shared `ambiguousChoiceAliases` is reused rather than reimplemented, so this screen and
     // the validator can never disagree about what "ambiguous" means.
-    const inlineOptions = optionSet && !(optionSet.isGlobal && optionSet.name)
-      ? optionSet.options.map(localizedSpecLabel)
-      : null;
-    const inlineIsAmbiguous = inlineOptions ? ambiguousChoiceAliases(inlineOptions).some((c) => c.hidden) : false;
+    //
+    // Options held in one language other than the authoring one come back as one-entry LCID maps
+    // (labelFromDataverse), and the validator counts a collision involving a map as hidden — so two
+    // options sharing one such label would leave a column untyped that the same labels as plain strings
+    // (the shape an earlier download wrote, which the validator only warns about) kept typed. That one
+    // case keeps the plain strings, as before; every other set keeps each option's language.
+    const inlineLabels = (lcid) => optionSet.options.map((l) => localizedSpecLabel(l, lcid));
+    const hiddenCollision = (options) => ambiguousChoiceAliases(options).some((c) => c.hidden);
+    let inlineOptions = optionSet && !(optionSet.isGlobal && optionSet.name) ? inlineLabels(languageCode) : null;
+    if (inlineOptions && hiddenCollision(inlineOptions) && !hiddenCollision(inlineLabels(undefined))) inlineOptions = inlineLabels(undefined);
+    const inlineIsAmbiguous = inlineOptions ? hiddenCollision(inlineOptions) : false;
     const usableOptionSet = inlineIsAmbiguous ? null : optionSet;
     const specType = TYPES_NEEDING_COMPANION_DATA.has(mapped) && !usableOptionSet ? undefined : mapped;
     const choice = !usableOptionSet ? {}
@@ -2081,7 +2095,7 @@ function entityFromMetadata(meta, logical, { unexpressible, incomplete, schemaOm
       // tail would then emit that raw object as the column's displayName, producing a spec that fails
       // its own validation with "'LocalizedLabels' is not an LCID". Omitting the label entirely is the
       // right answer: Dataverse has none either.
-      ...(columnDisplayName(a) !== undefined ? { displayName: columnDisplayName(a) } : {}),
+      ...(columnDisplayName(a, languageCode) !== undefined ? { displayName: columnDisplayName(a, languageCode) } : {}),
       ...(specType ? { type: specType } : {}),
       ...choice,
       ...columnOptionFields(a, specType),
@@ -2091,20 +2105,29 @@ function entityFromMetadata(meta, logical, { unexpressible, incomplete, schemaOm
   }).filter((c) => c.schemaName);
   // Table label + plural. When the table carries more than one language, BOTH must round-trip and
   // `pluralName` becomes required (validateAppSpec refuses to derive a plural from a label map), so
-  // the plural is emitted whenever the display name is localized.
-  const displayName = labelFromDataverse(meta && meta.DisplayName);
-  const pluralName = labelFromDataverse(meta && meta.DisplayCollectionName);
+  // the plural is emitted whenever the display name is localized. A label held in one language other
+  // than the authoring one keeps its language as a one-entry map (labelFromDataverse).
+  const displayName = labelFromDataverse(meta && meta.DisplayName, languageCode);
+  let pluralName = labelFromDataverse(meta && meta.DisplayCollectionName, languageCode);
   // The primary column's own label. It is EXCLUDED from `columns[]` (it is declared separately as
   // `primaryAttribute`), so its label has to be read from the un-filtered attribute list here —
   // otherwise a table whose primary column is called "Order Title" / "Título del pedido" downloads
   // as the hardcoded "Name", and a fresh-environment rebuild loses both the real label and its
   // translations. `'Name'` remains the fallback for a metadata read that carried no label at all.
   const primaryAttr = primaryLower ? attrs.find((a) => String((a && (a.logicalName || a.LogicalName || a.schemaName || a.SchemaName)) || '').toLowerCase() === primaryLower) : null;
-  const primaryLabel = columnDisplayName(primaryAttr);
+  const primaryLabel = columnDisplayName(primaryAttr, languageCode);
   const tableSchemaName = (meta && (meta.schemaName || meta.logicalName)) || logical;
   const tableLabel = displayName !== undefined ? displayName : ((meta && meta.displayName) || logical);
+  // A display name kept in its one language as a map needs a plural beside it (validateAppSpec). When the table has no plural label to
+  // read, it is the plural a rebuild of the plain label derived before — derivedPluralName — in that same language, so the text a rebuild
+  // writes is what it always was and only its language is right.
+  const singleLanguage = isLocalizedLabelMap(displayName) && Object.keys(displayName).length === 1;
+  if (pluralName === undefined && singleLanguage) {
+    const [lcid] = Object.keys(displayName);
+    pluralName = { [lcid]: derivedPluralName({ schemaName: tableSchemaName, displayName: displayName[lcid] }) };
+  }
   const statusReasons = statusReasonsFromOptions(meta && meta.statusOptions, { customTable: !meta || meta.isCustomEntity !== false, languageCode, omitted: schemaOmissions });
-  const alternateKeys = alternateKeysFromMetadata(meta && meta.Keys, localizedSpecLabel, schemaOmissions);
+  const alternateKeys = alternateKeysFromMetadata(meta && meta.Keys, (label) => localizedSpecLabel(label, languageCode), schemaOmissions);
   return {
     schemaName: tableSchemaName,
     displayName: tableLabel,
@@ -2408,27 +2431,33 @@ async function readMediaColumns(sdk, logical, attributes, concurrency) {
 //                         { "Label": "Línea base", "LanguageCode": 3082 }],
 //     "UserLocalizedLabel": { "Label": "Baseline", "LanguageCode": 1033 } }
 //
-// Returns a plain STRING when the table is labelled in one language, and an LCID map only when there
-// are genuinely two or more. That asymmetry is deliberate: emitting `{ "1033": "Baseline" }` for
-// every single-language table would change the shape of every spec this tool has ever written, for
-// no gain, and would make every download diff noisy. Returns undefined when there is nothing usable,
-// so a caller can fall back to the SDK's flattened `displayName` rather than write an empty label.
+// Returns an LCID map when there are genuinely two or more languages. A label in ONE language is a
+// plain STRING when that language is `languageCode` — the download's authoring language (the
+// `--language-code` flag, else the spec's own pin, else the environment's base language: the language
+// a rebuild of this spec resolves, the one the navigation titles are read in) — and a ONE-ENTRY map,
+// `{ "3082": "Pedido" }`, when it is another. A plain string is written by a rebuild in the language
+// that rebuild resolves, so dropping the LCID of a label held in another language stored Spanish text
+// as the English label, in this environment as in any other. Keeping the plain string for the
+// authoring language keeps every ordinary download byte-identical (a single-language table's labels
+// are all in it) and keeps the spec consistent: every plain label in it is in that one language. A
+// caller with no `languageCode` gets the plain string, as before. Returns undefined when there is
+// nothing usable, so a caller can fall back to the SDK's flattened `displayName` rather than write an
+// empty label.
 //
-// ⚠ KNOWN LIMITATION, accepted rather than overlooked: the LCID of a SINGLE label is not preserved.
-// A table labelled only in 3082 downloads as a plain string, and a rebuild applies it at the target
-// build's resolved language — correct when rebuilding into the same organization (its base language
-// is the same), wrong when rebuilding into one with a different base, where Spanish text is stored
-// as an English label. Fixing it means threading the org's base language into this pure function and
-// emitting a one-entry map whenever the two differ, which changes the emitted shape for a case that
-// is currently indistinguishable from the common one. `download` also deliberately never pins the
-// org's LCID into the spec (that would make the spec non-portable), so there is no existing signal
-// to key off. Pin `languageCode` in the spec before a cross-organization rebuild.
-function labelFromDataverse(value) {
+// A rebuild into an environment whose base language is not the authoring language still writes the
+// plain labels in ITS language — as it writes the navigation titles — unless the spec pins
+// `languageCode` (or the build is given `--language-code`); a one-entry map needs its language
+// provisioned there, and the build stops at the start of its data-model phase when it is not.
+function labelFromDataverse(value, languageCode) {
   if (!value || typeof value !== 'object') return undefined;
   const rows = Array.isArray(value.LocalizedLabels) ? value.LocalizedLabels : [];
   const usable = rows.filter((l) => l && typeof l.Label === 'string' && l.Label.trim() && Number.isInteger(Number(l.LanguageCode)) && Number(l.LanguageCode) > 0);
   if (!usable.length) return undefined;
-  if (usable.length === 1) return usable[0].Label;
+  if (usable.length === 1) {
+    const only = Number(usable[0].LanguageCode);
+    const authoring = normalizeLanguageCode(languageCode);
+    return authoring && only !== authoring ? { [String(only)]: usable[0].Label } : usable[0].Label;
+  }
   const out = {};
   // NOT sorted, deliberately: V8 orders integer-like object keys ASCENDING regardless of insertion
   // order, so `JSON.stringify` of this map is already deterministic and two downloads of the same
@@ -2438,11 +2467,20 @@ function labelFromDataverse(value) {
   return out;
 }
 
+// The text of a label held in one language, whichever shape it is written in — a plain string, or the one-entry map a label in a language
+// other than the authoring one is written as (labelFromDataverse). Any other label — a map of several languages — is returned as it is.
+function singleLanguageText(label) {
+  if (!isLocalizedLabelMap(label)) return label;
+  const values = Object.values(label);
+  return values.length === 1 ? values[0] : label;
+}
+
 // The App Spec `displayName` for one downloaded column, or undefined when Dataverse has no usable
 // label. GUARANTEES a string or an LCID map — never a raw Dataverse Label object, which would emit a
 // spec that fails its own validation. See the call site for the live-measured shape that motivated it.
-function columnDisplayName(a) {
-  const localized = labelFromDataverse(a && a.DisplayName);
+// `languageCode` is the download's authoring language (labelFromDataverse).
+function columnDisplayName(a, languageCode) {
+  const localized = labelFromDataverse(a && a.DisplayName, languageCode);
   if (localized !== undefined) return localized;
   // The SDK's `fetchEntityMetadata` projection already flattens this one to a string.
   if (typeof (a && a.displayName) === 'string' && a.displayName.trim()) return a.displayName;
@@ -3232,7 +3270,7 @@ async function runDownload({ sdk, genpage, outDir, appId, appUnique, allowLossy 
   try {
     const rel = await readRelationships(sdk, allLogicals, solution.publisherPrefix, (m) => {
       process.stderr.write(`WARNING: ${m}\n`);
-    }, { prefixUnknown, entities, concurrency });
+    }, { prefixUnknown, entities, concurrency, languageCode });
     relationships = rel.relationships;
     relationshipsSkipped = rel.skipped;
   } catch (e) {

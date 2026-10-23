@@ -1561,7 +1561,7 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   `readNavigationLanguage`, before the SDK is made). The SDK projects a sitemap in the ONE language
   it is constructed with and reads a node's title as empty when it has none in that language, so an SDK
   built with no language (1033) wrote `"label": ""` for every area, group and entry of a Spanish-only
-  environment. A label is a plain string, as a single-language table label is, and the language is never
+  environment. A navigation label is a plain string, and the language is never
   written into the spec: the flag decides what is read, not what is pinned, and a flag that names another
   language than the spec on disk pins is refused (`navigation-language-conflict`). When none of the three
   gives a language — the base language could not be read — the download stops before it writes anything
@@ -1575,6 +1575,16 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   which that rebuild writes over the right ones. `--verify` makes the same choice. A title a node holds only in
   another language is not in the spec, and a rebuild into the same environment leaves it as it is (the rule
   for a title the spec does not state, under the sitemap above).
+  **A table, column, option, lookup or alternate-key label held in ONE language keeps that language when it is
+  not the authoring language** (`labelFromDataverse`): it is written as a one-entry LCID map, `{ "3082": "Pedido" }`,
+  so a rebuild stores it in that language — a plain string was stored in the language the rebuild resolves, which
+  put Spanish text in the English label, in a fresh environment that had Spanish as much as in one that had not — and
+  a rebuild into an environment without the language stops at the start of its data model and names it. A label in
+  the authoring language stays a plain string, so an ordinary download is byte-identical
+  (`download-label-language-real-bundle.test.js`). Whether a lookup's label is left out is decided on its text, as
+  before. Two inline options sharing one such label keep the plain strings (as one-entry maps the validator would
+  refuse the collision and the column would lose its type), and global-choice labels stay plain strings (the spec
+  refuses a localized one).
   The fetched SDK navigation must agree with the selected current XML's full target multiset:
   entities, generative pages, URLs, dashboards and custom pages, including repeated shortcuts.
   A missing SDK sitemap or a mismatch is refused with publish-then-download guidance, never emitted

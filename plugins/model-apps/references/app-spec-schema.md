@@ -310,8 +310,17 @@ choosing a Choice option, or `personas[].jobs[].surfaces[]` naming a screen — 
 languages resolves to the same artifact. One option, one value, several names.
 
 **Round-trip.** `download-model-app` reconstructs localized labels from Dataverse: a table, plural,
-column or option labelled in several languages comes back as a map, and one labelled in a single
-language comes back as a plain string (so no existing spec changes shape). The download emits
+column, lookup, alternate key or option labelled in several languages comes back as a map. One labelled
+in a single language comes back as a plain string when that language is the download's authoring
+language (`--language-code`, else the `languageCode` the spec already on disk pins, else the environment's
+base language — so no ordinary spec changes shape), and as a **one-entry map** when it is another:
+`{ "3082": "Pedido" }` for a table labelled only in Spanish, downloaded from an environment whose base
+language is English. A plain string is written in the language a rebuild resolves, so that label used to
+come back as an English label with Spanish text; a map keeps its language, and a rebuild into an
+environment that does not have it stops at the start of its data model and names it (see the rule above)
+instead. Every plain label in a downloaded spec is in the authoring language, as its navigation titles
+are: a rebuild into an environment whose base language is another writes them in that one, unless the
+spec pins `languageCode` or the build is given `--language-code`. The download emits
 `pluralName` alongside a localized `displayName`, so its own output re-validates, and beside a plain one
 whenever it is not the `"<displayName>s"` a rebuild would derive — `"Tag Catalog"` for `"Tag"` comes back,
 `"Tags"` does not (it is the default).

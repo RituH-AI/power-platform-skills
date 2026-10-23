@@ -378,6 +378,87 @@ test('a single-language table still downloads as a plain string', () => {
   // No plural is emitted for a plain label — it was never in the spec before and adding it would
   // change every existing download.
   assert.strictEqual('pluralName' in e, false, JSON.stringify(e));
+  // ...and it stays exactly that when the label is in the download's authoring language.
+  assert.deepStrictEqual(entityFromMetadata(meta, 'new_order', { languageCode: 1033 }), e);
+});
+
+// --- a label held in ONE language that is not the authoring one ----------------------------------
+// The authoring language is the one a rebuild of the download resolves: --language-code, else the spec's pin, else the environment's
+// base language. A plain string is written in the language a rebuild resolves, so a label held only in Spanish, downloaded from an
+// environment whose base language is English, was rebuilt as an English label with Spanish text. The download now keeps its language.
+const onlyIn = (lcid, text) => dvLabel([[lcid, text]]);
+
+test('labelFromDataverse keeps the language of a label held in one language other than the authoring one, and nothing else changes', () => {
+  assert.deepStrictEqual(labelFromDataverse(onlyIn(3082, 'Pedido'), 1033), { 3082: 'Pedido' });
+  assert.strictEqual(labelFromDataverse(onlyIn(3082, 'Pedido'), 3082), 'Pedido', 'in the authoring language it is a plain string');
+  assert.strictEqual(labelFromDataverse(onlyIn(1033, 'Order'), 1033), 'Order');
+  assert.strictEqual(labelFromDataverse(onlyIn(1033, 'Order'), '1033'), 'Order', 'an LCID given as text is the same language');
+  assert.strictEqual(labelFromDataverse(onlyIn(3082, 'Pedido')), 'Pedido', 'a caller that names no authoring language gets the plain string, as before');
+  assert.deepStrictEqual(labelFromDataverse(dvLabel([[1033, 'Order'], [3082, 'Pedido']]), 1033), { 1033: 'Order', 3082: 'Pedido' }, 'several languages: the map, as before');
+  assert.strictEqual(labelFromDataverse(dvLabel([]), 1033), undefined);
+});
+
+function spanishOnlyTable() {
+  return {
+    logicalName: 'contoso_pedido', schemaName: 'contoso_pedido', displayName: 'Pedido', primaryNameAttribute: 'contoso_name',
+    DisplayName: onlyIn(3082, 'Pedido'), DisplayCollectionName: onlyIn(3082, 'Pedidos'),
+    attributes: [
+      { logicalName: 'contoso_name', schemaName: 'contoso_name', attributeType: 'String', isCustomAttribute: true, DisplayName: onlyIn(3082, 'Nombre') },
+      { logicalName: 'contoso_importe', schemaName: 'contoso_importe', attributeType: 'Integer', isCustomAttribute: true, DisplayName: onlyIn(3082, 'Importe') },
+      { logicalName: 'contoso_nota', schemaName: 'contoso_nota', attributeType: 'String', isCustomAttribute: true, DisplayName: onlyIn(1033, 'Note') },
+      { logicalName: 'contoso_estado', schemaName: 'contoso_estado', attributeType: 'Picklist', isCustomAttribute: true, DisplayName: onlyIn(3082, 'Estado'),
+        optionSet: { type: 'Choice', isGlobal: false, options: [onlyIn(3082, 'Abierto'), onlyIn(3082, 'Cerrado')] } },
+    ],
+    Keys: [{ SchemaName: 'contoso_importekey', DisplayName: onlyIn(3082, 'Clave de importe'), KeyAttributes: ['contoso_importe'] }],
+  };
+}
+const asSpec = (entity) => ({ ...base(), languageCode: undefined, entities: [entity] });
+
+test('a table labelled in Spanish, downloaded in English, keeps every label in Spanish — table, plural, primary column, columns, options, key — and the spec validates', () => {
+  const e = entityFromMetadata(spanishOnlyTable(), 'contoso_pedido', { languageCode: 1033 });
+  assert.deepStrictEqual(e.displayName, { 3082: 'Pedido' });
+  assert.deepStrictEqual(e.pluralName, { 3082: 'Pedidos' });
+  assert.deepStrictEqual(e.primaryAttribute.displayName, { 3082: 'Nombre' });
+  const col = (name) => e.columns.find((c) => c.schemaName === name);
+  assert.deepStrictEqual(col('contoso_importe').displayName, { 3082: 'Importe' });
+  assert.deepStrictEqual(col('contoso_estado').displayName, { 3082: 'Estado' });
+  assert.deepStrictEqual(col('contoso_estado').options, [{ 3082: 'Abierto' }, { 3082: 'Cerrado' }]);
+  assert.strictEqual(col('contoso_estado').type, 'Choice');
+  assert.strictEqual(col('contoso_nota').displayName, 'Note', 'a label in the authoring language stays a plain string');
+  assert.deepStrictEqual(e.alternateKeys.map((k) => k.displayName), [{ 3082: 'Clave de importe' }]);
+  assert.deepStrictEqual(validateAppSpec(asSpec(e), { profile: 'plan', reconstructed: true }).errors, []);
+  assert.deepStrictEqual(validateAppSpec(asSpec(e), { profile: 'deploy' }).errors, []);
+});
+
+test('the same table downloaded in Spanish is written as plain strings — the shape an earlier download wrote — but for the English label, which keeps its language', () => {
+  const e = entityFromMetadata(spanishOnlyTable(), 'contoso_pedido', { languageCode: 3082 });
+  const old = entityFromMetadata(spanishOnlyTable(), 'contoso_pedido');
+  assert.strictEqual(e.displayName, 'Pedido');
+  assert.strictEqual(e.primaryAttribute.displayName, 'Nombre');
+  assert.deepStrictEqual(e.columns.find((c) => c.schemaName === 'contoso_estado').options, ['Abierto', 'Cerrado']);
+  assert.deepStrictEqual(e.columns.find((c) => c.schemaName === 'contoso_nota').displayName, { 1033: 'Note' });
+  assert.deepStrictEqual({ ...e, columns: e.columns.filter((c) => c.schemaName !== 'contoso_nota') }, { ...old, columns: old.columns.filter((c) => c.schemaName !== 'contoso_nota') }, 'every Spanish label is what a download wrote before');
+  assert.deepStrictEqual(validateAppSpec(asSpec(e), { profile: 'plan', reconstructed: true }).errors, []);
+});
+
+test('a display name kept in its language with no plural label to read gets the plural a rebuild derived before, in that language', () => {
+  // validateAppSpec requires a plural beside a localized display name. The text is the one a rebuild of the plain label derived
+  // (derivedPluralName); only its language is new.
+  const meta = { ...spanishOnlyTable(), DisplayCollectionName: undefined };
+  const e = entityFromMetadata(meta, 'contoso_pedido', { languageCode: 1033 });
+  assert.deepStrictEqual(e.pluralName, { 3082: 'Pedidos' });
+  assert.deepStrictEqual(validateAppSpec(asSpec(e), { profile: 'plan', reconstructed: true }).errors, []);
+  assert.strictEqual('pluralName' in entityFromMetadata(meta, 'contoso_pedido'), false, 'as before, a plain label gets none');
+});
+
+test('two options sharing one label held in another language keep the plain strings an earlier download wrote, and the column keeps its type', () => {
+  // As one-entry maps the two would collide in a way the validator refuses (a collision involving a localized label), and the column
+  // would be left untyped; as plain strings the validator only warns, as it did before.
+  const meta = spanishOnlyTable();
+  meta.attributes.find((a) => a.logicalName === 'contoso_estado').optionSet.options = [onlyIn(3082, 'Abierto'), onlyIn(3082, 'Abierto')];
+  const estado = entityFromMetadata(meta, 'contoso_pedido', { languageCode: 1033 }).columns.find((c) => c.schemaName === 'contoso_estado');
+  assert.deepStrictEqual(estado.options, ['Abierto', 'Abierto']);
+  assert.strictEqual(estado.type, 'Choice');
 });
 
 test('a metadata read that returned no labels falls back to the SDK display name', () => {

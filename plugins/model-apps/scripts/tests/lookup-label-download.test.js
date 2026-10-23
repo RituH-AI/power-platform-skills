@@ -139,3 +139,30 @@ test('ADO 6691205 download: a minimal downloaded relationship validates and rebu
   assert.deepStrictEqual(checked.errors.filter((e) => /lookup|relationship/i.test(e)), []);
   assert.strictEqual(lookupColumnsFor(spec, 'new_ticket')[0].displayName, 'Customer');
 });
+
+// A lookup label held in one language other than the download's authoring language keeps its language (a one-entry LCID map, as
+// labelFromDataverse writes every such label), so a rebuild does not store it under the language it resolves. Whether the label is
+// left out is decided as it always was, on its text in its language.
+const readIn = (sdk, entities, languageCode) => readRelationships(sdk, ['new_customer', 'new_ticket'], 'new', undefined, { entities, languageCode });
+
+test('a carried lookup label held only in another language than the authoring one keeps its language', async () => {
+  const { relationships } = await readIn(makeSdk(ticketToCustomer(label([3082, 'Titular']))), [customer('Customer'), ticket()], 1033);
+  assert.deepStrictEqual(relationships[0].lookup, { schemaName: 'new_CustomerId', displayName: { 3082: 'Titular' } });
+  const authoring = await readIn(makeSdk(ticketToCustomer(label([3082, 'Titular']))), [customer('Customer'), ticket()], 3082);
+  assert.deepStrictEqual(authoring.relationships[0].lookup, { schemaName: 'new_CustomerId', displayName: 'Titular' }, 'in the authoring language it is the plain string');
+});
+
+test('a lookup label is left out exactly where it was before: like its in-app parent written in its one language, or like a stock parent in its own language', async () => {
+  // The parent table labelled only in Spanish is downloaded as { 3082: "Cliente" } now; the lookup labelled "Cliente" in Spanish is
+  // the same label, so it is left out, as it was when both were the plain string "Cliente".
+  const inApp = await readIn(makeSdk(ticketToCustomer(label([3082, 'Cliente']))), [customer({ 3082: 'Cliente' }), ticket()], 1033);
+  assert.deepStrictEqual(inApp.relationships[0].lookup, { schemaName: 'new_CustomerId' });
+  const stock = makeSdk({
+    m2o: { new_ticket: [rel({ SchemaName: 'new_systemuser_new_ticket', ReferencedEntity: 'systemuser', ReferencingEntity: 'new_ticket', ReferencingAttribute: 'new_agentid' })] },
+    lookups: { new_ticket: [{ LogicalName: 'new_agentid', SchemaName: 'new_AgentId', DisplayName: label([1036, 'Utilisateur']), Targets: ['systemuser'] }] },
+    parents: { systemuser: label([1033, 'User'], [1036, 'Utilisateur']) },
+  });
+  assert.deepStrictEqual((await readIn(stock, [ticket()], 1033)).relationships[0].lookup, { schemaName: 'new_AgentId' });
+  const oldDefault = await readIn(makeSdk(ticketToCustomer(label([3082, 'new_customer']))), [customer('Customer'), ticket()], 1033);
+  assert.deepStrictEqual(oldDefault.relationships[0].lookup, { schemaName: 'new_CustomerId' }, 'the old default is left out in any language');
+});
