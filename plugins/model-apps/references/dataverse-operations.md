@@ -302,7 +302,10 @@ What the pattern holds, in this order:
    output-shaped data shows none of it. An **actual** HTTP 404 on the result (a numeric
    `status` of 404) says `The selected operation is unavailable in this environment or player.
    No fallback was attempted.` and keeps the binding; a status is never read out of the
-   message's words, and no message suggests deploying a Custom API.
+   message's words, and no message suggests deploying a Custom API. The current model-driven
+   player passes no HTTP status to the page: a 404, a 403, a 429 and a network failure all
+   arrive as its own sanitized message, so in practice the page shows that message and cannot
+   tell an unavailable operation from a refused one.
 3. Only then `res.outputs` — a non-null object that is not an array (an empty or 204 answer is
    `{}`) — and only through own-property reads. Never the result root, `res.value`, `res.body`
    or fault details; never a spread, an iteration or `JSON.stringify` of it; any other property
@@ -314,7 +317,9 @@ What the pattern holds, in this order:
 5. A rejected promise is caught and shows bounded guidance, never a stack. A timeout or a
    `network` code is **not** proof the request never left the client or was cancelled, and the
    host does not cancel a timed-out GET: the pending button is disabled, which is not a claim
-   that the request stopped. A retry is the user's next click — never automatic.
+   that the request stopped. The page never retries — a retry is the user's next click. The
+   current player's own transport can re-send a request once after a connection reset, so a
+   click that failed may still have reached the service (both operations only read).
 6. Each operation has its own pending state and request counter: a new click clears that
    operation's previous result, a stale or unmounted answer is ignored, and the other
    operation's button stays usable.
