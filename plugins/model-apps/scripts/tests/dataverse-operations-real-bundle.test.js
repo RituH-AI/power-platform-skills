@@ -14,7 +14,7 @@ const { makeGenpageSdk, pageFolderFiles } = require('../lib/genpage-sdk.js');
 const { statedPageBindings } = require('../lib/app-spec.js');
 const { getReviewedDataverseOperation, toActionBinding } = require('../lib/dataverse-operations.js');
 const { parseDownloadedPages, pageBindingsReport, pageBindingsNote } = require('../download-model-app.js');
-const { FakeGenPageServer, INSTANCE, ACCOUNT_TABLE } = require('./helpers/fake-genpage-server.js');
+const { FakeGenPageServer, INSTANCE, ACCOUNT_TABLE, appTransport } = require('./helpers/fake-genpage-server.js');
 const { makeTempDir } = require('./helpers/temp-dirs.js');
 
 const SOURCE = "import * as React from 'react';\nexport default function Page() { return <div>Operations</div>; }\n";
@@ -27,8 +27,9 @@ function makeServer() {
   return server;
 }
 
-async function withBackend(server, fn) {
-  const genpage = makeGenpageSdk(INSTANCE, { httpClient: server.http() });
+async function withBackend(server, fn, { apps = false } = {}) {
+  // A delete scans every app's navigation for the page first, so a cleanup runs over the fake's app tables too (appTransport).
+  const genpage = makeGenpageSdk(INSTANCE, { httpClient: apps ? appTransport(server).http : server.http() });
   try {
     return await fn(genpage);
   } finally {
@@ -99,4 +100,44 @@ test('REAL BUNDLE: an update that leaves the list out keeps the page\'s built-in
     assert.deepStrictEqual(entry.actionBindings, legacy);
     assert.deepStrictEqual(pageBindingsReport([{ ...entry, key: 'legacy', name: 'Legacy' }], []).neededInTarget, { customApis: ['contoso_ApproveOrder'], dataverseOperations: ['WhoAmI'] });
   });
+});
+
+// ── Cleanup of a page that binds them, as a live check must prove it ─────────────────────────────────────────────────────────────────
+// What a create answers is the page's identity, not an inventory: its file rows and conversation messages exist although the answer names none of
+// them. So a cleanup starts from the page id, reads what the page holds (describe), deletes through the supported path, and reads every class back —
+// and a child that survives keeps the cleanup incomplete, whatever the page's own read says.
+test('REAL BUNDLE: a cleanup inventories a page\'s children by reading them, not from the create\'s answer, and proves each absent by reading it back', async () => {
+  const server = makeServer();
+  await withBackend(server, async (genpage) => {
+    const made = await genpage.create({ name: 'Operations', source: SOURCE, dataSources: ['account'], model: 'gpt-4.1', actionBindings: BINDINGS, prompt: 'Show who I am', agentMessage: 'Shown' });
+    const id = made.pageId;
+    // The answer carries no list of the rows it made…
+    assert.ok(!['files', 'fileRows', 'conversation', 'conversationMessages', 'messages'].some((key) => Object.hasOwn(made, key)), JSON.stringify(Object.keys(made)));
+    // …and yet there are some: an omitted field is no evidence that nothing was made.
+    assert.ok(server.filesOf(id).length > 0 && server.messagesOf(id).length > 0, 'the page has file rows and a conversation');
+    const inventory = await genpage.describe(id);
+    assert.ok(inventory.fileRows > 0 && inventory.conversationMessages === server.messagesOf(id).length, JSON.stringify(inventory));
+    const removed = await genpage.delete(id, { allowDestructive: true });
+    assert.deepStrictEqual([removed.deleted, removed.verified, removed.historyRemoved], [true, true, true]);
+    // ALL ABSENT only by reads, class by class.
+    assert.deepStrictEqual([server.filesOf(id).length, server.messagesOf(id).length], [0, 0]);
+    await assert.rejects(genpage.describe(id), (error) => error.code === 'GENPAGE_NOT_FOUND');
+  }, { apps: true });
+});
+
+test('REAL BUNDLE: a child the delete could not remove keeps the cleanup incomplete — the page reads as gone, its conversation does not', async () => {
+  const server = makeServer();
+  await withBackend(server, async (genpage) => {
+    const made = await genpage.create({ name: 'Operations', source: SOURCE, dataSources: ['account'], model: 'gpt-4.1', actionBindings: BINDINGS, prompt: 'Show who I am', agentMessage: 'Shown' });
+    const id = made.pageId;
+    const messages = server.messagesOf(id).length;
+    assert.ok(messages > 0);
+    // The service refuses every delete of a conversation message: the page goes, its history stays.
+    server.failOn = (method, path) => (method === 'DELETE' && /^\/agentconversationmessages\(/.test(path) ? 403 : undefined);
+    const removed = await genpage.delete(id, { allowDestructive: true });
+    assert.strictEqual(removed.verified, true, 'the page itself reads as gone');
+    assert.strictEqual(removed.historyRemoved, false, 'and the result does not claim its history went with it');
+    assert.ok(removed.warnings.some((warning) => /conversation history was not fully removed|may remain/.test(warning)), JSON.stringify(removed.warnings));
+    assert.strictEqual(server.messagesOf(id).length, messages, 'a known child remains: the cleanup is not all absent until it is resolved and removed');
+  }, { apps: true });
 });

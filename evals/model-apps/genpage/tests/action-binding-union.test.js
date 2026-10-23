@@ -253,3 +253,65 @@ test('union helpers: partition by exact name, one union with no duplicate, and t
   assert.equal(union.unionOrderProblems([API, RETRIEVE_VERSION, WHO_AM_I], 'a').length, 1);
   assert.deepStrictEqual(union.BUILT_IN_OUTPUTS, { WhoAmI: ['BusinessUnitId', 'UserId', 'OrganizationId'], RetrieveVersion: ['Version'] });
 });
+
+// ── The two gates at the authoring consumer, and a removal ─────────────────────────────────────────────────────────────────────────
+// The page sources of one partition alone, cut from the mixed page: the Custom API helper and its render call, or the WhoAmI helper and its button.
+const APPROVE_HELPER = SOURCE.slice(SOURCE.indexOf('async function approveOrder('), SOURCE.indexOf('function ownString('));
+const CUSTOM_ONLY = SOURCE.replace(SOURCE.slice(SOURCE.indexOf('function ownString('), SOURCE.indexOf('const GeneratedComponent')), '')
+  .replace(/  const \[identity[\s\S]*?\n  \};\n/, '')
+  .replace(/      <Button disabled=\{identityPending\}[\s\S]*?\n      \)\}\n/, '');
+const BUILT_IN_ONLY = SOURCE.replace(APPROVE_HELPER, '').replace("  void approveOrder(dataApi, 'record', 1, pending);\n", '');
+const SENTINEL_PLAN = PLAN.replace(/## Custom API Bindings[\s\S]*?\n\n## Dataverse Operations/, '## Custom API Bindings\nNo custom API bindings.\n\n## Dataverse Operations');
+const CUSTOM_PLAN = PLAN.replace(/\n## Dataverse Operations[\s\S]*$/, '\n');
+
+// A one-stage create with the rows, the plan and the page given, and the two gates as given; `listing` adds the catalogue listing after the built-in gate.
+function createFixture({ rows, plan, source, customApi, builtIns, listing: listed = builtIns === 'enabled' }) {
+  const fixture = mixedFixture();
+  fixture.genpagePlan = plan;
+  fixture.files[0].content = source;
+  fixture.artifacts['stages/with-api.tsx'] = source;
+  setActions(fixture, rows);
+  setConfigs(fixture, rows);
+  fixture.manifest.customApi.stages = fixture.manifest.customApi.stages.slice(0, 1);
+  const keep = new Set(['gate-create', 'builtin-gate', 'gate-generate', 'builtin-regate', 'write-create', 'create',
+    ...(customApi === 'enabled' ? ['discovery'] : []), ...(listed ? ['listing'] : [])]);
+  fixture.events = fixture.events.filter((call) => keep.has(call.id));
+  for (const id of ['gate-create', 'gate-generate']) event(fixture, id).result = customApi;
+  for (const id of ['builtin-gate', 'builtin-regate']) event(fixture, id).result = builtIns;
+  return fixture;
+}
+
+test('the two gates are independent at the authoring consumer: either one OFF stops only its own partition', () => {
+  const verdict = (fixture) => score(fixture);
+  // custom-api OFF, built-ins ON: a built-in-only page is authored.
+  assert.equal(verdict(createFixture({ rows: [WHO_AM_I], plan: SENTINEL_PLAN, source: BUILT_IN_ONLY, customApi: 'disabled', builtIns: 'enabled' })).status, 'pass');
+  // custom-api ON, built-ins OFF: a Custom-API-only page is authored, and no built-in row may be.
+  assert.equal(verdict(createFixture({ rows: [API], plan: CUSTOM_PLAN, source: CUSTOM_ONLY, customApi: 'enabled', builtIns: 'disabled' })).status, 'pass');
+  assert.equal(verdict(createFixture({ rows: [API, WHO_AM_I], plan: PLAN, source: SOURCE, customApi: 'enabled', builtIns: 'disabled', listing: true })).status, 'fail', 'a built-in row authored while its gate is off');
+  // Both OFF: neither partition is authored.
+  assert.equal(verdict(createFixture({ rows: [WHO_AM_I], plan: SENTINEL_PLAN, source: BUILT_IN_ONLY, customApi: 'disabled', builtIns: 'disabled', listing: true })).status, 'fail');
+  // Both ON is the mixed page.
+  assert.equal(verdict(mixedFixture()).status, 'pass');
+});
+
+test('a removal drops only the named entries and needs no built-in gate: WhoAmI out keeps the Custom API, and the reverse', () => {
+  const removal = (removed, kept, source) => {
+    const fixture = mixedFixture();
+    fixture.artifacts['removed-actions.json'] = JSON.stringify(kept);
+    fixture.artifacts['removed/config.json'] = JSON.stringify({ actionBindings: kept });
+    fixture.artifacts['stages/removed.tsx'] = source;
+    fixture.files[0].content = source;
+    fixture.manifest.customApi.stages.push({ id: 'remove', target: 'page.tsx', source: 'stages/removed.tsx', actions: 'removed-actions.json', beforeConfig: 'preserved/config.json', afterConfig: 'removed/config.json', upload: 'remove', change: { remove: removed } });
+    fixture.events.push(
+      { id: 'gate-remove', command: 'node feature-flags.js custom-api', result: 'enabled' },
+      { id: 'write-remove', command: 'Write page.tsx', artifact: 'stages/removed.tsx' },
+      { id: 'remove', command: `node genpage-upload.js --page-id ${PAGE} --code-file page.tsx --actions removed-actions.json`, result: { ok: true, pageId: PAGE } },
+    );
+    return fixture;
+  };
+  // The built-in gate was last probed OFF (the preserve stage): a removal does not consult it.
+  assert.equal(score(removal(['WhoAmI'], [API], CUSTOM_ONLY)).status, 'pass');
+  assert.equal(score(removal(['cnt_ApproveOrder'], [WHO_AM_I], BUILT_IN_ONLY)).status, 'pass');
+  const both = removal(['WhoAmI'], [], CUSTOM_ONLY);
+  assert.equal(score(both).status, 'fail', 'removing WhoAmI must not drop the Custom API too');
+});
