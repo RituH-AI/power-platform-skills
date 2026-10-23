@@ -13,6 +13,7 @@ const IDENTIFIER_ESCAPE = /\\u(?:[0-9a-fA-F]{4}|\{[0-9a-fA-F]+\})/y;
 const SOURCE_OPERATOR = /(?:>>>=|\*\*=|&&=|\|\|=|\?\?=|<<=|>>=|===|!==|=>|\?\.|\.\.\.|\+\+|--|==|!=|<=|>=|&&|\|\||\?\?|\*\*|[+\-*/%&|^]=)/y;
 const ASSIGNMENT_OPERATORS = new Set(['=', '+=', '-=', '*=', '/=', '%=', '**=', '<<=', '>>=', '>>>=', '&=', '|=', '^=', '&&=', '||=', '??=']);
 const HEAD_MODIFIERS = new Set(['async', 'get', 'set', 'static', 'public', 'private', 'protected', 'readonly', 'abstract', 'override']);
+const CLASS_MEMBER_MODIFIERS = new Set([...HEAD_MODIFIERS, 'declare', 'accessor']);
 const READ_FOLLOWERS = new Set(['(', ')', ']', '}', ',', ';', '?', ':', '!', '++', '--', '+', '-', '*', '/', '%', '**', '&', '|', '^', '<', '>', '<=', '>=', '==', '!=', '===', '!==', '&&', '||', '??', ...ASSIGNMENT_OPERATORS]);
 const READ_PREFIX_WORDS = ['return', 'throw', 'yield', 'await', 'typeof', 'void', 'new', 'delete', 'case', 'else', 'in', 'instanceof', 'as', 'satisfies', 'let', 'const', 'var', 'function', 'class'];
 const CONTEXT_NAME = /^_*(?:pcf)?(?:context|ctx)$/i;
@@ -1281,6 +1282,22 @@ function indexScopes(index) {
     scopes.push(scope);
     head.scope = scope;
   }
+  // A computed class member key is evaluated where the class is defined: in class D { [this.x = 1]() {} }
+  // `this` is the enclosing method's, not D's instance. The key gets a scope of its own that bindingFor
+  // resolves `this` through, past the class. Only a `[` that begins a member is a key; in
+  // value = {}\n[k] the `[` indexes the initializer, whose `this` is the instance.
+  // https://tc39.es/ecma262/#sec-runtime-semantics-classdefinitionevaluation
+  for (const head of heads) {
+    const open = head.body;
+    if (head.kind !== 'class' || tokens[open]?.value !== '{' || tokens[open].match < 0) continue;
+    for (let i = open + 1; i < tokens[open].match; i += 1) {
+      const token = tokens[i];
+      if (token.value === '[' && token.match >= 0 && classMemberKey(index, open, i)) {
+        scopes.push({ kind: 'class-key', start: token.start, body: token.start, end: tokens[token.match].end, roots: new Set() });
+      }
+      if (['(', '[', '{'].includes(token.value) && token.match > i) i = token.match;
+    }
+  }
   for (const control of controls) {
     if (control.kind !== 'for') continue;
     const end = indexedStatementEnd(index, control.body);
@@ -1317,6 +1334,30 @@ function indexScopes(index) {
   }
   index.scopes = scopes;
   index.blockScopes = blockScopes;
+}
+
+function classMemberKey(index, classBody, open) {
+  // True when the `[` at `open`, a direct child of the class body, begins a member's computed key:
+  //   class D { [k]() {} }   x = 1; [k] = 2   static [k]() {}   get [k]() {}   *[k]() {}   m() {} [k]() {}
+  // and after a field written without a semicolon, where the line break ends the field (ASI):
+  //   value
+  //   [k]() {}
+  const { tokens, mask } = index;
+  const boundary = (at) => {
+    let i = at - 1;
+    while (tokens[i]?.value === '*' || (tokens[i]?.kind === 'identifier' && CLASS_MEMBER_MODIFIERS.has(tokens[i].value))) i -= 1;
+    if (i === classBody || tokens[i]?.value === ';') return true;
+    if (tokens[i]?.value !== '}' || tokens[i].match < 0) return false;
+    // A `}` ends a member only when it closes a method body or a static block, never an initializer's
+    // object literal or function expression.
+    const closed = tokens[i].match;
+    return Boolean(index.bodies.get(closed)?.method)
+      || (tokenKeyword(tokens, closed - 1, 'static') && tokens[closed].parent === classBody);
+  };
+  if (boundary(open)) return true;
+  const name = open - 1;
+  return tokens[name]?.kind === 'identifier' && tokens[name].parent === classBody
+    && LINE_TERMINATOR.test(mask.slice(tokens[name].end, tokens[open].start)) && boundary(name);
 }
 
 function hasParameterExpressions(tokens, head) {
@@ -1520,7 +1561,7 @@ function bindingFor(scope, root) {
   // uses, memoizing each visited scope so deep callback chains are walked once per root.
   const pending = [];
   let binding;
-  for (let owner = scope; owner; owner = owner.parent) {
+  for (let owner = scope; owner;) {
     if (owner.bindings.has(root)) { binding = owner.bindings.get(root); break; }
     pending.push(owner);
     if (!owner.parent || owner.declarations.has(root) || owner.kind === 'opaque'
@@ -1528,6 +1569,9 @@ function bindingFor(scope, root) {
       binding = owner.id;
       break;
     }
+    // `this` in a computed class member key is the enclosing scope's: step past the class itself.
+    owner = root === 'this' && owner.kind === 'class-key' && owner.parent.kind === 'class' && owner.parent.parent
+      ? owner.parent.parent : owner.parent;
   }
   for (const owner of pending) owner.bindings.set(root, binding);
   return binding;

@@ -912,6 +912,46 @@ test('Pages proof keeps body declarations local when a function has parameter ex
   }
 });
 
+const THIS_CONTEXT_GUARD = 'typeof this._context.device?.captureImage === "function"';
+const THIS_CONTEXT_CALL = 'this._context.device.captureImage()';
+const inGuardedMethod = (classBody, after = `${THIS_CONTEXT_CALL};`) =>
+  `class C { run() { if (${THIS_CONTEXT_GUARD}) { class D { ${classBody} } ${after} } } }`;
+
+test('Pages proof expires after a this write in a computed class member key', () => {
+  // A computed key is evaluated where the class is defined, so its `this` is the enclosing method's.
+  // https://tc39.es/ecma262/#sec-runtime-semantics-classdefinitionevaluation
+  for (const member of [
+    '[this._context.device = null]() {}',
+    '[this._context.device = null] = 1;',
+    'static [this._context.device = null]() {}',
+    'static [this._context.device = null] = 1;',
+    'get [this._context.device = null]() { return 1; }',
+    'async *[this._context.device = null]() {}',
+    'value = 1; [this._context = null]() {}',
+    'run() {} [this._context.device = null]() {}',
+    'static { consume(1); } [this._context.device = null]() {}',
+    'value\n[this._context.device = null]() {}',
+  ]) {
+    assert.deepEqual(codesFor(inGuardedMethod(member)), ['PCF_PAGES_API'], member);
+  }
+});
+
+test('Pages proof keeps the class instance as this inside class member bodies and initializers', () => {
+  for (const member of [
+    'run() { this._context.device = null; }',
+    'value = (this._context.device = null);',
+    '[key] = (this._context.device = null);',
+    'static { this._context = null; }',
+    'value = { a: 1 }\n[this._context.device = null];',
+  ]) {
+    assert.deepEqual(codesFor(inGuardedMethod(member)), [], member);
+  }
+  // A call in a computed key runs under the enclosing proof; one in a member body does not.
+  assert.deepEqual(codesFor(inGuardedMethod(`[${THIS_CONTEXT_CALL}]() {}`, '')), []);
+  assert.deepEqual(codesFor(`class D { [${THIS_CONTEXT_CALL}]() {} }`), ['PCF_PAGES_API']);
+  assert.deepEqual(codesFor(inGuardedMethod(`run() { ${THIS_CONTEXT_CALL}; }`, '')), ['PCF_PAGES_API']);
+});
+
 for (const [name, call, plainCall = CALL, proof = PROOF] of [
   ['method non-null run', 'context.device.captureImage!!()'],
   ['root and namespace non-null runs', 'context!!!.device!!?.captureImage!!()'],
@@ -1314,7 +1354,7 @@ for (const relative of [
     assert.match(text, /lexer failure[^.\n]*comments?[^.\n]*strings?[^.\n]*report/i);
     if (relative === 'AGENTS.md') {
       assert.match(text, /parameter default reaches the outer binding[^.\n]*body declares the same name/i);
-      assert.match(text, /later release[^.\n]*computed class member keys/i);
+      assert.match(text, /`this` in a computed class member key[^\n]*enclosing method's[^.\n]*ends that method's proof/i);
       assert.match(text, /\.ts` files[^.\n]*angle-bracket types[^.\n]*JSX/i);
       assert.match(text, /unterminated such type[^.\n]*lexer-failure path/i);
     } else {
