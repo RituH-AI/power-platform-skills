@@ -4202,15 +4202,26 @@ function genericArrowIsComplete(rest) {
   if (open.kind !== '(') return false;
   const parametersEnd = typeGroupEnd(rest, open.start);
   if (parametersEnd === -1) return false;
+  // Where reading a generic call's type arguments in a default value changes the reading (returnTypeEnd, defaultValueEnd), the page must be complete both ways: that
+  // reading finds the cut right after a function type with such a parameter (`({ a = f<T, U>() }) => T`), and only ever refuses more — a value that TypeScript reads
+  // and Babel refuses (`await f<T, U>()` in a parameter, `f<T, U>(010)`) cannot make a page pass that the reading to the first `,` refused.
+  const options = { typeArgumentsInDefaults: true };
+  if (!arrowFollows(rest, parametersEnd, options)) return false;
+  if (options.typeArgumentsRead && !arrowFollows(rest, parametersEnd, { typeArgumentsInDefaults: false })) return false;
+  // The body is taken as written, as any exported expression is (its brackets are checked separately), unless the file stops at a token that needs more: `p +`, `p as`.
+  return !DANGLING_TAIL.test(rest) && !DANGLING_CAST.test(rest);
+}
+
+// Whether the arrow's `=>` and a body follow the parameter list that ends at `parametersEnd` in `rest` — at once, or after a return type read to its end (returnTypeEnd,
+// with `options`).
+function arrowFollows(rest, parametersEnd, options) {
   let arrow = typeTokenAt(rest, parametersEnd);
   if (arrow.kind === ':') {
-    const returnEnd = returnTypeEnd(rest, arrow.end);
+    const returnEnd = returnTypeEnd(rest, arrow.end, options);
     if (returnEnd === -1) return false;
     arrow = typeTokenAt(rest, returnEnd);
   }
-  if (arrow.kind !== '=>' || !startsArrowBody(typeTokenAt(rest, arrow.end))) return false;
-  // The body is taken as written, as any exported expression is (its brackets are checked separately), unless the file stops at a token that needs more: `p +`, `p as`.
-  return !DANGLING_TAIL.test(rest) && !DANGLING_CAST.test(rest);
+  return arrow.kind === '=>' && startsArrowBody(typeTokenAt(rest, arrow.end));
 }
 
 // What begins an arrow's body: a block, or what begins an expression — a name, any word but those that only begin a statement (a keyword that begins an expression, `this`,
@@ -4308,6 +4319,10 @@ const TYPE_START_KEYWORDS = new Set([...PRIMITIVE_TYPES, 'readonly', 'unique', '
 const RETURN_TYPE_DEPTH = 200;
 // The blanked body of a regular expression and its closing slash, read from right after its opening one (returnTypeEnd: a computed key's operand).
 const REGEX_BODY = / +\//y;
+// The words of strict code — a module's — that are no names besides the reserved words and `await` (https://tc39.es/ecma262/#sec-keywords-and-reserved-words: `yield`
+// and the future reserved words of strict mode). TypeScript's parser takes each for the name of a binding and leaves the error to its checker; Babel's parser refuses it.
+// returnTypeEnd: a strict reading takes none of them for the name that `infer` or a mapped type declares.
+const STRICT_MODE_RESERVED_WORDS = new Set(['yield', 'let', 'static', 'implements', 'interface', 'package', 'private', 'protected', 'public']);
 
 // Where a return type ends: the index just past it in `src` (blanked code) when it starts after the colon at `from`, or -1 where TypeScript's parser reports an error before it
 // ends, or the text ends first. The arrow's `=>` is the first token after its return type, and a return type may hold an `=>` of its own at its own level — `(p): (x: T) => T => …`,
@@ -4322,11 +4337,20 @@ const REGEX_BODY = / +\//y;
 //     type, `(p): (A | B) => …` a parenthesised type and then the arrow, and `(p): ({ a: T }) => p` a function type that takes the arrow's `=>` (an error);
 //   - type arguments, `[`, `extends`, `is` and an assertion's name continue a type only on its line; a function or constructor type after `|` or `&` is an error (TS1385, TS1388);
 //   - the JSDoc forms TypeScript's parser takes in a .tsx file and only its checker refuses (`?T`, `T?`, `!T`, `T!`, `*`, `function(…): T`) are read too.
-function returnTypeEnd(src, from) {
+// `options.typeArgumentsInDefaults` (true unless false) says whether a generic call's type arguments in a default value are passed over (defaultValueEnd), and
+// `options.typeArgumentsRead` is set where that changed what a default value holds.
+function returnTypeEnd(src, from, options = {}) {
+  if (options.typeArgumentsInDefaults === undefined) options.typeArgumentsInDefaults = true;
   let depth = 0;
-  // Above zero while a type is read STRICTLY (parenthesizedMappedType): a group in it — parentheses, brackets, braces, angle brackets — is read, not passed over whole, and
-  // what this reading does not read through (a function type's parameters, an object type with members, a template, an import type) ends it with -1.
+  // Above zero while a type is read STRICTLY (parenthesizedMappedType, typeArgumentsInExpressionEnd): a group in it — parentheses, brackets, braces, angle brackets — is
+  // read, not passed over whole; what this reading does not read through (a function type's parameters, an object type with members, a template, an import type) ends it
+  // with -1.
   let strictly = 0;
+  // Above zero while the answer must hold for Babel's parser as well as TypeScript's (parenthesizedMappedType, whose yes makes the gate accept a page it refused before):
+  // what TypeScript's parser reads and leaves to its checker, and Babel's refuses, ends the reading with -1 too — the JSDoc types (`*`, `?`, `?T`, `T?`, `!T`, `T!`,
+  // `function`), a predicate (`asserts x`), a reserved word or `await` for a type's name (`(if)`, `(delete)`), a word that strict code reserves for the name that `infer`
+  // or a mapped type declares (`infer yield`), and `readonly` before a type that is no array or tuple (tsCheckTypeAnnotationForReadOnly).
+  let bothParsers = 0;
   const at = (k) => typeTokenAt(src, k);
   const isWord = (token, text) => token.kind === 'word' && token.text === text;
   // isIdentifier: a word that is no reserved word, nor `await`, which parseExportAssignment makes a keyword in an export.
@@ -4405,7 +4429,9 @@ function returnTypeEnd(src, from) {
   // hold a type (parseParenthesizedType), and `{ [K in (keyof T)]: boolean }` is a mapped type (isStartOfMappedType, parseMappedType: `{`, `readonly` with an optional
   // `+` or `-`, `[`, a name, `in` and its type, maybe `as` and a type, `]`, `?` with an optional `+` or `-`, maybe `:` and a type, maybe `;`). Every type in it is read
   // strictly — what a group holds included — because the answer turns a function type into a parenthesised one: it says yes only where TypeScript parses the whole
-  // of it, and a member after the mapped one (a parse that only the checker refuses) is not read: no.
+  // of it, and a member after the mapped one (a parse that only the checker refuses) is not read: no. And it says yes only where Babel's parser reads the page the same
+  // way (`bothParsers`): its binding-pattern attempt fails on the same keys, and it refuses what TypeScript's parser takes and leaves to its checker — the type
+  // parameter the mapped type declares may not be a word strict code reserves (`[yield in (keyof T)]`), and no type in it may be one Babel refuses.
   const parenthesizedMappedType = (brace) => {
     if (brace.kind !== '{') return false;
     let token = at(brace.end);
@@ -4418,8 +4444,9 @@ function returnTypeEnd(src, from) {
     const keyOpen = token.start;
     const name = at(token.end);
     const inWord = at(name.end);
-    if (!identifier(name) || !isWord(inWord, 'in')) return false;
+    if (!identifier(name) || STRICT_MODE_RESERVED_WORDS.has(name.text) || !isWord(inWord, 'in')) return false;
     strictly += 1;
+    bothParsers += 1;
     try {
       let end = type(inWord.end, false);
       if (end === -1) return false;
@@ -4445,6 +4472,7 @@ function returnTypeEnd(src, from) {
       return next.kind === '}' && at(next.end).kind === ')';
     } finally {
       strictly -= 1;
+      bothParsers -= 1;
     }
   };
   // parseObjectBindingPattern and parseArrayBindingPattern, whose `{` or `[` is at `open`: the index just past the pattern, or -1 where it does not parse with no error. A
@@ -4513,6 +4541,11 @@ function returnTypeEnd(src, from) {
   // that the text ends without (`(a +)`, `(a ? b)`, `()`, `a[]`), or — where `deep` — a group in it that is 'no': no expression of TypeScript has either of the first two (a
   // line break inserts no `;` inside brackets), save `async` and a name (`async x => x`), which is not read. A group whose `)` an `=>` or a `:` follows may be an arrow's
   // parameters (`(x: T) => x`, `async (x): T => x`) and is not read: what it holds is no expression there. An object literal is not read.
+  // `await` is not read where `deep`, whose 'no' turns a function type into a parenthesised one: TypeScript parses a type outside the await context
+  // (parseType: doOutsideOfContext(TypeExcludesFlags)), the computed key of a function type's binding pattern included, so `await` there is an await expression only
+  // where a word, a number or a string follows it on its line (isAwaitExpression) and a name otherwise — `(await)`, `[await]` and `(await!)` hold an expression — and
+  // Babel's parser refuses it as a name in a module: no answer about it is certain. Elsewhere it is read as a prefix operator, as it always was. A word written with an
+  // escape may be a keyword to TypeScript (`\u0061wait x`), so a word after one is not read either.
   const expressionReading = (from, close, list, deep) => {
     const groupEnd = (token) => {
       const end = typeGroupEnd(src, token.start);
@@ -4532,6 +4565,8 @@ function returnTypeEnd(src, from) {
     let comma = false;
     let empty = true;
     let operandWord = null;
+    // The prefix operator just read, if it was `await`: a `/` after it is a division to TypeScript in a type, where `await` is a name, and a regex to the lexer.
+    let afterAwait = false;
     for (;;) {
       const token = at(k);
       if (token.start >= close - 1) {
@@ -4545,8 +4580,11 @@ function returnTypeEnd(src, from) {
       comma = false;
       if (!operand) {
         operandWord = null;
+        const awaited = afterAwait;
+        afterAwait = word === 'await';
         // A prefix operator, then an operand: a name or a keyword that is a value, a literal, a regular expression, or a group (a parenthesised expression, an array,
         // an object).
+        if (word === 'await' && deep) return 'unknown';
         if (['!', '~', '+', '-', '++', '--'].includes(token.kind) || ['typeof', 'void', 'delete', 'await', 'new'].includes(word)) k = token.end;
         else if (word !== null && (!(RESERVED_WORDS.has(word) || word === 'const') || ['this', 'null', 'true', 'false', 'super'].includes(word))) { operand = true; operandWord = word; k = token.end; }
         else if (token.kind === 'number' || token.kind === 'string' || token.kind === 'template') { operand = true; k = token.end; }
@@ -4557,7 +4595,7 @@ function returnTypeEnd(src, from) {
           if (token.kind !== '{' && groupReading(token, end, token.kind === '(' ? 'expression' : 'elements') === 'no') return 'no';
           operand = true;
           k = end;
-        } else if (token.kind === '/') {
+        } else if (token.kind === '/' && !awaited) {
           // A regular expression: the blanking keeps its two slashes and its flags and blanks its body, which no line break ends (regexCloses), so the next `/` on its
           // line, after nothing but blanks, closes it. A `/` that the lexer read as the division operator leaves code between them, and is not read.
           REGEX_BODY.lastIndex = token.end;
@@ -4606,7 +4644,7 @@ function returnTypeEnd(src, from) {
         operand = false;
         comma = token.kind === ',';
         k = token.end;
-      } else if ((token.kind === 'word' && !['async', 'await', 'yield', 'let'].includes(operandWord)) || token.kind === 'string' || token.kind === 'number') {
+      } else if ((token.kind === 'word' && !['async', 'await', 'yield', 'let', ''].includes(operandWord)) || token.kind === 'string' || token.kind === 'number') {
         // An operand right after an operand: `keyof T`, `T extends U`, `"a" "b"`.
         return 'no';
       } else {
@@ -4616,9 +4654,17 @@ function returnTypeEnd(src, from) {
     }
   };
   // A default value, from right after its `=` at `k`: the index of the `,` or the `closer` that ends it at its own level, or -1. A group in brackets, a string and a
-  // template are passed over whole, and so is a list of type arguments after an operand where TypeScript's parser takes one: `{ a = f<T, U>() }` holds one default, whose
-  // `,` is no element's (typeArgumentsInExpressionEnd).
+  // template are passed over whole, and so is a list of type arguments after an operand where TypeScript's parser takes one — `{ a = f<T, U>() }` holds one default, whose
+  // `,` is no element's (typeArgumentsInExpressionEnd) — unless `options.typeArgumentsInDefaults` is false: the value then ends at its first `,`, as JavaScript reads it.
+  // Where the two readings part, `options.typeArgumentsRead` says so (genericArrowIsComplete).
   const defaultValueEnd = (k, closer) => {
+    const plain = defaultValueEndReading(k, closer, false);
+    if (!options.typeArgumentsInDefaults) return plain;
+    const read = defaultValueEndReading(k, closer, true);
+    if (read !== plain) options.typeArgumentsRead = true;
+    return read;
+  };
+  const defaultValueEndReading = (k, closer, typeArguments) => {
     for (let j = k; j < src.length; j += 1) {
       const c = src[j];
       if (c === ',' || c === closer) return j;
@@ -4631,7 +4677,7 @@ function returnTypeEnd(src, from) {
         if (end === -1) return -1;
         j = end - 1;
       } else if (c === ')' || c === ']' || c === '}') return -1;
-      else if (c === '<' && operandEndsBefore(k, j)) {
+      else if (typeArguments && c === '<' && operandEndsBefore(k, j)) {
         const end = typeArgumentsInExpressionEnd(j, closer);
         if (end !== -1) j = end - 1;
       }
@@ -4711,15 +4757,31 @@ function returnTypeEnd(src, from) {
   // conditional types are allowed (tryParseConstraintOfInferType: the `extends` then begins a conditional type); anything else is a postfix type.
   const typeOperator = (k, noConditional) => nested(() => {
     const token = at(k);
+    if (bothParsers && isWord(token, 'readonly')) {
+      // `readonly` only before an array or a tuple type, as Babel takes it (tsCheckTypeAnnotationForReadOnly; TypeScript's parser leaves the rest to its checker).
+      const end = typeOperator(token.end, noConditional);
+      return end !== -1 && arrayOrTupleType(token.end, end) ? end : -1;
+    }
     if (isWord(token, 'keyof') || isWord(token, 'unique') || isWord(token, 'readonly')) return typeOperator(token.end, noConditional);
     if (!isWord(token, 'infer')) return postfix(k);
     const name = at(token.end);
-    if (!identifier(name)) return -1;
+    if (!identifier(name) || (bothParsers && STRICT_MODE_RESERVED_WORDS.has(name.text))) return -1;
     const ext = at(name.end);
     if (!isWord(ext, 'extends')) return name.end;
     const constraint = type(ext.end, true);
     return constraint !== -1 && (noConditional || at(constraint).kind !== '?') ? constraint : name.end;
   });
+  // Whether the type from `k` to `end` is an array type — a postfix type whose last `[…]` is empty, not after `keyof`, `unique`, `readonly` or `infer` — or a tuple type.
+  const arrayOrTupleType = (k, end) => {
+    const first = at(k);
+    if (first.kind === 'word' && ['keyof', 'unique', 'readonly', 'infer'].includes(first.text)) return false;
+    if (first.kind === '[' && typeGroupEnd(src, first.start) === end) return true;
+    let p = end - 1;
+    if (src[p] !== ']') return false;
+    p -= 1;
+    while (p > k && isTrivia(src[p])) p -= 1;
+    return src[p] === '[';
+  };
   // parsePostfixTypeOrHigher: on the type's line, `[…]` (an array or an indexed access) and the JSDoc `!` and `?` — a `?` before what can start a type is a conditional's,
   // and ends the type.
   const postfix = (k) => {
@@ -4727,8 +4789,8 @@ function returnTypeEnd(src, from) {
     while (end !== -1) {
       const token = at(end);
       if (token.newline) return end;
-      if (token.kind === '!') end = token.end;
-      else if (token.kind === '?' && !startsType(token.end, 0)) end = token.end;
+      if (token.kind === '!') end = bothParsers ? -1 : token.end;
+      else if (token.kind === '?' && !startsType(token.end, 0)) end = bothParsers ? -1 : token.end;
       else if (token.kind === '[') end = strictly ? strictBracketEnd(token, true) : typeGroupEnd(src, token.start);
       else return end;
     }
@@ -4751,15 +4813,16 @@ function returnTypeEnd(src, from) {
     const token = at(k);
     switch (token.kind) {
       case 'word': return wordType(token, k);
-      case 'string': case 'number': case '*': return token.end;
+      case 'string': case 'number': return token.end;
       // A template's substitutions are blank here, so a strict reading cannot say what they hold.
       case 'template': return strictly ? -1 : token.end;
       case '{': case '[': case '(': return strictly ? strictGroupEnd(token) : typeGroupEnd(src, token.start);
-      // reScanAsteriskEqualsToken and reScanQuestionToken: `*=` is a `*` and then `=`, `??` two `?`.
-      case '*=': return token.start + 1;
-      case '??': return jsdocNullable(token.start + 1);
-      case '?': return jsdocNullable(token.end);
-      case '!': return nonArray(token.end);
+      // The JSDoc types, which a reading for both parsers does not take. reScanAsteriskEqualsToken and reScanQuestionToken: `*=` is a `*` and then `=`, `??` two `?`.
+      case '*': return bothParsers ? -1 : token.end;
+      case '*=': return bothParsers ? -1 : token.start + 1;
+      case '??': return bothParsers ? -1 : jsdocNullable(token.start + 1);
+      case '?': return bothParsers ? -1 : jsdocNullable(token.end);
+      case '!': return bothParsers ? -1 : nonArray(token.end);
       case '-': {
         const number = at(token.end);
         return number.kind === 'number' ? number.end : -1;
@@ -4783,6 +4846,7 @@ function returnTypeEnd(src, from) {
     if (word === 'import') return importType(k);
     if (word === 'function') {
       // parseJSDocFunctionType: `function(…)` and maybe `: type`; `function` alone is a name.
+      if (bothParsers) return -1;
       const open = at(token.end);
       if (open.kind !== '(') return token.end;
       if (strictly) return -1;
@@ -4793,13 +4857,16 @@ function returnTypeEnd(src, from) {
       // parseAssertsTypePredicate, where a word follows on the line: `asserts this` or `asserts name`, then maybe `is` and a type (on any line).
       const name = at(token.end);
       if (name.kind === 'word' && !name.newline) {
-        if (!isWord(name, 'this') && !identifier(name)) return -1;
+        if (bothParsers || (!isWord(name, 'this') && !identifier(name))) return -1;
         const is = at(name.end);
         return isWord(is, 'is') ? type(is.end, false) : name.end;
       }
     }
-    return typeReference(k);
+    return bothParsers && noNameToBabel(token) ? -1 : typeReference(k);
   };
+  // A word that a reading for both parsers does not take for the name of a type or of a type query: a reserved word (TypeScript's parser reads `(if)` as a type,
+  // Babel's does not), or `await`, which Babel refuses as a name in a module.
+  const noNameToBabel = (token) => token.kind === 'word' && (RESERVED_WORDS.has(token.text) || token.text === 'const' || token.text === 'await');
   // parseTypeReference: a name — any word, dotted (parseEntityName) — and type arguments on its line.
   const typeReference = (k) => {
     const end = entityName(k);
@@ -4830,6 +4897,7 @@ function returnTypeEnd(src, from) {
   };
   // parseTypeQuery, after `typeof`: a name, then type arguments on its line.
   const typeQuery = (k) => {
+    if (bothParsers && noNameToBabel(at(k)) && !isWord(at(k), 'this')) return -1;
     const end = entityName(k);
     return end === -1 ? -1 : typeArgumentsOnLine(end, false);
   };

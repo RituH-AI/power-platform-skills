@@ -3190,21 +3190,34 @@ TypeScript's parser takes a list of types after an operand (`parseTypeArgumentsI
 (`({ a = f<T, U>() }) => R`), the pattern is read, the parentheses hold a function type's parameters, and a write cut
 right after such a function type (`export default <T,>(p: T): ({ a = f<T,T>() }) => T`) is refused as TypeScript
 refuses it (`'=>' expected`). The types are read strictly, each with what its groups hold; anything else between the
-angle brackets is a comparison, as TypeScript reads it, and the value ends at its first comma. A computed key that holds
+angle brackets is a comparison, as TypeScript reads it, and the value ends at its first comma. That reading only ever
+refuses more: where it changes what a default value holds, the page must be complete read to the first comma as well
+(`genericArrowIsComplete`), because the lexer cannot see a value that TypeScript or Babel refuses in a parameter (`f<T, U>(010)`,
+`await f<T, U>()`). A computed key that holds
 an expression is one even where it starts with a regular expression (`({ [/key/.source]: value }: R) => | T | null`
-is a function type, whose `=>` and leading `|` are its own). And a mapped type whose key type is in parentheses, inside
+is a function type, whose `=>` and leading `|` are its own) — but not right after `await`, where TypeScript reads a
+division. And a mapped type whose key type is in parentheses, inside
 a parenthesised return type — `(p): ({ [K in (keyof T)]: boolean }) => …`, `((keyof T))`, `(keyof T) as K`, a
 parenthesised conditional key type, `[keyof T]` — is a parenthesised type, as TypeScript reads it: the braces are tried
 as a binding pattern first, whose key `K in (keyof T)` holds two names side by side in parentheses, which is no
 expression, so the pattern fails (`parenthesizedMappedType`; the mapped type is read strictly to the `)` that closes the
 parentheses around it, and `K in (T)` and `K in (Extract<keyof T, string>)`, which are expressions, still make a pattern).
+That answer makes the gate accept a page it refused before, so it is given only where Babel's parser reads the page the same
+way: a key that holds `await` is not read (TypeScript parses a type outside the await context, where `(await)` is a name and
+an expression; Babel refuses it as a name in a module), and neither is a key or member type that only TypeScript's parser
+takes — a JSDoc type, a predicate (`asserts x`), a reserved word or `await` for a type's name, `readonly` before a type that
+is no array or tuple, a type parameter named by a word strict code reserves (`[yield in …]`, `infer yield`).
+`source-literals.test.js` sweeps such key types against both parsers (with the oracle variables set): the gate reads the
+braces as a mapped type only where TypeScript and Babel both parse the page so.
 **Known limits** (rare, pinned in `source-literals.test.js`, each checked against TypeScript's parser): a type argument
 that the strict reading does not read — a function type, an object type with members, a template literal type, an import
 type — leaves the default value read to its first comma, so a write cut right after a function type whose parameter has
-`{ a = f<(x: T) => U, V>() }` is accepted (the page compile refuses it); and a mapped type whose key type is an object
-type with members or a function or constructor type in parentheses (`[K in ({ a: keyof T })]`, `[K in (new () => T)]`)
-is refused although TypeScript parses it — write the key type without the parentheses, drop the parentheses around the
-return type, or name the type with a type alias.
+`{ a = f<(x: T) => U, V>() }` is accepted (the page compile refuses it); a function type whose parameter's default passes
+over a generic call's type arguments and whose own return type begins with a `|` (`({ a = f<T, U>() }: R) => | X | null =>
+…`) is refused although TypeScript parses it, as it was before the type arguments were read; a mapped type whose key type
+is an object type with members or a function or constructor type in parentheses (`[K in ({ a: keyof T })]`,
+`[K in (new () => T)]`), or one that only TypeScript's parser takes (above), is refused although TypeScript parses it —
+write the key type without the parentheses, drop the parentheses around the return type, or name the type with a type alias.
 The export pattern once took no `<` after `default`, and every such page was refused as having no default export.
 And `endsMidStatement` catches the cuts that leave every bracket balanced: the
 lexer reports when a file stops inside a string, template, comment or JSX element, and a file
