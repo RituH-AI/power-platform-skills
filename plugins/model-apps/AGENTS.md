@@ -4124,7 +4124,10 @@ NODE20_BIN=/path/to/node20/bin node scripts/run-tests.js --with-sdk /path/to/pow
   workspace for a moment, and under load for longer than the maker waits, so the workspace goes to the plain
   temporary folder, as the code allows. A test file that checks WHERE a workspace is made therefore requires
   `scripts/tests/helpers/own-temp-folder.js` first: it then works in a temporary folder of its own inside the
-  suite's, which the end of the file removes when it is empty (and leaves, for the run to name, when it is not). The folder the suite
+  suite's, which the end of the file removes when it is empty (and leaves, for the run to name, when it is not).
+  That folder's name is short whatever the file is called — `own-<first letter of each word of the file's
+  name>-<4 hex digits of a hash of it>-<random>`, 22 characters at most — because a workspace is two levels
+  below it and Windows refuses `fs.mkdtempSync` a folder path of 248 characters or more. The folder the suite
   runs in is the plugin's own, so the run FAILS too, naming the folder, when a test makes a
   `.maker-workspace` there that was not there before the run (a build opens `<app folder>/.maker-workspace`
   unless it is given a workspace, so a test must never hand a build `process.cwd()`; `sdk-build.test.js`

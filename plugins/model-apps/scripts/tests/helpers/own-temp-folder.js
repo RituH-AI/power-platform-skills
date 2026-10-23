@@ -19,8 +19,18 @@
 // THE END. The folder is removed when the process ends — after lib/temp-workspace.js has removed the workspaces this process made, and then the
 // plugin's folder: the removal is registered from the file's `after` hook, so it runs after every `exit` listener the tests' workspaces registered —
 // and only if nothing is left in it: `rmdir` takes an empty folder and nothing else. A test that leaves anything behind leaves this folder in the
-// suite's temp folder, where the runner's check names it (`own-temp-<test file>-<random>`) and fails the run.
+// suite's temp folder, where the runner's check names it (`own-<letters>-<hash>-<random>`, below) and fails the run.
+//
+// THE NAME is short, and bounded whatever the test file is called. Every workspace a test makes is two levels below this folder, and Windows refuses
+// fs.mkdtempSync a folder whose whole path is 248 characters or more (measured on Node 20 and 22: 247 is made, 248 is ENAMETOOLONG — MAX_PATH less
+// room for an 8.3 name, https://learn.microsoft.com/windows/win32/fileio/maximum-file-path-limitation). A name holding the whole file name took 51 of
+// them for `solution-settings-real-bundle.test.js` (measured): under a temp folder of 134 characters — long, but one the suite can use — the settings
+// copy's work folder no longer fit, went to the plain temp folder, and the test that checks where it is made failed. So the name is `own-`, the first
+// letter of each word of the file's name (at most six), four hex digits of a hash of the whole name, and mkdtemp's six characters:
+// `solution-settings-real-bundle.test.js` is `own-ssrb-<4 hex>-AbC123`, 22 characters at most, so this folder costs a workspace path 23 characters at
+// most. The letters say which file it was, the hash tells two files with the same letters apart, and a file's name is the same on every run.
 const test = require('node:test');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -32,8 +42,11 @@ const NAMES = ['TEMP', 'TMP', 'TMPDIR'];
 const WAITS_MS = [25, 50, 100, 200, 400];
 const pauseSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-const testFile = require.main && require.main.filename ? path.basename(require.main.filename, '.js') : 'test';
-const ownTemp = fs.mkdtempSync(path.join(os.tmpdir(), `own-temp-${testFile.replace(/[^A-Za-z0-9._-]/g, '_')}-`));
+// `solution-settings-real-bundle.test.js` → `own-ssrb-<4 hex>-`: the words are the runs of letters and digits before `.test.js`.
+const testFile = require.main && require.main.filename ? path.basename(require.main.filename) : 'test';
+const letters = testFile.replace(/(?:\.test)?\.[cm]?js$/, '').split(/[^A-Za-z0-9]+/).filter(Boolean).map((word) => word[0].toLowerCase()).join('').slice(0, 6) || 't';
+const hash = crypto.createHash('sha256').update(testFile).digest('hex').slice(0, 4);
+const ownTemp = fs.mkdtempSync(path.join(os.tmpdir(), `own-${letters}-${hash}-`));
 for (const name of NAMES) process.env[name] = ownTemp;
 if (os.tmpdir() !== ownTemp) throw new Error(`os.tmpdir() is ${os.tmpdir()}, not this test file's own temp folder ${ownTemp}`);
 
