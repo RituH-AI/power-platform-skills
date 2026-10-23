@@ -1,6 +1,7 @@
 'use strict';
 
 const { blankNonCodePreservingTemplateExpressions } = require('../../../../plugins/model-apps/scripts/lib/source-literals.js');
+const { jsxElements } = require('./tsx-structure.js');
 
 function groupEnd(mask, open) {
   const pairs = { '(': ')', '{': '}', '[': ']' };
@@ -177,8 +178,13 @@ function callSites(mask, name) {
 // function component already has a scope; an arrow component's body is found after its `=>`.
 function pageComponent(mask, scopes) {
   const exported = /\bexport\s+default\s+(?:async\s+)?(?:function\s+)?([A-Za-z_$][\w$]*)/.exec(mask);
-  if (!exported) return null;
-  const id = escapeRe(exported[1]);
+  return exported ? componentNamed(mask, scopes, exported[1]) : null;
+}
+
+// The component declared as `name` — `function name(…) {…}` or `const name = (…) => …` — read as pageComponent
+// reads the default export. The FIRST such declaration; forwardedPageBody refuses a name declared twice.
+function componentNamed(mask, scopes, name) {
+  const id = escapeRe(name);
   const decl = new RegExp(`(?:\\bfunction\\s+${id}\\s*|\\b(?:const|let|var)\\s+${id}\\s*(?::[^=;]+)?=\\s*(?:async\\s*)?)\\(`).exec(mask);
   if (!decl) return null;
   const open = decl.index + decl[0].length - 1;
@@ -191,13 +197,76 @@ function pageComponent(mask, scopes) {
     if (!arrow) return null;
     const body = close + 1 + arrow[0].length;
     const end = '({'.includes(mask[body]) ? groupEnd(mask, body) : (mask.indexOf(';', body) + 1 || mask.length);
-    scope = { name: exported[1], start: decl.index, paramsOpen: open, paramsEnd: close, body, end };
+    scope = { name, start: decl.index, paramsOpen: open, paramsEnd: close, body, end };
   }
   return {
     scope: { ...scope, isComponent: true },
     propsName: pattern ? null : (/^([A-Za-z_$][\w$]*)/.exec(first) || [])[1] || null,
     destructured: pattern ? destructuredNames(pattern[1]) : new Map(),
+    declaredAt: decl.index,
+    firstParameter: first,
   };
+}
+
+// The canonical page error wrapper (references/rules.md, "Missing Error Handling"):
+//   const GeneratedComponent = (props: GeneratedComponentProps) => (
+//     <PageErrorBoundary>
+//       <PageBody {...props} />
+//     </PageErrorBoundary>
+//   );
+//   export default GeneratedComponent;
+// React renders PageBody with exactly the object the default export received, so PageBody's first parameter IS the page
+// props, and PageBody — not the wrapper — is the component the receiver proofs start from. Only this bounded shape earns
+// that, so nothing but the real props can reach PageBody:
+//   - the default export's whole body is that one element: an arrow's expression (parenthesized or not), or a block
+//     holding only `return (…);`. Its own first parameter is a plain name the file never assigns again;
+//   - the root is PageErrorBoundary, given nothing, or only its telemetry prop (`appInsights={props.appInsights}`);
+//   - its one child, and nothing else, is a self-closing PageBody whose only attribute is one spread of that parameter;
+//   - PageBody is declared once, at the top level of the module, with a plain first parameter (no destructuring and no
+//     default value), and is named nowhere else: a second JSX use, a call or a value hand-off could pass another object.
+// Anything else returns null, and the default export stays the component exactly as before the wrapper existed. A
+// failed proof is not evidence that a call is unrelated: what PageBody then receives is simply unproven.
+const PAGE_BODY = 'PageBody';
+const PAGE_ERROR_BOUNDARY = 'PageErrorBoundary';
+function forwardedPageBody(mask, scopes, wrapper) {
+  const propsName = wrapper?.propsName;
+  if (!propsName || reassigned(mask, propsName)) return null;
+  const { scope } = wrapper;
+  const bodyEnd = '({'.includes(mask[scope.body]) ? scope.end + 1 : scope.end;
+  const inside = jsxElements(mask).filter((element) => element.start >= scope.body && element.end <= bodyEnd);
+  if (!inside.length) return null;
+  const root = inside.reduce((first, element) => (element.start < first.start ? element : first));
+  const around = (mask.slice(scope.body, root.start) + mask.slice(root.end, bodyEnd)).replace(/\s+/g, '');
+  if (!['()', '();', '', ';', '{return();}', '{return()}', '{return;}', '{return}'].includes(around)) return null;
+  if (root.name !== PAGE_ERROR_BOUNDARY || root.selfClosing) return null;
+  const rootAttrs = [...root.attrs.entries()];
+  if (rootAttrs.length > 1 || (rootAttrs.length === 1 && !(rootAttrs[0][0] === 'appInsights' && rootAttrs[0][1].kind === 'expression'
+    && normalizeChain(rootAttrs[0][1].value) === `${propsName}.appInsights`))) return null;
+  const children = inside.filter((element) => element !== root);
+  if (children.length !== 1) return null;
+  const [child] = children;
+  if (child.name !== PAGE_BODY || !child.selfClosing || child.attrs.size !== 1) return null;
+  const spread = child.attrs.get('...');
+  if (!spread || spread.value.replace(/\s+/g, '') !== `...${propsName}`) return null;
+  if ((mask.slice(root.childrenStart, child.start) + mask.slice(child.end, root.childrenEnd)).trim()) return null;
+  // Named exactly twice: its declaration and the child element. A type position (`typeof PageBody`) counts too, and refuses.
+  if ([...mask.matchAll(new RegExp(`(?<![\\w$.])${PAGE_BODY}(?![\\w$])`, 'g'))].length !== 2) return null;
+  const declarations = mask.match(new RegExp(`\\b(?:function|class|const|let|var)\\s+${PAGE_BODY}(?![\\w$])`, 'g')) || [];
+  if (declarations.length !== 1) return null;
+  const body = componentNamed(mask, scopes, PAGE_BODY);
+  if (!body?.propsName || !new RegExp(`^${escapeRe(body.propsName)}\\s*(?::[^=]*)?$`).test(body.firstParameter.trim())) return null;
+  if (moduleDepth(mask, body.declaredAt) !== 0) return null;
+  return body;
+}
+
+// How many brackets are open at `at`: 0 at the top level of the module.
+function moduleDepth(mask, at) {
+  let depth = 0;
+  for (let i = 0; i < at; i += 1) {
+    if ('({['.includes(mask[i])) depth += 1;
+    else if (')}]'.includes(mask[i])) depth -= 1;
+  }
+  return depth;
 }
 
 // A declaration's complete initializer, from `start` to the end of its statement: a `;`, a
@@ -490,7 +559,8 @@ function isDataApi(ctx, expr, at, depth = 0) {
 // assigned from such a name (casts allowed), or a parameter of an enclosing helper that every
 // outside call fills with one of those. Anything unresolvable fails.
 function sourceContext(mask, scopes) {
-  const component = pageComponent(mask, scopes);
+  const exported = pageComponent(mask, scopes);
+  const component = forwardedPageBody(mask, scopes, exported) || exported;
   const named = component
     ? [...scopes.filter((scope) => scope.paramsOpen !== component.scope.paramsOpen), component.scope]
     : scopes;

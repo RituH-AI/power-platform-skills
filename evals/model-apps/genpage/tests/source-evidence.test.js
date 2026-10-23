@@ -258,3 +258,91 @@ test('a named helper\u2019s destructured parameter binds its own names', () => {
   assert.equal(receiverOk(helper('dataApi', '{ dataApi }: Props') + page('props', 'void run(props);')), true, 'an outer helper');
   assert.equal(receiverOk(helper('dataApi', '{ dataApi }: Props') + page('props', 'void run({ dataApi: mockApi });')), false, 'an outer helper, given a mock');
 });
+
+// The page error contract wraps the page in a render boundary (references/rules.md, "Missing Error Handling"): the default
+// export only forwards its props, unchanged, to the top-level PageBody, which holds the hooks and the dataApi calls:
+//   const GeneratedComponent = (props: GeneratedComponentProps) => (
+//     <PageErrorBoundary>
+//       <PageBody {...props} />
+//     </PageErrorBoundary>
+//   );
+// React then hands PageBody exactly the page props, so its first parameter is proven to be them — but only through that
+// one bounded shape, never because a function happens to be called PageBody.
+const body = (inner, { name = 'PageBody', param = 'props' } = {}) => `function ${name}(${param}: GeneratedComponentProps) {
+  ${inner}
+  return null;
+}
+`;
+const wrapper = (jsx, param = 'props') => `const GeneratedComponent = (${param}: GeneratedComponentProps) => (
+  ${jsx}
+);
+export default GeneratedComponent;
+`;
+const CANONICAL = '<PageErrorBoundary>\n    <PageBody {...props} />\n  </PageErrorBoundary>';
+const DESTRUCTURED = 'const { dataApi } = props;\n  void run(dataApi);';
+
+test('the canonical boundary wrapper forwards the page props to PageBody, so its dataApi is the page dataApi', () => {
+  assert.equal(receiverOk(helper('client', 'client') + body(DESTRUCTURED) + wrapper(CANONICAL)), true, 'a helper filled from PageBody');
+  assert.equal(receiverOk(body(`async function approve() {
+    const res = await props.dataApi.executeAction({ name: 'cnt_Approve' });
+  }`) + wrapper(CANONICAL)), true, 'props.dataApi in a handler inside PageBody');
+  assert.equal(receiverOk(helper('client', 'client') + `const PageBody = (pageProps: GeneratedComponentProps) => {
+  const { dataApi } = pageProps;
+  void run(dataApi);
+  return null;
+};
+` + wrapper(CANONICAL)), true, 'an arrow PageBody with its own parameter name');
+  assert.equal(receiverOk(helper('client', 'client') + body(DESTRUCTURED) + `function GeneratedComponent(props: GeneratedComponentProps) {
+  return (
+    <PageErrorBoundary appInsights={props.appInsights}>
+      <PageBody {...props} />
+    </PageErrorBoundary>
+  );
+}
+export default GeneratedComponent;
+`), true, 'a function wrapper, with the boundary given its telemetry prop');
+  // Neighbour: a page without the wrapper keeps the old proof from its default export.
+  assert.equal(receiverOk(helper('client', 'client') + page('props', DESTRUCTURED)), true, 'a page without the wrapper is unchanged');
+});
+
+test('anything but the exact forwarding shape leaves PageBody\u2019s props unproven', () => {
+  const run = helper('client', 'client');
+  const refused = {
+    // `PageBody(props)` in the render is an ordinary named call, which the existing proof follows because it does pass the
+    // page props on; the page error evaluator refuses that page as a boundary that wraps no rendered body
+    // (page-error-evidence.test.js). Called with anything else, it proves nothing.
+    'PageBody evaluated in the render with other props': run + body(DESTRUCTURED) + wrapper('<PageErrorBoundary>{PageBody(mockProps)}</PageErrorBoundary>'),
+    'an extra child prop': run + body(DESTRUCTURED) + wrapper('<PageErrorBoundary><PageBody {...props} dataApi={mockApi} /></PageErrorBoundary>'),
+    'another spread source': run + body(DESTRUCTURED) + wrapper('<PageErrorBoundary><PageBody {...mockProps} /></PageErrorBoundary>'),
+    'a second spread': run + body(DESTRUCTURED) + wrapper('<PageErrorBoundary><PageBody {...props} {...mockProps} /></PageErrorBoundary>'),
+    'a second child': run + body(DESTRUCTURED) + wrapper('<PageErrorBoundary><Header /><PageBody {...props} /></PageErrorBoundary>'),
+    'the boundary is not the root': run + body(DESTRUCTURED) + wrapper('<div><PageErrorBoundary><PageBody {...props} /></PageErrorBoundary></div>'),
+    'an unrelated wrapper component': run + body(DESTRUCTURED) + wrapper('<OtherBoundary><PageBody {...props} /></OtherBoundary>'),
+    'a second caller of PageBody': run + body(DESTRUCTURED) + wrapper(CANONICAL) + 'const Preview = () => <PageBody {...mockProps} />;\n',
+    'PageBody handed on as a value': run + body(DESTRUCTURED) + wrapper(CANONICAL) + 'const Alias = PageBody;\n',
+    'two PageBody declarations': run + body(DESTRUCTURED) + body('', { param: 'other' }) + wrapper(CANONICAL),
+    'a destructured PageBody parameter': run + `function PageBody({ dataApi }: GeneratedComponentProps) {
+  void run(dataApi);
+  return null;
+}
+` + wrapper(CANONICAL),
+    'the wrapper rebinds its props': run + body(DESTRUCTURED) + `const GeneratedComponent = (props: GeneratedComponentProps) => {
+  props = mockProps;
+  return <PageErrorBoundary><PageBody {...props} /></PageErrorBoundary>;
+};
+export default GeneratedComponent;
+`,
+    'a boundary given the dataApi': run + body(DESTRUCTURED) + wrapper('<PageErrorBoundary dataApi={props.dataApi}><PageBody {...props} /></PageErrorBoundary>'),
+    'PageBody nested in the wrapper': run + `const GeneratedComponent = (props: GeneratedComponentProps) => {
+  function PageBody(inner: GeneratedComponentProps) {
+    const { dataApi } = inner;
+    void run(dataApi);
+    return null;
+  }
+  return <PageErrorBoundary><PageBody {...props} /></PageErrorBoundary>;
+};
+export default GeneratedComponent;
+`,
+  };
+  for (const [label, code] of Object.entries(refused)) assert.equal(receiverOk(code), false, label);
+});
