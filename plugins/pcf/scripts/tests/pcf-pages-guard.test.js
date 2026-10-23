@@ -314,6 +314,7 @@ for (const [name, relative] of [
     assert.match(text, /dynamic dispatch/i);
     assert.match(text, /parenthesized receivers/i);
     assert.match(text, /except a function- or block-local `const` bound to an object literal[^\n]*used only to call those functions[^\n]*fail closed/i);
+    assert.match(text, /early-return guards and calls in `else` branches are reported by design[^\n]*deliberate fail-closed limit[^\n]*positive guard block/i);
     assert.match(text, /parenthesized receivers[^\n]*`\.bind`[^\n]*`Reflect\.apply`[^\n]*detected like direct calls/i);
     assert.match(text, /runtime verification on the target Power Pages site[^.\n]*required/i);
   });
@@ -521,6 +522,35 @@ test('Pages detection reads optional and generic call arguments as arguments, no
   for (const text of ['ready && (context.device).captureImage();', 'value = (context.device).captureImage();', 'void (context.device).captureImage();']) {
     assert.deepEqual(codesFor(text, null), ['PCF_FEATURE_UNDECLARED', 'PCF_PAGES_API'], text);
   }
+});
+
+test('Pages proof refuses early exits and else branches of a negated method check by design', () => {
+  // A deliberate fail-closed limit: code that runs between a negated check and the call, such as a later
+  // operand of the same condition, can remove the method without a write the analyzer sees.
+  const negated = 'typeof context.device?.captureImage !== "function"';
+  for (const body of [
+    `if (${negated}) return; ${CALL};`,
+    `if (${negated}) { return; } ${CALL};`,
+    `if (${negated}) throw new Error("no camera"); ${CALL};`,
+    `if (!context.device?.captureImage) return; ${CALL};`,
+    `if (!(${PROOF})) return; ${CALL};`,
+    `if (${negated}) return; return ${CALL};`,
+    `if (${negated}) return; const image = ${CALL};`,
+    `if (${negated}) { consume(); } else { ${CALL}; }`,
+    `if (${negated}) consume(); else ${CALL};`,
+    `if (${negated} || !state.ready) return; return ${CALL};`,
+    `if (!(${PROOF} && state > 0)) return; ${CALL};`,
+    `if (${negated}) return; Object.assign(context.device, { captureImage: undefined }); ${CALL};`,
+  ]) {
+    assert.deepEqual(codesFor(`function capture(context, state, consume) { ${body} }`), ['PCF_PAGES_API'], body);
+  }
+  assert.deepEqual(codesFor(`function capture(contexts) { for (const context of contexts) { if (${negated}) continue; ${CALL}; } }`),
+    ['PCF_PAGES_API']);
+  const [finding] = findingsFor(`function capture(context) { if (${negated}) return; ${CALL}; }`);
+  assert.match(finding.message, /early-return guards and aliases are not recognized/);
+  // The recommended rewrite: a positive guard block around the call.
+  assert.deepEqual(codesFor(`function capture(context) { if (${PROOF}) { ${CALL}; } }`), []);
+  assert.deepEqual(codesFor(`async function capture(context, consume) { if (${PROOF}) { const image = await ${CALL}; consume(image); } }`), []);
 });
 
 test('Pages detection ignores a context-named local object literal that is provably not the PCF context', () => {
