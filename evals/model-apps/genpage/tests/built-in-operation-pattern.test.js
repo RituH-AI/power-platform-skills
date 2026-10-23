@@ -308,3 +308,40 @@ test('a handler or helper handed to an effect, a timer, a frame, a microtask, a 
     for (const [index, result] of verdicts(fixture(source)).entries()) assert.equal(result.status, 'pass', `${label}, layer ${index + 1}: ${result.reason}`);
   }
 });
+
+// ── The result after the helper returns it ──────────────────────────────────────────────────────────────────────────────────────────
+// The handler stores the helper's answer in state (`setIdentity(view)`), and the page renders that state. Nothing kept from the result — the
+// state, a ref it is written to, a variable initialized from either — may reach a log, storage, the clipboard, a URL, telemetry or the network,
+// wherever on the page that happens: at render, in an effect, in another handler. A sink that carries none of it (telemetry of something else, a
+// log of the pending flag, a same-named variable in another function) is not the operation's business.
+test('a value kept from the result — in state, a ref or a variable — logged, stored, copied, put in a URL or sent anywhere on the page fails in both layers', () => {
+  const lastIdentity = (sink) => mutated('  const identityRequest = React.useRef(0);', '  const identityRequest = React.useRef(0);\n  const lastIdentity = React.useRef<IdentityView>({});')
+    .replace('setIdentity(view);\n', 'setIdentity(view);\n      lastIdentity.current = view;\n')
+    .replace(BEFORE_RENDER, `${sink}\n${BEFORE_RENDER}`);
+  for (const [label, source, reason] of [
+    ['the identity state logged at render', atRender('  console.log(identity.identity);'), /^WhoAmI: a value kept from its result \(identity\) must not be logged, stored, copied or sent/],
+    ['the version logged by an effect', atRender('  React.useEffect(() => { if (version.version) console.info(version.version); }, [version]);'), /^RetrieveVersion: a value kept from its result \(version\)/],
+    ['the identity state stored', atRender("  React.useEffect(() => { localStorage.setItem('me', JSON.stringify(identity)); }, [identity]);"), /^WhoAmI: a value kept from its result \(identity\)/],
+    ['a variable derived from the version, sent to telemetry', atRender("  const shown = version.version;\n  React.useEffect(() => { appInsights.trackEvent({ name: 'Version', properties: { shown } }); }, [shown]);"), /^RetrieveVersion: a value kept from its result \(shown\)/],
+    ['the user id put in the URL', atRender("  React.useEffect(() => { if (identity.identity) history.replaceState(null, '', `?user=${identity.identity.userId}`); }, [identity]);"), /^WhoAmI: a value kept from its result \(identity\)/],
+    ['the version sent with fetch', atRender("  React.useEffect(() => { if (version.version) void fetch('/log', { method: 'POST', body: version.version }); }, [version]);"), /^RetrieveVersion: a value kept from its result \(version\)/],
+    ['a copy button of its own', mutated('      {identity.message && <Text>', "      <Button onClick={() => void navigator.clipboard.writeText(identity.identity?.userId ?? '')}>Copy</Button>\n      {identity.message && <Text>"), /^WhoAmI: a value kept from its result \(identity\)/],
+    ['a ref written from the result, logged at render', lastIdentity('  console.log(lastIdentity.current);'), /^WhoAmI: a value kept from its result \(lastIdentity\)/],
+    ['a module variable assigned the result, logged by an effect', mutated('setVersion(view);\n', 'setVersion(view);\n      lastVersion = view;\n')
+      .replace('const GeneratedComponent', 'let lastVersion: VersionView | undefined;\n\nconst GeneratedComponent')
+      .replace(BEFORE_RENDER, `  React.useEffect(() => { console.log(lastVersion); }, [version]);\n${BEFORE_RENDER}`), /^RetrieveVersion: a value kept from its result \(lastVersion\)/],
+  ]) {
+    const found = problems(source);
+    assert.ok(found.some((p) => reason.test(p)), `${label}: ${JSON.stringify(found)}`);
+    for (const [index, result] of verdicts(fixture(source)).entries()) assert.equal(result.status, 'fail', `${label}, layer ${index + 1}`);
+  }
+  for (const [label, source] of [
+    ['telemetry of something else', atRender("  React.useEffect(() => { appInsights.trackEvent({ name: 'PageViewed', properties: { identity: 'not-recorded' } }); }, []);")],
+    ['a log of the pending flag', atRender("  console.debug('identity pending', identityPending);")],
+    ['same-named variables in another function', mutated('async function readVersion(', 'function logRows(view: unknown[]) { const res = view.length; console.log(view.length, res); }\n\nasync function readVersion(')],
+    ['a constant named like the button attribute', atRender("  const onClick = 'tracked';\n  console.debug('button', onClick);")],
+  ]) {
+    assert.deepStrictEqual(problems(source), [], label);
+    for (const [index, result] of verdicts(fixture(source)).entries()) assert.equal(result.status, 'pass', `${label}, layer ${index + 1}: ${result.reason}`);
+  }
+});

@@ -175,7 +175,8 @@ function builtInGateProblems(calls, authoring) {
 //   - the button that triggers it is disabled while its call is pending, a separate state per operation; its handler ignores a stale request (a
 //     `.current` counter it increments and compares after the await) and catches a rejected promise;
 //   - outputs are read only after a non-null, non-array object check, through own-property reads, never from the result root, by a literal member,
-//     by a spread, an iteration or JSON.stringify, and nothing of the result is logged, stored, copied or sent;
+//     by a spread, an iteration or JSON.stringify, and nothing of the result is logged, stored, copied, put in a URL or sent — not by the helper or
+//     its handlers, and not from the state, ref or variable that keeps it, anywhere on the page (a render, an effect, another handler);
 //   - WhoAmI shows all three identifiers or none: one guard that returns tests every one of them with the GUID pattern; RetrieveVersion shows a
 //     Version of 1 to 128 characters or nothing; an unexpected shape says the fixed sentence;
 //   - a status is never read out of the message's words, and nothing says to deploy a Custom API.
@@ -184,8 +185,11 @@ const UNEXPECTED = 'The operation returned an unexpected response. No result was
 const UNAVAILABLE = 'The selected operation is unavailable in this environment or player. No fallback was attempted.';
 const IDENTITY_FIELDS = ['UserId', 'BusinessUnitId', 'OrganizationId'];
 const DTO = 'BusinessUnitId|UserId|OrganizationId|Version';
-// What a page must never do with an operation's result: log it, keep it, copy it or send it anywhere.
-const LEAKS = /\bconsole\s*\.|\blocalStorage\b|\bsessionStorage\b|\bclipboard\b|\bappInsights\b|\.track(?:Event|Metric|Trace|Exception|Dependency)\s*\(|\bURLSearchParams\b|\bhistory\s*\.\s*(?:push|replace)State\b|\bdocument\s*\.\s*cookie\b/;
+// What a page must never do with an operation's result: log it, keep it, copy it, put it in a URL, hash it or send it anywhere. LEAKS finds one in
+// a text; SINKS finds each one of a page.
+const LEAK_SOURCE = String.raw`\bconsole\s*\.|\blocalStorage\b|\bsessionStorage\b|\bindexedDB\b|\bclipboard\b|\bappInsights\b|\.track(?:Event|Metric|Trace|Exception|Dependency|PageView)\s*\(|\bURLSearchParams\b|\bhistory\s*\.\s*(?:push|replace)State\b|\blocation\s*\.\s*(?:assign|replace)\s*\(|\blocation\s*\.\s*(?:href|search|hash)\s*=(?!=)|\bwindow\s*\.\s*open\s*\(|\bdocument\s*\.\s*cookie\b|\bfetch\s*\(|\bsendBeacon\b|\bXMLHttpRequest\b|\bWebSocket\b|\bpostMessage\s*\(|\bcrypto\s*\.\s*subtle\b`;
+const LEAKS = new RegExp(LEAK_SOURCE);
+const SINKS = new RegExp(LEAK_SOURCE, 'g');
 // Where a call is not a user's: an effect, a memo, a timer, a frame or a microtask (a hook's type argument list, `useMemo<string>(…)`, included).
 const NOT_A_USER = /\b(?:useEffect|useLayoutEffect|useInsertionEffect|useMemo|setTimeout|setInterval|requestAnimationFrame|queueMicrotask)\s*(?:<(?:[^<>()]|<[^<>()]*>)*>\s*)?\(/g;
 
@@ -266,6 +270,95 @@ function dependencyLists(mask) {
     } catch { /* not gradeable here; actionCalls refuses it */ }
   }
   return out;
+}
+
+// The `{ … }` blocks of a source, [open, close]. A declaration is visible in the innermost one around it (the whole file at the top level).
+function braceBlocks(mask) {
+  const out = [];
+  const stack = [];
+  for (let i = 0; i < mask.length; i += 1) {
+    if (mask[i] === '{') stack.push(i);
+    else if (mask[i] === '}' && stack.length) out.push([stack.pop(), i]);
+  }
+  return out;
+}
+
+// The names that keep a built-in operation's result once its call answers, each with the block it is visible in ({ name, start, end }):
+//   - `seeds` — the variable the call's answer is assigned to (`res`);
+//   - a variable initialized from a call of the helper or a handler (`const view = await readIdentity(api)`);
+//   - the state its setter stores one in (`setIdentity(view)`, with `const [identity, setIdentity] = useState(…)`);
+//   - a declared ref or variable one is assigned to (`last.current = view`);
+//   - every variable initialized from any of those (`const shown = version.version`) — until nothing new is found.
+// Scoped by block, so a same-named variable of another function holds nothing. A name passed on to a function this does not follow (a prop
+// callback) is not tracked: the page component is the root of what a generated page renders.
+function resultHolders(mask, reached, seeds) {
+  const blocks = braceBlocks(mask);
+  const scopeOf = (at) => blocks.filter(([a, b]) => a < at && at < b).reduce((best, block) => (!best || block[0] > best[0] ? block : best), null) || [0, mask.length];
+  const declarations = [];
+  // `const view = …`, `let last;`, `const [identity, setIdentity] = …`, `const { a, b: c } = …` — each declared local name, and its initializer.
+  for (const match of mask.matchAll(/\b(const|let|var)\s+(\[[^\]]*\]|\{[^}]*\}|[A-Za-z_$][\w$]*)/g)) {
+    const pattern = match[2];
+    const names = /^[[{]/.test(pattern)
+      ? pattern.slice(1, -1).split(',').map((part) => /^\s*(?:\.\.\.)?\s*(?:[A-Za-z_$][\w$]*\s*:\s*)?([A-Za-z_$][\w$]*)/.exec(part)?.[1]).filter(Boolean)
+      : [pattern];
+    const assigned = /^\s*(?::[^=;]+)?=(?!=)\s*/.exec(mask.slice(match.index + match[0].length));
+    let init = -1;
+    let end = -1;
+    if (assigned) {
+      init = match.index + match[0].length + assigned[0].length;
+      try { end = expressionEnd(mask, init); } catch { continue; }
+    }
+    const text = assigned ? mask.slice(init, end) : '';
+    declarations.push({
+      kind: match[1], names, init, end, scope: scopeOf(match.index),
+      isFunction: /=>|^\s*(?:async\s+)?function\b/.test(text),
+      setter: pattern.startsWith('[') && /^\s*(?:React\s*\.\s*)?useState\b/.test(text) ? names[1] || null : null,
+    });
+  }
+  const declared = new Set(declarations.flatMap((d) => d.names));
+  // A JSX attribute (`onClick={…}`) is not an assignment, so a plain name is followed only when `let` or `var` declares it.
+  const reassignable = new Set(declarations.filter((d) => d.kind !== 'const').flatMap((d) => d.names));
+  const scopeOfName = (name, at) => declarations
+    .filter((d) => d.names.includes(name) && d.scope[0] <= at && at <= d.scope[1])
+    .reduce((best, d) => (!best || d.scope[0] > best[0] ? d.scope : best), null) || [0, mask.length];
+  const reachedCalls = [...reached].flatMap((fn) => callSites(mask, fn).map((site) => site.at));
+  const cache = new Map();
+  const mentionsOf = (name) => {
+    if (!cache.has(name)) cache.set(name, mentions(mask, name));
+    return cache.get(name);
+  };
+  const held = [];
+  const carries = (from, to) => reachedCalls.some((at) => at >= from && at < to)
+    || held.some(({ name, start, end }) => mentionsOf(name).some((at) => at >= from && at < to && start < at && at < end));
+  const hold = (name, [start, end]) => {
+    if (held.some((h) => h.name === name && h.start === start && h.end === end)) return false;
+    held.push({ name, start, end });
+    return true;
+  };
+  for (const { name, at } of seeds) hold(name, scopeOf(at));
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const d of declarations) {
+      if (d.init !== -1 && !d.isFunction && !d.setter && carries(d.init, d.end)) for (const name of d.names) grew = hold(name, d.scope) || grew;
+    }
+    for (const d of declarations.filter((entry) => entry.setter)) {
+      for (const site of callSites(mask, d.setter)) {
+        const open = mask.indexOf('(', site.at);
+        let close;
+        try { close = groupEnd(mask, open); } catch { continue; }
+        if (carries(open, close)) grew = hold(d.names[0], d.scope) || grew;
+      }
+    }
+    // An assignment to a ref's `.current`, or to a name `let` or `var` declares (`last = view`).
+    for (const match of mask.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)(\s*\.\s*current)?\s*=(?![=>])/g)) {
+      if (!(match[2] ? declared : reassignable).has(match[1]) || /\b(?:const|let|var)\s+$/.test(mask.slice(Math.max(0, match.index - 12), match.index))) continue;
+      const from = match.index + match[0].length;
+      let end;
+      try { end = expressionEnd(mask, from); } catch { continue; }
+      if (carries(from, end)) grew = hold(match[1], scopeOfName(match[1], match.index)) || grew;
+    }
+  }
+  return held;
 }
 
 function builtInRuntimeProblems(code, names) {
@@ -382,6 +475,15 @@ function builtInRuntimeProblems(code, names) {
       if (!/\bcatch\b/.test(handlerText + prefix + post)) problems.push(`${at}: a rejected call is not caught`);
       if (LEAKS.test(mask.slice(helper.start, helper.end)) || LEAKS.test(handlers.map((h) => mask.slice(h.start, h.end)).join('\n'))) {
         problems.push(`${at}: the result must not be logged, stored, copied or sent`);
+      }
+      // …nor anything that keeps it, wherever the page uses that: the state rendered from it, a ref, a variable — at render, in an effect, in
+      // another handler. A sink is the expression a LEAKS match starts, so what it is handed is what it logs, stores, copies or sends.
+      const holders = resultHolders(mask, reached, call.resultName ? [{ name: call.resultName, at: call.start }] : []);
+      for (const sink of mask.matchAll(SINKS)) {
+        let end;
+        try { end = expressionEnd(mask, sink.index); } catch { end = mask.length; }
+        const holder = holders.find(({ name: held, start, end: scopeEnd }) => mentions(mask, held).some((spot) => spot > sink.index && spot < end && start < spot && spot < scopeEnd));
+        if (holder) problems.push(`${at}: a value kept from its result (${holder.name}) must not be logged, stored, copied or sent`);
       }
       // Outputs: an object check, own-property reads, never a literal member, the root, a spread, an iteration or a serialization.
       if (!/\bArray\s*\.\s*isArray\s*\(/.test(postMask) || !/\btypeof\s+[\w$.?]+\s*!==?\s*(['"])object\1/.test(post)) {

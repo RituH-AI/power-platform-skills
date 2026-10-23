@@ -321,7 +321,9 @@ copy, put in a URL, send to telemetry or hash them; never join them to business 
 them as a client-side authorization; never retrieve the `systemuser`, `businessunit` or
 `organization` row behind them; never copy the identity an auth preflight printed into page
 source. Binding WhoAmI is not permission to call it for analytics. Results stay in component
-memory.
+memory, and the same holds for everything that keeps them — the state the page renders from, a
+ref, a variable derived from either — wherever the page uses it: at render, in an effect or in
+another handler.
 
 ## Download and rebuild
 
