@@ -138,13 +138,15 @@ changed, and never as a partial file.
 | preserve (an unrelated edit) | not consulted | omitted | keep existing call text as it is |
 | add / replace | must be ON | the full desired array | the button pattern below, for the new names only |
 | remove | not consulted | the array minus the named entries | delete those calls only |
-| clear all | after the maker confirms (the confirmation names the built-ins it removes) | `[]` | delete every call |
+| clear all | after the maker's clear choice, which names the built-ins it removes | `[]` | delete every call |
 | none, on create | n/a | omitted unless Custom APIs changed | no built-in call |
 | none, on an edit whose page already binds one | n/a | not passed | halt: no preserve evidence is no permission to delete the call |
 
 Removing every Custom API is a remove of each Custom API row: the built-in rows stay, byte for
-byte, and the file is never `[]` while one remains. Only a clear the maker confirmed, naming each
-built-in operation it removes, empties the array.
+byte, and the file is never `[]` while one remains. Only the maker's clear choice — asked with two
+options and recorded right before the upload it covers as `Clear choice: Clear every action binding
+of page <page-id>, removing <names>` — empties the array; a yes to adding or keeping an operation
+never does.
 
 A gate flipped OFF between planning and generation of an add/replace halts: no `actions.json`
 is written, no `--actions` is passed, and `[]` is never written in its place (`[]` is only an

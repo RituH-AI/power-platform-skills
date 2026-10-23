@@ -22,6 +22,7 @@ const {
 } = require('../../../../plugins/model-apps/scripts/lib/dataverse-operations.js');
 const { planSection, parseMarkdownRows } = require('./plan-evidence.js');
 const { isGeneration, isUpload, resultObject } = require('./workflow-evidence.js');
+const { uploadChoiceLines, consumedChoice } = require('./upload-contract.js');
 const { actionCalls, groupEnd, literalString, escapeRe, callSites, expressionEnd } = require('./source-evidence.js');
 const { blankNonCodePreservingTemplateExpressions } = require('../../../../plugins/model-apps/scripts/lib/source-literals.js');
 
@@ -165,17 +166,33 @@ function builtInGateProblems(calls, authoring) {
 }
 
 // A clear (`change: { clear: true }`, an upload of `[]`) empties the WHOLE array. On a page whose before-config holds a built-in row, removing the
-// Custom APIs is not that — it keeps the built-in rows — so a clear needs the maker's confirmation that names each built-in it removes: a
-// workflow-log line `AskUserQuestion: <question> → <answer>` whose question names every one of them and whose answer accepts.
-function clearConfirmationProblems(workflowLog, before, label) {
-  const removed = partitionBindings(before).builtIns.map((entry) => entry.name);
-  if (!removed.length) return [];
-  const confirmed = String(workflowLog || '').split(/\r?\n/).some((line) => {
-    const exchange = /\bAskUserQuestion:\s*(.*?)\s*(?:→|->)\s*(.*)$/.exec(line);
-    return Boolean(exchange) && removed.every((name) => new RegExp(`(?<![\\w$])${escapeRe(name)}(?![\\w$])`).test(exchange[1]))
-      && /^(?:yes\b|confirm|clear\b)/i.test(exchange[2].trim());
-  });
-  return confirmed ? [] : [`${label}: clearing every action binding removes ${removed.join(', ')} — only after the maker confirmed a clear that names each one`];
+// Custom APIs is not that — it keeps the built-in rows — so a clear needs the maker's clear choice (edit-flow.md, Edit Phase 6), recorded as its
+// own workflow-log line right before the upload it covers:
+//   Clear choice: Clear every action binding of page <page-id>, removing WhoAmI and RetrieveVersion
+// <page-id> is that upload's `--page-id` (any case), and the names are exactly the built-ins the page holds, in catalogue order. It is read the
+// way an overwrite choice is (upload-contract.js): a `Clear choice:` line sets the pending answer, a later one replaces it, and the next log line
+// that carries an upload command consumes it. So the answer that counts is the last one before this upload's own log line, it covers that one
+// upload (a retry needs it again), and a choice logged after the upload, for another page, for another set of built-ins, or with anything
+// added to it is no permission. AskUserQuestion exchanges are not read at all: a yes to adding or keeping WhoAmI never authorizes deleting it.
+const CLEAR_CHOICE = 'Clear choice:';
+function clearConfirmationProblems({ workflowLog, uploads, call, pageId, before, label }) {
+  const held = new Set(partitionBindings(before).builtIns.map((entry) => entry.name));
+  if (!held.size) return [];
+  const removed = CATALOGUE_ORDER.filter((name) => held.has(name)).join(' and ');
+  const expected = `${CLEAR_CHOICE} Clear every action binding of page ${pageId}, removing ${removed}`;
+  // Every upload consumes its own log entry, in order, so an entry an earlier upload used can never be reached by this one.
+  const entries = uploadChoiceLines(workflowLog, CLEAR_CHOICE);
+  let consumed = null;
+  for (const upload of uploads) {
+    const choice = consumedChoice(entries, upload.command);
+    if (upload === call) {
+      consumed = choice;
+      break;
+    }
+  }
+  const choice = /^Clear choice: Clear every action binding of page (\S+), removing (.+)$/.exec(consumed || '');
+  const accepted = Boolean(choice) && typeof pageId === 'string' && choice[1].toLowerCase() === pageId.toLowerCase() && choice[2] === removed;
+  return accepted ? [] : [`${label}: clearing every action binding removes ${removed.replace(' and ', ', ')} — only with the maker's clear choice recorded right before this upload: ${expected}`];
 }
 
 // ── The generated call of a NEWLY authored built-in operation (references/dataverse-operations.md, "Generated call") ─────────────────────────────

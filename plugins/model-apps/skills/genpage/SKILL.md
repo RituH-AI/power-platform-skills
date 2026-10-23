@@ -1003,13 +1003,13 @@ Custom API deployment follows the **identical matrix** as connectors, substituti
 array is not empty; on an edit only
 when bindings changed/added/removed (full replace); omit it on an unrelated edit (the page keeps
 its deployed `actionBindings`); write `[]` and pass it to clear all `actionBindings` — on a page
-that also binds a built-in operation (`WhoAmI`, `RetrieveVersion`) only after the maker confirmed
-a clear that names each one, because removing every Custom API keeps them (edit-flow.md, Edit
-Phase 3).
+that also binds a built-in operation (`WhoAmI`, `RetrieveVersion`) only after the maker's clear
+choice naming each one (edit-flow.md, Edit Phase 6), because removing every Custom API keeps them
+(edit-flow.md, Edit Phase 3).
 The same array carries the built-in operation rows (`WhoAmI`, `RetrieveVersion`), so the same
 rules hold for them: `--actions` is passed only when the whole desired set changed, a preserve
 omits it, a removal passes the array minus the named entries, and `[]` is passed only for a
-confirmed clear-all — never as the result of a gate that turned off (Phase 4.6b, or in an edit the
+clear-all the maker chose — never as the result of a gate that turned off (Phase 4.6b, or in an edit the
 Edit Phase 4 re-probe, halts instead).
 
 **Deploy through `scripts/genpage-upload.js`.** It writes the page through the SDK — the same page backend

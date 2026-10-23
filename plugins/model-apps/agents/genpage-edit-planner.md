@@ -229,8 +229,8 @@ at a time (you are headless — see the interaction contract below):
 >   run`, the builder added none: plan the edit without that call and do not signal again. A call on load, on a
 >   filter or in the background is refused (`explicit_trigger_required`): only a button.
 > - **remove** — drop only the named calls and bindings; nothing else.
-> - **clear all** — only after the maker confirms; the confirmation names the built-in bindings
->   it removes.
+> - **clear all** — only after the maker's clear choice, which names the built-in bindings it
+>   removes (edit-flow.md, Edit Phase 6); a yes to adding or keeping one is not that choice.
 > - If the page already binds WhoAmI or RetrieveVersion and you cannot tell the intent, halt
 >   with `needs_input`: missing preserve evidence is not permission to delete the call.
 

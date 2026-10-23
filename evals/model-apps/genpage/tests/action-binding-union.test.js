@@ -355,26 +355,55 @@ test('removing every Custom API of a mixed page keeps WhoAmI — an empty action
   }
 });
 
-test('clearing every binding of a page that binds WhoAmI needs the maker\'s confirmation, and the confirmation names WhoAmI', () => {
-  const cleared = (line) => {
-    const fixture = withUpdate(mixedFixture(), 'clear', { clear: true }, [], NO_CALLS);
-    fixture.workflowLog += line ? `\n${line}\n` : '';
-    return fixture;
-  };
-  const confirmed = 'AskUserQuestion: Clear every action binding? This also removes WhoAmI. → Yes, clear them all';
-  for (const layer of [1, 2]) {
-    const result = score(cleared(confirmed), layer);
-    assert.equal(result.status, 'pass', `layer ${layer}: ${result.reason}`);
-  }
-  for (const [label, line] of [
-    ['no confirmation', ''],
-    ['a confirmation that does not name WhoAmI', 'AskUserQuestion: Clear every Custom API? → Yes'],
-    ['a refusal', 'AskUserQuestion: Clear every action binding? This also removes WhoAmI. → No, keep WhoAmI'],
+// The clear's own record (edit-flow.md, Edit Phase 6): the maker's answer to the two-option clear question, written as its own workflow-log line
+// right before the upload it covers —
+//   Clear choice: Clear every action binding of page <page-id>, removing WhoAmI
+// The last `Clear choice:` line before the log line that carries this upload's exact command is the one that counts, and each upload consumes
+// the choice before it, as an overwrite choice is consumed (upload-contract.js): one choice covers one upload, a later choice replaces an
+// earlier one, and a choice written after the upload, for another page or for another set of built-ins is no permission. A yes to adding or
+// keeping WhoAmI is not a clear choice at all.
+const OTHER_PAGE = '11111111-1111-4111-8111-111111111111';
+const CLEAR_CHOICE = `Clear choice: Clear every action binding of page ${PAGE}, removing WhoAmI`;
+const CLEAR_REFUSED = /^clear: clearing every action binding removes WhoAmI — only with the maker's clear choice recorded right before this upload/;
+// The clear of the mixed page, with `lines` appended to its workflow log; `<upload>` stands for the log line of the clear's upload command and
+// `retry` makes the clear upload twice — a first attempt that failed, then the stage's own upload — both logged with the same command.
+function cleared(lines, { retry = false } = {}) {
+  const fixture = withUpdate(mixedFixture(), 'clear', { clear: true }, [], NO_CALLS);
+  const upload = fixture.events.find((call) => call.id === 'clear');
+  if (retry) fixture.events.splice(fixture.events.indexOf(upload), 0, { id: 'clear-attempt', command: upload.command, result: { ok: false, error: 'The request timed out.' } });
+  fixture.workflowLog = [fixture.workflowLog, ...lines.map((line) => (line === '<upload>' ? `- Command: \`${upload.command}\`` : line))].join('\n');
+  return fixture;
+}
+
+test('clearing every binding of a page that binds WhoAmI needs the clear choice, recorded right before that upload, for that page and every built-in it removes', () => {
+  const asked = 'AskUserQuestion: Clearing every action binding also removes WhoAmI. → Clear every action binding, removing WhoAmI';
+  for (const [label, fixture] of [
+    ['the choice before the upload', cleared([asked, CLEAR_CHOICE, '<upload>'])],
+    ['the choice beside an overwrite choice for the same upload', cleared([CLEAR_CHOICE, 'Choice: Overwrite the deployed changes', '<upload>'])],
+    ['a retried clear with the choice written again', cleared([CLEAR_CHOICE, '<upload>', CLEAR_CHOICE, '<upload>'], { retry: true })],
   ]) {
-    const problems = customApiProblems(cleared(line));
-    assert.ok(problems.includes('clear: clearing every action binding removes WhoAmI — only after the maker confirmed a clear that names each one'), `${label}: ${JSON.stringify(problems)}`);
+    for (const layer of [1, 2]) {
+      const result = score(fixture, layer);
+      assert.equal(result.status, 'pass', `${label}, layer ${layer}: ${result.reason}`);
+    }
   }
-  // A page with no built-in row clears as before: the Custom APIs are the whole array.
+  for (const [label, fixture] of [
+    ['no confirmation', cleared(['<upload>'])],
+    ['a yes to adding WhoAmI', cleared(['AskUserQuestion: Add a button for WhoAmI? → Yes', '<upload>'])],
+    ['a yes to keeping WhoAmI', cleared(['AskUserQuestion: Keep the WhoAmI binding? → Yes', '<upload>'])],
+    ['a free-text yes to clearing', cleared(['AskUserQuestion: Clear every action binding? This also removes WhoAmI. → Yes, clear them all', '<upload>'])],
+    ['a clear choice withdrawn before the upload', cleared([CLEAR_CHOICE, 'Clear choice: Keep WhoAmI', '<upload>'])],
+    ['a clear choice written after the upload', cleared(['<upload>', CLEAR_CHOICE])],
+    ['a qualified answer', cleared([`${CLEAR_CHOICE}, but keep WhoAmI`, '<upload>'])],
+    ['a choice for another page', cleared([CLEAR_CHOICE.replace(PAGE, OTHER_PAGE), '<upload>'])],
+    ['a choice for another set of built-ins', cleared([`${CLEAR_CHOICE} and RetrieveVersion`, '<upload>'])],
+    ['one choice for a retried clear', cleared([CLEAR_CHOICE, '<upload>', '<upload>'], { retry: true })],
+  ]) {
+    const problems = customApiProblems(fixture);
+    assert.ok(problems.some((problem) => CLEAR_REFUSED.test(problem)), `${label}: ${JSON.stringify(problems)}`);
+    for (const layer of [1, 2]) assert.equal(score(fixture, layer).status, 'fail', `${label}, layer ${layer}`);
+  }
+  // A page with no built-in row clears as before: the Custom APIs are the whole array, and no choice is asked.
   const apiOnly = mixedFixture();
   apiOnly.genpagePlan = CUSTOM_PLAN;
   for (const call of apiOnly.events.filter((entry) => ['builtin-gate', 'listing', 'builtin-regate'].includes(entry.id))) apiOnly.events.splice(apiOnly.events.indexOf(call), 1);

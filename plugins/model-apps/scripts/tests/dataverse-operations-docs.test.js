@@ -89,7 +89,7 @@ test('the orchestrator dispatches the builder once, re-probes before an add/repl
   const editFlow = squash(read('skills', 'genpage', 'edit-flow.md'));
   has(editFlow, /\| preserve \(an unrelated edit\) \| not consulted \| omit \|/);
   has(editFlow, /\| none, but the page binds one \| n\/a \| do not pass \| halt/);
-  has(editFlow, /`\[\]` is passed only for a confirmed clear-all — never because the `dataverse-operations` gate turned off/);
+  has(editFlow, /`\[\]` is passed only for a clear-all the maker chose \(the clear choice below\) — never because the `dataverse-operations` gate turned off/);
 });
 
 test('the page builder emits a button-only call from the reference, only for the plan\'s table; download, rebuild and /app-builder relay the not-checked words', () => {
@@ -136,7 +136,7 @@ test('removing every Custom API keeps the built-in rows — `[]` only clears a p
     assert.ok(!/\*\*Clear all Custom APIs:\*\* write `\[\]`/.test(text), `${phase}: no [] recipe for clearing the Custom APIs`);
     assert.ok(!/\*\*Remove every Custom API:\*\* write `\[\]`/.test(text), `${phase}: no [] recipe for removing every Custom API`);
     has(text, /\*\*Remove every Custom API:\*\*[^*]*every built-in operation row \(`WhoAmI`, `RetrieveVersion`\) stays, byte for byte/);
-    has(text, /\*\*Clear every action binding:\*\*[^*]*only when the page holds no built-in operation row, or after the maker confirmed a clear that names each one it removes/);
+    has(text, /\*\*Clear every action binding:\*\*[^*]*only when the page holds no built-in operation row, or after the maker's clear choice naming each one it removes/);
   }
   has(planning, /On a page that binds one, invoke the builder the same way, with the remove intent naming every Custom API row/);
   has(deploy, /never `\[\]` while a built-in row remains/);
@@ -219,4 +219,23 @@ test('the edit flow handles the built-in signal, forwards this run\'s contract t
   // The edit planner takes the forwarded block as this run's selection; AGENTS.md names the edit's own re-probe.
   has(squash(read('agents', 'genpage-edit-planner.md')), /unless your prompt carries this run's built-in operation contract \(the body of the builder's `dataverse-operations\.md` between `----- BEGIN\/END DATAVERSE OPERATIONS -----` lines\)/);
   has(squash(read('AGENTS.md')), /an edit re-probes in edit-flow\.md, Edit Phase 4/);
+});
+
+// A clear of a page that binds a built-in operation deletes it, so its permission is one fixed record the evaluator can tie to the upload it
+// covers — the maker's answer to a two-option question, written right before that upload — never a yes found anywhere in the log.
+test('a clear of a page that binds a built-in needs the maker\'s clear choice, recorded right before the upload it covers — never a yes to adding or keeping one', () => {
+  const edit = read('skills', 'genpage', 'edit-flow.md');
+  const deploy = section(edit, '## Edit Phase 6:', '## Edit Phase 7:');
+  has(deploy, /\*\*The clear choice\.\*\* A clear of a page that binds a built-in operation needs the maker's own answer, asked with `AskUserQuestion` with exactly two options — `Clear every action binding, removing <names>` and `Keep <names>`/);
+  has(deploy, /Clear choice: Clear every action binding of page <page-id>, removing <names>/);
+  has(deploy, /Only the first, for this page and every built-in operation it holds, permits `\[\]`, and it covers that one upload: write it again before a retry/);
+  has(deploy, /A yes to adding or keeping an operation, an answer with conditions, or a choice written after the upload is no permission/);
+  has(deploy, /\*\*Unattended:\*\* do not clear/);
+  has(section(edit, '## Edit Phase 3:', '## Edit Phase 4:'), /\| clear all \| after the maker's clear choice, which names the built-ins removed \(Edit Phase 6\) \| `\[\]` \| delete every call \|/);
+  has(section(read('agents', 'genpage-customapi-builder.md'), '## Step 4'), /only the maker's clear choice, recorded as edit-flow\.md Edit Phase 6 describes, permits `\[\]`/);
+  has(squash(read('agents', 'genpage-edit-planner.md')), /\*\*clear all\*\* — only after the maker's clear choice, which names the built-in bindings it removes \(edit-flow\.md, Edit Phase 6\); a yes to adding or keeping one is not that choice/);
+  const reference = squash(read('references', 'dataverse-operations.md'));
+  has(reference, /\| clear all \| after the maker's clear choice, which names the built-ins it removes \| `\[\]` \| delete every call \|/);
+  has(reference, /recorded right before the upload it covers as `Clear choice: Clear every action binding of page <page-id>, removing <names>`/);
+  has(section(read('skills', 'genpage', 'SKILL.md'), '### Phase 6: Deploy', '**Deploy through `scripts/genpage-upload.js`.**'), /only after the maker's clear choice naming each one \(edit-flow\.md, Edit Phase 6\)/);
 });

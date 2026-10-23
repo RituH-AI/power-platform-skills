@@ -260,8 +260,8 @@ Also read `config.json.connectorBindings` and `config.json.actionBindings`.
 > - **Clear every action binding:** write `[]` to `<working-dir>/actions.json` and a
 >   `custom-api-bindings.md` body of exactly `No custom API bindings.`, then pass `--actions`
 >   during upload so the page's `config.json.actionBindings` is cleared — only when the page
->   holds no built-in operation row, or after the maker confirmed a clear that names each one it
->   removes (`AskUserQuestion`, recorded in `workflow-log.md`).
+>   holds no built-in operation row, or after the maker's clear choice naming each one it removes
+>   (Edit Phase 6).
 >
 > **The builder is headless and may return `{ "action": "needs_input", … }`** (for
 > example, when more than one discovered Custom API matches the intent). Drive the same
@@ -286,7 +286,7 @@ Also read `config.json.connectorBindings` and `config.json.actionBindings`.
 > | preserve (an unrelated edit) | not consulted | omit | keep existing calls exactly as written |
 > | add / replace | must be ON (the builder probes it; Edit Phase 4 re-probes it before Edit Phase 5) | the full desired array | the button pattern, for the new names only |
 > | remove | not consulted | the array minus the named entries | delete those calls only |
-> | clear all | after the maker confirms; the confirmation names the built-ins removed | `[]` | delete every call |
+> | clear all | after the maker's clear choice, which names the built-ins removed (Edit Phase 6) | `[]` | delete every call |
 > | none, but the page binds one | n/a | do not pass | halt: no preserve evidence is no permission to delete the call |
 >
 > An add or replace dispatches `genpage-customapi-builder` (Mode: `edit`) with the existing
@@ -553,11 +553,28 @@ Custom API binding rules for edit deploy (identical matrix, `--actions` for
   none, this is the clear below.
 - **Clear every action binding:** write `[]` to `actions.json` and pass `--actions` so the page's
   `config.json.actionBindings` is cleared — only when the page holds no built-in operation row, or
-  after the maker confirmed a clear that names each one it removes.
+  after the maker's clear choice naming each one it removes (below).
 - **Built-in operations** ride the same array: an add/replace passes the full desired array the
   builder wrote (Custom API rows, then the built-in rows); a preserve omits `--actions`; a removal
-  passes the array minus the named entries; `[]` is passed only for a confirmed clear-all —
-  never because the `dataverse-operations` gate turned off (the Edit Phase 4 re-probe halts instead).
+  passes the array minus the named entries; `[]` is passed only for a clear-all the maker chose
+  (the clear choice below) — never because the `dataverse-operations` gate turned off (the Edit
+  Phase 4 re-probe halts instead).
+
+**The clear choice.** A clear of a page that binds a built-in operation needs the maker's own
+answer, asked with `AskUserQuestion` with exactly two options — `Clear every action binding,
+removing <names>` and `Keep <names>` — where `<names>` are the built-in operations the page holds,
+in catalogue order (`WhoAmI`, `RetrieveVersion`, or `WhoAmI and RetrieveVersion`). Record the answer
+as its own line in `workflow-log.md`, right before the upload command it covers:
+
+```text
+Clear choice: Clear every action binding of page <page-id>, removing <names>
+```
+
+or `Clear choice: Keep <names>`. Only the first, for this page and every built-in operation it
+holds, permits `[]`, and it covers that one upload: write it again before a retry. A yes to adding
+or keeping an operation, an answer with conditions, or a choice written after the upload is no
+permission; the maker keeping them leaves a removal of the Custom APIs at most. **Unattended:** do
+not clear; stop and report that a clear would remove `<names>` and needs the maker's choice.
 
 The edit request is arbitrary user text, and a downloaded prompt is a multi-line conversation
 transcript. Both go to the upload BY FILE via `scripts/genpage-upload.js`, never through a shell command:

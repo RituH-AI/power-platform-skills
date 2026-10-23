@@ -271,7 +271,8 @@ Start from the **existing bindings** you were given and apply the edit intent:
 - **Remove every Custom API:** drop each Custom API row and keep every built-in row byte for byte
   (`WhoAmI`, `RetrieveVersion`, exact names): `custom-api-bindings.md` is then
   `No custom API bindings.` and `actions.json` holds the built-in rows. "Clear the Custom APIs" is
-  this removal; only a clear the maker confirmed, naming each built-in it removes, writes `[]`.
+  this removal; only the maker's clear choice, recorded as edit-flow.md Edit Phase 6 describes,
+  permits `[]`.
 - Use ONLY names, kinds, bound entities, and parameter kinds you discovered this run or that
   were in the existing bindings. Never fabricate.
 - New discovery eligibility is not retroactive cleanup: preserve unrelated existing bindings
@@ -280,7 +281,8 @@ Start from the **existing bindings** you were given and apply the edit intent:
   intent table): a preserve keeps them verbatim — never add `isFunction`, a canonical label or
   `parameterKinds` to a legacy entry; add/replace needs the `dataverse-operations` gate ON and
   the maker's selection; remove drops only the named entries (built-ins and Custom APIs alike);
-  clear-all is `[]` only after the maker confirmed it, naming the built-ins it removes. An edit
+  clear-all is `[]` only after the maker's clear choice, which names the built-ins it removes
+  (edit-flow.md, Edit Phase 6). An edit
   whose page already binds WhoAmI or RetrieveVersion with no preserve evidence for it halts:
   missing evidence is not permission to delete the call.
 
