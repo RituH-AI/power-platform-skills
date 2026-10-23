@@ -2705,6 +2705,7 @@ test('main changed-only full-fast-noop cycle uses the real flow', async () => {
   const os = require('node:os');
   const { loadCli } = require('./helpers/cli-harness.js');
   const { makeSimpleMockSdk } = require('./helpers/mock-sdk.js');
+  const { withPageType, PAGE_TYPE } = require('./helpers/page-component-type.js');
   const snapshotStore = require('../lib/apply-snapshot-store.js');
   const { sha256 } = require('../lib/hash.js');
   const genpageSdk = require('../lib/genpage-sdk.js');
@@ -2787,7 +2788,8 @@ test('main changed-only full-fast-noop cycle uses the real flow', async () => {
     assert.ok(row, `web resource ${id} exists`);
     row.content = Buffer.from(o.content, 'utf8').toString('base64');
   };
-  sdk.dataverse = { get: async (url) => {
+  // The page table's component type is answered first: the build's pages join the spec's solution (lib/page-solution.js).
+  sdk.dataverse = { get: withPageType(async (url) => {
     // The shared-page scan lists the apps that were never published: the one app here is published, so it is the only row.
     if (url.startsWith('/appmodules/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()')) {
       return { status: 200, body: { value: state.app ? [{ appmoduleid: state.app.id, appmoduleidunique: appUniqueValue, uniquename: spec.app.uniqueName, componentstate: 0 }] : [] } };
@@ -2796,7 +2798,7 @@ test('main changed-only full-fast-noop cycle uses the real flow', async () => {
     return state.table && !url.includes("LogicalName='entity'")
       ? { status: 200, body: { LogicalName: state.table.logicalName, EntitySetName: state.table.entitySetName } }
       : { status: 404, body: {} };
-  } };
+  }) };
   sdk.queryRecords = async (set, o = {}) => {
     const filter = o.filter || '';
     if (set === 'appmodule') {
@@ -2949,8 +2951,12 @@ test('main changed-only full-fast-noop cycle uses the real flow', async () => {
     assert.strictEqual(fast.verify.ok, true);
     assert.deepStrictEqual(fast.changedOnly.pageKeys, ['overview']);
     assert.deepStrictEqual(uploads, [{ name: 'Overview', pageId: pageIds.Overview, requestedId: pageIds.Overview, code: deployedCode }]);
-    assert.ok(writes.every((w) => w.method === 'updateWebResource' || (w.method === 'addSolutionComponent' && w.args[0].componentType === 61)),
-      `fast apply writes only the page manifest, never the data model or sitemap: ${JSON.stringify(writes)}`);
+    // The page it writes is re-asserted in the spec's solution, as the manifest is: this double keeps no solution, so neither is found there and both are added.
+    assert.ok(writes.every((w) => w.method === 'updateWebResource' || (w.method === 'addSolutionComponent' && (w.args[0].componentType === 61
+      || (w.args[0].componentType === PAGE_TYPE && w.args[0].componentId === pageIds.Overview)))),
+      `fast apply writes only the page manifest and the solution membership of the page it changed, never the data model or sitemap: ${JSON.stringify(writes)}`);
+    assert.ok(writes.some((w) => w.method === 'addSolutionComponent' && w.args[0].componentType === PAGE_TYPE && w.args[0].componentId === pageIds.Overview && w.args[0].addRequiredComponents === true),
+      'the changed page is in the spec\'s solution, with its files');
     const eligible = snapshotStore.readSnapshot(workspaceDir);
     assert.strictEqual(eligible.eligible, true);
     assert.notStrictEqual(eligible.generation, baseline.generation);

@@ -594,8 +594,8 @@ is deployed (see "A new app" there). Carry the app's name and the plan's `Soluti
 - `--solution` is mandatory and takes the solution's **unique name**: `apps.js create` refuses
   a call without it, or with a name no unmanaged solution has.
 
-**If existing app-id:** Use it directly. `apps.js create` is not called, so
-the `Solution` line is informational only for this phase.
+**If existing app-id:** Use it directly. `apps.js create` is not called; the plan's `Solution`
+is still the solution every page this run creates joins (Phase 6 passes it with `--solution`).
 
 ### Phase 4: Generate RuntimeTypes (Conditional)
 
@@ -1051,7 +1051,7 @@ in it is neither refused nor escaped.
 
 ```markdown
 ## Phase 6 — Deploy
-- Command: `node "${PLUGIN_ROOT}/scripts/genpage-upload.js" --env '<org-url>' --app-id '<id>' --code-file '<path>' --data-sources '<entities>' --prompt-file '<working-dir>/prompt.txt' --model '<model-id>' --name-file '<working-dir>/page-name.txt' --agent-message-file '<working-dir>/agent-message.txt' --add-to-sitemap`
+- Command: `node "${PLUGIN_ROOT}/scripts/genpage-upload.js" --env '<org-url>' --app-id '<id>' --code-file '<path>' --data-sources '<entities>' --prompt-file '<working-dir>/prompt.txt' --model '<model-id>' --name-file '<working-dir>/page-name.txt' --agent-message-file '<working-dir>/agent-message.txt' --solution '<Solution unique name>' --add-to-sitemap`
 - Prompt scope: full page description from plan's `## User Requirements` (create) — or the delta only (update)
 - Result: page-id = <returned-id>, status = success
 ```
@@ -1097,12 +1097,27 @@ node "${PLUGIN_ROOT}/scripts/genpage-upload.js" `
   --prompt-file '<working-dir>/prompt.txt' `
   --model '<current-model-id>' `
   --agent-message-file '<working-dir>/agent-message.txt' `
+  --solution '<Solution unique name>' `
   --add-to-sitemap
 ```
 
 Omit the `--connectors` line when Phase 4.5 did not write `connectors.json`, and the
 `--actions` line when Phase 4.6c decided an empty array — a page that binds only built-in
 operations keeps it, whatever the `custom-api` flag says.
+
+**Every create passes `--solution` with the plan's `Solution` value** (`## Environment`), so the page
+joins the solution the maker chose, as the tables and the app do. A page joins no solution on its own,
+and adding an app to a solution never brings the pages it shows. The upload checks the solution before
+it writes anything: a name that is not an unmanaged solution stops the upload with nothing made. It adds
+the page last, after the page is written, published and placed, and the result says `"solution"` and
+`"addedToSolution": true`. A system solution such as `Default` already holds every page, so nothing is
+added and the result says `"systemSolution": true`. **An add that fails** exits 1 with
+`"code": "solution-add-failed"` and the page's `pageId`. The page exists and works: do not create it
+again. Run the `add-page-to-solution.js` command that the error names
+(`node "${PLUGIN_ROOT}/scripts/add-page-to-solution.js" '<org-url>' '<Solution unique name>' --page-ids '<page-id>'`).
+Updates (a later edit of the page) do not pass `--solution`, because the page is in the solution
+already. A create that did not finish, run again with `--page-id` added (see below), keeps
+`--solution`: the run that finishes the page also adds it.
 
 **A new app** (the plan says `create new`): there is no app to name yet. Create the app's **first page with no
 `--app-id` and no `--add-to-sitemap`** — a page needs no app, and one created without it is added to none — and make
@@ -1195,10 +1210,10 @@ Phase 3 created nothing, because the platform refuses an app whose navigation is
      --publish
    ```
 
-   It makes the app with one area `Main`, one group `Pages` and a sub-area for the page, titled with the page's name; the app and its sitemap join the solution (a system solution such as `Default` already holds every component, so the result says `systemSolution: true` and an empty `inSolution` — a create into `Default` needs no add and did not fail). **`--publish` is mandatory:** without it the new app stays in draft and the genux runtime URL errors with "app not published". It prints `{ "ok": true, "appId", "uniqueName", "published", "unpublishedChanges", "solution", "navigation", "dataSources", "pinnedViews", … }` — store `appId` for the rest of the run. The create also pins the default public view of each table the page reads into the app's components, so that the maker's "/" picker lists the page's tables (`dataSources` are the tables, `pinnedViews` the views); a `warnings` entry says when a table has no default public view to pin, or when the environment could not take the app's new header and navigation setting, and the app was made all the same.
-3. **The remaining pages.** Upload each with `--app-id '<appId>'` and `--add-to-sitemap` (the create above): each becomes a sub-area of the new app, and the default views of the tables it reads join the app's components with it.
+   It makes the app with one area `Main`, one group `Pages` and a sub-area for the page, titled with the page's name; the app, its sitemap and its page join the solution (`inSolution` lists `app`, `sitemap` and `pages` as each joins; a system solution such as `Default` already holds every component, so the result says `systemSolution: true` and an empty `inSolution` — a create into `Default` needs no add and did not fail). **`--publish` is mandatory:** without it the new app stays in draft and the genux runtime URL errors with "app not published". It prints `{ "ok": true, "appId", "uniqueName", "published", "unpublishedChanges", "solution", "navigation", "dataSources", "pinnedViews", … }` — store `appId` for the rest of the run. The create also pins the default public view of each table the page reads into the app's components, so that the maker's "/" picker lists the page's tables (`dataSources` are the tables, `pinnedViews` the views); a `warnings` entry says when a table has no default public view to pin, or when the environment could not take the app's new header and navigation setting, and the app was made all the same.
+3. **The remaining pages.** Upload each with `--app-id '<appId>'`, `--add-to-sitemap` and `--solution` (the create above): each becomes a sub-area of the new app and joins the solution, and the default views of the tables it reads join the app's components with it.
 
-**A create of the app that failed** exits 1 and prints `{ "ok": false, "code", "error", "written", … }`; `code` and `error` are the SDK's own. `"written": false` means nothing was made: fix what the message names and run it again. `"written": true` means the app or its sitemap exists (`appId`, `sitemapId`, `left`, `published` and `unpublishedChanges` say which and in what state): its unique name is taken, so run it again with `--unique-name '<name>'`, or remove the leftovers first — the error says how. `"written": null` means the platform could not be read back, so the outcome is unknown: look in the environment for what `lookFor` names (the unique name, the app id and the sitemap id the create used) before running it again. `stage` says how far it got, and `inSolution` which of the app and its sitemap joined the solution.
+**A create of the app that failed** exits 1 and prints `{ "ok": false, "code", "error", "written", … }`; `code` and `error` are the SDK's own. `"written": false` means nothing was made: fix what the message names and run it again. `"written": true` means the app or its sitemap exists (`appId`, `sitemapId`, `left`, `published` and `unpublishedChanges` say which and in what state): its unique name is taken, so run it again with `--unique-name '<name>'`, or remove the leftovers first — the error says how. `"written": null` means the platform could not be read back, so the outcome is unknown: look in the environment for what `lookFor` names (the unique name, the app id and the sitemap id the create used) before running it again. `stage` says how far it got, and `inSolution` which of the app, its sitemap and its pages joined the solution (a create that stopped at the `solution` stage made the app: add what is missing with `add-page-to-solution.js '<org-url>' '<Solution unique name>' '<appId>' --page-ids '<page-id>'` — the app's add brings its sitemap, and a component the solution already holds is accepted).
 
 ### Phase 6.5: Navigation Fix-Up (Multi-Page Only)
 
@@ -1251,7 +1266,9 @@ The creates in Phase 6 wrote a base marker beside each uploaded file, using the 
 
 Runs only when the plan's `## Solution Packaging` has `Package into solution: true`.
 Adds the deployed app, the GenPage(s), and any connection references to the
-target solution so they travel cross-environment.
+target solution so they travel cross-environment. (The pages already joined the plan's
+`## Environment` `Solution` in Phase 6; this packages them, with the app and the connection
+references, into the solution `## Solution Packaging` names, which may be another one.)
 
 1. Ensure the solution exists — create it only if it doesn't already exist:
    `node "${PLUGIN_ROOT}/scripts/provision-solution.js" '<envUrl>' '<solutionUniqueName>' '<Friendly Name>' [--publisher '<uniqueName>']`

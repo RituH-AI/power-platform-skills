@@ -92,6 +92,9 @@ const POLICY = {
   'pages-publish-failed': { kinds: ['by-failure'], via: PAGES },
   'pages-dangling-navref': { kinds: ['never'], via: PAGES },
   'pages-update-identity-mismatch': { kinds: ['never'], via: PAGES },
+  // The page table's component type, which a page needs to join the spec's solution (lib/page-solution.js), could not be read: raised before any page is written, and as transient as
+  // the read it wraps (a 503 is run again; a refusal, or an answer with no type in it, is the service's to say). Held failure by failure beside the page doubles.
+  'pages-solution-type-unreadable': { kinds: ['by-failure'], via: PAGES },
   // A connector binding whose connection reference in the environment written to is for another connector (lib/page-binding-targets.js): raised at preflight, before anything is
   // written, and a run again reads the same reference. Held with the doubles of a target environment, under a page name that reads as a transient error.
   'pages-binding-reference-conflict': { kinds: ['never'], via: 'page-bindings.test.js' },

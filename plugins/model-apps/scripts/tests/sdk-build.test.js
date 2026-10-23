@@ -7,6 +7,7 @@ const path = require('node:path');
 const { commandDef, chartDef, runSdkBuild: runSdkBuildWithRealWaits, planFor, resolvePhases, compileFormIntent, formFieldLogicals, viewDef, appDef, defaultViewColumns, enrichesDefaultViews, artifactIdentityQuery, resolveExistingFormId, FORM_TYPE_CODE, dashboardTileOpts, PHASES, appUniqueName, personaRoleSpecFor } = require('../lib/sdk-build.js');
 const { validateAppSpec } = require('../lib/app-spec.js');
 const { makeTempDir } = require('./helpers/temp-dirs.js');
+const { withPageType } = require('./helpers/page-component-type.js');
 // The AI phase's proof after a publish waits 500 ms between reads of an override row that is not there yet, as --verify
 // does. No test below is about that wait (it is pinned through `proofBudget`), and every one that leaves a row absent
 // would otherwise sleep a second for it.
@@ -478,8 +479,10 @@ function mockSdk(opts = {}) {
   //                  answers with both layers. opts.savedNavigationError makes the read fail as a whole; an app's `savedRows` replaces its rows (e.g. to leave them out). A draft app's
   //                  one row is its saved sitemap; it may set `noSitemapComponent` (its layer has no sitemap component to find), `componentReadFails` (the read of its components fails) or
   //                  `sitemapName` (the unique name its sitemap carries, when it is not the app's own).
+  //   page type      the page table's solution component type, which the pages phase reads to add the pages to the spec's solution (helpers/page-component-type.js);
+  //                  answered in front of the rest, and not recorded among the calls.
   if (opts.selfAppUnique !== undefined || (opts.otherApps || []).length || (opts.draftApps || []).length) sdk.dataverse = {
-    get: async (url) => {
+    get: withPageType(async (url) => {
       calls.push({ name: 'dataverse.get', args: [url] });
       if (/^\/appmodules\/Microsoft\.Dynamics\.CRM\.RetrieveUnpublishedMultiple\(\)/.test(url)) {
         if (opts.draftAppsError) return { status: 503, body: null };
@@ -504,7 +507,7 @@ function mockSdk(opts = {}) {
         else value.push({ sitemapid: draftSitemapId(j), sitemapnameunique, sitemapxml: d.savedSitemapXml, componentstate: 1 });
       });
       return { status: 200, body: { value } };
-    },
+    }),
   };
   return { sdk, calls };
 }

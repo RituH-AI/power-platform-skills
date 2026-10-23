@@ -58,8 +58,8 @@ planner picks them by asking the user (when metadata work is needed) or by
 writing the safe defaults `Solution: Default` + `Publisher Prefix: new` (when
 no question is needed). They are never omitted.
 
-Why mandatory: `apps.js create --solution <name>` takes the solution the new app and its
-sitemap are added to, and has no "active solution" fallback — a missing `--solution` is a usage
+Why mandatory: `apps.js create --solution <name>` takes the solution the new app, its
+sitemap and its pages are added to, and has no "active solution" fallback — a missing `--solution` is a usage
 error. Always writing the field eliminates a fragile conditional branch in the orchestrator.
 
 Downstream consumers honour them:
@@ -67,7 +67,9 @@ Downstream consumers honour them:
   so newly-created tables/columns/relationships land in that solution. It also
   uses `Publisher Prefix` to build schema names (e.g. `<prefix>_Candidate`).
 - The orchestrator (skill) passes `--solution <Solution>` to `apps.js create`
-  when provisioning a new model-driven app.
+  when provisioning a new model-driven app, and to every `genpage-upload.js`
+  create, so each page this run makes joins that solution too (a page joins no
+  solution on its own, and the app's add never brings the pages it shows).
 
 ## Pages
 | Page | File | Purpose | Entities |

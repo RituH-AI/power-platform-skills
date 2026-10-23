@@ -22,6 +22,7 @@ const { main: upload } = require('../genpage-upload.js');
 const { FakeGenPageServer, INSTANCE, ACCOUNT_TABLE, appTransport, APP_ID, APP_EXISTING_PAGE_ID, APP_VIEW_ID } = require('./helpers/fake-genpage-server.js');
 const { withAppComponents } = require('./helpers/fake-app-components.js');
 const { effectiveContentLength } = require('./helpers/wire-framing.js');
+const { withPageType } = require('./helpers/page-component-type.js');
 
 const OTHER = '77777777-7777-4777-8777-777777777777';
 const ACCOUNT_ID = '88888888-8888-4888-8888-888888888888';
@@ -278,7 +279,8 @@ test('REAL BUNDLE: the build\'s pin of the tables its pages read — the pages p
       },
       updateWebResource: async (id, { content }) => { manifest = content; },
       addSolutionComponent: async () => {},
-      dataverse: { get: async () => ({ status: 200, body: { value: [row] } }) },
+      // The page joins the spec's solution, so the page table's component type is read first (lib/page-solution.js).
+      dataverse: { get: withPageType(async () => ({ status: 200, body: { value: [row] } })) },
     };
     const warnings = [];
     const built = await runSdkBuild(spec, {

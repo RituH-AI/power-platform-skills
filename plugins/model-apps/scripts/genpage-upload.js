@@ -44,6 +44,16 @@
 //   `--prompt` / `--agent-message` are accepted for short, shell-safe text, but `--prompt-file` is
 //   the documented path precisely because it cannot be mangled by a shell. `--compiled-code-file` is
 //   refused (see main): the page is compiled from the checked `--code-file` itself.
+//
+//   `--solution <unique name>` is the solution the page joins (AB#6443257). A page made through the SDK joins none on its own, and nothing
+//   else brings it into one — the add of an app brings its sitemap, never the pages its navigation opens — so a run that was given a
+//   solution and made pages left them out of it. The solution is read BEFORE anything is written (a name that is no unmanaged solution, or
+//   an environment that cannot say the page table's component type, refuses the upload with nothing made), and the page is added LAST,
+//   once it is written, published and placed: the result then says `solution` and `addedToSolution: true`. A system solution (Default,
+//   Active, Basic) holds every component already, so it is neither read nor added to (`addedToSolution: false`, `systemSolution: true`).
+//   An add that fails is a failure (exit 1, `code: "solution-add-failed"`, the page's id): the page works and is not in the solution, and
+//   the error names the one command that adds it (add-page-to-solution.js) — never a second create. An update may name it too: the page
+//   then joins the solution once it is saved, which is how a create that did not finish, run again with `--page-id`, still joins it.
 const fs = require('node:fs');
 const path = require('node:path');
 const { parseArgs, validateFlags, emitResult } = require('./lib/dataverse-auth.js');
@@ -58,7 +68,7 @@ const { makeWritesBlocking } = require('./lib/output-redaction.js');
 
 const KNOWN = ['env', 'app-id', 'code-file', 'compiled-code-file', 'page-id', 'name', 'name-file',
   'data-sources', 'clear-data-sources', 'prompt', 'prompt-file', 'agent-message', 'agent-message-file',
-  'model', 'connectors', 'actions', 'add-to-sitemap', 'overwrite-deployed'];
+  'model', 'connectors', 'actions', 'add-to-sitemap', 'overwrite-deployed', 'solution'];
 // Bare switches; every other flag carries a value.
 const SWITCHES = ['add-to-sitemap', 'clear-data-sources', 'overwrite-deployed'];
 const NEED_VALUE = KNOWN.filter((f) => !SWITCHES.includes(f));
@@ -66,7 +76,7 @@ const NEED_VALUE = KNOWN.filter((f) => !SWITCHES.includes(f));
 const USAGE = 'Usage: node scripts/genpage-upload.js --env <orgUrl> --code-file <path> '
   + '--prompt-file <path> --agent-message-file <path> [--app-id <guid>] [--page-id <guid>] [--name-file <path> | --name <text>] '
   + '[--data-sources <csv>] [--clear-data-sources] [--model <id>] '
-  + '[--connectors <path>] [--actions <path>] [--add-to-sitemap] [--overwrite-deployed]'
+  + '[--connectors <path>] [--actions <path>] [--add-to-sitemap] [--overwrite-deployed] [--solution <unique name>]'
   + ' (--app-id is required with --page-id and with --add-to-sitemap; --page-id alone finishes a page this tool created and did not finish)';
 
 // The skill writes these inputs — the prompt, agent-message and page-name files, connectors.json, actions.json —
@@ -431,6 +441,20 @@ async function deploy(context) {
   // The page's id as soon as it is known, kept outside the write's try: an update names it up front, and a create learns it from the backend — from its answer, or from the
   // error it raises once it has sent (`pageId`). Whatever fails after that, the failure carries it.
   let knownPageId = flags['page-id'] || null;
+  // The solution the page joins (--solution), read before anything is read for the update or written: a name that is no unmanaged solution, or an environment that
+  // cannot say the page table's component type, refuses the upload with nothing made. A system solution is not read (the backend answers it from its name).
+  let solutionTarget = null;
+  if (typeof flags.solution === 'string' && flags.solution.trim()) {
+    try {
+      solutionTarget = await genpage.solutionTarget(flags.solution);
+    } catch (e) {
+      return done(false, {
+        ok: false,
+        ...(e && typeof e.code === 'string' && e.code ? { code: e.code } : {}),
+        error: `nothing was written: the solution ${JSON.stringify(flags.solution.trim())} the page is to join cannot be used — ${(e && e.message) || e}`,
+      });
+    }
+  }
   if (flags['page-id']) {
     // An UPDATE must have a target that EXISTS, and it must be in the app it names: updating a real page through the wrong app would write
     // the page and attach its tables to an app that does not hold it. The page read is the existence proof — a page that is not there is a
@@ -685,6 +709,26 @@ async function deploy(context) {
         warnings.push(`could not clear the base marker's unfinished state (${(e && e.message) || e}) — running the same command with --page-id ${pageId} completes the page again, which changes nothing`);
       }
     }
+    // The solution the page joins, last: the page is written, published and placed by now, so an add that fails leaves a page that works and is not in the
+    // solution. That is a failure, said with the one command that adds the page — never a second create, which would make a second page.
+    let solutionFacts = {};
+    if (solutionTarget) {
+      const where = solutionTarget.uniqueName;
+      try {
+        const joined = await genpage.addToSolution(pageId, solutionTarget);
+        solutionFacts = { solution: where, addedToSolution: !!(joined && joined.added), ...(solutionTarget.systemSolution ? { systemSolution: true } : {}) };
+      } catch (e) {
+        const placedText = placement && placement.added && placement.added.length ? ` and placed in app ${flags['app-id']}'s navigation` : '';
+        return done(false, {
+          ...failed(`page ${pageId} was ${creating ? 'created' : 'saved'} and published${placedText}, but it was NOT added to solution ${where}: ${(e && e.message) || e}. `
+            + `Do not create it again: add it with node scripts/add-page-to-solution.js ${flags.env} ${where} --page-ids ${pageId} (a page the solution already holds is accepted, so running it again changes nothing).`),
+          code: 'solution-add-failed',
+          solution: where,
+          addedToSolution: false,
+          ...(warnings.length ? { warnings } : {}),
+        });
+      }
+    }
     return done(true, {
       ok: true,
       pageId,
@@ -693,6 +737,7 @@ async function deploy(context) {
       updated: !!flags['page-id'],
       ...(written && written.unchanged ? { unchanged: true } : {}),
       ...(placement && placement.added && placement.added.length ? { addedToSitemap: true } : {}),
+      ...solutionFacts,
       ...(warnings.length ? { warnings } : {}),
     });
   } catch (e) {

@@ -136,7 +136,7 @@ const BUILD_WRITES = {
   'POST roles': 1, // the persona's role
   'POST roles/Microsoft.Dynamics.CRM.ReplacePrivilegesRole': 1, // its privileges, converged
   'POST roles/Microsoft.Dynamics.CRM.AddPrivilegesRole': 1, // the grant on Basic User, added
-  'POST AddSolutionComponent': 16, // each component the build creates or reuses that the solution does not already hold
+  'POST AddSolutionComponent': 17, // each component the build creates or reuses that the solution does not already hold — the generative page among them, which no other add brings
   'POST PublishXml': 11, // see BUILD_PUBLISHES
 };
 // What each publish of the first build names, in order (an app or a page id is `app` / `page`, a web resource `webresource`).
@@ -319,6 +319,19 @@ test('lifecycle matrix: the build makes every feature of the kitchen-sink spec, 
   assert.deepEqual(publishesOfStage(run, 'build'), BUILD_PUBLISHES);
   assert.deepEqual(s.unpublished, [], 'nothing is left saved but not published');
   withinBudget(s, 'build');
+});
+
+// The add of the app brings its sitemap and never the pages its navigation opens (AB#6443257): the solution holds the page only because the build adds it, as a
+// component of the type the environment gives the page table (10200 in this fake) — so an export of the solution carries the page its navigation opens.
+test('lifecycle matrix: the build adds its generative page to the spec\u2019s solution, as the page table\u2019s own component type, and the rebuild keeps it there', async () => {
+  const run = await lifecycle();
+  stageOf(run, 'build');
+  assert.ok(run.ids.page, 'the page was built');
+  const pageType = 10200;
+  const held = (inventory) => inventory.solutionComponents.filter((row) => row.endsWith(` ${pageType} ${run.ids.page}`));
+  assert.equal(held(run.afterBuild).length, 1, 'the solution holds the page once');
+  assert.ok(held(run.afterBuild)[0].startsWith(run.afterBuild.rows.solutions.find((row) => row.endsWith(` ${run.spec.solution.uniqueName}`)).split(' ')[0]), 'and it is the spec\u2019s solution');
+  assert.equal(held(run.afterRebuild).length, 1, 'a rebuild keeps it there, without a second row');
 });
 
 test('lifecycle matrix: rebuilding the unchanged spec creates and deletes nothing, and sends only the writes the budget lists', async (t) => {

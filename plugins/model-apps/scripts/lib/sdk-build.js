@@ -143,6 +143,7 @@ const { tableRefs, pinAppTables, publishAppComponents, resolveMainForms, appComp
 const { appWriteTables, appPushTables, preAppTables, publishTablesXml, readSavedNotPublished, describeSavedNotPublished, readAppFormChartTables, describePreAppRefusal, describeUnreadAppComponents } = require('./table-publish.js');
 const { hasUnsyncedEdits } = require('./unsynced-edits.js');
 const { createSolutionMembership, ensureSolutionComponent } = require('./solution-membership.js');
+const { readPageComponentType, pageComponent } = require('./page-solution.js');
 const { openUnconfirmedWebResources } = require('./web-resource-records.js');
 const { openDashboardCreations } = require('./dashboard-creation-records.js');
 const { ownValue } = require('./own-keys.js');
@@ -7161,6 +7162,39 @@ async function runSdkBuildPhases(spec, opts, owed) {
       // After the whole scan, so a build that halts on a later page says only why it halted. Nothing has been written yet, and the pages that are warned about are sent as they are.
       if (typeof opts.warn === 'function') for (const warning of griffelWarnings) opts.warn(warning);
 
+      // THE SOLUTION HOLDS THE PAGES TOO (AB#6443257). Every other component the build makes joins the spec's solution, but a page joins one only when it is added
+      // explicitly — the add of the app brings its sitemap, never the pages its navigation opens (lib/page-solution.js) — so a build made "in" a solution left
+      // its pages out of it, and the solution exported an app whose navigation opens pages the target environment does not have. A page this run CREATES is
+      // added as soon as it is made; one it UPDATES is re-asserted, as every component the build reuses is (lib/solution-membership.js): a page an earlier build
+      // made outside the solution, or whose add failed, joins it now, and one the solution is proven to hold costs a read and no write. The add brings the page's
+      // file rows with it (AddRequiredComponents). The page table's component type is the environment's: read HERE, before the first page is written, so an
+      // environment that cannot say it halts the phase with nothing in it written. A system solution holds every component already and is not added to.
+      const pagesJoinSolution = !!(sol && sol.uniqueName) && !isRestrictedSolution(sol.uniqueName) && implemented.some(uploadedThisRun)
+        // An SDK with no raw client to read with is a test double, as everywhere in this file: the real one always has it, so there is no type to read and no page is added.
+        && !!(provision.dataverse && typeof provision.dataverse.get === 'function');
+      let pageComponentType = null;
+      let pageMembers = null;
+      const pagesInSolution = new Set();
+      if (pagesJoinSolution) {
+        try {
+          pageComponentType = await readPageComponentType(provision.dataverse);
+        } catch (e) {
+          throw new BuildHalt(`could not read the solution component type of a generative page, so the pages cannot join solution ${sol.uniqueName} — nothing in the pages phase was written: ${(e && e.message) || e}`, { phase: 'pages', code: 'pages-solution-type-unreadable', recoverable: true, ...retryFrom(e) });
+        }
+        pageMembers = createSolutionMembership({ read: provision, solutionUniqueName: sol.uniqueName, componentTypes: [pageComponentType] });
+      }
+      // `created`: a page this run has just made cannot already be a member, so it is added without the membership read.
+      const pageIntoSolution = async (pageId, { created }) => {
+        if (!pagesJoinSolution) return;
+        const id = String(pageId).toLowerCase();
+        if (pagesInSolution.has(id)) return;
+        if (created || !(await pageMembers.has(id, pageComponentType))) {
+          await provision.addSolutionComponent(pageComponent(id, pageComponentType, sol.uniqueName));
+          pageMembers.note(id, pageComponentType);
+        }
+        pagesInSolution.add(id);
+      };
+
       const mintedKeys = new Set();
       const deployment = new Map(); // key -> resolved code (nav sources only)
       // What a page write answered. The SDK's warnings, and a publish it could not prove, go to the build's log; a page that was SAVED but could not be
@@ -7302,6 +7336,7 @@ async function runSdkBuildPhases(spec, opts, owed) {
             mintedKeys.add(key);
             await persistNow();
             await afterWrite(p, 'created', up, fields);
+            await pageIntoSolution(up.pageId, { created: true });
           }
           const navSources = new Map();
           for (const p of implemented) if ((p.navigatesTo || []).length) navSources.set(keyOf(p), { code: sourceByKey.get(keyOf(p)) });
@@ -7412,6 +7447,7 @@ async function runSdkBuildPhases(spec, opts, owed) {
             result.created.pageSourceShas[key] = scannedSha.get(key);
             await persistNow(); // manifest carries this id BEFORE the next create (crash-safety, design §9)
             await afterWrite(p, requestedId ? 'updated' : 'created', up, fields);
+            await pageIntoSolution(up.pageId, { created: !requestedId });
             return up.pageId;
           });
         }

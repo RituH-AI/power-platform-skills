@@ -23,6 +23,7 @@ const { sha256 } = require('../lib/hash.js');
 const { readPageOwnership, readPendingCreations, recordPagePending, recordPageCreation } = require('../lib/page-ownership-records.js');
 const { currentReadSdk } = require('./helpers/app-membership-sdk.js');
 const { OBJECT_DIVISION_PAGE, MISREAD_PAGES, HIDDEN_CALL_PAGE, PREFIX_INCREMENT_PAGE, TEMPLATE_LINE_PAGE, JSX_TEXT_PAGE, ELEMENT_AFTER_OPERATOR_PAGES, ELEMENT_LOOKALIKE_PAGES, ELEMENT_PAGE_TOKEN_LINE, FUNCTION_TYPE_PAGES } = require('./helpers/misread-page.js');
+const { withPageType, PAGE_TYPE } = require('./helpers/page-component-type.js');
 
 // Real GUIDs for the three-authority sitemap mock. SELF_* resolve THIS app's appmodule + sitemap so
 // fetchSitemap(appUnique) returns opts.liveSitemapXml; a page-less EMPTY sitemap is the default membership.
@@ -101,7 +102,8 @@ function mockSdk(opts = {}) {
     // The shared-page scan's reads through the client: the list of apps (the published ones are all there are here, none was never published) and the other apps'
     // saved layer, which is each app's published sitemap while nothing is pending.
     dataverse: {
-      get: async (url) => {
+      // The page table's solution component type is answered too: the pages join the spec's solution (helpers/page-component-type.js).
+      get: withPageType(async (url) => {
         if (url.startsWith('/appmodules/')) {
           const value = [{ appmoduleid: APP_ID, appmoduleidunique: SELF_UNIQUE_VALUE, uniquename: opts.selfAppUnique, componentstate: 0 }];
           (opts.otherApps || []).forEach((a, i) => value.push({ appmoduleid: `app-${i + 2}`, appmoduleidunique: `uv-${i + 2}`, uniquename: a.uniquename, componentstate: 0 }));
@@ -109,7 +111,7 @@ function mockSdk(opts = {}) {
         }
         if (url.startsWith('/sitemaps/')) return { status: 200, body: { value: (opts.otherApps || []).map((a, i) => ({ sitemapid: `sm-${i + 2}`, sitemapxml: a.sitemapxml || '<SiteMap/>', componentstate: 0 })) } };
         return { status: 404, body: null };
-      },
+      }),
     },
   };
   return { sdk, calls };
@@ -647,6 +649,83 @@ test('deploy: a rebuild re-binds ids from the live enumeration and issues only U
     assert.ok(genpageCli.uploads.length > 0);
     assert.ok(genpageCli.uploads.every((u) => !!u.requestedId), 'every upload targets a known pageId (UPDATE) — no CREATE, no duplicate');
   } finally { fs.rmSync(appDir, { recursive: true, force: true }); }
+});
+
+// THE SOLUTION HOLDS THE PAGES (AB#6443257). Every other component the build makes joins the spec's solution, and the add of the app brings its sitemap — never the
+// pages its navigation opens. So each page is added on its own, as a component of the page table's type the environment allocates, with its files.
+const pageAdds = (calls) => calls.filter((c) => c.name === 'addSolutionComponent' && c.args[0].componentType === PAGE_TYPE).map((c) => c.args[0]);
+
+test('solution: every page the build creates joins the spec\u2019s solution — as the page table\u2019s type the environment answers, with its files — once', async () => {
+  const { appDir, spec } = makeTwoPageApp();
+  try {
+    const { sdk, calls } = mockSdk();
+    const genpageCli = mockGenpageCli();
+    await runSdkBuild(spec, { sdk, apply: true, env: 'https://x', appDir, genpageCli, phases: PHASES });
+    assert.deepStrictEqual(pageAdds(calls).sort((a, b) => a.componentId.localeCompare(b.componentId)), [
+      { componentId: OVERVIEW_ID, componentType: PAGE_TYPE, solutionUniqueName: 'PgDeploy', addRequiredComponents: true },
+      { componentId: DETAIL_ID, componentType: PAGE_TYPE, solutionUniqueName: 'PgDeploy', addRequiredComponents: true },
+    ]);
+  } finally { fs.rmSync(appDir, { recursive: true, force: true }); }
+});
+
+test('solution: a rebuild re-asserts each page it writes — one the solution is proven to hold costs no add, one it does not hold (an earlier build\u2019s) joins it', async () => {
+  const { appDir, spec } = makeTwoPageApp();
+  try {
+    const live = [{ pageId: OVERVIEW_ID, name: 'Overview' }, { pageId: DETAIL_ID, name: 'Detail' }];
+    const manifest = Buffer.from(JSON.stringify({ schemaVersion: 1, pages: [{ key: 'overview', name: 'Overview', pageId: OVERVIEW_ID }, { key: 'detail', name: 'Detail', pageId: DETAIL_ID }] }), 'utf8').toString('base64');
+    const { sdk, calls } = mockSdk({ pageManifest: manifest, manifestId: 'wr-manifest', liveSitemapXml: pageSitemap([OVERVIEW_ID, DETAIL_ID]), pageRows: live.map((p) => ({ uxagentprojectid: p.pageId, name: p.name })) });
+    // The solution holds Overview (a row of the page table's type) and not Detail: what a build before this one left.
+    const SOLUTION_ID = '5a5a5a5a-0000-4000-8000-00000000005a';
+    const query = sdk.queryRecords;
+    sdk.queryRecords = async (entity, options) => {
+      if (entity === 'solution') return [{ solutionid: SOLUTION_ID }];
+      if (entity === 'solutioncomponent') {
+        calls.push({ name: 'queryRecords', args: [entity, options] });
+        return options.filter.includes(`componenttype eq ${PAGE_TYPE}`) ? [{ objectid: OVERVIEW_ID, componenttype: PAGE_TYPE, rootcomponentbehavior: null }] : [];
+      }
+      return query(entity, options);
+    };
+    await runSdkBuild(spec, { sdk, apply: true, env: 'https://x', appDir, genpageCli: mockGenpageCli(live), phases: PHASES });
+    assert.deepStrictEqual(pageAdds(calls), [{ componentId: DETAIL_ID, componentType: PAGE_TYPE, solutionUniqueName: 'PgDeploy', addRequiredComponents: true }]);
+    const pageMembershipReads = calls.filter((c) => c.name === 'queryRecords' && c.args[0] === 'solutioncomponent' && c.args[1].filter.includes(`componenttype eq ${PAGE_TYPE}`));
+    assert.strictEqual(pageMembershipReads.length, 1, 'the solution\u2019s pages are read once, for every page');
+  } finally { fs.rmSync(appDir, { recursive: true, force: true }); }
+});
+
+test('solution: a system solution holds every page already — no page is added, and the page table\u2019s type is not read', async () => {
+  const { appDir, spec } = makeTwoPageApp();
+  try {
+    spec.solution = { uniqueName: 'Default', displayName: 'Default Solution', publisherPrefix: 'contoso' };
+    const { sdk, calls } = mockSdk();
+    const reads = [];
+    const get = sdk.dataverse.get;
+    sdk.dataverse.get = async (url) => { reads.push(url); return get(url); };
+    await runSdkBuild(spec, { sdk, apply: true, env: 'https://x', appDir, genpageCli: mockGenpageCli(), phases: PHASES });
+    assert.deepStrictEqual(pageAdds(calls), []);
+    assert.ok(!reads.some((url) => /EntityDefinitions\(LogicalName='uxagentproject'\)/.test(url)));
+  } finally { fs.rmSync(appDir, { recursive: true, force: true }); }
+});
+
+// The halt is as transient as the read it wraps (tests/halt-retry-policy.test.js): a 503 is run again, a refusal is final — whatever the solution is called, since its name is the maker's.
+test('solution: an environment that cannot say the page table\u2019s type halts the pages phase before any page is written — run again for a 503, final for a refusal', async () => {
+  const { isTransientHalt } = require('../build-model-app.js');
+  for (const [status, said, transient] of [[503, 'Service Unavailable', true], [403, 'Principal user is missing prvReadEntity privilege', false]]) {
+    const { appDir, spec } = makeTwoPageApp();
+    try {
+      spec.solution.uniqueName = 'Timeout_503_TryAgainLater';
+      const { sdk, calls } = mockSdk();
+      const get = sdk.dataverse.get;
+      sdk.dataverse.get = async (url) => (/EntityDefinitions\(LogicalName='uxagentproject'\)/.test(url) ? { status, body: { error: { message: said } } } : get(url));
+      const genpageCli = mockGenpageCli();
+      let halt = null;
+      try { await runSdkBuild(spec, { sdk, apply: true, env: 'https://x', appDir, genpageCli, phases: PHASES }); } catch (e) { halt = e; }
+      assert.ok(halt && halt.phase === 'pages' && halt.code === 'pages-solution-type-unreadable', `${status}: ${halt && halt.stack}`);
+      assert.ok(halt.message.includes(`cannot join solution Timeout_503_TryAgainLater — nothing in the pages phase was written: the solution component type of a generative page could not be read (HTTP ${status}: ${said})`), halt.message);
+      assert.strictEqual(isTransientHalt(halt, { spec }), transient, `${status}: the build runs again for it only when the read it wraps can succeed on another try`);
+      assert.strictEqual(genpageCli.uploads.length, 0, 'no page was written');
+      assert.deepStrictEqual(pageAdds(calls), []);
+    } finally { fs.rmSync(appDir, { recursive: true, force: true }); }
+  }
 });
 
 // Duplicate page names: validateAppSpec TOLERATES a duplicate name when both pages carry a

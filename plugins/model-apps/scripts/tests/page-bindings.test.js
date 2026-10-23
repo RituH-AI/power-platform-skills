@@ -26,6 +26,7 @@ const { runSdkBuild, BuildHalt } = require('../lib/sdk-build.js');
 const { classifyPages } = require('../lib/classify-changes.js');
 const { buildManifest } = require('../lib/page-manifest.js');
 const { makeSimpleMockSdk } = require('./helpers/mock-sdk.js');
+const { withPageType } = require('./helpers/page-component-type.js');
 const { currentReadSdk } = require('./helpers/app-membership-sdk.js');
 const { fakeGenpage } = require('./helpers/fake-genpage.js');
 const { createAzHttpClient } = require('../lib/sdk-http-client.js');
@@ -499,7 +500,8 @@ function downloadFixture(pages) {
   sdk.listArtifacts = async (kind) => (kind === 'app' ? [{ id: APP_ID, isDirty: false }] : []);
   sdk.findTables = async () => [{ logicalName: 'contoso_item', entitySetName: 'contoso_items' }];
   sdk.fetchEntityMetadata = async (logical) => ({ logicalName: logical, schemaName: logical, displayName: 'Item', primaryNameAttribute: 'contoso_name', entitySetName: 'contoso_items', attributes: [], relationships: [] });
-  sdk.dataverse = { get: async () => ({ status: 200, body: { value: [] } }) };
+  // The page table's solution component type is answered too: a rebuild adds the pages it writes to the spec's solution (helpers/page-component-type.js).
+  sdk.dataverse = { get: withPageType(async () => ({ status: 200, body: { value: [] } })) };
   const manifest = buildManifest({ pages: pages.map((p) => ({ key: p.key, name: p.name })) }, new Map(pages.map((p) => [p.key, p.pageId])));
   let manifestContent = Buffer.from(JSON.stringify(manifest), 'utf8').toString('base64');
   sdk.queryRecords = async (logical, opts = {}) => {
@@ -903,7 +905,7 @@ function freshEnvironmentSdk() {
     pushArtifact: async (t, id) => ({ type: t, id, saved: true, shipped: false, publish: { kind: 'notRequested' } }),
     addSolutionComponent: async () => {},
     publishArtifact: async (type, id) => ({ type, id, shipped: true, publish: { kind: 'verified' } }),
-    dataverse: { get: async () => ({ status: 404, body: null }) },
+    dataverse: { get: withPageType(async () => ({ status: 404, body: null })) },
   };
 }
 
