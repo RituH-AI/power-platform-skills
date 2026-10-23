@@ -723,6 +723,42 @@ async function rowsByIds(sdk, set, idField, ids, select, mapRow) {
   return out;
 }
 
+// The command-bar customisations of the app's tables: the modern commands (`appaction` rows) a rebuild into another environment drops,
+// because a download does not reconstruct `commands[]` (a deployed bar holds what the spec's buttons cannot state — Power Fx actions and
+// visibility, classic-rule visibility, buttons migrated from the classic ribbon). They are listed so the not-round-tripped report names
+// them as it names forms, views and charts; nothing is written from them.
+//
+// Read by `contextvalue`, the logical name of the table a table-bound command is on (the column the teardown scopes these rows by), 20
+// tables to a request, and only UNMANAGED rows: a managed command ships with its solution and exists wherever that is installed. A row
+// is this app's when it is TABLE-scoped (no app: every app that shows the table renders it) or scoped to THIS app; one scoped to another
+// app is that app's. A Group row (type 3) is a container whose buttons are rows of their own, and an inactive row is not rendered. A row
+// is answered as
+//   { "appactionid": "<guid>", "name": "contoso_Escalate!<hex>", "buttonlabeltext": "Escalate", "contextvalue": "contoso_project",
+//     "type": 0, "statecode": 0, "_appmoduleid_value": null }
+// See https://learn.microsoft.com/power-apps/developer/data-platform/reference/entities/appaction and
+// https://learn.microsoft.com/power-apps/maker/model-driven-apps/commanding-scopes
+async function readCommandInventory(sdk, appId, tables) {
+  const app = odataGuid(appId).toLowerCase();
+  const names = [...new Set((tables || []).map((t) => String(t || '').toLowerCase()).filter(Boolean))].sort(compareText);
+  const out = [];
+  for (let i = 0; i < names.length; i += 20) {
+    const onTables = names.slice(i, i + 20).map((t) => `contextvalue eq '${t.replace(/'/g, "''")}'`).join(' or ');
+    const rows = await sdk.queryRecords('appaction', {
+      select: ['appactionid', 'name', 'buttonlabeltext', 'contextvalue', 'type', 'statecode', '_appmoduleid_value'],
+      filter: `ismanaged eq false and (${onTables})`,
+      paginate: true,
+    });
+    for (const r of rows || []) {
+      if (!r || !r.appactionid) continue;
+      const owner = odataGuid(r._appmoduleid_value).toLowerCase();
+      if ((owner && owner !== app) || Number(r.type) === 3 || Number(r.statecode) === 1) continue;
+      const label = typeof r.buttonlabeltext === 'string' && r.buttonlabeltext.trim() ? r.buttonlabeltext : r.name;
+      out.push({ id: r.appactionid, name: label, entity: String(r.contextvalue || '').toLowerCase() });
+    }
+  }
+  return out;
+}
+
 // Read the two app-shell settings the BUILD writes but the download previously dropped, so a
 // downloaded spec round-trips them instead of silently reverting an app to the classic shell when it
 // is rebuilt into a fresh environment (#514).
@@ -784,13 +820,15 @@ async function readAppShellSettings(sdk, appId) {
   return out;
 }
 
-async function readDescriptionInventory(sdk, appId, solutionScope, referencedGlobalChoices, componentInventory) {
+async function readDescriptionInventory(sdk, appId, solutionScope, referencedGlobalChoices, componentInventory, { tables } = {}) {
   // `incomplete[]` records an artifact class whose read FAILED. Without it the whole app-component
   // block shared one broad catch, so a 403 on `systemform` left `forms: []` — indistinguishable from
   // an app with no forms, which is EXACTLY the reported bug (AB#6686423) reappearing inside the fix
-  // for it. It is a sibling key for the same reason `roleRestrictedForms` is: only the five
-  // whitelisted keys reach `app-spec.json`, so this informs the CLI without changing the spec shape.
-  const inventory = { views: [], charts: [], forms: [], businessRules: [], globalChoices: [], roleRestrictedForms: [], incomplete: [] };
+  // for it. It is a sibling key for the same reason `roleRestrictedForms` is: only the whitelisted
+  // keys reach `app-spec.json`, so this informs the CLI without changing the spec shape.
+  //
+  // `tables` are the app's tables, whose command bars are inventoried (readCommandInventory); a caller that names none reads none.
+  const inventory = { views: [], charts: [], forms: [], businessRules: [], globalChoices: [], commands: [], roleRestrictedForms: [], incomplete: [] };
   const fail = (kind, err) => inventory.incomplete.push({ kind, reason: (err && err.message) ? String(err.message).slice(0, 200) : 'read failed' });
   try {
     const layer = componentInventory ? componentInventory.layer : await currentAppLayer(sdk.dataverse, appId);
@@ -968,10 +1006,19 @@ async function readDescriptionInventory(sdk, appId, solutionScope, referencedGlo
     fail('globalChoices', err);
   }
 
+  // A failed read is UNKNOWN, never "the app has no commands" — the same rule as every class above.
+  if (Array.isArray(tables)) {
+    try {
+      inventory.commands.push(...await readCommandInventory(sdk, appId, tables));
+    } catch (err) {
+      fail('commands', err);
+    }
+  }
+
   // Ordered here, once, for everything that reads the inventory — the spec's `descriptionInventory`, the not-round-tripped report
   // and the role-restriction warning. The rows are in the order Dataverse answered, which differs between two reads of one app; by
   // table, then name, then id (compareArtifacts) they do not.
-  for (const key of ['views', 'charts', 'forms', 'businessRules', 'roleRestrictedForms']) inventory[key].sort(compareArtifacts);
+  for (const key of ['views', 'charts', 'forms', 'businessRules', 'commands', 'roleRestrictedForms']) inventory[key].sort(compareArtifacts);
   inventory.globalChoices.sort((a, b) => compareText(a.name, b.name));
   inventory.incomplete.sort((a, b) => compareText(a.kind, b.kind) || compareText(a.reason, b.reason));
   return Object.fromEntries(Object.entries(inventory).filter(([, value]) => value.length));
@@ -1745,15 +1792,14 @@ function notRoundTrippedSummary(inventory) {
   // `entityScoped: false` for global choices because they are ORG-wide: grouping one under a table
   // would invent a relationship the platform does not have.
   //
-  // ⚠ `commands[]` is missing from this list for a different reason, and it is a KNOWN gap rather
-  // than an oversight: `readDescriptionInventory` never collects commands, so there is no count to
-  // report. Adding the class here would emit a permanent "0 commands" that reads as "this app has
-  // none" — the exact false reassurance the `incomplete` channel exists to avoid. Inventory them
-  // first, then add the class.
+  // `commands` are the command-bar customisations of the app's tables (readCommandInventory). They were
+  // missing until the download read them: a class with no read behind it would have reported a permanent
+  // "0 commands", the false reassurance the `incomplete` channel exists to avoid.
   const CLASSES = [
     { key: 'forms', label: 'form', entityScoped: true },
     { key: 'views', label: 'view', entityScoped: true },
     { key: 'charts', label: 'chart', entityScoped: true },
+    { key: 'commands', label: 'command', entityScoped: true },
     { key: 'businessRules', label: 'business rule', entityScoped: true },
     { key: 'globalChoices', label: 'global choice', entityScoped: false },
   ];
@@ -3316,7 +3362,7 @@ async function runDownload({ sdk, genpage, outDir, appId, appUnique, allowLossy 
       const scope = solutionUnreadable
         ? new Error(`the solutions this app belongs to could not be read (${solutionUnreadable})`)
         : (solutionCandidates || solution.uniqueName);
-      capturedInventory = await readDescriptionInventory(sdk, appId, scope, referenced, componentInventory);
+      capturedInventory = await readDescriptionInventory(sdk, appId, scope, referenced, componentInventory, { tables: [...allLogicals, ...appTables] });
       return capturedInventory;
     },
   };

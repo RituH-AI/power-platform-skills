@@ -372,7 +372,8 @@ maker typed in the UI**.
 reconstruct as rebuildable spec (`solution`, `entities[]`, `entities[].columns[]`, `dashboards[]`).
 Views, charts, forms, business rules and global choices are not fully reconstructed yet, so their
 deployed descriptions are exposed under `descriptionInventory` for inspection only rather than as
-partial rebuildable artifacts. Null or absent Dataverse descriptions are omitted, never written as
+partial rebuildable artifacts (the command-bar buttons of the app's tables are listed there too, by
+table and label). Null or absent Dataverse descriptions are omitted, never written as
 `""`.
 
 **Rebuild behaviour:** a description is written at CREATE, and is additionally **reconciled on an

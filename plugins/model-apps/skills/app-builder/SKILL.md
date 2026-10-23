@@ -705,6 +705,9 @@ not everything:**
 - **Does NOT round-trip:** `forms[]`, `views[]`, `charts[]`, `commands[]` — they come back empty.
   All four **survive on the live app** (a rebuild preserves them by discovery), so a plain edit is
   safe; they just aren't editable through the downloaded spec. Change them in Maker or a fresh spec.
+  The download names every one it leaves out — the command-bar buttons of the app's tables included —
+  in its `NOTE` and its result's `notRoundTripped`, and lists them under `descriptionInventory` in the
+  spec: tell the user before they rebuild the spec in another environment, which would not have them.
 - **Roles are not in the spec, and a rebuild leaves them as they are.** A download carries no
   `personas[]`: the roles associated with the app stay as the environment has them. Keep `personas[]`
   out when you extend an app whose roles somebody else owns — a persona's role is converged to exactly

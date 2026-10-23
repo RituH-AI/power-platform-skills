@@ -1662,12 +1662,17 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   a non-primary AutoNumber's custom length/format and DateTime behavior are not authorable here.
   Dashboard tiles still bind source view/chart ids; moving them to another environment also needs
   those artifacts mapped, and removing a pinned source `dashboardId` when creating a new dashboard.
-  **Form/view/chart omissions are reported, not silent** (AB#6686423): every deployed form/view/chart is listed in the
+  **Form/view/chart/command omissions are reported, not silent** (AB#6686423): every deployed form/view/chart is listed in the
   spec's `descriptionInventory`, and each run prints a note naming the counts, the tables and the
   artifacts, plus a `notRoundTripped` block on the JSON result. It is a NOTE, never a gate — every app
   has forms and views, so failing the download would break every download, and the omission is not
   destructive in the environment the app came from. Do not "fix" this by reconstructing `forms[]`
   without also solving the lossy-layout problem above.
+  The **command-bar customisations of the app's tables** are listed the same way (`commands`, by table and button
+  label; `readCommandInventory`): the unmanaged modern commands (`appaction` rows, read by the table's logical name,
+  20 tables to a request) that are table-scoped or scoped to this app — not another app's, not a Group container, not
+  an inactive row. They used to be named nowhere, so a rebuild in another environment dropped them without a word. A
+  failed read is reported as `commands` under the classes that could not be inventoried, never as "no commands".
   **A page's connector and Custom API bindings are in the spec** (`pages[].connectorBindings`,
   `pages[].actionBindings`; the format and the rebuild rules are in `references/app-spec-schema.md` →
   `pages[]`). The page folder always held the raw lists in its `config.json`, but the spec carried only

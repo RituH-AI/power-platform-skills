@@ -444,13 +444,15 @@ test('lifecycle matrix: the download writes the authored spec back, but for the 
   assert.deepEqual(sortRelationships(downloaded), sortRelationships(expectedDownload(run.spec, run.ids)));
   // The page's source comes back byte for byte.
   assert.equal(fs.readFileSync(path.join(dir, 'pages', run.ids.page, 'page.tsx'), 'utf8'), PAGE_SOURCE);
-  // What it does not carry, it names: the forms, views and charts of each table.
-  assert.deepEqual(emitted.payload.notRoundTripped.classes, [{ kind: 'forms', count: 5, label: 'form' }, { kind: 'views', count: 9, label: 'view' }, { kind: 'charts', count: 1, label: 'chart' }]);
+  // What it does not carry, it names: the forms, views and charts of each table, and the buttons of the command bar the build made on
+  // contoso_project (the button, the flyout and its child; the group the adapter put between them is a container, not a command).
+  assert.deepEqual(emitted.payload.notRoundTripped.classes, [{ kind: 'forms', count: 5, label: 'form' }, { kind: 'views', count: 9, label: 'view' }, { kind: 'charts', count: 1, label: 'chart' }, { kind: 'commands', count: 3, label: 'command' }]);
   assert.deepEqual(Object.fromEntries(Object.entries(descriptionInventory).map(([k, list]) => [k, list.map((x) => (x.entity ? `${x.entity}: ${x.name}` : x.name))])), {
     views: ['contoso_project: Active Projects', 'contoso_project: Inactive Projects', 'contoso_project: Open Projects', 'contoso_tag: Active Tag Catalog', 'contoso_tag: Inactive Tag Catalog', 'contoso_task: Active Task Items', 'contoso_task: Inactive Task Items', 'contoso_task: My Open Tasks', 'contoso_task: Open Tasks'],
     charts: ['contoso_project: Projects by Priority'],
     forms: ['contoso_project: Information', 'contoso_project: Project', 'contoso_tag: Information', 'contoso_task: Information', 'contoso_task: Task'],
     globalChoices: ['contoso_stage'],
+    commands: ['contoso_project: Approve', 'contoso_project: Escalate', 'contoso_project: More'],
   });
   // ...and it warns about the two losses a rebuild elsewhere would otherwise not show.
   const warningLines = stderr.split('\n').filter((l) => /^WARNING:/.test(l));

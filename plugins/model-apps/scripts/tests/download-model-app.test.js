@@ -2537,7 +2537,7 @@ test('runDownload WARNS on stderr about a role-restricted form, naming it', asyn
   // SORTED, not in the order the mock returned them. `notRoundTripped` is compared between runs, so
   // it sorts at every level, and `descriptionInventory` below is ordered the same way (table, then
   // name, then id): the two lists carry the same forms in the same order.
-  assert.deepStrictEqual(res.notRoundTripped.entities, [{ entity: 'new_order', forms: ['Dispatcher Form', 'Everyone Form'], views: [], charts: [], businessRules: [] }]);
+  assert.deepStrictEqual(res.notRoundTripped.entities, [{ entity: 'new_order', forms: ['Dispatcher Form', 'Everyone Form'], views: [], charts: [], commands: [], businessRules: [] }]);
   // The spec on disk still carries them under descriptionInventory — the note's claim must be true.
   assert.deepStrictEqual((res.spec.descriptionInventory.forms || []).map((f) => f.name), ['Dispatcher Form', 'Everyone Form']);
 });
