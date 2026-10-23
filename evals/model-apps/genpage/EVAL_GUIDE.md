@@ -453,7 +453,7 @@ Read this output as:
 2. `not graded yet` / `requires RuntimeTypes.ts fixture` — a check that cannot grade the stored evidence: a correct check would fail a historical fixture's real drift, or the capture did not keep what the check reads. `evals/model-apps/tests/eval-coverage-baseline.json` records the reason for each
 3. `no check registered for this expectation` — the assertion text in `evals.json` doesn't have a corresponding check in the runner library. Either add the check or accept the skip as documentation-only.
 
-Custom API support has no feature flag, so no rule grades a `custom-api` gate: a recorded `feature-flags.js custom-api` probe (an older run made one) is neither required nor refused, and a run that never probes it is not failed for it.
+Custom API support has no feature flag, so no rule grades a `custom-api` gate: a probe of that removed flag, recorded by an older run, is neither required nor refused, and a run that never probes it is not failed for it.
 
 ---
 
