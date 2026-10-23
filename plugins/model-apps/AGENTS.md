@@ -1960,7 +1960,12 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   id) AND, best-effort, **content** so an *unapplied edit* is caught (not just a missing artifact): a
   view's **column set** (parsed from `layoutxml`; every spec column must be deployed — an extra deployed
   column passes by design, so a column REMOVED from the spec, which the additive `reconcileView` leaves
-  in place, is not flagged), plus **relationship** and **command-bar existence** (previously unchecked).
+  in place, is not flagged), plus **relationship** and **command-bar existence** (previously unchecked), and
+  each declared **web resource**: it exists and — unless it is `external`, a shared one the build reuses as it finds it —
+  its deployed (published) content is the spec's, byte for byte (`webResourceContentState` in `lib/sdk-build.js`, the comparison
+  the build's reuse line makes): a rebuild never writes the content of a web resource that exists, so an edit that was not
+  recreated fails this check (`web-resource`), a spec content this machine cannot read (a missing `contentPath`, read relative to
+  the spec's folder) is `unverified`, and a run whose build skipped the web-resources phase reports it as phase-skipped.
   A relationship is verified by its **identity**, not its name: the answer has to state its schema name, its
   type, both its tables and, for a 1:N, its lookup column — for an N:N, its intersect table and the column each
   table has in it — and all of them have to match (`compareRelationship`, `lib/relationship-metadata.js`; an N:N's

@@ -41,7 +41,10 @@ Reference from a column via `"globalChoice": "new_priority"` (built before the c
 - Built **before** forms and added to the solution; reference one from a form `events[]` handler.
 - **Content edits are NOT applied on rebuild.** Like commands, the phase is discover-then-skip: a web
   resource that already exists is reused as-is, so changing `content` and rebuilding deploys nothing
-  and the old script keeps running. Delete the web resource (or tear down) and rebuild to change it —
+  and the old script keeps running. The build says so: it compares the deployed content with the spec's,
+  and when they differ its line reads `(exists — reuse; its deployed content differs from the spec's …)`
+  and a warning names the web resource; verify fails its `web-resource` check for the same reason (an
+  `external` entry is checked only for existence). Delete the web resource (or tear down) and rebuild to change it —
   note it cannot be deleted while a command or form handler still references it.
 - **An unconfirmed first write is different from an ordinary content edit.** A
   `WEB_RESOURCE_UNVERIFIED` halt names the existing row; it does not mean the resource was lost.

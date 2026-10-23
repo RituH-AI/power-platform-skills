@@ -268,6 +268,15 @@ function readerFor(sdk, appUnique, opts) {
       const items = await sdk.resolveArtifact('command', { entity: String(entity).toLowerCase() });
       return !!(items && items[0] && items[0].id);
     },
+    // webResource(name): the web resource of that name as a plain read answers it (its published layer), with its content — the same read
+    // the build makes before it reuses one — or null when there is none:
+    //   GET /webresourceset?$select=webresourceid,content&$filter=name eq 'contoso_/scripts/form.js'&$top=1
+    //   { "value": [ { "webresourceid": "…", "content": "dmFyIEZvcm0gPSB7…" } ] }
+    webResource: async (name) => {
+      const rows = await sdk.queryRecords('webresource', { select: ['webresourceid', 'content'], filter: `name eq '${odataLit(name)}'`, top: 1 });
+      const row = rows && rows[0];
+      return row && row.webresourceid ? { id: row.webresourceid, content: row.content } : null;
+    },
     // statusReasons(entity) / alternateKeys(entity): the table's status reasons, with their states, and its alternate keys, with their
     // columns — one narrow read each, made only for a table that declares any (lib/status-reasons-keys.js). They never throw: a read that
     // fails answers { state: 'error', why }, which verify reports on the checks it was for.
@@ -688,7 +697,8 @@ async function main() {
     // kept because it was changed in the designer since then is not a failure (AB#6726727). It is keyed by
     // environment, so a folder built against another one yields none.
     const baselineSpec = readBaseline(workspaceDir, { environment: dataverseOrigin(env), appUniqueName: appUniqueName(spec) }) || undefined;
-    r = await verifySpec(spec, readerFor(session.sdk, appUniqueName(spec), { genpage, workspaceDir, isolatedReader: isolatedReaderFor(env, { httpClient }) }), { baselineSpec, languageCode });
+    // `appDir`: a web resource's `contentPath` is read relative to the spec's folder, as the build reads it, to compare its content.
+    r = await verifySpec(spec, readerFor(session.sdk, appUniqueName(spec), { genpage, workspaceDir, isolatedReader: isolatedReaderFor(env, { httpClient }) }), { baselineSpec, languageCode, appDir: path.dirname(specPath) });
   } finally {
     // Before the result is printed: emitResult ends the process, so a cleanup placed after it never ran.
     // The backend first, and awaited: a page read the pass gave up on can still be running, and its workspace is closed and removed once the storage

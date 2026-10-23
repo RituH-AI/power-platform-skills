@@ -14,7 +14,7 @@ const { sitemapEntityTables } = require('./app-spec.js');
 const { decodeXmlEntities, liveNavEntries, XML_TAG, XML_ATTR } = require('./sitemap-pages.js');
 const { normalizePageSource, relationshipSchemaName, manyToManySchemaName, SDK_ROLE_MARKER, canonicalPersonaName, bpfUniqueName, BPF_ROLE_ACCESS, generatedTabName, generatedSectionName, formColumnsOf, formLayoutNames, subgridRelationshipName, normalizeLanguageCode, isLocalizedLabelMap } = require('./app-spec.js');
 const { sameRelationship, compareRelationship, describeRelationship, describeIncomplete } = require('./relationship-metadata.js');
-const { resolveExistingFormId, resolveRoleBusinessUnit, roleBuClause, appUniqueName, businessRuleFilter, bpfFilter, viewDef, dashboardsInSolution, findDashboardsByName, findPinnedDashboard } = require('./sdk-build.js');
+const { resolveExistingFormId, resolveRoleBusinessUnit, roleBuClause, appUniqueName, businessRuleFilter, bpfFilter, viewDef, dashboardsInSolution, findDashboardsByName, findPinnedDashboard, webResourceContentState } = require('./sdk-build.js');
 const { DASHBOARD_LAUNCHER_URL, isDashboardLauncherUrl, subAreaTargetKey, specSubAreaTargetKey, specSubAreas, chromeByTargetKey, keepsLiveValue } = require('./sitemap-merge.js');
 // Recorded on an icon check the build's keep rule satisfies (keepsLiveValue, sitemap-merge.js).
 const KEPT_BY_DESIGNER = 'kept as the environment has it: changed in the designer since the spec\u2019s baseline, which the spec still matches';
@@ -1263,6 +1263,35 @@ async function verifySpec(spec, read, opts = {}) {
       let present = false;
       try { present = !!(await read.commandBar(entity)); } catch { present = false; }
       add('command', `${entity} command bar`, present);
+    }
+    });
+  }
+
+  // Web resources: each declared one exists and — unless it is `external`, a shared web resource the build reuses as it finds it and never
+  // writes — holds the content the spec gives it, compared exactly as the build compares it (webResourceContentState, sdk-build.js). A
+  // rebuild never writes the content of a web resource that exists (references/app-spec-schema-advanced.md), so a content edit that was not
+  // recreated would otherwise verify PASS while the old script runs. Best-effort like the command check: only when the reader can read a web
+  // resource (`webResource(name)` -> { id, content } or null). A read that fails is a failed check, as there; a spec content this machine
+  // cannot read (a contentPath that is not there) decides nothing, so it is unverified; and a web resource whose phase the build did not
+  // run is reported as phase-skipped, as a business rule is.
+  if (typeof read.webResource === 'function') {
+    const webResourcesPhaseRan = !ranPhases || ranPhases.has('web-resources');
+    plan.each(spec.webResources || [], async ({ add, phaseSkipped, unverified }, resources) => {
+    for (const wr of resources) {
+      if (!wr || typeof wr.name !== 'string' || !wr.name) continue;
+      if (!webResourcesPhaseRan) { phaseSkipped.push(`web-resource:${wr.name}`); continue; }
+      let row;
+      try {
+        row = await read.webResource(wr.name);
+      } catch (err) {
+        add('web-resource', wr.name, false, `could not be read: ${(err && err.message) || err}`);
+        continue;
+      }
+      if (!row) { add('web-resource', wr.name, false, 'not found'); continue; }
+      if (wr.external === true) { add('web-resource', wr.name, true); continue; }
+      const compared = webResourceContentState(wr, opts.appDir, row.content);
+      if (compared.state === 'unknown') { unverified.push(`web-resource:${wr.name} (its content was not compared: ${compared.reason})`); continue; }
+      add('web-resource', wr.name, compared.state === 'same', compared.state === 'same' ? '' : "its deployed content differs from the spec's — a rebuild does not write the content of a web resource that exists; delete it (or tear the app down) and build again to deploy it");
     }
     });
   }

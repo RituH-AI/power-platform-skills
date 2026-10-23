@@ -2513,7 +2513,7 @@ test('the verify options carry the ACTUAL phase list, not a constant', () => {
   // Asserted on the SOURCE because the value has to be the caller's own `opts.phases`: a test that
   // merely passes a phase list through would still accept `phases: PHASES`.
   const src = fs.readFileSync(path.join(__dirname, '..', 'build-model-app.js'), 'utf8');
-  assert.match(src, /deps\.verify\(spec, \{ environmentSkipped: r\.skipped, phases: opts\.phases(, baselineSpec: opts\.baselineSpec)?(, languageCode: opts\.languageCode, preResolvedLanguageCode: opts\.preResolvedLanguageCode)? \}\)/,
+  assert.match(src, /deps\.verify\(spec, \{ environmentSkipped: r\.skipped, phases: opts\.phases(, baselineSpec: opts\.baselineSpec)?(, languageCode: opts\.languageCode, preResolvedLanguageCode: opts\.preResolvedLanguageCode)?(, appDir: opts\.appDir)? \}\)/,
     'verify must receive the invocation\'s OWN phases — a constant re-breaks the --changed-only fast path');
 });
 
@@ -2581,8 +2581,11 @@ test('the build hands verify the language it wrote its labels in', async () => {
   await buildModelApp(desk, { apply: true, env: 'https://x', verify: true, preResolvedLanguageCode: 1031 }, { sdk, verify });
   assert.strictEqual(received.languageCode, undefined);
   assert.strictEqual(received.preResolvedLanguageCode, 1031);
-  // The rest of the options are exactly what they were.
-  assert.deepStrictEqual(Object.keys(received).sort(), ['baselineSpec', 'environmentSkipped', 'languageCode', 'phases', 'preResolvedLanguageCode']);
+  // The rest of the options are exactly what they were, and the app folder, from which verify reads a web resource's contentPath to
+  // compare its deployed content.
+  assert.deepStrictEqual(Object.keys(received).sort(), ['appDir', 'baselineSpec', 'environmentSkipped', 'languageCode', 'phases', 'preResolvedLanguageCode']);
+  await buildModelApp(desk, { apply: true, env: 'https://x', verify: true, appDir: path.join(__dirname, '..', '..', 'samples') }, { sdk, verify });
+  assert.strictEqual(received.appDir, path.join(__dirname, '..', '..', 'samples'), 'the folder the build read the spec\'s sources from');
 });
 
 test('verify NARRATES what it could not verify beside its PASS — it is neither a pass nor a failure — and the result carries it', async () => {

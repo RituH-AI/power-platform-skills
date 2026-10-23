@@ -62,7 +62,8 @@ prod-ready** app; don't under-build (a bare table list) or over-build (surfaces 
   `100000003`, because they are assigned per publisher. Resolve by label via `getOptions()`
   (see `references/app-spec-schema-advanced.md` → webResources). Note also that command and web-resource
   **edits do not redeploy on rebuild** — the phases reuse what exists, so changing a button or a
-  script means deleting it first. This does not apply to recovery of the build's own
+  script means deleting it first (the build warns, and verify fails, when a web resource's deployed
+  content differs from the spec's). This does not apply to recovery of the build's own
   `WEB_RESOURCE_UNVERIFIED` row: keep that row and the same build workspace, then follow its halt.
 - **Form logic without code** — `businessRules[]`: show/hide, lock/unlock, set-required and
   set-value, driven by a condition on the record. **Reach for a business rule before form JS** when

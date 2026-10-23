@@ -831,8 +831,9 @@ async function buildModelAppHeld(spec, opts, deps, v, buildLease) {
           // at all) fails the same way on every run after the first.
           // The language the build wrote its labels in goes too: the flag it was given and what its SDK was made for. A build run with
           // `--language-code` in an organization whose base language is another one publishes its captions in the flag's language, and a
-          // verify that does not know it holds them to the organization's and reports the captions it was just given as missing.
-          const vr = await deps.verify(spec, { environmentSkipped: r.skipped, phases: opts.phases, baselineSpec: opts.baselineSpec, languageCode: opts.languageCode, preResolvedLanguageCode: opts.preResolvedLanguageCode });
+          // verify that does not know it holds them to the organization's and reports the captions it was just given as missing. And the app
+          // folder, from which a web resource's `contentPath` is read to compare its deployed content (verify-spec.js, the web-resource check).
+          const vr = await deps.verify(spec, { environmentSkipped: r.skipped, phases: opts.phases, baselineSpec: opts.baselineSpec, languageCode: opts.languageCode, preResolvedLanguageCode: opts.preResolvedLanguageCode, appDir: opts.appDir });
           const present = vr.checks.length - vr.missing.length;
           log(`\n${vr.ok ? '✓ verify PASS' : `✗ verify FAIL — ${vr.missing.length} missing`} (${present}/${vr.checks.length} present)`);
           // Named explicitly rather than folded into the pass, so a green verify never reads as

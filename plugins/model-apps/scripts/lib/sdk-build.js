@@ -603,6 +603,27 @@ function webResourceOpts(wr, appDir) {
   return o;
 }
 
+// How the spec's web resource `wr` compares with the content an environment holds for it — `deployed`, the base64 text a read of
+// `webresourceset` answers in `content` (the published layer, for a plain read):
+//   { state: 'same' }               the bytes the build would write are the deployed bytes
+//   { state: 'differs' }            they are not
+//   { state: 'unknown', reason }    one side cannot be read: the spec's source (a contentPath that is not there), or an answer with no content
+// The bytes are the ones the SDK sends — `contentBase64` as given, `content` as UTF-8 (webResourceOpts) — and compares when it reads a write back
+// to confirm it, so a web resource an earlier build wrote from the same spec compares the same. The ONE comparison behind the build's reuse line
+// and verify's web-resource check, so the two cannot disagree about whether an edit was deployed.
+function webResourceContentState(wr, appDir, deployed) {
+  if (typeof deployed !== 'string') return { state: 'unknown', reason: 'the environment answered no content' };
+  let options;
+  try {
+    options = webResourceOpts(wr, appDir);
+  } catch (err) {
+    const source = typeof wr.contentPath === 'string' && wr.content === undefined && wr.contentBase64 === undefined ? `contentPath ${JSON.stringify(wr.contentPath)}: ` : '';
+    return { state: 'unknown', reason: `the spec's content could not be read (${source}${(err && err.message) || err})` };
+  }
+  const wanted = options.contentBase64 !== undefined ? Buffer.from(String(options.contentBase64), 'base64') : Buffer.from(String(options.content), 'utf8');
+  return { state: Buffer.from(deployed, 'base64').equals(wanted) ? 'same' : 'differs' };
+}
+
 // --- the ordered plan (dry-run + totals) -----------------------------------------------
 function planFor(spec, opts) {
   const has = (p) => !opts.phases || opts.phases.includes(p);
@@ -3356,6 +3377,10 @@ async function runSdkBuildPhases(spec, opts, owed) {
   //     in the solution). Built before forms so a form event handler can bind its library.
   //     One that an earlier run of this build created or wrote and could not confirm was published (WEB_RESOURCE_UNVERIFIED,
   //     recorded in the workspace) is not reused: its content is written again by id (writeOwnedWebResource).
+  //     The reuse writes nothing — the phase is discover-then-skip, like charts, command bars and dashboards, whose lines say their
+  //     edits are not applied — but it is not silent about the content: the row's deployed (published) content is read with its id and
+  //     compared with what the spec would write (webResourceContentState), and a difference is said in the skip line and as a warning.
+  //     An `external` web resource is a shared one the build reuses as it finds it, so its content is not the spec's to compare.
   if (has('web-resources')) {
     for (const wr of spec.webResources || []) {
       const recordedId = unconfirmedWebResources.idOf(wr.name);
@@ -3365,10 +3390,23 @@ async function runSdkBuildPhases(spec, opts, owed) {
         });
         continue;
       }
-      const existing = await provision.queryRecords('webresource', { select: ['webresourceid'], filter: `name eq '${odataLit(wr.name)}'`, top: 1 });
+      // The row as a plain read answers it (its published layer):
+      //   GET /webresourceset?$select=webresourceid,content&$filter=name eq 'contoso_/scripts/form.js'&$top=1
+      //   { "value": [ { "webresourceid": "…", "content": "dmFyIEZvcm0gPSB7…" } ] }
+      const existing = await provision.queryRecords('webresource', { select: ['webresourceid', 'content'], filter: `name eq '${odataLit(wr.name)}'`, top: 1 });
       if (existing && existing[0] && existing[0].webresourceid) {
         result.created.webResources[wr.name] = existing[0].webresourceid;
-        runner.skip('web-resources', `web resource ${wr.name} (exists — reuse)`);
+        const compared = wr.external === true ? null : webResourceContentState(wr, opts.appDir, existing[0].content);
+        if (compared && compared.state === 'differs') {
+          runner.skip('web-resources', `web resource ${wr.name} (exists — reuse; its deployed content differs from the spec's: content edits aren't applied on rebuild, recreate to change)`);
+          if (typeof opts.warn === 'function') {
+            opts.warn(`web resource ${wr.name}: its deployed content differs from the spec's and is left as it is — a rebuild does not write the content of a web resource that exists; delete it (or tear the app down) and build again to deploy the spec's content`);
+          }
+        } else if (compared && compared.state === 'unknown') {
+          runner.skip('web-resources', `web resource ${wr.name} (exists — reuse; its content was not compared: ${compared.reason})`);
+        } else {
+          runner.skip('web-resources', `web resource ${wr.name} (exists — reuse)`);
+        }
         continue;
       }
       await runner.run('web-resources', `web resource ${wr.name} (${wr.type || 'js'})`, async () => {
@@ -8252,4 +8290,4 @@ async function runSdkBuildPhases(spec, opts, owed) {
   return result;
 }
 
-module.exports = { runSdkBuild, publishTargets, partialEnrichment, settleOwedPublishes, collectOwedPublishes, settleOwedLengths, normalizeFormId, planFor, annotateLivePlan, resolvePhases, PHASES, BuildHalt, SDK_COLUMN_TYPE, viewDef, defaultViewColumns, subgridLabel, enrichesDefaultViews, dashboardsInSolution, findDashboardsByName, findPinnedDashboard, artifactIdentityQuery, resolveExistingFormId, FORM_TYPE_CODE, chartDef, dashboardTileOpts, dashboardComponent, compileFormIntent, formFieldLogicals, appDef, appUniqueName, applyAppAiDescription, haltOnUnpublishedAppHeader, pushAppHeader, commandsByEntity, commandDef, businessRuleDef, businessRuleFilter, bpfDef, bpfFilter, webResourceOpts, WEB_RESOURCE_KINDS, FORM_EVENTS, acquireAppPagesLease, personaRoleSpecFor, resolveRoleBusinessUnit, roleBuClause, roleGrantLabel, resolveRoleGrantTarget, existingAppSitemapIsWritten, pagesFirstRule, applyAppHeader, applyAppHeaderText, warnAppIconNotApplied, inspectBpfStages, applyBpfStages, refuseUnpushedAppCopy, assertAuthorizedSitemapRewrite, reconciledPublishHalt };
+module.exports = { runSdkBuild, publishTargets, partialEnrichment, settleOwedPublishes, collectOwedPublishes, settleOwedLengths, normalizeFormId, planFor, annotateLivePlan, resolvePhases, PHASES, BuildHalt, SDK_COLUMN_TYPE, viewDef, defaultViewColumns, subgridLabel, enrichesDefaultViews, dashboardsInSolution, findDashboardsByName, findPinnedDashboard, artifactIdentityQuery, resolveExistingFormId, FORM_TYPE_CODE, chartDef, dashboardTileOpts, dashboardComponent, compileFormIntent, formFieldLogicals, appDef, appUniqueName, applyAppAiDescription, haltOnUnpublishedAppHeader, pushAppHeader, commandsByEntity, commandDef, businessRuleDef, businessRuleFilter, bpfDef, bpfFilter, webResourceOpts, webResourceContentState, WEB_RESOURCE_KINDS, FORM_EVENTS, acquireAppPagesLease, personaRoleSpecFor, resolveRoleBusinessUnit, roleBuClause, roleGrantLabel, resolveRoleGrantTarget, existingAppSitemapIsWritten, pagesFirstRule, applyAppHeader, applyAppHeaderText, warnAppIconNotApplied, inspectBpfStages, applyBpfStages, refuseUnpushedAppCopy, assertAuthorizedSitemapRewrite, reconciledPublishHalt };

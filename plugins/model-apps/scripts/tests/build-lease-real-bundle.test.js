@@ -174,7 +174,8 @@ test('a teardown deletes the one generated icon its lookup answers ($top=1) — 
 
 // What a build that runs alone sends, by `METHOD entity set` — ids, keys and queries left out — as the build sent it before the lease (2.18.0),
 // for the first build and an unchanged rebuild of the same spec. The lease is a file in the workspace: a build that meets no other sends exactly
-// this, and a request the lease added would show here.
+// this, and a request the lease added would show here. Since then the build's own verify reads each web resource the spec declares, with
+// its content (one GET /webresourceset in each run: the spec declares one).
 const ALONE = {
   build: {
     'GET /appmodulecomponents': 5,
@@ -195,7 +196,7 @@ const ALONE = {
     'GET /sitemaps/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()': 1,
     'GET /solutions': 2,
     'GET /systemforms': 1,
-    'GET /webresourceset': 2,
+    'GET /webresourceset': 3,
     'GET /webresourceset()': 2,
     'POST /AddAppComponents': 1,
     'POST /AddSolutionComponent': 4,
@@ -227,7 +228,7 @@ const ALONE = {
     'GET /systemforms': 1,
     'GET /systemforms/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()': 1,
     'GET /uxagentprojects': 1,
-    'GET /webresourceset': 3,
+    'GET /webresourceset': 4,
     'PATCH /sitemaps()': 1,
     'POST /AddAppComponents': 1,
     'POST /PublishXml': 3,

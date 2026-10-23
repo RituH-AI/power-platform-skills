@@ -211,7 +211,7 @@ const VERIFY_CHECKS = {
   entity: 3, column: 18, 'status-reason': 1, 'alternate-key': 1, relationship: 3,
   view: 3, 'view-columns': 3, 'view-filters': 3, 'view-sort': 1, chart: 1,
   form: 4, 'form-identities': 4, 'form-default': 2, 'form-order': 1, 'form-order-served': 1, 'form-timeline': 1,
-  dashboard: 1, command: 1,
+  dashboard: 1, command: 1, 'web-resource': 2,
   subarea: 4, 'subarea-dashboard-launcher': 1, 'app-table-component': 4, page: 1, 'page-subarea': 1,
   role: 1, 'app-role': 1, 'role-privileges': 1, 'role-grant': 1, 'role-grant-privileges': 1,
 };
