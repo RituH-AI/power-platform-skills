@@ -1264,6 +1264,15 @@ function indexScopes(index) {
     scopes.push(scope);
     blockScopes.set(i, scope);
     if (head) head.scope = scope;
+    // A function with parameter expressions evaluates its defaults before the body's declarations
+    // exist, in a separate environment: function f(v = (context.device = {})) { let context; } writes
+    // the outer context. Give the body its own var/lexical scope so a body declaration cannot capture
+    // a root that a default reads or writes. Defaults and computed pattern keys are the parameter
+    // expressions; a stray '=' or '[' in a type only adds a scope that changes no binding.
+    // https://tc39.es/ecma262/#sec-functiondeclarationinstantiation (steps 27-28)
+    if (head && head.kind === 'function' && scope.kind === 'function' && hasParameterExpressions(tokens, head)) {
+      scopes.push({ kind: 'body', start: tokens[i].start, body: tokens[i].start, end, roots: new Set(), head });
+    }
   }
   for (const head of heads) {
     if (tokens[head.body]?.value === '{') continue;
@@ -1300,7 +1309,7 @@ function indexScopes(index) {
       // A static block owns its var/function declarations; var context inside it
       // must not shadow or write context outside the class.
       // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Static_initialization_blocks
-      scope.function = ['program', 'function', 'opaque', 'static'].includes(scope.kind) ? scope : scope.parent?.function;
+      scope.function = ['program', 'function', 'body', 'opaque', 'static'].includes(scope.kind) ? scope : scope.parent?.function;
       scope.parentFunction = scope.parent?.function;
       active.push(scope);
     }
@@ -1308,6 +1317,15 @@ function indexScopes(index) {
   }
   index.scopes = scopes;
   index.blockScopes = blockScopes;
+}
+
+function hasParameterExpressions(tokens, head) {
+  const open = head.parameters;
+  if (open === undefined || open < 0 || tokens[open]?.value !== '(' || tokens[open].match < 0) return false;
+  for (let i = open + 1; i < tokens[open].match; i += 1) {
+    if (tokens[i].value === '=' || tokens[i].value === '[') return true;
+  }
+  return false;
 }
 
 function topLevelTokenRanges(tokens, start, end, separator) {

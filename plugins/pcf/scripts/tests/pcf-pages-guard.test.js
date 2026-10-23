@@ -881,6 +881,37 @@ for (const [name, body] of [
   });
 }
 
+test('Pages proof expires after a parameter-default write that a same-named body declaration does not hide', () => {
+  // A function with parameter expressions evaluates its defaults before its body's declarations exist,
+  // so the default writes the outer context however the body declares the name.
+  for (const body of [
+    `function reset(v = (context.device = {})) { let context; } ${CALL};`,
+    `function reset(v = (context.device = {})) { var context; } ${CALL};`,
+    `function reset(v = (context = next)) { const context = other; consume(context); } ${CALL};`,
+    `function reset({ v = (context.device = {}) } = {}) { let context; } ${CALL};`,
+    `const reset = function (v = (context.device = {})) { var context; }; ${CALL};`,
+    `const reset = (v = (context.device = {})) => { let context; }; ${CALL};`,
+    `const h = { reset(v = (context.device = {})) { var context; } }; ${CALL};`,
+    `class H { reset(v = (context.device = {})) { let context; } } ${CALL};`,
+  ]) {
+    assert.deepEqual(codesFor(withinGuard(body)), ['PCF_PAGES_API'], body);
+  }
+});
+
+test('Pages proof keeps body declarations local when a function has parameter expressions', () => {
+  for (const body of [
+    `function reset(v = 1) { let context = next; context = other; consume(context); } ${CALL};`,
+    `function reset(v = 1) { var context = next; context.device = other; } ${CALL};`,
+    `function reset(v = (other = next)) { var context; context = next; } ${CALL};`,
+  ]) {
+    assert.deepEqual(codesFor(withinGuard(body)), [], body);
+  }
+  // A call in such a body reads the body's own declaration, which no outer proof covers.
+  for (const kind of ['let', 'var']) {
+    assert.deepEqual(codesFor(withinGuard(`function reset(v = 1) { ${kind} context = next; ${CALL}; }`)), ['PCF_PAGES_API'], kind);
+  }
+});
+
 for (const [name, call, plainCall = CALL, proof = PROOF] of [
   ['method non-null run', 'context.device.captureImage!!()'],
   ['root and namespace non-null runs', 'context!!!.device!!?.captureImage!!()'],
@@ -1282,8 +1313,8 @@ for (const relative of [
     assert.match(text, /Pages API calls[^.\n]*unguarded/i);
     assert.match(text, /lexer failure[^.\n]*comments?[^.\n]*strings?[^.\n]*report/i);
     if (relative === 'AGENTS.md') {
-      assert.match(text, /later release[^.\n]*parameter-default writes[^.\n]*body declarations/i);
-      assert.match(text, /computed class member keys/i);
+      assert.match(text, /parameter default reaches the outer binding[^.\n]*body declares the same name/i);
+      assert.match(text, /later release[^.\n]*computed class member keys/i);
       assert.match(text, /\.ts` files[^.\n]*angle-bracket types[^.\n]*JSX/i);
       assert.match(text, /unterminated such type[^.\n]*lexer-failure path/i);
     } else {
