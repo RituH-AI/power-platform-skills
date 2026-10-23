@@ -15,8 +15,19 @@
 //     flags kept; JSX text is blanked; a comment, and a hashbang at offset 0, are blanked;
 //   - blanking writes a space for every character but a line terminator, which stays.
 // Where TypeScript reports any parse diagnostic, or its parse cannot be read (an exception), there is no view: the page is not one the parser vouches for.
+//
+// WHERE TYPESCRIPT IS NOT THE ONLY READER. Other tools read a page too — Babel's parser and esbuild compile TSX — and TypeScript's parser is more lenient than the
+// language, and than theirs, in a few places. There the parse vouches for nothing either, and the lexer's reading (its frontier) stands, for every consumer alike —
+// told from the parse itself, not from the lexer, whose earlier misread can hide what comes after it:
+//   - a JSX attribute string after trivia (`x= '…'`) that holds a backslash: TypeScript scans it as a JavaScript string, with escapes — it scans a JSX string, with none,
+//     only where the quote follows the `=` at once (scanJsxAttributeValue) — and Babel and esbuild as a JSX string, so the two end it at different quotes and read
+//     different code after it: `<C x= '\'/>;//' />; navigateTo(…)` holds a call to TypeScript, and a comment to Babel;
+//   - grammar the parser takes and leaves to the checker, which Babel's parser refuses: a word that strict code reserves used as a name (`await`, `yield`, `let`,
+//     `static`, … — a module is strict code; https://tc39.es/ecma262/#sec-keywords-and-reserved-words) or a reserved word used as one (`type X = if`), outside the
+//     places a keyword may name something (a property, a member, a JSX tag: isIdentifierName); a JSDoc type (`?T`, `T!`, `*`); a type predicate outside a return
+//     type (`asserts x`); `readonly` before a type that is no array or tuple; and an empty list of type arguments or type parameters (`A<>`).
 const { loadVendoredTypeScript } = require('./typescript-compiler.js');
-const { isLineTerminator } = require('./source-literals.js');
+const { blankNonCodePreservingTemplateExpressions, isLineTerminator } = require('./source-literals.js');
 
 // The views of the last sources asked about: the oracle lexes one source several times per call (resolve, stray, residual), and each would parse it again.
 const CACHE_LIMIT = 8;
@@ -88,9 +99,15 @@ function buildViews(ts, src) {
   }
   const JSX_TAGS = new Set([ts.SyntaxKind.JsxOpeningElement, ts.SyntaxKind.JsxClosingElement, ts.SyntaxKind.JsxSelfClosingElement, ts.SyntaxKind.JsxOpeningFragment,
     ts.SyntaxKind.JsxClosingFragment]);
+  // Set where the parse holds what another reader reads differently or refuses (WHERE TYPESCRIPT IS NOT THE ONLY READER, above): the parse then vouches for nothing.
+  let otherReaders = false;
   const visit = (node) => {
     // JSDoc is held as a child of the node it documents and is also the leading trivia of its first token, where it is blanked as the comment it is.
-    if (ts.isJSDoc(node)) return;
+    if (otherReaders || ts.isJSDoc(node)) return;
+    if (readAnotherWay(ts, src, sf, node)) {
+      otherReaders = true;
+      return;
+    }
     const children = node.getChildren(sf);
     if (children.length > 0 && !ts.isToken(node)) {
       for (const child of children) visit(child);
@@ -142,6 +159,7 @@ function buildViews(ts, src) {
     }
   };
   visit(sf);
+  if (otherReaders) return null;
   // A template's substitutions are code only in `keep`: in the literal view the whole of a template between its back-ticks is blank.
   const templates = (node) => {
     if (node.kind === ts.SyntaxKind.TemplateExpression || node.kind === ts.SyntaxKind.TemplateLiteralType) {
@@ -155,4 +173,48 @@ function buildViews(ts, src) {
   return { literal: literal.join(''), keep: keep.join(''), comments, regexEnds, jsxTagEnds };
 }
 
-module.exports = { typescriptViews, setParserCheck };
+// Whether `node` of the parse of `src` is read another way, or refused, by another reader (WHERE TYPESCRIPT IS NOT THE ONLY READER, above).
+function readAnotherWay(ts, src, sf, node) {
+  const kind = node.kind;
+  const SK = ts.SyntaxKind;
+  if (kind === SK.StringLiteral && node.parent && node.parent.kind === SK.JsxAttribute && node.parent.initializer === node) {
+    // `x='…'` (the quote right after the `=`) is a JSX string to every reader; a comment cannot end in `=`, so a `=` right before the quote is the attribute's.
+    const start = node.getStart(sf);
+    return src[start - 1] !== '=' && src.slice(start, node.end).includes('\\');
+  }
+  if (kind === SK.Identifier) {
+    // identifierToKeywordKind: the keyword the name spells, written with an escape or not (`\u0061wait` is `await`).
+    const keyword = ts.identifierToKeywordKind(node);
+    if (keyword === undefined || ts.isIdentifierName(node)) return false;
+    return (keyword >= SK.FirstReservedWord && keyword <= SK.LastReservedWord) || (keyword >= SK.FirstFutureReservedWord && keyword <= SK.LastFutureReservedWord)
+      || keyword === SK.AwaitKeyword;
+  }
+  // A JSDoc type outside a JSDoc comment (visit does not enter those): JSDocAllType, JSDocNullableType and the rest, which only TypeScript parses in a .tsx file.
+  if (kind >= SK.FirstJSDocNode && kind <= SK.LastJSDocNode) return true;
+  if (kind === SK.TypePredicate) return !(node.parent && ts.isFunctionLike(node.parent) && node.parent.type === node);
+  if (kind === SK.TypeOperator && node.operator === SK.ReadonlyKeyword) return !ts.isArrayTypeNode(node.type) && !ts.isTupleTypeNode(node.type);
+  return (node.typeArguments !== undefined && node.typeArguments !== null && node.typeArguments.length === 0)
+    || (node.typeParameters !== undefined && node.typeParameters !== null && node.typeParameters.length === 0);
+}
+
+/**
+ * The lexer's executable view of `src` and its first guess (`onAmbiguity`: { at, kind }, or null), and — where it guessed — the parser's views of the page
+ * (typescriptViews), which settle the guess: null where the lexer did not guess, where it guessed a JSX attribute string after trivia (no parser settles that one), and
+ * where typescriptViews has none. The one place the navigation oracle (pageref-resolver.js) and the structure gate (page-structure.js) decide which reading stands,
+ * so the two never decide it differently.
+ * @param {string} src
+ * @returns {{ keep: string, frontier: null | { at: number, kind: string }, views: null | object }}
+ */
+function guessedPageViews(src) {
+  let frontier = null;
+  let jsxAttribute = false;
+  const keep = blankNonCodePreservingTemplateExpressions(src, {
+    onAmbiguity: (at, kind) => {
+      if (kind === 'jsx-attribute') jsxAttribute = true;
+      if (!frontier || at < frontier.at) frontier = { at, kind };
+    },
+  });
+  return { keep, frontier, views: frontier !== null && !jsxAttribute ? typescriptViews(src) : null };
+}
+
+module.exports = { typescriptViews, guessedPageViews, setParserCheck };

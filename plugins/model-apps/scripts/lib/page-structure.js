@@ -18,8 +18,8 @@
 // a copy that keeps ordinary string bodies, accepted prose that merely MENTIONS an export:
 //   /* export default */                                -> accepted
 //   const prose = "export default GeneratedComponent";   -> accepted
-const { blankLiterals, blankNonCodePreservingTemplateExpressions, endsMidStatement, findElisionMarker, hasDefaultExport, hasUnbalancedBrackets, trimTrivia, WS } = require('./source-literals.js');
-const { typescriptViews } = require('./typescript-views.js');
+const { blankLiterals, endsMidStatement, findElisionMarker, hasDefaultExport, hasUnbalancedBrackets, trimTrivia, WS } = require('./source-literals.js');
+const { guessedPageViews } = require('./typescript-views.js');
 
 // A line that opens a markdown fence, after the white space TypeScript skips (source-literals.js, isTrivia): U+0085 and the zero-width space before a fence are white space to it.
 const MARKDOWN_FENCE = new RegExp(`^${WS}*(\`\`\`|~~~)`, 'm');
@@ -27,11 +27,11 @@ const MARKDOWN_FENCE = new RegExp(`^${WS}*(\`\`\`|~~~)`, 'm');
 // Where the lexer guessed what a construct is (source-literals.js, `onAmbiguity`), its view of the page may be wrong from there on — an interface's generic call
 // signature, `interface Api { <U>(x: U): U; }`, reads to it as an element whose text runs to the end of the file, and a complete page as cut off. So where it
 // guessed, the page is read as the TypeScript parser reads it (typescript-views.js: the same views, built from the parse), when the parser reports no diagnostic;
-// where it does report one, or did not need to be asked, the lexer's views stand. Every check is the same either way: only the views they read differ.
+// where it does report one, or did not need to be asked, the lexer's views stand — and so they do where another reader reads the page differently or refuses it
+// (a JSX attribute string after trivia, grammar only TypeScript's parser takes), decided by guessedPageViews exactly as the navigation oracle decides it. Every
+// check is the same either way: only the views they read differ.
 function parsedViews(text) {
-  let guessed = false;
-  blankNonCodePreservingTemplateExpressions(text, { onAmbiguity: () => { guessed = true; } });
-  return guessed ? typescriptViews(text) : null;
+  return guessedPageViews(text).views;
 }
 
 function pageStructureProblems(code) {

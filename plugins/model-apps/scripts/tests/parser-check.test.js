@@ -16,11 +16,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { blankLiterals, blankNonCodePreservingTemplateExpressions, commentRanges, endsMidStatement, findElisionMarker, hasDefaultExport, hasUnbalancedBrackets } = require('../lib/source-literals.js');
-const { typescriptViews, setParserCheck } = require('../lib/typescript-views.js');
+const { typescriptViews, guessedPageViews, setParserCheck } = require('../lib/typescript-views.js');
 const { loadVendoredTypeScript } = require('../lib/typescript-compiler.js');
 const { resolvePageRefs, strayPageRefs, navigationFrontier } = require('../lib/pageref-resolver.js');
 const { pageStructureProblems } = require('../lib/page-structure.js');
 const { validPages, heldOpenLinePages, NAVIGATION_CALL } = require('./helpers/valid-pages.js');
+const { loadBabelOracle } = require('./helpers/typescript-oracle.js');
 
 const REPO = path.resolve(__dirname, '..', '..', '..', '..');
 const ID = '11111111-1111-4111-8111-111111111111';
@@ -179,8 +180,11 @@ test('parser check: a call signature in an interface no longer reads as a cut, a
   assert.deepEqual(pageStructureProblems(complete), []);
   // A cut inside the export: TypeScript reports it, so the lexer's reading stands, and the page is refused.
   assert.ok(pageStructureProblems(`${head}export default function P() { return <div>`).length > 0);
-  // A cut that TypeScript parses — a dangling `let`, a page with no default export — is refused from the parser's views as from the lexer's.
-  assert.deepEqual(pageStructureProblems(`${complete}let`), ['stops mid-statement — the file looks truncated']);
+  // A dangling `let`: TypeScript's parser reads it as a name, which strict code reserves (Babel refuses it), so the parse vouches for nothing, the lexer's reading
+  // stands, and the page is refused as cut off.
+  assert.equal(guessedPageViews(`${complete}let`).views, null);
+  assert.ok(pageStructureProblems(`${complete}let`).includes('stops mid-statement — the file looks truncated'));
+  // A page with no default export is refused from the parser's views as from the lexer's.
   assert.match(pageStructureProblems(`${head}const x = 1;\n`).join('\n'), /no complete default export/);
   // A comment that elides code, after the construct the lexer misread (to it, the comment was the text of an element).
   assert.deepEqual(pageStructureProblems(`${head}// TODO: wire the handler\nexport default function P() { return null; }\n`), ['contains a TODO/FIXME comment — the page is incomplete']);
@@ -201,6 +205,127 @@ test('parser check: where the parser does not answer, the lexer\'s reading stand
   assert.ok(guesses(attribute).has('jsx-attribute'));
   assert.equal(reading(attribute).resolves, false);
   assert.equal(navigationFrontier(attribute).kind, 'jsx-attribute');
+});
+
+// What the parser vouches for is told from its own parse, not from the lexer's guesses: an earlier misread can make the lexer skip a JSX attribute string after trivia,
+// which it then never names (`jsx-attribute`), and grammar that only TypeScript's parser takes names no guess at all. Babel reads both differently, or not at all.
+const BABEL_CALLS = (babel, code) => {
+  let tree;
+  try {
+    tree = babel.parse(code, { sourceType: 'module', plugins: ['jsx', 'typescript'] });
+  } catch {
+    return null;
+  }
+  let found = 0;
+  const walk = (node) => {
+    if (!node || typeof node.type !== 'string') return;
+    if (node.type === 'CallExpression' && node.callee.type === 'Identifier' && node.callee.name === 'navigateTo') found += 1;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'loc' || key === 'start' || key === 'end' || key === 'extra' || key === 'comments' || key === 'leadingComments' || key === 'trailingComments') continue;
+      if (Array.isArray(value)) for (const child of value) walk(child);
+      else if (value && typeof value === 'object') walk(value);
+    }
+  };
+  walk(tree.program);
+  return found;
+};
+// [what, attribute after `<C x=`, whether TypeScript and Babel read it alike]: the quote right after the `=` is a JSX string to both, and so is a string with no backslash.
+const ATTRIBUTES = [
+  ['a string after a space, with an escaped quote', " '\\'/>;//' />", false],
+  ['a string after a comment, with an escaped quote', "/* c */'\\'/>;//' />", false],
+  ['a string after a line break, with a backslash', "\n  'a\\\\' />", false],
+  ['a string right after the `=`', "'a' />", true],
+  ['a string after a space, with no backslash', " 'a' />", true],
+];
+
+test('parser check: a JSX attribute string after trivia keeps the lexer\'s reading for the navigation oracle and the structure gate alike, though a misread hid it from the lexer', (t) => {
+  const babel = loadBabelOracle();
+  // The page the parsers read differently: TypeScript reads the call; Babel ends the string at its first quote and reads the call in a comment.
+  const differ = 'const n = {valueOf(){return 12;}}/2; const e = <C x= \'\\\'/>;//\' />; navigateTo({pageType:"generative",pageId:"PAGEREF_detail"});\n'
+    + 'export default function P(){return null;}';
+  assert.equal(parses(differ).parseDiagnostics.length, 0);
+  assert.equal(navigationCalls(parses(differ)), 1);
+  assert.deepEqual([...guesses(differ)], ['brace'], 'the lexer names the misread, and not the attribute it hid');
+  assert.equal(navigationFrontier(differ)?.kind, 'brace', 'the frontier stands');
+  const { deployment, residual } = resolvePageRefs(new Map([['page', { code: differ }]]), new Map([['detail', ID]]));
+  assert.equal(deployment.get('page'), differ, 'nothing is rewritten');
+  assert.deepEqual(residual.map(({ token }) => token), ['PAGEREF_detail'], 'the token is reported');
+  assert.equal(guessedPageViews(differ).views, null);
+  if (babel) assert.equal(BABEL_CALLS(babel, differ), 0, 'Babel reads no call');
+  // The page Babel refuses: the structure gate reads it as the lexer does, and refuses it as cut off, as before.
+  const refused = "interface Api { <U>(x:U):U; }\nconst e = <C x= 'it\\'s'/>;\nexport default function P(){return null;}";
+  assert.equal(parses(refused).parseDiagnostics.length, 0);
+  assert.equal(pageStructureProblems(refused).length, 3);
+  assert.equal(guessedPageViews(refused).views, null);
+  if (babel) assert.equal(BABEL_CALLS(babel, refused), null, 'Babel refuses the page');
+  // Each guess the lexer names (GUESSED_SHAPES) before each attribute: where the two parsers read the string alike the parser vouches for the page and the call resolves;
+  // where they do not, the lexer's reading stands for both consumers, whether or not the lexer saw the attribute after its guess.
+  let compared = 0;
+  for (const [what, snippet, kind] of GUESSED_SHAPES) {
+    for (const [attributeWhat, attribute, alike] of ATTRIBUTES) {
+      const code = WRAP(`${snippet}\nconst e = <C x=${attribute};`);
+      const name = `${what}, ${attributeWhat}`;
+      assert.equal(parses(code).parseDiagnostics.length, 0, `TypeScript parses ${name}`);
+      assert.ok(guesses(code).has(kind), `${name}: the lexer guesses "${kind}"`);
+      assert.equal(reading(code).resolves, alike, `${name}: the call resolves`);
+      if (!alike) {
+        const problems = pageStructureProblems(code);
+        setParserCheck(false);
+        try {
+          assert.deepEqual(problems, pageStructureProblems(code), `${name}: the structure gate reads it as the lexer does`);
+        } finally {
+          setParserCheck(true);
+        }
+      }
+      assert.equal(guessedPageViews(code).views !== null, alike, `${name}: the parser vouches for it`);
+      if (babel && alike) assert.equal(BABEL_CALLS(babel, code), 1, `${name}: Babel reads the call`);
+      compared += 1;
+    }
+  }
+  assert.equal(compared, GUESSED_SHAPES.length * ATTRIBUTES.length);
+  if (!babel) t.diagnostic('no Babel parser oracle: set BABEL_ORACLE_PATH to an @babel/parser package to compare the readings');
+});
+
+// Grammar TypeScript's parser takes and leaves to its checker, which Babel's parser refuses, on a page the lexer guessed on: the parser vouches for nothing, and the
+// lexer's reading stands — as on a page TypeScript does not parse. Their neighbours, which both parse, are read as the parser reads them. [what, declaration, both parse it]
+const ONLY_TYPESCRIPT_TAKES = [
+  ['`await` for a name', 'function f2() { return await; }', false], ['`yield` for a name', 'const y = (x: number) => yield;', false],
+  ['`let` for a name', 'declare const v: number; const w = let;', false], ['`static` for a variable', 'declare const s: number; const t2 = static;', false],
+  ['a reserved word for a type\'s name', 'type I = if;', false], ['a JSDoc nullable type', 'type J = ?string;', false], ['a JSDoc non-null type', 'type K = string!;', false],
+  ['the JSDoc any type', 'type L = *;', false], ['a predicate outside a return type', 'type P = asserts x;', false], ['`readonly` before a name', 'type R = readonly string;', false],
+  ['an empty list of type arguments', 'type E = Array<>;', false],
+  ['`readonly` before an array type', 'type R2 = readonly string[];', true], ['a method named `yield`', 'interface Y { yield<U>(y: U): void; }', true],
+  ['a property named `let`', 'const o = { let: 1, static: 2 }; const q = o.let;', true], ['a predicate in a return type', 'declare function isS(x: unknown): x is string;', true],
+];
+
+test('parser check: grammar only TypeScript\'s parser takes keeps the lexer\'s reading; what both parsers take is read as TypeScript parses it', () => {
+  const babel = loadBabelOracle();
+  for (const [what, declaration, both] of ONLY_TYPESCRIPT_TAKES) {
+    const code = WRAP(`interface Api { <U>(x: U): U; }\n${declaration}`);
+    assert.equal(parses(code).parseDiagnostics.length, 0, `TypeScript parses ${what}`);
+    assert.ok(guesses(code).has('generic'), `${what}: the lexer guesses`);
+    assert.equal(reading(code).resolves, both, `${what}: the call resolves`);
+    assert.equal(pageStructureProblems(code).length === 0, both, `${what}: the structure gate reads it as ${both ? 'TypeScript parses it' : 'the lexer does'}`);
+    assert.equal(guessedPageViews(code).views !== null, both, `${what}: the parser vouches for it`);
+    if (babel) assert.equal(BABEL_CALLS(babel, code) !== null, both, `${what}: Babel ${both ? 'parses' : 'refuses'} it`);
+  }
+});
+
+// With the Babel oracle: every generated valid page the lexer guessed on and the parser vouches for (whose calls the gates then read as TypeScript parses the page) is
+// one Babel parses too, with the same navigation calls.
+test('parser check: every guessed page the parser vouches for is one Babel parses, with the calls TypeScript reads', (t) => {
+  const babel = loadBabelOracle();
+  if (!babel) return t.skip('no Babel parser oracle: set BABEL_ORACLE_PATH to an @babel/parser package to run it');
+  let vouched = 0;
+  const differ = [];
+  for (const page of [...validPages(), ...heldOpenLinePages()]) {
+    if (guesses(page.code).size === 0 || !reading(page.code).resolves) continue;
+    vouched += 1;
+    const calls = BABEL_CALLS(babel, page.code);
+    if (calls !== navigationCalls(parses(page.code))) differ.push(`${page.group}: ${JSON.stringify(page.name)} (Babel: ${calls})`);
+  }
+  assert.deepEqual(differ.slice(0, 5), [], `${differ.length} pages`);
+  assert.ok(vouched >= 300, `vouched for ${vouched} guessed pages`);
 });
 
 // The pages built to make the lexer misread (helpers/misread-page.js), run in a JavaScript engine: with the parser asked where the lexer guessed, whatever the resolver
