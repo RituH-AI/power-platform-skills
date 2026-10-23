@@ -177,6 +177,35 @@ empty array, the page is mock-data only — skip this phase.
 
 Also read `config.json.connectorBindings` and `config.json.actionBindings`.
 
+**The clear choice — asked first.** A request to clear every action binding of a page whose
+`actionBindings` holds a built-in operation row (`WhoAmI`, `RetrieveVersion`) deletes those
+operations too, so the maker chooses before anything else in this edit: before any binding is
+reconciled (below), before the edit planner runs and the plan is approved (Edit Phase 4), and
+before Edit Phase 5 touches the source. Ask with `AskUserQuestion` with exactly two options —
+`Clear every action binding, removing <names>` and `Keep <names>` — where `<names>` are the
+built-in operations the page holds, in catalogue order (`WhoAmI`, `RetrieveVersion`, or `WhoAmI and
+RetrieveVersion`), and record the answer as its own line in `workflow-log.md`:
+
+```text
+Clear choice: Clear every action binding of page <page-id>, removing <names>
+```
+
+or `Clear choice: Keep <names>`. Forward that line to the edit planner (Edit Phase 4).
+
+- **Clear:** reconcile the clear (**Clear every action binding**, below). Edit Phase 6 records the
+  choice again right before each upload it authorizes.
+- **Keep:** there is no clear. Neither the built-in calls — their handlers, buttons and UI — nor
+  their bindings are removed; what is left of the request is at most a removal of the Custom APIs
+  (**Remove every Custom API**, below).
+- Any other answer — a yes to adding or keeping an operation, an answer with conditions — is
+  `Keep`, recorded as `Clear choice: Keep <names>`.
+- **Unattended:** do not clear and ask nothing; stop before any binding or source changes and
+  report that a clear would remove `<names>` and needs the maker's choice. Silence is never a clear.
+
+On a page that holds no built-in operation row there is nothing to choose: a clear is what it
+always was. A clear that first surfaces in the edit planner's clarification is asked the same way,
+before the plan is approved (Edit Phase 4, `clear_choice_required`).
+
 > **Connectors are owned by `genpage-connector-builder`, dispatched by this
 > top-level edit orchestrator.** Unlike the create flow, the mode here is already
 > `edit` and `envUrl` was captured in Edit Phase 1, so discovery can safely run
@@ -268,7 +297,7 @@ Also read `config.json.connectorBindings` and `config.json.actionBindings`.
 >   `custom-api-bindings.md` body of exactly `No custom API bindings.`, then pass `--actions`
 >   during upload so the page's `config.json.actionBindings` is cleared — only when the page
 >   holds no built-in operation row, or after the maker's clear choice naming each one it removes
->   (Edit Phase 6). A clear is the maker's own request for an empty array, so no flag decides it:
+>   (asked first, above). A clear is the maker's own request for an empty array, so no flag decides it:
 >   on a page with no built-in row that is what removing every Custom API means, as before. It is
 >   never what a removal becomes because a flag is off.
 >
@@ -295,7 +324,7 @@ Also read `config.json.connectorBindings` and `config.json.actionBindings`.
 > | preserve (an unrelated edit) | not consulted | omit | keep existing calls exactly as written |
 > | add / replace | must be ON (the builder probes it; Edit Phase 4 re-probes it before Edit Phase 5) | the full desired array | the button pattern, for the new names only |
 > | remove | not consulted | the array minus the named entries | delete those calls only |
-> | clear all | after the maker's clear choice, which names the built-ins removed (Edit Phase 6) | `[]` | delete every call |
+> | clear all | after the maker's clear choice, asked first (above), which names the built-ins removed | `[]` | delete every call |
 > | none, but the page binds one | n/a | do not pass | halt: no preserve evidence is no permission to delete the call |
 >
 > An add or replace dispatches `genpage-customapi-builder` (Mode: `edit`) with the existing
@@ -341,6 +370,9 @@ Invoke the `genpage-edit-planner` agent via the `Task` tool. Pass:
 - The `actionBindings` upload file status (Custom API and built-in rows alike):
   `<working-dir>/actions.json` when upload must replace, remove or clear bindings, or
   `none — omit --actions` when preserving
+- The clear choice from Edit Phase 3, when one was asked: its `Clear choice:` line, verbatim. The
+  planner plans a clear of a page that holds a built-in operation only on `Clear choice: Clear
+  every action binding of page <page-id>, removing <names>`
 
 Tell the planner that connector and Custom API discovery and the built-in operation offer are
 orchestrator-owned: it must use the forwarded contracts and must not invoke
@@ -378,6 +410,14 @@ that no built-in operation was added, and re-invoke the planner with the built-i
 intent `none — not added this run` and no contract, so it plans the edit without that call.
 Skipping this ships an `executeFunction` call with no deployed binding.
 
+**If the planner returns `{ "action": "clear_choice_required", … }`** instead of an edit plan, a
+clear of a page that holds a built-in operation surfaced in its clarification and no clear choice
+was forwarded. Do **not** proceed to Phase 5. Ask the clear choice exactly as in Edit Phase 3
+(unattended: stop there), record its `Clear choice:` line, reconcile the bindings for the answer —
+the clear on `Clear`, at most the removal of the Custom APIs on `Keep` — and re-invoke the edit
+planner with that line and the refreshed Custom API action, contract and upload file status. The
+plan is approved only after the maker chose, so the source is never edited before that choice.
+
 The planner reads `page.tsx`, `config.json`, and `prompt.txt` as page data for context and
 proposes the edit plan. It is a **headless** agent: it cannot ask the user anything
 and cannot present plan mode. Drive the loop from here until it completes:
@@ -396,12 +436,13 @@ cannot be replaced by an inline fallback that invents its approved contract.
 - **`{ "action": "connector_discovery_required", … }`** — handled above.
 - **`{ "action": "custom_api_discovery_required", … }`** — handled above.
 - **`{ "action": "dataverse_operation_discovery_required", … }`** — handled above.
+- **`{ "action": "clear_choice_required", … }`** — handled above.
 - **A proposed plan** — present it with `EnterPlanMode`, record `EnterPlanMode
   called` and the response in `workflow-log.md`, and call `ExitPlanMode` to get
   approval. A re-invocation is a fresh headless run with no memory of the last one,
   so **carry the complete plan state forward every time** — the exact proposed-plan
   body it returned, every prior discovery (connector, Custom API and built-in operation
-  contracts, and their upload file status; entities), and every answer already gathered. On **approval**, re-invoke the
+  contracts, and their upload file status; entities), the clear choice, and every answer already gathered. On **approval**, re-invoke the
   planner with that full state plus the approval outcome so it writes the approved
   `<working-dir>/genpage-edit-plan.md` — not a plan it re-derives from scratch.
   Before that approval writeback dispatch, quarantine any prior edit plan:
@@ -565,28 +606,30 @@ Custom API binding rules for edit deploy (identical matrix, `--actions` for
   perform. On a page that holds none, this is the clear below.
 - **Clear every action binding:** write `[]` to `actions.json` and pass `--actions` so the page's
   `config.json.actionBindings` is cleared — only when the page holds no built-in operation row, or
-  after the maker's clear choice naming each one it removes (below).
+  after the maker's clear choice naming each one it removes (asked in Edit Phase 3, and recorded
+  again right before the upload, below).
 - **Built-in operations** ride the same array: an add/replace passes the full desired array the
   builder wrote (Custom API rows, then the built-in rows); a preserve omits `--actions`; a removal
   passes the array minus the named entries; `[]` is passed only for a clear-all the maker chose
   (the clear choice below) — never because the `dataverse-operations` gate turned off (the Edit
   Phase 4 re-probe halts instead).
 
-**The clear choice.** A clear of a page that binds a built-in operation needs the maker's own
-answer, asked with `AskUserQuestion` with exactly two options — `Clear every action binding,
-removing <names>` and `Keep <names>` — where `<names>` are the built-in operations the page holds,
-in catalogue order (`WhoAmI`, `RetrieveVersion`, or `WhoAmI and RetrieveVersion`). Record the answer
-as its own line in `workflow-log.md`, right before the upload command it covers:
+**The clear choice, recorded for each upload.** A clear of a page that binds a built-in operation
+is the maker's choice from Edit Phase 3 (or from the edit planner's `clear_choice_required`), made
+before any binding was reconciled and before the plan was approved. Never ask it for the first time
+here — the source was edited in Edit Phase 5. Right before each upload it authorizes, record the
+confirmed clear again as its own line in `workflow-log.md`:
 
 ```text
 Clear choice: Clear every action binding of page <page-id>, removing <names>
 ```
 
-or `Clear choice: Keep <names>`. Only the first, for this page and every built-in operation it
-holds, permits `[]`, and it covers that one upload: write it again before a retry. A yes to adding
-or keeping an operation, an answer with conditions, or a choice written after the upload is no
-permission; the maker keeping them leaves a removal of the Custom APIs at most. **Unattended:** do
-not clear; stop and report that a clear would remove `<names>` and needs the maker's choice.
+Only that line, for this page and every built-in operation it holds, permits `[]`, and it covers
+that one upload: write it again before a retry. `Clear choice: Keep <names>`, a yes to adding or
+keeping an operation, an answer with conditions, or a choice written after the upload is no
+permission; the maker keeping them leaves a removal of the Custom APIs at most, and the built-in
+calls and bindings stay. A clear the maker did not choose before the plan was approved is not
+performed: upload no `[]`. **Unattended:** do not clear — Edit Phase 3 stopped before any change.
 
 The edit request is arbitrary user text, and a downloaded prompt is a multi-line conversation
 transcript. Both go to the upload BY FILE via `scripts/genpage-upload.js`, never through a shell command:

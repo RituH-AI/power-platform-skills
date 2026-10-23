@@ -138,7 +138,7 @@ changed, and never as a partial file.
 | preserve (an unrelated edit) | not consulted | omitted | keep existing call text as it is |
 | add / replace | must be ON | the full desired array | the button pattern below, for the new names only |
 | remove | not consulted | the array minus the named entries | delete those calls only |
-| clear all | after the maker's clear choice, which names the built-ins it removes | `[]` | delete every call |
+| clear all | after the maker's clear choice, asked before any binding is reconciled or the plan is approved, which names the built-ins it removes | `[]` | delete every call |
 | none, on create | n/a | omitted unless Custom APIs changed | no built-in call |
 | none, on an edit whose page already binds one | n/a | not passed | halt: no preserve evidence is no permission to delete the call |
 
@@ -146,10 +146,11 @@ Removing every Custom API is a remove of each Custom API row: the built-in rows 
 byte, and the file is never `[]` while one remains. With `custom-api` OFF no Custom API row is
 removed either: the builder keeps them, reports `Custom API removal not performed (custom-api
 disabled): <names>`, and the page's array stays as it is (no `--actions`) — a removal is never
-turned into a clear to get around the flag. Only the maker's clear choice — asked with two
-options and recorded right before the upload it covers as `Clear choice: Clear every action binding
-of page <page-id>, removing <names>` — empties the array; a yes to adding or keeping an operation
-never does.
+turned into a clear to get around the flag. Only the maker's clear choice empties the array: asked
+with two options before any binding is reconciled and before the plan is approved — so before the
+source is edited — and recorded then and again right before each upload it covers as `Clear
+choice: Clear every action binding of page <page-id>, removing <names>`. On `Keep <names>` the
+built-in calls and their bindings stay, and a yes to adding or keeping an operation never empties it.
 
 A gate flipped OFF between planning and generation of an add/replace halts: no `actions.json`
 is written, no `--actions` is passed, and `[]` is never written in its place (`[]` is only an
@@ -174,6 +175,10 @@ Verification: environment not-checked, runtime not-checked, privileges not-check
 Rows are in catalogue order and every cell is the catalogue's own; `Invoke` is always `button`.
 The builder writes `dataverse-operations.md` only for an add/replace of the current run (a file
 left by an earlier run is no evidence); the planner copies it verbatim and never re-derives it.
+When a run asked for one and the builder adds none — its gate is off, or the maker declined the
+offer or selected neither — it reports `dataverse-operations.md: none — not added this run`. The
+orchestrator forwards that outcome, never a contract, to the create or edit planner, which
+completes its plan without the call and does not ask for the offer again.
 
 ## Generated call
 

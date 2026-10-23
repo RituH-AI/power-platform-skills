@@ -25,29 +25,41 @@ const switchOn = (value) => value === true || value === 'true';
 const DIVERGENCE_CODES = new Set(['no-base', 'deployed-changed', 'deployed-unreadable']);
 const OVERWRITE_CHOICE_LINE = 'Choice: Overwrite the deployed changes';
 
+// Each entry also keeps its line number in the log (`index`) and that of the choice it carries
+// (`choiceIndex`, -1 for none), so a rule can place another logged event — a plan approval —
+// before or after the upload the entry belongs to, or the answer it carries.
 function uploadChoiceLines(workflowLog, prefix = 'Choice:') {
   const entries = [];
   let pending = null;
-  for (const line of String(workflowLog || '').split(/\r?\n/)) {
+  let pendingIndex = -1;
+  String(workflowLog || '').split(/\r?\n/).forEach((line, index) => {
     const trimmed = line.trim();
     if (trimmed.startsWith(prefix)) {
       pending = trimmed;
-      continue;
+      pendingIndex = index;
+      return;
     }
     if (/\bgenpage-upload\.js\b/.test(line)) {
-      entries.push({ line, choice: pending, used: false });
+      entries.push({ line, choice: pending, used: false, index, choiceIndex: pending === null ? -1 : pendingIndex });
       pending = null;
+      pendingIndex = -1;
     }
-  }
+  });
   return entries;
 }
 
-function consumedChoice(entries, command) {
+// The log entry an upload consumes: the first one not yet used that carries its exact command.
+function consumedEntry(entries, command) {
   if (typeof command !== 'string' || !command) return null;
   const match = entries.find((entry) => !entry.used && lineCarriesCommand(entry.line, command));
   if (!match) return null;
   match.used = true;
-  return match.choice;
+  return match;
+}
+
+function consumedChoice(entries, command) {
+  const match = consumedEntry(entries, command);
+  return match ? match.choice : null;
 }
 
 // The logged line must carry this exact command, not a longer one that merely starts with it: an
@@ -380,5 +392,5 @@ function uploadPreservationProblems(fixture, mode) {
 module.exports = {
   uploadProblems, uploadPreservationProblems, uploadTransportProblems, desiredBindings, sameBindings,
   uploadResultIdentityMatches, pageIdentityProblems, beforePageIdentityProblems, sameRecordedEnvironment,
-  uploadChoiceLines, consumedChoice,
+  uploadChoiceLines, consumedChoice, consumedEntry,
 };

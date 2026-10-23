@@ -222,22 +222,95 @@ test('the edit flow handles the built-in signal, forwards this run\'s contract t
 });
 
 // A clear of a page that binds a built-in operation deletes it, so its permission is one fixed record the evaluator can tie to the upload it
-// covers — the maker's answer to a two-option question, written right before that upload — never a yes found anywhere in the log.
-test('a clear of a page that binds a built-in needs the maker\'s clear choice, recorded right before the upload it covers — never a yes to adding or keeping one', () => {
+// covers — the maker's answer to a two-option question, written again right before that upload — never a yes found anywhere in the log.
+test('a clear of a page that binds a built-in needs the maker\'s clear choice, recorded again right before each upload it covers — never a yes to adding or keeping one', () => {
   const edit = read('skills', 'genpage', 'edit-flow.md');
   const deploy = section(edit, '## Edit Phase 6:', '## Edit Phase 7:');
-  has(deploy, /\*\*The clear choice\.\*\* A clear of a page that binds a built-in operation needs the maker's own answer, asked with `AskUserQuestion` with exactly two options — `Clear every action binding, removing <names>` and `Keep <names>`/);
+  has(deploy, /\*\*The clear choice, recorded for each upload\.\*\* A clear of a page that binds a built-in operation is the maker's choice from Edit Phase 3 \(or from the edit planner's `clear_choice_required`\), made before any binding was reconciled and before the plan was approved\./);
+  has(deploy, /Right before each upload it authorizes, record the confirmed clear again as its own line in `workflow-log\.md`/);
   has(deploy, /Clear choice: Clear every action binding of page <page-id>, removing <names>/);
-  has(deploy, /Only the first, for this page and every built-in operation it holds, permits `\[\]`, and it covers that one upload: write it again before a retry/);
-  has(deploy, /A yes to adding or keeping an operation, an answer with conditions, or a choice written after the upload is no permission/);
+  has(deploy, /Only that line, for this page and every built-in operation it holds, permits `\[\]`, and it covers that one upload: write it again before a retry/);
+  has(deploy, /`Clear choice: Keep <names>`, a yes to adding or keeping an operation, an answer with conditions, or a choice written after the upload is no permission/);
   has(deploy, /\*\*Unattended:\*\* do not clear/);
-  has(section(edit, '## Edit Phase 3:', '## Edit Phase 4:'), /\| clear all \| after the maker's clear choice, which names the built-ins removed \(Edit Phase 6\) \| `\[\]` \| delete every call \|/);
-  has(section(read('agents', 'genpage-customapi-builder.md'), '## Step 4'), /only the maker's clear choice, recorded as edit-flow\.md Edit Phase 6 describes, permits `\[\]`/);
-  has(squash(read('agents', 'genpage-edit-planner.md')), /\*\*clear all\*\* — only after the maker's clear choice, which names the built-in bindings it removes \(edit-flow\.md, Edit Phase 6\); a yes to adding or keeping one is not that choice/);
+  has(section(read('agents', 'genpage-customapi-builder.md'), '## Step 4'), /only the maker's clear choice, asked before any binding is reconciled \(edit-flow\.md, Edit Phase 3\) and recorded again right before each upload it authorizes, permits `\[\]`/);
   const reference = squash(read('references', 'dataverse-operations.md'));
-  has(reference, /\| clear all \| after the maker's clear choice, which names the built-ins it removes \| `\[\]` \| delete every call \|/);
-  has(reference, /recorded right before the upload it covers as `Clear choice: Clear every action binding of page <page-id>, removing <names>`/);
-  has(section(read('skills', 'genpage', 'SKILL.md'), '### Phase 6: Deploy', '**Deploy through `scripts/genpage-upload.js`.**'), /only after the maker's clear choice naming each one \(edit-flow\.md, Edit Phase 6\)/);
+  has(reference, /\| clear all \| after the maker's clear choice, asked before any binding is reconciled or the plan is approved, which names the built-ins it removes \| `\[\]` \| delete every call \|/);
+  has(reference, /recorded then and again right before each upload it covers as `Clear choice: Clear every action binding of page <page-id>, removing <names>`/);
+  has(section(read('skills', 'genpage', 'SKILL.md'), '### Phase 6: Deploy', '**Deploy through `scripts/genpage-upload.js`.**'), /only after the maker's clear choice naming each one, asked before any binding is reconciled or the plan is approved \(edit-flow\.md, Edit Phase 3\) and recorded again right before the upload/);
+});
+
+// The clear choice decides what the edit removes, so it is asked before anything is removed: before Edit Phase 3 reconciles a binding, before the
+// edit planner plans and the maker approves the plan, and so before Edit Phase 5 edits the source. Asked after that, a `Keep` would come too late —
+// the calls and their buttons would already be gone, and nothing puts them back. A clear the planner's clarification turns up is asked the same
+// way, before the plan is approved; the deploy step only records the confirmed answer again for each upload.
+test('the clear choice is asked first — before any binding is reconciled and before the plan is approved — and on Keep the built-in calls and bindings stay', () => {
+  const edit = read('skills', 'genpage', 'edit-flow.md');
+  const phase3 = edit.slice(edit.indexOf('## Edit Phase 3:'), edit.indexOf('## Edit Phase 4:'));
+  const asked = phase3.indexOf('**The clear choice — asked first.**');
+  assert.ok(asked !== -1, 'Edit Phase 3 asks the clear choice');
+  for (const recipe of ['> **Connectors are owned by', '> **Custom APIs are owned by', '> **Built-in Dataverse operations']) {
+    assert.ok(phase3.indexOf(recipe) !== -1 && asked < phase3.indexOf(recipe), `the clear choice is asked before ${recipe}`);
+  }
+  const intent = squash(phase3);
+  has(intent, /\*\*The clear choice — asked first\.\*\* A request to clear every action binding of a page whose `actionBindings` holds a built-in operation row \(`WhoAmI`, `RetrieveVersion`\) deletes those operations too, so the maker chooses before anything else in this edit: before any binding is reconciled \(below\), before the edit planner runs and the plan is approved \(Edit Phase 4\), and before Edit Phase 5 touches the source/);
+  has(intent, /Ask with `AskUserQuestion` with exactly two options — `Clear every action binding, removing <names>` and `Keep <names>`/);
+  has(intent, /Clear choice: Clear every action binding of page <page-id>, removing <names>/);
+  has(intent, /\*\*Keep:\*\* there is no clear\. Neither the built-in calls — their handlers, buttons and UI — nor their bindings are removed/);
+  has(intent, /\*\*Unattended:\*\* do not clear and ask nothing; stop before any binding or source changes/);
+  has(intent, /Silence is never a clear\./);
+  has(intent, /\| clear all \| after the maker's clear choice, asked first \(above\), which names the built-ins removed \| `\[\]` \| delete every call \|/);
+  // Planning gets the answer; a clear found in the planner's clarification is asked before the plan is approved.
+  const planning = section(edit, '## Edit Phase 4:', '## Edit Phase 5:');
+  has(planning, /The clear choice from Edit Phase 3, when one was asked: its `Clear choice:` line, verbatim/);
+  has(planning, /\*\*If the planner returns `\{ "action": "clear_choice_required", … \}`\*\*/);
+  has(planning, /The plan is approved only after the maker chose, so the source is never edited before that choice\./);
+  has(planning, /- \*\*`\{ "action": "clear_choice_required", … \}`\*\* — handled above\./);
+  has(planning, /every prior discovery \(connector, Custom API and built-in operation contracts, and their upload file status; entities\), the clear choice, and every answer already gathered/);
+  // Deploy records the answer again; it never asks the question.
+  const deploy = section(edit, '## Edit Phase 6:', '## Edit Phase 7:');
+  assert.ok(!/exactly two options/.test(deploy), 'Edit Phase 6 does not ask the clear question');
+  has(deploy, /Never ask it for the first time here — the source was edited in Edit Phase 5/);
+  // The edit planner plans a clear only on a forwarded choice, keeps everything on Keep, and asks for the choice rather than planning without it.
+  const editPlanner = squash(read('agents', 'genpage-edit-planner.md'));
+  has(editPlanner, /\*\*clear all\*\* — only when your prompt carries the maker's clear choice `Clear choice: Clear every action binding of page <page-id>, removing <names>`/);
+  has(editPlanner, /On `Clear choice: Keep <names>` there is no clear: keep the built-in calls — their handlers, buttons and UI — and their bindings/);
+  has(editPlanner, /"action": "clear_choice_required"/);
+  // No document still asks the choice in the deploy phase.
+  for (const [name, text] of [
+    ['edit-flow.md', squash(edit)],
+    ['genpage-edit-planner.md', editPlanner],
+    ['genpage-customapi-builder.md', squash(read('agents', 'genpage-customapi-builder.md'))],
+    ['SKILL.md', squash(read('skills', 'genpage', 'SKILL.md'))],
+    ['dataverse-operations.md', squash(read('references', 'dataverse-operations.md'))],
+  ]) {
+    assert.ok(!/clear choice[^.]*\(?(?:edit-flow\.md,? )?Edit Phase 6\b/.test(text), `${name}: the clear choice is not placed in Edit Phase 6`);
+  }
+});
+
+// A create that asks for WhoAmI or RetrieveVersion sends the planner's signal to the builder once. When the builder adds none — its gate is off,
+// or the maker declined the offer or selected neither — it writes no `dataverse-operations.md`, and the maker's request still reads as the same
+// signal. So the builder reports that outcome in so many words, the orchestrator forwards it to every later planner round, and the planner
+// completes the plan without the call instead of asking for the offer again: the edit flow's `none — not added this run`, now in the create flow.
+test('a create whose built-in offer adds nothing — the gate off, or the offer declined — forwards `none — not added this run`, and the planner completes without the call instead of signalling again', () => {
+  const builder = section(read('agents', 'genpage-customapi-builder.md'), '## Step 5');
+  has(builder, /When this run adds none — the `dataverse-operations` gate is off, or the maker declined the offer or selected neither — say `dataverse-operations\.md: none — not added this run` with the reason \(`gate off` or `none selected`\)/);
+  has(builder, /the orchestrator forwards that outcome, never a contract, so the planner completes its plan without the call instead of asking for this offer again/);
+  has(builder, /whether `dataverse-operations\.md` was written this run \(or `none — not added this run` and why\)/);
+  assert.ok(!/so the orchestrator forwards nothing/.test(builder), 'the builder no longer tells the orchestrator to forward nothing');
+  const skill = read('skills', 'genpage', 'SKILL.md');
+  const offer = section(skill, '#### 1c.', '#### Invocation prompt');
+  has(offer, /When it reports `dataverse-operations\.md: none — not added this run` — its `dataverse-operations` gate is off, or the maker declined the offer or selected neither — there is no built-in contract/);
+  has(offer, /forward the outcome `none — not added this run` \(never a contract\) to the planner in this and every later round/);
+  has(offer, /so the builder is not dispatched a second time for the same request/);
+  const prompt = section(skill, '#### Invocation prompt', '### Phase 2:');
+  has(prompt, /the outcome `none — not added this run` when this run's builder was dispatched for one and added none \(1c\)/);
+  has(prompt, /\[Only when this run's builder added none:\] Built-in Dataverse operations: `none — not added this run`\./);
+  has(prompt, /plan the page without that call, write no `## Dataverse Operations` section, and do not return `dataverse_operation_discovery_required` again/);
+  has(squash(read('agents', 'genpage-planner.md')), /When your prompt says `none — not added this run`, the builder was already dispatched for the request and added none — its `dataverse-operations` gate is off, or the maker declined the offer or selected neither\. Plan the page without that call, write no `## Dataverse Operations` section, and do not signal again/);
+  has(squash(read('references', 'dataverse-operations.md')), /it reports `dataverse-operations\.md: none — not added this run`\. The orchestrator forwards that outcome, never a contract, to the create or edit planner, which completes its plan without the call and does not ask for the offer again/);
+  // The edit flow's own rule stays as it was.
+  has(squash(read('agents', 'genpage-edit-planner.md')), /When your prompt says `none — not added this run`, the builder added none: plan the edit without that call and do not signal again/);
+  has(section(read('skills', 'genpage', 'edit-flow.md'), '## Edit Phase 4:', '## Edit Phase 5:'), /re-invoke the planner with the built-in operation intent `none — not added this run` and no contract/);
 });
 
 // While `custom-api` is OFF the builder removes no Custom API row (it keeps them, as it keeps every Custom API binding then). Every recipe that

@@ -20,9 +20,9 @@ const { isDeepStrictEqual } = require('node:util');
 const {
   AUTHORING_CODES, getDataverseOperationCatalogue, getReviewedDataverseOperation, toActionBinding,
 } = require('../../../../plugins/model-apps/scripts/lib/dataverse-operations.js');
-const { planSection, parseMarkdownRows } = require('./plan-evidence.js');
+const { planSection, parseMarkdownRows, planModeEvents } = require('./plan-evidence.js');
 const { isGeneration, isUpload, resultObject } = require('./workflow-evidence.js');
-const { uploadChoiceLines, consumedChoice } = require('./upload-contract.js');
+const { uploadChoiceLines, consumedEntry } = require('./upload-contract.js');
 const { actionCalls, groupEnd, literalString, escapeRe, callSites, expressionEnd } = require('./source-evidence.js');
 const { blankNonCodePreservingTemplateExpressions } = require('../../../../plugins/model-apps/scripts/lib/source-literals.js');
 
@@ -166,33 +166,52 @@ function builtInGateProblems(calls, authoring) {
 }
 
 // A clear (`change: { clear: true }`, an upload of `[]`) empties the WHOLE array. On a page whose before-config holds a built-in row, removing the
-// Custom APIs is not that — it keeps the built-in rows — so a clear needs the maker's clear choice (edit-flow.md, Edit Phase 6), recorded as its
-// own workflow-log line right before the upload it covers:
+// Custom APIs is not that — it keeps the built-in rows — so a clear needs the maker's clear choice, recorded as its own workflow-log line:
 //   Clear choice: Clear every action binding of page <page-id>, removing WhoAmI and RetrieveVersion
-// <page-id> is that upload's `--page-id` (any case), and the names are exactly the built-ins the page holds, in catalogue order. It is read the
-// way an overwrite choice is (upload-contract.js): a `Clear choice:` line sets the pending answer, a later one replaces it, and the next log line
-// that carries an upload command consumes it. So the answer that counts is the last one before this upload's own log line, it covers that one
-// upload (a retry needs it again), and a choice logged after the upload, for another page, for another set of built-ins, or with anything
-// added to it is no permission. AskUserQuestion exchanges are not read at all: a yes to adding or keeping WhoAmI never authorizes deleting it.
+// <page-id> is that upload's `--page-id` (any case), and the names are exactly the built-ins the page holds, in catalogue order. Two rules read it:
+//   - Asked first (edit-flow.md, Edit Phase 3): the choice is made before any binding is reconciled and before the edit plan is approved, so the
+//     source is never edited before a `Keep` could stop it. The answer that stands when the plan this upload carries out was approved — the last
+//     `Clear choice:` line before the last `ExitPlanMode … approved` line that precedes this upload, after the previous lifecycle stage's upload
+//     line — must be that clear. A choice recorded only after the approval, a `Keep` at the approval, or no approval in the log is no permission.
+//   - Recorded again for each upload (Edit Phase 6), after that approval, read the way an overwrite choice is (upload-contract.js): a
+//     `Clear choice:` line sets the pending answer, a later one replaces it, and the next log line that carries an upload command consumes it. So
+//     the answer that counts is the last one before this upload's own log line, it covers that one upload (a retry needs it again), and the
+//     answer asked first is not that record; a choice logged after the upload, for another page, for another set of built-ins, or with anything
+//     added to it is no permission.
+// AskUserQuestion exchanges are not read at all: a yes to adding or keeping WhoAmI never authorizes deleting it.
 const CLEAR_CHOICE = 'Clear choice:';
-function clearConfirmationProblems({ workflowLog, uploads, call, pageId, before, label }) {
+function clearConfirmationProblems({ workflowLog, uploads, call, previousUpload, pageId, before, label }) {
   const held = new Set(partitionBindings(before).builtIns.map((entry) => entry.name));
   if (!held.size) return [];
   const removed = CATALOGUE_ORDER.filter((name) => held.has(name)).join(' and ');
   const expected = `${CLEAR_CHOICE} Clear every action binding of page ${pageId}, removing ${removed}`;
+  const isClear = (line) => {
+    const choice = /^Clear choice: Clear every action binding of page (\S+), removing (.+)$/.exec(line || '');
+    return Boolean(choice) && typeof pageId === 'string' && choice[1].toLowerCase() === pageId.toLowerCase() && choice[2] === removed;
+  };
   // Every upload consumes its own log entry, in order, so an entry an earlier upload used can never be reached by this one.
   const entries = uploadChoiceLines(workflowLog, CLEAR_CHOICE);
-  let consumed = null;
+  let entry = null;
+  let previousEntry = null;
   for (const upload of uploads) {
-    const choice = consumedChoice(entries, upload.command);
+    const consumed = consumedEntry(entries, upload.command);
+    if (upload === previousUpload) previousEntry = consumed;
     if (upload === call) {
-      consumed = choice;
+      entry = consumed;
       break;
     }
   }
-  const choice = /^Clear choice: Clear every action binding of page (\S+), removing (.+)$/.exec(consumed || '');
-  const accepted = Boolean(choice) && typeof pageId === 'string' && choice[1].toLowerCase() === pageId.toLowerCase() && choice[2] === removed;
-  return accepted ? [] : [`${label}: clearing every action binding removes ${removed.replace(' and ', ', ')} — only with the maker's clear choice recorded right before this upload: ${expected}`];
+  const names = removed.replace(' and ', ', ');
+  const refused = `${label}: clearing every action binding removes ${names} — only with the maker's clear choice recorded right before this upload: ${expected}`;
+  if (!entry || !isClear(entry.choice)) return [refused];
+  const lines = String(workflowLog || '').split(/\r?\n/);
+  const start = previousEntry ? previousEntry.index : -1;
+  const approval = planModeEvents(workflowLog).filter((event) => event.kind === 'approved' && event.at > start && event.at < entry.index).at(-1);
+  const standing = approval && lines.slice(start + 1, approval.at).map((line) => line.trim()).filter((line) => line.startsWith(CLEAR_CHOICE)).at(-1);
+  if (!isClear(standing)) {
+    return [`${label}: clearing every action binding removes ${names} — the maker's clear choice is asked before the edit plan is approved, so the answer standing at that approval (ExitPlanMode → approved) must be: ${expected}`];
+  }
+  return entry.choiceIndex > approval.at ? [] : [refused];
 }
 
 // ── The generated call of a NEWLY authored built-in operation (references/dataverse-operations.md, "Generated call") ─────────────────────────────

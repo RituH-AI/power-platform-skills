@@ -278,7 +278,8 @@ Start from the **existing bindings** you were given and apply the edit intent:
   is then `No custom API bindings.` and `actions.json` holds the built-in rows. With it disabled,
   keep every row — the Custom API table and rows too — and report the removal as not performed
   (Step 1); never turn it into a clear. "Clear the Custom APIs" is
-  this removal; only the maker's clear choice, recorded as edit-flow.md Edit Phase 6 describes,
+  this removal; only the maker's clear choice, asked before any binding is reconciled
+  (edit-flow.md, Edit Phase 3) and recorded again right before each upload it authorizes,
   permits `[]`.
 - Use ONLY names, kinds, bound entities, and parameter kinds you discovered this run or that
   were in the existing bindings. Never fabricate.
@@ -289,7 +290,7 @@ Start from the **existing bindings** you were given and apply the edit intent:
   `parameterKinds` to a legacy entry; add/replace needs the `dataverse-operations` gate ON and
   the maker's selection; remove drops only the named entries (built-ins and Custom APIs alike);
   clear-all is `[]` only after the maker's clear choice, which names the built-ins it removes
-  (edit-flow.md, Edit Phase 6). An edit
+  (asked before any binding is reconciled: edit-flow.md, Edit Phase 3). An edit
   whose page already binds WhoAmI or RetrieveVersion with no preserve evidence for it halts:
   missing evidence is not permission to delete the call.
 
@@ -359,10 +360,13 @@ Write the final binding set to the output files (see "Outputs"):
   ```
 
   Write it **only** for a current-run add/replace. A `dataverse-operations.md` left by an earlier
-  run is not this run's selection: when this run adds none, say `dataverse-operations.md: none`
-  so the orchestrator forwards nothing. Built-in rows never go into `custom-api-bindings.md`.
+  run is not this run's selection. When this run adds none — the `dataverse-operations` gate is
+  off, or the maker declined the offer or selected neither — say `dataverse-operations.md: none —
+  not added this run` with the reason (`gate off` or `none selected`): the orchestrator forwards
+  that outcome, never a contract, so the planner completes its plan without the call instead of
+  asking for this offer again. Built-in rows never go into `custom-api-bindings.md`.
 
 Return a concise summary: mode, both gate results, the `name`s of the Custom API bindings
 and of the built-in operations written (or "none"), whether `dataverse-operations.md` was
-written this run, and the Custom API removals not performed because `custom-api` is disabled
-(or "none").
+written this run (or `none — not added this run` and why), and the Custom API removals not
+performed because `custom-api` is disabled (or "none").

@@ -231,8 +231,14 @@ at a time (you are headless — see the interaction contract below):
 >   run`, the builder added none: plan the edit without that call and do not signal again. A call on load, on a
 >   filter or in the background is refused (`explicit_trigger_required`): only a button.
 > - **remove** — drop only the named calls and bindings; nothing else.
-> - **clear all** — only after the maker's clear choice, which names the built-in bindings it
->   removes (edit-flow.md, Edit Phase 6); a yes to adding or keeping one is not that choice.
+> - **clear all** — only when your prompt carries the maker's clear choice `Clear choice: Clear every
+>   action binding of page <page-id>, removing <names>`, which names the built-in bindings it removes.
+>   The orchestrator asks it before any binding is reconciled and before this plan (edit-flow.md, Edit
+>   Phase 3); a yes to adding or keeping one is not that choice. On `Clear choice: Keep <names>` there
+>   is no clear: keep the built-in calls — their handlers, buttons and UI — and their bindings, and
+>   plan at most the removal of the Custom APIs. When a clear surfaces in your own clarification and
+>   your prompt carries no clear choice, do **not** write the plan: stop and return
+>   `{ "action": "clear_choice_required", "names": "<the built-in operations the page holds>" }`.
 > - If the page already binds WhoAmI or RetrieveVersion and you cannot tell the intent, halt
 >   with `needs_input`: missing preserve evidence is not permission to delete the call.
 

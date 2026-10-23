@@ -41,4 +41,26 @@ function parseMarkdownRows(sectionText, requiredColumns) {
   return rows;
 }
 
-module.exports = { planSection, findMarkdownTable, parseMarkdownRows };
+// The step that starts a plan write: genpage-plan-provenance.js quarantines the old plan before the approved one is written.
+const PROVENANCE_PREPARE = /\bgenpage-plan-provenance\.js\b[^\n]*\bprepare\b/;
+
+// Plan presentations and their outcomes, in log order. Shapes recorded by the skill:
+//   - EnterPlanMode called with the initial plan:
+//   - ExitPlanMode called → changes requested (revised): "add a search box in addition to …"
+//   - Task genpage-planner re-invoked with the revision request …
+//   - ExitPlanMode called → approved
+//   - `node scripts\genpage-plan-provenance.js prepare --plan genpage-plan.md`   (the plan write starts)
+function planModeEvents(log) {
+  const events = [];
+  String(log || '').split(/\r?\n/).forEach((line, at) => {
+    if (/\bEnterPlanMode\b/.test(line) && !/\bnot\b/i.test(line)) events.push({ at, kind: 'present', line });
+    else if (/\bExitPlanMode\b/.test(line)) {
+      const kind = /changes?\s+requested|\brevis|\breject/i.test(line) ? 'changes' : /\bapproved\b/i.test(line) ? 'approved' : 'unknown';
+      events.push({ at, kind, line });
+    } else if (PROVENANCE_PREPARE.test(line)) events.push({ at, kind: 'write', line });
+    else if (/\bgenpage-planner\b/.test(line) && /\b(?:re-?invoked|Task|Dispatched)\b/i.test(line)) events.push({ at, kind: 'planner', line });
+  });
+  return events;
+}
+
+module.exports = { planSection, findMarkdownTable, parseMarkdownRows, planModeEvents, PROVENANCE_PREPARE };

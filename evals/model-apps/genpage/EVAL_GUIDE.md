@@ -109,7 +109,7 @@ Layers 1 and 2 are automated. Layer 3 is human judgment by design — visual qua
 - `<DataGrid>` usage imports `createTableColumn` + configures `columnSizingOptions` or `resizableColumns`
 - Every effective navigation target is checked with the production resolver; current before/after snapshots must differ by exact substitutions only, and only affected pages reupload
 - The production `pageStructureProblems` gate rejects truncated modules, including unfinished statements after valid exports
-- The Custom API lifecycle grades actual saved TSX, method/parameter/bound-record parity, sanitized result handling and preservation versus explicit clear
+- The Custom API lifecycle grades actual saved TSX, method/parameter/bound-record parity, sanitized result handling and preservation versus explicit clear; a clear of a page that binds `WhoAmI` or `RetrieveVersion` needs the maker's `Clear choice:` line standing when the edit plan was approved (`ExitPlanMode … approved`) and recorded again after it, right before each upload it covers
 
 Whether a page applies a style the maker asked for (a plan whose `Styling:` line starts with `Maker-requested:`) is not graded yet.
 

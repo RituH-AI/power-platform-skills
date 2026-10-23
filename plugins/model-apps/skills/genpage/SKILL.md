@@ -395,6 +395,13 @@ also stays the one writer of `actions.json` (Custom API rows first, then the bui
 - When the builder reports `dataverse-operations.md` written **this run**, forward its body to
   the planner as the `## Dataverse Operations` contract, delimited like the other contracts. A
   file left by an earlier run is not forwarded. With none, the plan has no such section.
+- When it reports `dataverse-operations.md: none — not added this run` — its
+  `dataverse-operations` gate is off, or the maker declined the offer or selected neither —
+  there is no built-in contract: tell the maker that no built-in operation was added, and forward
+  the outcome `none — not added this run` (never a contract) to the planner in this and every
+  later round. The planner then completes the plan without that call instead of signalling
+  again, so the builder is not dispatched a second time for the same request — the edit flow's
+  own rule.
 - In an edit, Edit Phase 4 of edit-flow.md handles this signal, forwards the contract through
   every edit-planner round, and re-probes the gate before an add or replace is applied.
 
@@ -416,7 +423,8 @@ Pass a prompt that includes:
 - The built-in operation contract, only when this run's builder wrote it: the full body of
   `<working-dir>/dataverse-operations.md` between `----- BEGIN/END DATAVERSE OPERATIONS -----`
   delimiters (copied verbatim into an optional `## Dataverse Operations` section right after
-  `## Custom API Bindings`); otherwise nothing, and the plan has no such section
+  `## Custom API Bindings`); the outcome `none — not added this run` when this run's builder was
+  dispatched for one and added none (1c); otherwise nothing, and the plan has no such section
 
 Example:
 
@@ -479,6 +487,11 @@ Example:
 > not cover, return `{ "action": "dataverse_operation_discovery_required", "intent": "<the
 > maker's words>", "resolvedAction": "create" | "edit", "envUrl": "<the environment you
 > resolved>" }`.
+>
+> [Only when this run's builder added none:] Built-in Dataverse operations: `none — not added
+> this run`. The builder was dispatched for this request and added none (its gate is off, or the
+> maker selected neither): plan the page without that call, write no `## Dataverse Operations`
+> section, and do not return `dataverse_operation_discovery_required` again.
 >
 > Follow the instructions in your agent file. Validate prereqs and confirm auth.
 > The create/edit decision and the resolved environment are supplied to you by the
@@ -1005,7 +1018,8 @@ array is not empty; on an edit only
 when bindings changed/added/removed (full replace); omit it on an unrelated edit (the page keeps
 its deployed `actionBindings`); write `[]` and pass it to clear all `actionBindings` — on a page
 that also binds a built-in operation (`WhoAmI`, `RetrieveVersion`) only after the maker's clear
-choice naming each one (edit-flow.md, Edit Phase 6), because removing every Custom API keeps them
+choice naming each one, asked before any binding is reconciled or the plan is approved (edit-flow.md,
+Edit Phase 3) and recorded again right before the upload, because removing every Custom API keeps them
 (edit-flow.md, Edit Phase 3).
 The same array carries the built-in operation rows (`WhoAmI`, `RetrieveVersion`), so the same
 rules hold for them: `--actions` is passed only when the whole desired set changed, a preserve

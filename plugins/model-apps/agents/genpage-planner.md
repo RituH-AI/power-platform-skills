@@ -429,6 +429,10 @@ the gate, the offer and the maker's selection (`references/dataverse-operations.
   verbatim into the plan's `## Dataverse Operations` section, right after
   `## Custom API Bindings` — never re-derive or edit it. Without one, write no such section: it
   is optional, and absent means no new built-in operation.
+- When your prompt says `none — not added this run`, the builder was already dispatched for the
+  request and added none — its `dataverse-operations` gate is off, or the maker declined the
+  offer or selected neither. Plan the page without that call, write no `## Dataverse Operations`
+  section, and do not signal again: the request is complete without it.
 
 ### App Detection
 
