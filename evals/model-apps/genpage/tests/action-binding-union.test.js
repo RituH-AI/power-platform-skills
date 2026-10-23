@@ -1,0 +1,255 @@
+'use strict';
+// A page's one `actionBindings` array, as the Custom API lifecycle evaluator compares it when it holds both partitions: a Custom API row and a reviewed built-in operation
+// (WhoAmI). The upload replaces the page's list with the file it is given, so the evaluator compares the WHOLE union — the Custom API rows, then the built-in rows in catalogue
+// order — and the built-in rows must come from an enabled `dataverse-operations` gate, the catalogue listing and the plan's `## Dataverse Operations` table. Dropping either
+// partition, spreading a descriptor onto the wire, reordering, or a built-in name in the Custom API table fails; a later stage that only preserves the page's bindings does not
+// consult the built-in gate. The built-in call is held to the same order as a Custom API call: a failure returns before `res.outputs` is read.
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { PHASE_EXPECTATIONS } = require('../lib/assertions-layer-1.js');
+const { PHASE5_EXPECTATIONS } = require('../lib/assertions-layer-2.js');
+const union = require('../lib/action-binding-union.js');
+const { getDataverseOperationCatalogue } = require('../../../../plugins/model-apps/scripts/lib/dataverse-operations.js');
+
+const RULE = 'Phase 5: Custom API discovery, gate, bare bindings, runtime calls and update preservation or explicit clear agree';
+const PAGE = '99999999-9999-4999-8999-999999999999';
+const API = { name: 'cnt_ApproveOrder', isFunction: false, boundEntityLogicalName: 'salesorder', displayName: 'Approve Order', parameterKinds: { Comment: 'String', Amount: 'Decimal' } };
+const WHO_AM_I = { name: 'WhoAmI', isFunction: true, displayName: 'Current Dataverse identity', parameterKinds: {} };
+const RETRIEVE_VERSION = { name: 'RetrieveVersion', isFunction: true, displayName: 'Dataverse server version', parameterKinds: {} };
+const listing = () => ({ ok: true, ...structuredClone(getDataverseOperationCatalogue()) });
+
+// The Custom API helper of the existing lifecycle fixture, and a user-triggered WhoAmI helper and button (references/dataverse-operations.md).
+const SOURCE = `
+type ActionResult = { ok: boolean; indeterminate?: boolean; outputs?: Record<string, unknown>; error?: { message: string; code?: string; status?: number } };
+type ActionApi = { executeAction?: (request: unknown) => Promise<ActionResult>; executeFunction?: (request: { name: string }) => Promise<ActionResult> };
+type Pending = { current: boolean };
+type Identity = { userId: string; businessUnitId: string; organizationId: string };
+type IdentityView = { identity?: Identity; message?: string };
+const GUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const UNEXPECTED = 'The operation returned an unexpected response. No result was displayed.';
+const UNAVAILABLE = 'The selected operation is unavailable in this environment or player. No fallback was attempted.';
+const UNSUPPORTED = 'This page player cannot call built-in operations.';
+const FAILED = 'The operation failed. No result was displayed.';
+async function approveOrder(api: ActionApi, recordId: string, amount: number, pending: Pending) {
+  if (typeof api.executeAction !== 'function') return;
+  if (pending.current || !recordId) return;
+  pending.current = true;
+  try {
+    const res = await api.executeAction({
+      name: 'cnt_ApproveOrder',
+      parameters: { Comment: 'Approved', Amount: amount },
+      boundTo: { entityName: 'salesorder', id: recordId },
+    });
+    if (res.indeterminate) { setError('Refresh before retrying.'); return; }
+    if (!res.ok) { setError(res.error?.message ?? 'Action failed.'); return; }
+    setStatus(res.outputs?.NewStatus);
+  } catch { setError('Network failed.'); }
+  finally { pending.current = false; }
+}
+function ownGuid(outputs: Record<string, unknown>, field: string): string | undefined {
+  const value = Object.prototype.hasOwnProperty.call(outputs, field) ? outputs[field] : undefined;
+  return typeof value === 'string' && GUID.test(value) ? value : undefined;
+}
+async function readIdentity(api: ActionApi): Promise<IdentityView> {
+  if (typeof api.executeFunction !== 'function') return { message: UNSUPPORTED };
+  const res = await api.executeFunction({ name: 'WhoAmI' });
+  if (res.ok !== true) {
+    return { message: res.error?.status === 404 ? UNAVAILABLE : res.error?.message || FAILED };
+  }
+  const outputs = res.outputs;
+  if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) return { message: UNEXPECTED };
+  const userId = ownGuid(outputs, 'UserId');
+  const businessUnitId = ownGuid(outputs, 'BusinessUnitId');
+  const organizationId = ownGuid(outputs, 'OrganizationId');
+  if (!userId || !businessUnitId || !organizationId) return { message: UNEXPECTED };
+  return { identity: { userId, businessUnitId, organizationId } };
+}
+const GeneratedComponent = (props: Props) => {
+  const { dataApi } = props;
+  const pending = { current: false };
+  const [identity, setIdentity] = React.useState<IdentityView>({});
+  const [identityPending, setIdentityPending] = React.useState(false);
+  const identityRequest = React.useRef(0);
+  const mounted = React.useRef(true);
+  React.useEffect(() => () => { mounted.current = false; }, []);
+  const showIdentity = async () => {
+    if (identityPending) return;
+    const requestId = ++identityRequest.current;
+    setIdentity({});
+    setIdentityPending(true);
+    try {
+      const view = await readIdentity(dataApi);
+      if (mounted.current && requestId === identityRequest.current) setIdentity(view);
+    } catch {
+      if (mounted.current && requestId === identityRequest.current) setIdentity({ message: FAILED });
+    } finally {
+      if (mounted.current && requestId === identityRequest.current) setIdentityPending(false);
+    }
+  };
+  void approveOrder(dataApi, 'record', 1, pending);
+  return (
+    <div>
+      <Button disabled={identityPending} onClick={() => void showIdentity()}>Show my Dataverse identity</Button>
+      {identity.message && <Text>{identity.message}</Text>}
+      {identity.identity && (
+        <div>
+          <Text>Dataverse user id: {identity.identity.userId}</Text>
+          <Text>Business unit id: {identity.identity.businessUnitId}</Text>
+          <Text>Organization id: {identity.identity.organizationId}</Text>
+          <Text>The organization id is not an Entra tenant id.</Text>
+        </div>
+      )}
+    </div>
+  );
+};
+export default GeneratedComponent;
+`;
+
+const PLAN = `## Custom API Bindings
+| Name | Kind | Bound Entity | Display Name | Parameters (name: kind) |
+|------|------|--------------|--------------|-------------------------|
+| cnt_ApproveOrder | Action | salesorder | Approve Order | Comment: String, Amount: Decimal |
+
+## Dataverse Operations
+Verification: environment not-checked, runtime not-checked, privileges not-checked.
+| Name | Kind | Bound Entity | Display Name | Parameters | Response fields | Invoke |
+|------|------|--------------|--------------|------------|-----------------|--------|
+| WhoAmI | Function | (Global) | Current Dataverse identity | (none) | BusinessUnitId, UserId, OrganizationId | button |
+`;
+
+function mixedFixture() {
+  const both = [API, WHO_AM_I];
+  const config = JSON.stringify({ actionBindings: both });
+  return {
+    contractVersion: 2,
+    files: [{ name: 'page.tsx', content: SOURCE }],
+    artifacts: { 'stages/with-api.tsx': SOURCE, 'actions.json': JSON.stringify(both), 'created/config.json': config, 'preserved/config.json': config },
+    genpagePlan: PLAN,
+    workflowLog: 'Custom API and built-in operation lifecycle; latest enabled gates before each authoring generation and upload.',
+    manifest: {
+      customApi: {
+        outputs: { cnt_ApproveOrder: ['NewStatus'] },
+        stages: [
+          { id: 'create', target: 'page.tsx', source: 'stages/with-api.tsx', actions: 'actions.json', afterConfig: 'created/config.json', upload: 'create' },
+          { id: 'preserve', target: 'page.tsx', source: 'stages/with-api.tsx', beforeConfig: 'created/config.json', afterConfig: 'preserved/config.json', upload: 'preserve' },
+        ],
+      },
+    },
+    events: [
+      { id: 'gate-create', command: 'node feature-flags.js custom-api', result: 'enabled' },
+      { id: 'discovery', command: 'node list-custom-apis.js https://contoso.crm.dynamics.com --entities salesorder', result: { ok: true, customApis: [{ ...structuredClone(API), bindingType: 'Entity' }] } },
+      { id: 'builtin-gate', command: 'node feature-flags.js dataverse-operations', result: 'enabled' },
+      { id: 'listing', command: 'node list-dataverse-operations.js', result: listing() },
+      { id: 'gate-generate', command: 'node feature-flags.js custom-api', result: 'enabled' },
+      { id: 'builtin-regate', command: 'node feature-flags.js dataverse-operations', result: 'enabled' },
+      { id: 'write-create', command: 'Write page.tsx', artifact: 'stages/with-api.tsx' },
+      { id: 'create', command: 'node genpage-upload.js --code-file page.tsx --actions actions.json --add-to-sitemap', result: { ok: true, pageId: PAGE } },
+      // An unrelated later edit while built-in authoring is OFF: it preserves the page's bindings (no --actions) and does not halt.
+      { id: 'gate-preserve', command: 'node feature-flags.js custom-api', result: 'enabled' },
+      { id: 'builtin-off', command: 'node feature-flags.js dataverse-operations', result: 'disabled' },
+      { id: 'write-preserve', command: 'Write page.tsx', artifact: 'stages/with-api.tsx' },
+      { id: 'preserve', command: `node genpage-upload.js --page-id ${PAGE} --code-file page.tsx`, result: { ok: true, pageId: PAGE } },
+    ],
+  };
+}
+
+const event = (fixture, id) => fixture.events.find((call) => call.id === id);
+function score(fixture, layer = 1) {
+  const check = (layer === 1 ? PHASE_EXPECTATIONS : PHASE5_EXPECTATIONS).get(RULE);
+  return check({ fixture, files: fixture.files, eval: { id: 24 } });
+}
+const setActions = (fixture, rows) => { fixture.artifacts['actions.json'] = JSON.stringify(rows); };
+const setConfigs = (fixture, rows) => { for (const name of ['created/config.json', 'preserved/config.json']) fixture.artifacts[name] = JSON.stringify({ actionBindings: rows }); };
+
+test('a mixed actions file — a Custom API row and a reviewed built-in — passes as one union in both evaluator layers', () => {
+  for (const layer of [1, 2]) {
+    const result = score(mixedFixture(), layer);
+    assert.equal(result.status, 'pass', `layer ${layer}: ${result.reason}`);
+  }
+});
+
+test('the union is compared whole: dropping either partition, spreading a descriptor or putting a built-in first fails', () => {
+  for (const [label, mutate] of [
+    ['the built-in partition dropped from every file', (f) => { setActions(f, [API]); setConfigs(f, [API]); }],
+    ['the Custom API partition dropped from every file', (f) => { setActions(f, [WHO_AM_I]); setConfigs(f, [WHO_AM_I]); }],
+    ['the built-in row only in actions.json', (f) => { setConfigs(f, [API]); }],
+    ['a descriptor spread onto the wire', (f) => { const rows = [API, { ...WHO_AM_I, bindingType: 'Global', response: listing().operations[0].response }]; setActions(f, rows); setConfigs(f, rows); }],
+    ['the built-in before the Custom API row', (f) => { setActions(f, [WHO_AM_I, API]); }],
+    ['a built-in row with a display name of its own', (f) => { const rows = [API, { ...WHO_AM_I, displayName: 'Who am I' }]; setActions(f, rows); setConfigs(f, rows); }],
+    ['a built-in the plan did not select', (f) => { const rows = [API, WHO_AM_I, RETRIEVE_VERSION]; setActions(f, rows); setConfigs(f, rows); }],
+  ]) {
+    for (const layer of [1, 2]) {
+      const bad = mixedFixture();
+      mutate(bad);
+      assert.equal(score(bad, layer).status, 'fail', `layer ${layer}: ${label}`);
+    }
+  }
+});
+
+test('built-in rows need an enabled dataverse-operations gate, the catalogue listing and a re-probe before an authoring generation and upload — a preserve-only stage does not', () => {
+  assert.equal(score(mixedFixture()).status, 'pass');
+  for (const [label, mutate] of [
+    ['listing after a disabled gate', (f) => { event(f, 'builtin-gate').result = 'disabled'; }],
+    ['no listing', (f) => { f.events = f.events.filter((call) => call.id !== 'listing'); }],
+    ['no re-probe after the listing', (f) => { f.events = f.events.filter((call) => call.id !== 'builtin-regate'); }],
+    ['a disabled re-probe', (f) => { event(f, 'builtin-regate').result = 'disabled'; }],
+    ['an unreadable re-probe', (f) => { event(f, 'builtin-regate').result = 'maybe'; }],
+    ['a failed listing', (f) => { event(f, 'listing').result = { ok: false, error: 'The built-in operation catalogue could not be read. No built-in operations were offered.' }; }],
+    ['a widened listing', (f) => { const result = listing(); result.operations.push({ ...result.operations[0], name: 'CalculateRollupField' }); event(f, 'listing').result = result; }],
+    ['a listing that claims a check', (f) => { event(f, 'listing').result = { ...listing(), eligible: true }; }],
+    ['an altered listed descriptor', (f) => { const result = listing(); result.operations[0].isFunction = false; event(f, 'listing').result = result; }],
+  ]) {
+    const bad = mixedFixture();
+    mutate(bad);
+    assert.equal(score(bad).status, 'fail', label);
+  }
+});
+
+test('the plan section is the exact sentinel or the catalogue\'s own table — anything else halts, and a built-in never sits in the Custom API table', () => {
+  const plan = (rows) => PLAN.replace('| WhoAmI | Function | (Global) | Current Dataverse identity | (none) | BusinessUnitId, UserId, OrganizationId | button |', rows);
+  for (const [label, text] of [
+    ['wrong case', plan('| whoami | Function | (Global) | Current Dataverse identity | (none) | BusinessUnitId, UserId, OrganizationId | button |')],
+    ['an effectful Function', plan('| CalculateRollupField | Function | (Global) | Calculate | (none) | Entity | button |')],
+    ['a display name of its own', plan('| WhoAmI | Function | (Global) | Who am I | (none) | BusinessUnitId, UserId, OrganizationId | button |')],
+    ['an on-load trigger', plan('| WhoAmI | Function | (Global) | Current Dataverse identity | (none) | BusinessUnitId, UserId, OrganizationId | on-load |')],
+    ['no verification line', PLAN.replace('Verification: environment not-checked, runtime not-checked, privileges not-checked.\n', '')],
+    ['prose instead of a table', PLAN.replace(/## Dataverse Operations[\s\S]*$/, '## Dataverse Operations\nWhoAmI, please.\n')],
+    // Moved, not duplicated: the Custom API table states the very row the built-in table would, and is still not where a built-in belongs.
+    ['in the Custom API table', PLAN.replace(/\n## Dataverse Operations[\s\S]*$/, '\n').replace('| cnt_ApproveOrder | Action | salesorder | Approve Order | Comment: String, Amount: Decimal |', '| cnt_ApproveOrder | Action | salesorder | Approve Order | Comment: String, Amount: Decimal |\n| WhoAmI | Function | (Global) | Current Dataverse identity |  |')],
+  ]) {
+    const bad = mixedFixture();
+    bad.genpagePlan = text;
+    assert.equal(score(bad).status, 'fail', label);
+  }
+  assert.deepStrictEqual(union.plannedBuiltIns(PLAN), [WHO_AM_I]);
+  assert.deepStrictEqual(union.plannedBuiltIns('## Dataverse Operations\nNo Dataverse operations.\n'), []);
+  assert.equal(union.plannedBuiltIns('## Custom API Bindings\nNo custom API bindings.\n'), null);
+});
+
+test('a built-in call is held to the Custom API order: a failure returns before res.outputs is read, and DTO fields come only from res.outputs', () => {
+  for (const [label, mutate] of [
+    ['outputs read before the success check', (text) => text.replace('  if (res.ok !== true) {\n    return { message: res.error?.status === 404 ? UNAVAILABLE : res.error?.message || FAILED };\n  }\n  const outputs = res.outputs;', '  const outputs = res.outputs;\n  if (res.ok !== true) {\n    return { message: res.error?.status === 404 ? UNAVAILABLE : res.error?.message || FAILED };\n  }')],
+    ['no success check at all', (text) => text.replace('if (res.ok !== true) {', 'if (false) {')],
+    ['outputs from res.value', (text) => text.replace('const outputs = res.outputs;', 'const outputs = res.value;')],
+    ['an undeclared output', (text) => text.replace("ownGuid(outputs, 'UserId')", 'ownGuid(outputs, String(res.outputs?.SystemUserName))')],
+    ['raw fault text', (text) => text.replace('res.error?.message || FAILED', 'res.error?.stack || FAILED')],
+  ]) {
+    const bad = mixedFixture();
+    bad.artifacts['stages/with-api.tsx'] = mutate(SOURCE);
+    bad.files[0].content = bad.artifacts['stages/with-api.tsx'];
+    assert.notEqual(bad.artifacts['stages/with-api.tsx'], SOURCE, `${label}: the mutation applies`);
+    assert.equal(score(bad).status, 'fail', label);
+  }
+});
+
+test('union helpers: partition by exact name, one union with no duplicate, and the order a new actions file keeps', () => {
+  assert.deepStrictEqual(union.partitionBindings([API, WHO_AM_I, { name: 'whoami', isFunction: true }, RETRIEVE_VERSION]), {
+    customApis: [API, { name: 'whoami', isFunction: true }], builtIns: [WHO_AM_I, RETRIEVE_VERSION],
+  });
+  assert.deepStrictEqual(union.unionBindings([API], [WHO_AM_I, RETRIEVE_VERSION]), [API, WHO_AM_I, RETRIEVE_VERSION]);
+  assert.throws(() => union.unionBindings([API, WHO_AM_I], [WHO_AM_I]), /Select each built-in operation once/);
+  assert.deepStrictEqual(union.unionOrderProblems([API, WHO_AM_I, RETRIEVE_VERSION], 'a'), []);
+  assert.equal(union.unionOrderProblems([WHO_AM_I, API], 'a').length, 1);
+  assert.equal(union.unionOrderProblems([API, RETRIEVE_VERSION, WHO_AM_I], 'a').length, 1);
+  assert.deepStrictEqual(union.BUILT_IN_OUTPUTS, { WhoAmI: ['BusinessUnitId', 'UserId', 'OrganizationId'], RetrieveVersion: ['Version'] });
+});

@@ -10,6 +10,11 @@ const { actionCalls, literalString, objectFields, receiverIsDataApi, stringRecor
 const {
   desiredBindings, sameBindings, uploadResultIdentityMatches, beforePageIdentityProblems, sameRecordedEnvironment,
 } = require('./upload-contract.js');
+// A page's actionBindings may also hold the reviewed built-in operations (WhoAmI, RetrieveVersion): the union layer owns their plan section, listing, gate and order, and this
+// evaluator compares the WHOLE union — never the Custom API partition alone (action-binding-union.js).
+const {
+  BUILT_IN_OUTPUTS, isBuiltInBinding, partitionBindings, plannedBuiltIns, unionBindings, listedBuiltIns, unionOrderProblems, builtInGateProblems,
+} = require('./action-binding-union.js');
 
 const KINDS = new Set(Object.values(PARAMETER_KIND_BY_TYPE));
 const isGate = (command) => /\bfeature-flags\.js\b[^\n]*\bcustom-api\b/.test(command);
@@ -26,6 +31,7 @@ function planBindings(fixture) {
   const rows = parseMarkdownRows(body, ['Name', 'Kind', 'Bound Entity', 'Display Name', 'Parameters (name: kind)']);
   if (!rows.length) throw new Error('Custom API Bindings must be a populated table or the exact no-bindings sentinel');
   return rows.map((row) => {
+    if (isBuiltInBinding(row)) throw new Error(`${row.name} is a built-in Dataverse operation: it belongs in ## Dataverse Operations, not the Custom API table`);
     if (!['Action', 'Function'].includes(row.kind)) throw new Error(`invalid API kind for ${row.name}`);
     const parameterKinds = {};
     for (const parameter of row['parameters (name: kind)'].split(',').filter((value) => value.trim())) {
@@ -154,7 +160,10 @@ function runtimeProblems(code, bindings, declaredOutputs, lookupMetadata) {
     const binding = known.get(name);
     if (!binding) { problems.push(`runtime calls unbound or undiscovered Custom API ${name || '(dynamic name)'}`); continue; }
     used.add(name);
-    if (call.method !== (binding.isFunction ? 'executeFunction' : 'executeAction')) problems.push(`${name}: runtime method disagrees with discovered Action/Function kind`);
+    // A built-in operation is a Function whatever a preserved legacy entry declares (or leaves out), and it takes no inputs.
+    const builtIn = isBuiltInBinding(binding);
+    const kinds = builtIn ? {} : binding.parameterKinds;
+    if (call.method !== (builtIn || binding.isFunction ? 'executeFunction' : 'executeAction')) problems.push(`${name}: runtime method disagrees with discovered Action/Function kind`);
     const prefix = code.slice(call.scope.start, call.start);
     const prefixMask = call.mask.slice(call.scope.start, call.start);
     const post = code.slice(call.end + 1, call.scope.end);
@@ -171,16 +180,16 @@ function runtimeProblems(code, bindings, declaredOutputs, lookupMetadata) {
     // Sparse declared kinds do not enumerate lookup inputs. Use discovery-only metadata to allow
     // their names and enforce required lookups without persisting structural kinds in the binding.
     const lookups = lookupMetadata.get(name) || {};
-    const allowed = new Set([...Object.keys(binding.parameterKinds), ...Object.keys(lookups)]);
+    const allowed = new Set([...Object.keys(kinds), ...Object.keys(lookups)]);
     if ([...parameters.keys()].some((parameter) => !allowed.has(parameter))
-      || Object.keys(binding.parameterKinds).some((parameter) => !parameters.has(parameter))) {
+      || Object.keys(kinds).some((parameter) => !parameters.has(parameter))) {
       problems.push(`${name}: runtime parameter names differ from the declared kinds and discovered lookups`);
     }
-    for (const [parameter, kind] of Object.entries(binding.parameterKinds)) {
+    for (const [parameter, kind] of Object.entries(kinds)) {
       if (!parameterMatches(parameters.get(parameter) || '', kind, prefix)) problems.push(`${name}.${parameter}: runtime value does not match ${kind}`);
     }
     problems.push(...lookupParameterProblems(parameters, lookups, name, prefix, call));
-    if (binding.boundEntityLogicalName) {
+    if (binding.boundEntityLogicalName && !builtIn) {
       if (!call.fields.has('boundTo')) problems.push(`${name}: entity-bound operation omits boundTo`);
       else {
         const bound = objectFields(call.fields.get('boundTo'));
@@ -193,7 +202,8 @@ function runtimeProblems(code, bindings, declaredOutputs, lookupMetadata) {
     } else if (call.fields.has('boundTo')) problems.push(`${name}: global operation must omit boundTo`);
 
     const result = call.resultName;
-    const ok = new RegExp(`\\bif\\s*\\(\\s*(?:!\\s*${result}\\.ok|${result}\\.ok\\s*===?\\s*false)\\s*\\)\\s*\\{[^}]*\\breturn\\b[^}]*\\}`);
+    // `res.ok !== true` is the stricter spelling of the same refusal (a built-in call's pattern uses it), so it is accepted beside `!res.ok`; the failure must still return before outputs are read.
+    const ok = new RegExp(`\\bif\\s*\\(\\s*(?:!\\s*${result}\\.ok|${result}\\.ok\\s*===?\\s*false|${result}\\.ok\\s*!==?\\s*true)\\s*\\)\\s*\\{[^}]*\\breturn\\b[^}]*\\}`);
     const okMatch = ok.exec(postMask);
     const outputsAt = postMask.search(new RegExp(`\\b${result}\\.outputs\\b`));
     if (!okMatch || outputsAt < 0 || okMatch.index + okMatch[0].length > outputsAt) problems.push(`${name}: response.ok must refuse before outputs are read`);
@@ -202,7 +212,7 @@ function runtimeProblems(code, bindings, declaredOutputs, lookupMetadata) {
     }
     const outputs = [...postMask.matchAll(new RegExp(`\\b${result}\\.outputs(?:\\?\\.)?\\.?([A-Za-z_$][\\w$]*)`, 'g'))].map((entry) => entry[1]);
     if (!Array.isArray(declaredOutputs?.[name]) || outputs.some((output) => !declaredOutputs[name].includes(output))) problems.push(`${name}: runtime reads an undeclared output`);
-    if (!binding.isFunction) {
+    if (!binding.isFunction && !builtIn) {
       if (!/\bif\s*\(\s*(?:pending\.current|isSubmitting)(?:\s*\|\|[^)]*)?\)\s*(?:return\b|\{\s*return\b)/.test(prefixMask)
         || !/\bpending\.current\s*=\s*true\b|\bsetIsSubmitting\s*\(\s*true\s*\)/.test(prefixMask)
         || !/\bfinally\b[\s\S]*(?:pending\.current\s*=\s*false\b|setIsSubmitting\s*\(\s*false\s*\))/.test(postMask)) {
@@ -221,7 +231,8 @@ function customApiProblems(fixture) {
   if (fixture.manifest?.expectedOutcome === 'refused') return problems;
   const contract = fixture.manifest?.customApi;
   if (!contract?.stages?.length) return [...problems, 'Custom API lifecycle has no source/config stages'];
-  const declared = planBindings(fixture);
+  // The whole desired array: the plan's Custom API rows, then its built-in operation rows (none when the plan has no `## Dataverse Operations` section).
+  const declared = unionBindings(planBindings(fixture), plannedBuiltIns(fixture.genpagePlan) || []);
   const calls = workflowCalls(fixture);
   const discovered = new Map();
   const lookupMetadata = new Map();
@@ -233,6 +244,16 @@ function customApiProblems(fixture) {
       lookupMetadata.set(entry.name, discoveredLookupParameters(entry));
     }
   }
+  // A built-in row's fresh evidence is the catalogue listing, projected exactly as the builder must project it (toActionBinding).
+  const listed = listedBuiltIns(calls);
+  problems.push(...listed.problems);
+  for (const [name, row] of listed.offered) discovered.set(name, row);
+  // A preserved built-in entry is carried as the page holds it — a legacy one with no isFunction included — so it is never held to the Custom API projection.
+  const project = (entry) => (isBuiltInBinding(entry) ? entry : projectBinding(entry));
+  const authoring = contract.stages
+    .filter((stage) => (stage.beforeConfig ? (stage.change?.add || []).some(isBuiltInBinding) : partitionBindings(declared).builtIns.length > 0))
+    .map((stage) => stage.upload);
+  problems.push(...builtInGateProblems(calls, authoring));
   const beforeByStage = new Map();
   const verifiedBefore = new Set();
   const producedConfigs = new Map();
@@ -245,7 +266,7 @@ function customApiProblems(fixture) {
       const config = artifactJson(fixture, stage.beforeConfig);
       const before = config.actionBindings === undefined ? [] : config.actionBindings;
       desiredBindings(before, undefined, 'name');
-      for (const binding of before) projectBinding(binding);
+      for (const binding of before) project(binding);
       beforeByStage.set(stage, before);
       const identityProblems = [];
       if (!call || !flags['page-id'] || result?.ok !== true || !uploadResultIdentityMatches(flags, result)) {
@@ -279,7 +300,7 @@ function customApiProblems(fixture) {
   const beforeBindings = [...verifiedBefore].flatMap((stage) => beforeByStage.get(stage));
   for (const binding of declared) {
     const fresh = isDeepStrictEqual(discovered.get(binding.name), binding);
-    const existing = beforeBindings.some((before) => isDeepStrictEqual(projectBinding(before), binding));
+    const existing = beforeBindings.some((before) => isDeepStrictEqual(project(before), binding));
     if (!fresh && !existing) problems.push(`${binding.name}: plan kind, bound entity or parameter kinds do not match discovery or unchanged before-config evidence`);
   }
   let previousId = null;
@@ -298,13 +319,15 @@ function customApiProblems(fixture) {
     if (!stage.beforeConfig || stage.change !== undefined) {
       if (!flags.actions || pathKey(flags.actions) !== pathKey(stage.actions) || !sameBindings(artifactJson(fixture, flags.actions), desired, 'name')) {
         problems.push(`${stage.id}: actions file must be the full desired bare array, including explicit [] to clear`);
+      } else if (authoring.includes(stage.upload)) {
+        problems.push(...unionOrderProblems(artifactJson(fixture, flags.actions), stage.id));
       }
     }
     const after = artifactJson(fixture, stage.afterConfig).actionBindings;
     if (!sameBindings(after, desired, 'name')) problems.push(`${stage.id}: API config read-back loses preservation or explicit-clear intent`);
     const authoredNames = new Set((stage.change?.add || []).map((binding) => binding.name));
     for (const binding of desired) {
-      const projected = projectBinding(binding);
+      const projected = project(binding);
       const fresh = isDeepStrictEqual(discovered.get(binding.name), projected);
       // Only an exact unchanged stage-before entry has preservation provenance. An explicit
       // addition/replacement still needs eligible discovery, even when its name already existed.
@@ -315,7 +338,8 @@ function customApiProblems(fixture) {
     const code = artifactText(fixture, stage.source);
     const write = calls.slice(0, uploadIndex).filter((entry) => /^Write\s+/.test(entry.command) && fileName(entry.command.slice(6)) === stage.target).at(-1);
     if (!write || artifactText(fixture, write.artifact) !== code) problems.push(`${stage.id}: uploaded API source is not the actual preceding generated snapshot`);
-    problems.push(...runtimeProblems(code, desired, contract.outputs, lookupMetadata));
+    // A built-in operation's outputs are its catalogue response's properties, whatever a fixture declares.
+    problems.push(...runtimeProblems(code, desired, { ...contract.outputs, ...BUILT_IN_OUTPUTS }, lookupMetadata));
   }
   const last = contract.stages.at(-1);
   if (artifactText(fixture, last.target) !== artifactText(fixture, last.source)) problems.push('final API TSX differs from the final lifecycle stage');
