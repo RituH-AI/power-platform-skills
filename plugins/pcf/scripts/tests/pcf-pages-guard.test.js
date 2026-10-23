@@ -1186,6 +1186,19 @@ test('Pages proof keeps the class instance as this inside class member bodies an
   assert.deepEqual(codesFor(inGuardedMethod(`run() { ${THIS_CONTEXT_CALL}; }`, '')), ['PCF_PAGES_API']);
 });
 
+test('Pages proof keeps the inner class this for a computed key after an assertion initializer or a generic decorator', () => {
+  // Known limit, behaving as before: the member scanner does not recognize these keys as member starts, so
+  // `this` in them is still read as the inner class's instance and a write there does not end the outer proof.
+  for (const member of [
+    'value = {} as object\n[this._context.device = null]() {}',
+    '@decorate<number>() [this._context.device = null]() {}',
+  ]) {
+    assert.deepEqual(codesFor(inGuardedMethod(member)), [], member);
+  }
+  // The same key on its own line after the generic decorator is recognized.
+  assert.deepEqual(codesFor(inGuardedMethod('@decorate<number>()\n[this._context.device = null]() {}')), ['PCF_PAGES_API']);
+});
+
 for (const [name, call, plainCall = CALL, proof = PROOF] of [
   ['method non-null run', 'context.device.captureImage!!()'],
   ['root and namespace non-null runs', 'context!!!.device!!?.captureImage!!()'],
@@ -1640,6 +1653,7 @@ for (const relative of [
     if (relative === 'AGENTS.md') {
       assert.match(text, /parameter default reaches the outer binding[^.\n]*body declares the same name/i);
       assert.match(text, /`this` in a computed class member key[^\n]*enclosing method's[^.\n]*ends that method's proof/i);
+      assert.match(text, /Two forms behave as before[^\n]*type assertion or `satisfies`[^\n]*decorator with type arguments/i);
       assert.match(text, /\.ts` files[^.\n]*angle-bracket types[^.\n]*JSX/i);
       assert.match(text, /unterminated such type[^.\n]*lexer-failure path/i);
     } else {
