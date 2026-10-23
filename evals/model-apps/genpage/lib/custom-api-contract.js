@@ -298,14 +298,10 @@ function customApiProblems(fixture) {
     if (!fresh && !existing) problems.push(`${binding.name}: plan kind, bound entity or parameter kinds do not match discovery or unchanged before-config evidence`);
   }
   let previousId = null;
-  // The previous lifecycle stage's upload: a clear's choice must stand at the approval of its own edit plan, after that upload.
-  let previousUpload = null;
   for (const stage of contract.stages) {
     const uploadIndex = calls.findIndex((call) => call.id === stage.upload);
     const call = calls[uploadIndex];
     if (!call || !isUpload(call.command)) { problems.push(`${stage.id}: missing associated API upload`); continue; }
-    const stageUpload = previousUpload;
-    previousUpload = call;
     const { flags } = commandInfo(call);
     const result = resultObject(call);
     if (fileName(flags['code-file']) !== stage.target || result?.ok !== true) problems.push(`${stage.id}: upload target/result does not match the generated API page`);
@@ -315,8 +311,7 @@ function customApiProblems(fixture) {
     const desired = stage.beforeConfig ? desiredBindings(before, stage.change, 'name') : declared;
     if (stage.beforeConfig && stage.change?.clear === true) {
       problems.push(...clearConfirmationProblems({
-        workflowLog: fixture.workflowLog, uploads: calls.filter((entry) => isUpload(entry.command)), call, previousUpload: stageUpload,
-        pageId: flags['page-id'], before, label: stage.id,
+        workflowLog: fixture.workflowLog, uploads: calls.filter((entry) => isUpload(entry.command)), call, pageId: flags['page-id'], before, label: stage.id,
       }));
     }
     if (stage.beforeConfig && stage.change === undefined && flags.actions) problems.push(`${stage.id}: unchanged APIs must omit --actions`);

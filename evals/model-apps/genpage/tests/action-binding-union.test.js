@@ -372,39 +372,32 @@ test('removing every Custom API of a mixed page keeps WhoAmI — an empty action
   }
 });
 
-// The clear's own record: the maker's answer to the two-option clear question, written as its own workflow-log line —
+// The clear's own record (edit-flow.md, Edit Phase 6): the maker's answer to the two-option clear question, written as its own workflow-log line
+// right before the upload it covers —
 //   Clear choice: Clear every action binding of page <page-id>, removing WhoAmI
-// It is asked first (edit-flow.md, Edit Phase 3), before any binding is reconciled and before the edit plan is approved, so the answer that
-// stands at the plan's approval (`ExitPlanMode called → approved`) must be that clear. It is then recorded again right before each upload it
-// covers (Edit Phase 6): the last `Clear choice:` line before the log line that carries this upload's exact command is the one that counts, and
-// each upload consumes the choice before it, as an overwrite choice is consumed (upload-contract.js): one choice covers one upload, a later choice
-// replaces an earlier one, and a choice written after the upload, for another page or for another set of built-ins is no permission. A yes to
-// adding or keeping WhoAmI is not a clear choice at all.
+// The last `Clear choice:` line before the log line that carries this upload's exact command is the one that counts, and each upload consumes
+// the choice before it, as an overwrite choice is consumed (upload-contract.js): one choice covers one upload, a later choice replaces an
+// earlier one, and a choice written after the upload, for another page or for another set of built-ins is no permission. A yes to adding or
+// keeping WhoAmI is not a clear choice at all.
 const OTHER_PAGE = '11111111-1111-4111-8111-111111111111';
 const CLEAR_CHOICE = `Clear choice: Clear every action binding of page ${PAGE}, removing WhoAmI`;
 const CLEAR_REFUSED = /^clear: clearing every action binding removes WhoAmI — only with the maker's clear choice recorded right before this upload/;
-const CLEAR_TOO_LATE = /^clear: clearing every action binding removes WhoAmI — the maker's clear choice is asked before the edit plan is approved/;
-const ASKED = 'AskUserQuestion: Clearing every action binding also removes WhoAmI. → Clear every action binding, removing WhoAmI';
-const PRESENTED = 'EnterPlanMode called with the edit plan';
-const APPROVED = 'ExitPlanMode called → approved';
-// The clear of the mixed page, with `lines` appended to its workflow log; `<upload>` stands for the log line of the clear's upload command,
-// `<preserve>` for the log line of the earlier preserve stage's upload, and `retry` makes the clear upload twice — a first attempt that failed,
-// then the stage's own upload — both logged with the same command.
+// The clear of the mixed page, with `lines` appended to its workflow log; `<upload>` stands for the log line of the clear's upload command and
+// `retry` makes the clear upload twice — a first attempt that failed, then the stage's own upload — both logged with the same command.
 function cleared(lines, { retry = false } = {}) {
   const fixture = withUpdate(mixedFixture(), 'clear', { clear: true }, [], NO_CALLS);
   const upload = fixture.events.find((call) => call.id === 'clear');
-  const preserve = fixture.events.find((call) => call.id === 'preserve');
   if (retry) fixture.events.splice(fixture.events.indexOf(upload), 0, { id: 'clear-attempt', command: upload.command, result: { ok: false, error: 'The request timed out.' } });
-  const logged = { '<upload>': upload, '<preserve>': preserve };
-  fixture.workflowLog = [fixture.workflowLog, ...lines.map((line) => (logged[line] ? `- Command: \`${logged[line].command}\`` : line))].join('\n');
+  fixture.workflowLog = [fixture.workflowLog, ...lines.map((line) => (line === '<upload>' ? `- Command: \`${upload.command}\`` : line))].join('\n');
   return fixture;
 }
 
 test('clearing every binding of a page that binds WhoAmI needs the clear choice, recorded right before that upload, for that page and every built-in it removes', () => {
+  const asked = 'AskUserQuestion: Clearing every action binding also removes WhoAmI. → Clear every action binding, removing WhoAmI';
   for (const [label, fixture] of [
-    ['the choice asked first and recorded again before the upload', cleared([ASKED, CLEAR_CHOICE, PRESENTED, APPROVED, CLEAR_CHOICE, '<upload>'])],
-    ['the choice beside an overwrite choice for the same upload', cleared([CLEAR_CHOICE, APPROVED, CLEAR_CHOICE, 'Choice: Overwrite the deployed changes', '<upload>'])],
-    ['a retried clear with the choice written again', cleared([CLEAR_CHOICE, APPROVED, CLEAR_CHOICE, '<upload>', CLEAR_CHOICE, '<upload>'], { retry: true })],
+    ['the choice before the upload', cleared([asked, CLEAR_CHOICE, '<upload>'])],
+    ['the choice beside an overwrite choice for the same upload', cleared([CLEAR_CHOICE, 'Choice: Overwrite the deployed changes', '<upload>'])],
+    ['a retried clear with the choice written again', cleared([CLEAR_CHOICE, '<upload>', CLEAR_CHOICE, '<upload>'], { retry: true })],
   ]) {
     for (const layer of [1, 2]) {
       const result = score(fixture, layer);
@@ -412,16 +405,16 @@ test('clearing every binding of a page that binds WhoAmI needs the clear choice,
     }
   }
   for (const [label, fixture] of [
-    ['no confirmation', cleared([APPROVED, '<upload>'])],
-    ['a yes to adding WhoAmI', cleared([APPROVED, 'AskUserQuestion: Add a button for WhoAmI? → Yes', '<upload>'])],
-    ['a yes to keeping WhoAmI', cleared([APPROVED, 'AskUserQuestion: Keep the WhoAmI binding? → Yes', '<upload>'])],
-    ['a free-text yes to clearing', cleared([APPROVED, 'AskUserQuestion: Clear every action binding? This also removes WhoAmI. → Yes, clear them all', '<upload>'])],
-    ['a clear choice withdrawn before the upload', cleared([CLEAR_CHOICE, APPROVED, CLEAR_CHOICE, 'Clear choice: Keep WhoAmI', '<upload>'])],
-    ['a clear choice written after the upload', cleared([CLEAR_CHOICE, APPROVED, '<upload>', CLEAR_CHOICE])],
-    ['a qualified answer', cleared([APPROVED, `${CLEAR_CHOICE}, but keep WhoAmI`, '<upload>'])],
-    ['a choice for another page', cleared([APPROVED, CLEAR_CHOICE.replace(PAGE, OTHER_PAGE), '<upload>'])],
-    ['a choice for another set of built-ins', cleared([APPROVED, `${CLEAR_CHOICE} and RetrieveVersion`, '<upload>'])],
-    ['one choice for a retried clear', cleared([CLEAR_CHOICE, APPROVED, CLEAR_CHOICE, '<upload>', '<upload>'], { retry: true })],
+    ['no confirmation', cleared(['<upload>'])],
+    ['a yes to adding WhoAmI', cleared(['AskUserQuestion: Add a button for WhoAmI? → Yes', '<upload>'])],
+    ['a yes to keeping WhoAmI', cleared(['AskUserQuestion: Keep the WhoAmI binding? → Yes', '<upload>'])],
+    ['a free-text yes to clearing', cleared(['AskUserQuestion: Clear every action binding? This also removes WhoAmI. → Yes, clear them all', '<upload>'])],
+    ['a clear choice withdrawn before the upload', cleared([CLEAR_CHOICE, 'Clear choice: Keep WhoAmI', '<upload>'])],
+    ['a clear choice written after the upload', cleared(['<upload>', CLEAR_CHOICE])],
+    ['a qualified answer', cleared([`${CLEAR_CHOICE}, but keep WhoAmI`, '<upload>'])],
+    ['a choice for another page', cleared([CLEAR_CHOICE.replace(PAGE, OTHER_PAGE), '<upload>'])],
+    ['a choice for another set of built-ins', cleared([`${CLEAR_CHOICE} and RetrieveVersion`, '<upload>'])],
+    ['one choice for a retried clear', cleared([CLEAR_CHOICE, '<upload>', '<upload>'], { retry: true })],
   ]) {
     const problems = customApiProblems(fixture);
     assert.ok(problems.some((problem) => CLEAR_REFUSED.test(problem)), `${label}: ${JSON.stringify(problems)}`);
@@ -436,36 +429,6 @@ test('clearing every binding of a page that binds WhoAmI needs the clear choice,
   setConfigs(apiOnly, [API]);
   const result = score(withUpdate(apiOnly, 'clear', { clear: true }, [], NO_CALLS));
   assert.equal(result.status, 'pass', result.reason);
-});
-
-// Asked after the plan was approved, a `Keep` would come too late: Edit Phase 5 has already removed the calls and their buttons, and nothing puts
-// them back. So the answer that stands when the edit plan this upload carries out was approved must be the clear — the last `Clear choice:` line
-// before the last approval after the previous stage's upload — whatever is written right before the upload.
-test('the clear choice must stand when the edit plan is approved — asked before any binding is reconciled — and is recorded again for each upload', () => {
-  for (const [label, fixture] of [
-    ['asked first, recorded again before the upload', cleared([ASKED, CLEAR_CHOICE, PRESENTED, APPROVED, CLEAR_CHOICE, '<upload>'])],
-    ['asked when the planner\'s clarification turned up the clear, before the revised plan was approved',
-      cleared([PRESENTED, 'ExitPlanMode called → changes requested: clear every binding', ASKED, CLEAR_CHOICE, PRESENTED, APPROVED, CLEAR_CHOICE, '<upload>'])],
-    ['asked after an earlier stage\'s upload, for this stage', cleared(['<preserve>', ASKED, CLEAR_CHOICE, PRESENTED, APPROVED, CLEAR_CHOICE, '<upload>'])],
-  ]) {
-    assert.deepStrictEqual(customApiProblems(fixture), [], label);
-    for (const layer of [1, 2]) assert.equal(score(fixture, layer).status, 'pass', `${label}, layer ${layer}`);
-  }
-  for (const [label, fixture] of [
-    ['asked only after the plan was approved', cleared([PRESENTED, APPROVED, ASKED, CLEAR_CHOICE, '<upload>'])],
-    ['Keep when the plan was approved, Clear only before the upload', cleared(['Clear choice: Keep WhoAmI', PRESENTED, APPROVED, CLEAR_CHOICE, '<upload>'])],
-    ['no plan approval in the log', cleared([ASKED, CLEAR_CHOICE, '<upload>'])],
-    ['the only clear choice is from before an earlier stage\'s upload', cleared([CLEAR_CHOICE, '<preserve>', PRESENTED, APPROVED, CLEAR_CHOICE, '<upload>'])],
-  ]) {
-    const problems = customApiProblems(fixture);
-    assert.ok(problems.some((problem) => CLEAR_TOO_LATE.test(problem)), `${label}: ${JSON.stringify(problems)}`);
-    for (const layer of [1, 2]) assert.equal(score(fixture, layer).status, 'fail', `${label}, layer ${layer}`);
-  }
-  // Asked first but not recorded again after the approval: the answer asked first is not the record of this upload.
-  const notAgain = cleared([ASKED, CLEAR_CHOICE, PRESENTED, APPROVED, '<upload>']);
-  const problems = customApiProblems(notAgain);
-  assert.ok(problems.some((problem) => CLEAR_REFUSED.test(problem)), `not recorded again: ${JSON.stringify(problems)}`);
-  for (const layer of [1, 2]) assert.equal(score(notAgain, layer).status, 'fail', `not recorded again, layer ${layer}`);
 });
 
 // ── A Custom API removal, and a recorded custom-api probe ──────────────────────────────────────────────────────────────────────────

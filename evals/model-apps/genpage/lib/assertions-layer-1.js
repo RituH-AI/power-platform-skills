@@ -21,7 +21,7 @@ const { gradeEvidence, isGuid, fileName, artifactText, commandInfo } = require('
 const { navigationProblems, navTargets } = require('./navigation-contract.js');
 const { workerProblems } = require('./worker-contract.js');
 const { uploadProblems, uploadPreservationProblems } = require('./upload-contract.js');
-const { planSection, findMarkdownTable, parseMarkdownRows, planModeEvents, PROVENANCE_PREPARE } = require('./plan-evidence.js');
+const { planSection, findMarkdownTable, parseMarkdownRows } = require('./plan-evidence.js');
 const { gradeCustomApi } = require('./custom-api-contract.js');
 const { plannedBuiltIns } = require('./action-binding-union.js');
 const { packagingProblems, isPackaging } = require('./packaging-contract.js');
@@ -2672,6 +2672,7 @@ const PAGE_FILES_GATE = /\bcheck-page-files\.js\b/;
 const WORKER_STAMP = /\bgenpage-worker-output\.js\b[^\n]*--stamp\b/;
 const PAGE_BUILDER = /\b(?:Task|Dispatched)\s+genpage-page-builder\b/;
 const PROVENANCE_VERIFY = /\bgenpage-plan-provenance\.js\b[^\n]*\bverify\b/;
+const PROVENANCE_PREPARE = /\bgenpage-plan-provenance\.js\b[^\n]*\bprepare\b/;
 
 function artifactOrNull(fixture, name) {
   try { return artifactText(fixture, name); } catch { return null; }
@@ -2747,6 +2748,25 @@ function provisionInput(fixture, entry = provisionCalls(fixture).find((c) => typ
 }
 
 const schemaSuffix = (name) => suffixOf(String(name || '').toLowerCase());
+
+// Plan presentations and their outcomes, in log order. Shapes recorded by the skill:
+//   - EnterPlanMode called with the initial plan:
+//   - ExitPlanMode called → changes requested (revised): "add a search box in addition to …"
+//   - Task genpage-planner re-invoked with the revision request …
+//   - ExitPlanMode called → approved
+//   - `node scripts\genpage-plan-provenance.js prepare --plan genpage-plan.md`   (the plan write starts)
+function planModeEvents(log) {
+  const events = [];
+  String(log || '').split(/\r?\n/).forEach((line, at) => {
+    if (/\bEnterPlanMode\b/.test(line) && !/\bnot\b/i.test(line)) events.push({ at, kind: 'present', line });
+    else if (/\bExitPlanMode\b/.test(line)) {
+      const kind = /changes?\s+requested|\brevis|\breject/i.test(line) ? 'changes' : /\bapproved\b/i.test(line) ? 'approved' : 'unknown';
+      events.push({ at, kind, line });
+    } else if (PROVENANCE_PREPARE.test(line)) events.push({ at, kind: 'write', line });
+    else if (/\bgenpage-planner\b/.test(line) && /\b(?:re-?invoked|Task|Dispatched)\b/i.test(line)) events.push({ at, kind: 'planner', line });
+  });
+  return events;
+}
 
 function stalePlans(fixture) {
   return Object.entries(fixture.artifacts || {})
