@@ -1425,7 +1425,15 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   app handler does for its delete, so a page the platform still holds fails the step and keeps its receipt and pending record, and a read that
   cannot be made counts as "not proven gone". The SDK's delete sends no `MSCRM.IncludeUnpublished`, and its own notes say a by-id request on a page that was
   never published answers 404 without it; measured live, the platform DELETED such a row, so the read-back is insurance against an answer it has not been seen to give.
-  Form-only page references are not scanned.
+  **Known limit — a page a form embeds is deleted.** A form can show a generative page through the `MscrmControls.UxAgentControl`
+  control, whose static `RefId` parameter holds the page id, and Dataverse records no dependency for it (measured: the page reported
+  zero dependents and its delete answered 204), so the platform never refuses the delete — and teardown reads no form. A proven page is
+  deleted even while a form (of the app's tables or of any other) still shows it, and that form is left pointing at a page that is gone.
+  So before a teardown with `--apply`, take the page off every form that shows it, or delete those forms; the dry run lists each page it
+  would delete. Teardown does not look for such forms itself, on purpose: a forms read alone cannot prove that no form names a page — that
+  takes every form's FormXML read as one complete document, and a table's absence proven from metadata that can be trusted — and a check
+  that let the delete through on a reply it could not read would promise more than it keeps. Pinned by `teardown-form-embedded-page.test.js`
+  (the delete set of such an app, and no form read).
   **An app is TWO rows** — an `appmodule` AND a `sitemaps`
   row, with no server-side cascade. The sitemap is linked by a type-62 `appmodulecomponent` on the app's **current**
   `appmoduleidunique` layer, not necessarily by equal unique names (first-party and renamed sitemaps may have different names).
