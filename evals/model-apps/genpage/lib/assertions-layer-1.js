@@ -2509,33 +2509,44 @@ PHASE_EXPECTATIONS.set(
 // is its label — a string, or a map of LCID to label — in the plan's order, and that order is what numbers it 100000000 + index. An option
 // written as a {"label", "value"} object is refused by the plugin's own gate ("'label' is not an LCID"), so the gate is asked rather than
 // its rule repeated here. Only the captured input JSON shows how the options were written: a capture made without it is skipped, a
-// current fixture without it fails.
+// current fixture without it fails. Provisioned means APPLIED: without --apply the CLI only plans, writes nothing and answers
+//   { "ok": true, "dryRun": true, "plan": [ … ] }
+// so the inputs graded are the ones the applying runs were handed, each of them — never a preview's.
 PHASE_EXPECTATIONS.set(
   "Phase 2b (Entity Builder): cr_ticket is provisioned with choice columns via provision-entities.js input JSON; each picklist option is written as its label, in the plan's order (numbered 100000000 + index)",
   ({ fixture }) => {
     const calls = provisionCalls(fixture).filter((c) => typeof c.flags.input === 'string');
     if (!calls.length) return fail('provision-entities.js was not run with --input <json>');
     if (calls.some((c) => !c.call.historical && resultObject(c.call)?.ok !== true)) return fail('a provision-entities.js run did not return ok:true');
-    const input = provisionInput(fixture);
-    if (input === null) return currentContract(fixture) ? fail('provision-input.json was not captured') : skip('provision-input.json was not captured');
-    if (input === undefined) return fail('provision-input.json is not JSON');
-    const gate = validateProvisionInput(input);
-    if (!gate.ok) return fail(`provision-entities.js refuses the captured input: ${gate.errors[0]}`);
-    const ticket = (input.entities || []).find((e) => schemaSuffix(e.schemaName) === 'ticket');
-    if (!ticket) return fail('provision-input.json does not declare ticket');
+    const applied = calls.filter((c) => c.flags.apply === true && resultObject(c.call)?.dryRun !== true);
+    if (!applied.length) return fail('provision-entities.js was not run with --input <json> --apply');
+    const inputs = [];
+    for (const run of applied) {
+      const name = provisionInputName(run);
+      const input = provisionInput(fixture, run);
+      if (input === null) return currentContract(fixture) ? fail(`${name} was not captured`) : skip(`${name} was not captured`);
+      if (input === undefined) return fail(`${name} is not JSON`);
+      const gate = validateProvisionInput(input);
+      if (!gate.ok) return fail(`provision-entities.js refuses the captured input: ${gate.errors[0]}`);
+      inputs.push(input);
+    }
+    const tickets = inputs.map((input) => (input.entities || []).find((e) => schemaSuffix(e.schemaName) === 'ticket')).filter(Boolean);
+    if (!tickets.length) return fail('provision-input.json does not declare ticket');
     const block = planEntityBlocks(fixture.genpagePlan).find((b) => b.suffix === 'ticket');
     // A string option is its label; a language map holds it under one of its languages.
     const isLabel = (option, label) => (typeof option === 'string' ? option.trim() === label : Object.values(option || {}).some((text) => String(text).trim() === label));
-    for (const name of ['priority', 'status']) {
-      const column = (ticket.columns || []).find((c) => schemaSuffix(c.schemaName) === name);
-      if (!column) return fail(`provision-input.json declares no ticket ${name} column`);
-      if (column.type !== 'Choice') return fail(`ticket ${name} is ${column.type === undefined ? 'untyped' : column.type}, not a Choice column`);
-      const planned = block && block.choices.find((c) => c.suffix === name);
-      if (!planned || !planned.options.length) return fail(`the plan lists no ${name} options to number the input's by`);
-      const labels = [...planned.options].sort((a, b) => a.value - b.value).map((o) => o.label);
-      const options = Array.isArray(column.options) ? column.options : [];
-      if (options.length !== labels.length || options.some((option, i) => !isLabel(option, labels[i]))) {
-        return fail(`ticket ${name} options are ${options.map((o) => JSON.stringify(o)).join(', ')}, but the plan numbers ${labels.join(', ')} from 100000000 in that order`);
+    for (const ticket of tickets) {
+      for (const name of ['priority', 'status']) {
+        const column = (ticket.columns || []).find((c) => schemaSuffix(c.schemaName) === name);
+        if (!column) return fail(`provision-input.json declares no ticket ${name} column`);
+        if (column.type !== 'Choice') return fail(`ticket ${name} is ${column.type === undefined ? 'untyped' : column.type}, not a Choice column`);
+        const planned = block && block.choices.find((c) => c.suffix === name);
+        if (!planned || !planned.options.length) return fail(`the plan lists no ${name} options to number the input's by`);
+        const labels = [...planned.options].sort((a, b) => a.value - b.value).map((o) => o.label);
+        const options = Array.isArray(column.options) ? column.options : [];
+        if (options.length !== labels.length || options.some((option, i) => !isLabel(option, labels[i]))) {
+          return fail(`ticket ${name} options are ${options.map((o) => JSON.stringify(o)).join(', ')}, but the plan numbers ${labels.join(', ')} from 100000000 in that order`);
+        }
       }
     }
     return pass();
@@ -2736,11 +2747,14 @@ function planLookupProblems(plan, child, parent) {
     : [`${child} has no lookup relationship to ${parent}`];
 }
 
-// provision-input.json, when captured: the App Spec the entity-builder handed provision-entities.js.
-function provisionInput(fixture) {
-  const entry = provisionCalls(fixture).find((c) => typeof c.flags.input === 'string');
-  const name = entry ? fileName(String(entry.flags.input).replace(/^@/, '')) : 'provision-input.json';
-  const text = artifactOrNull(fixture, name);
+// The file name of the input JSON a provision-entities.js run was handed: `--input @D:/temp/support-tickets/provision-input.json` →
+// provision-input.json (no run: the name the entity-builder writes).
+const provisionInputName = (entry) => (entry ? fileName(String(entry.flags.input).replace(/^@/, '')) : 'provision-input.json');
+
+// provision-input.json, when captured: the App Spec the entity-builder handed provision-entities.js — the input of `entry` (a
+// provisionCalls entry), by default of the first run that names one.
+function provisionInput(fixture, entry = provisionCalls(fixture).find((c) => typeof c.flags.input === 'string')) {
+  const text = artifactOrNull(fixture, provisionInputName(entry));
   if (text === null) return null;
   try { return JSON.parse(text.replace(/^\uFEFF/, '')); } catch { return undefined; }
 }

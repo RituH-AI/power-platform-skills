@@ -37,7 +37,7 @@
         "runner": "layer-1",
         "eval": 15,
         "text": "Phase 2b (Entity Builder): cr_ticket is provisioned with choice columns via provision-entities.js input JSON; each picklist option is written as its label, in the plan's order (numbered 100000000 + index)",
-        "reason": "Graded from the input JSON the entity-builder handed provision-entities.js (provision-input.json), which the plugin's own input gate checks, but the only eval-15 fixture, 15-support-tickets-real, is a capture that did not keep that file, so the check skips it. A capture or a synthetic eval-15 fixture that keeps provision-input.json closes it."
+        "reason": "Graded from the input JSON each applying run of provision-entities.js (--apply; a run without it only plans and provisions nothing) was handed, provision-input.json, which the plugin's own input gate checks, but the only eval-15 fixture, 15-support-tickets-real, is a capture that did not keep that file, so the check skips it. A capture or a synthetic eval-15 fixture that keeps provision-input.json closes it."
       },
       {
         "runner": "layer-2",

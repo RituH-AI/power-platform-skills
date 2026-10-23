@@ -702,6 +702,35 @@ test('eval 15: a capture that did not keep its input JSON is skipped, and a curr
   assertFail(grade(TICKET_CHOICES, { ...committed(E15), contractVersion: 2, manifest: { contractVersion: 2, provenance: 'synthetic' } }), /provision-input\.json was not captured/);
 });
 
+// A table is provisioned by a run that APPLIED its input: provision-entities.js without --apply only plans, writes nothing, and answers
+//   { "ok": true, "dryRun": true, "plan": [ … ] }
+// so such a run is no provisioning, however good its input. The input graded is the one the applying run was handed, not a preview's.
+function provisionedBy(events, artifacts) {
+  return { ...committed(E15), contractVersion: 2, manifest: { contractVersion: 2, provenance: 'synthetic' }, artifacts: { ...committed(E15).artifacts, ...artifacts }, events };
+}
+const provisionRun = (id, input, flags, result) => ({ id, command: `node scripts/provision-entities.js --env https://contoso.crm.dynamics.com --input @${input}${flags}`, result });
+
+test('eval 15: a dry run of provision-entities.js provisions nothing, and the input graded is the applying run\'s', () => {
+  const good = JSON.stringify(ticketInput());
+  const labelValue = JSON.stringify(ticketInput(['Low', 'Medium', 'High', 'Critical'].map((label, i) => ({ label, value: 100000000 + i }))));
+  const applied = { ok: true, entities: [{ schemaName: 'cr_Ticket', logicalName: 'cr_ticket', entitySetName: 'cr_tickets' }] };
+  const planned = { ok: true, dryRun: true, plan: [{ step: 'createTable', schemaName: 'cr_Ticket' }] };
+  assertPass(grade(TICKET_CHOICES, provisionedBy([provisionRun('apply', 'provision-input.json', ' --apply', applied)], { 'provision-input.json': good })));
+  // Planned only: no --apply, and the CLI's own dry-run answer.
+  assertFail(grade(TICKET_CHOICES, provisionedBy([provisionRun('plan', 'provision-input.json', '', planned)], { 'provision-input.json': good })),
+    /provision-entities\.js was not run with --input <json> --apply/);
+  // An answer that says it was a dry run is no apply, whatever flags were recorded with it.
+  assertFail(grade(TICKET_CHOICES, provisionedBy([provisionRun('apply', 'provision-input.json', ' --apply', planned)], { 'provision-input.json': good })),
+    /provision-entities\.js was not run with --input <json> --apply/);
+  // A preview with another input file, then the apply: the apply's input decides — either way round.
+  const previewThenApply = [provisionRun('plan', 'preview-input.json', '', planned), provisionRun('apply', 'provision-input.json', ' --apply', applied)];
+  assertPass(grade(TICKET_CHOICES, provisionedBy(previewThenApply, { 'preview-input.json': labelValue, 'provision-input.json': good })));
+  assertFail(grade(TICKET_CHOICES, provisionedBy(previewThenApply, { 'preview-input.json': good, 'provision-input.json': labelValue })),
+    /provision-entities\.js refuses the captured input: .*options\[0\]: 'label' is not an LCID/);
+  // The applying run's input was not kept: a current fixture fails, though the preview's was.
+  assertFail(grade(TICKET_CHOICES, provisionedBy(previewThenApply, { 'preview-input.json': good })), /provision-input\.json was not captured/);
+});
+
 // --- Eval 19 -----------------------------------------------------------------------------------
 
 const E19 = '19-add-weather-connector';
