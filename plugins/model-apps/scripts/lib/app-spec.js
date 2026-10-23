@@ -859,6 +859,45 @@ const ENTITY_KEY_HINTS = Object.assign(Object.create(null), {
   localizedLabels: ' — write the LCID map on the label FIELD itself (e.g. "displayName": { "1033": "Baseline", "3082": "Línea base" }), not in a separate per-table block; see references/app-spec-schema.md → "Localized labels"',
 });
 
+// The keys of a table's `primaryAttribute`: exactly what the build reads from it — the name column's schema name and label for the
+// table's create, its number format (autoNumberFormat), its level (required) and its length (maxLength) — and what a download writes
+// (primaryColumnOptionFields). The same rule as ENTITY_KEYS one level down: any other key used to validate clean and be ignored, so a
+// `maxlength`, an `autonumberFormat` or a `requiredLevel` made the table without the length, the format or the level its author wrote.
+// Frozen, in the order the messages list them.
+const PRIMARY_ATTRIBUTE_KEYS = Object.freeze(['schemaName', 'displayName', 'autoNumberFormat', 'required', 'maxLength']);
+
+// What to write instead, for a key a near spelling cannot explain. Prototype-less for the reason ENTITY_KEY_HINTS is: the lookup key
+// comes from the spec. `type` is the one most likely to look harmless — the name column has no type to choose, so `"AutoNumber"` there
+// made a plain text name.
+const PRIMARY_ATTRIBUTE_KEY_HINTS = Object.assign(Object.create(null), {
+  requiredLevel: ' — the level is \'required\': true, "recommended" or false',
+  type: " — the primary name column is always a single line of text: leave 'type' out (for an auto-numbered name, give 'autoNumberFormat')",
+});
+
+// The findings for the keys of one table's `primaryAttribute`, each with `label` (how the caller names the table) in front: one per
+// unknown key, naming the key it most likely meant (a written hint first, then the shared single-edit matcher, which also settles a
+// casing slip such as `maxlength`) and the allowed keys. Nothing for a value that is not a plain object — the caller's
+// `primaryAttribute.schemaName` check already reports that, and `Object.keys('x')` would turn it into a bogus "unknown key '0'".
+// The ONE rule behind both gates — validateAppSpec and the provision-entities input validator — so that neither accepts what the other
+// refuses. Enumerating is guarded because the object comes from the caller, and a validator RETURNS problems rather than throw them.
+function primaryAttributeKeyProblems(primaryAttribute, label) {
+  if (!primaryAttribute || typeof primaryAttribute !== 'object' || Array.isArray(primaryAttribute)) return [];
+  let keys;
+  try {
+    keys = Object.keys(primaryAttribute);
+  } catch {
+    return [`${label}: primaryAttribute could not be inspected — enumerating its keys threw`];
+  }
+  const hintFor = (key) => {
+    if (PRIMARY_ATTRIBUTE_KEY_HINTS[key]) return PRIMARY_ATTRIBUTE_KEY_HINTS[key];
+    const near = nearestName(key, PRIMARY_ATTRIBUTE_KEYS.map((k) => k.toLowerCase()));
+    const meant = near && PRIMARY_ATTRIBUTE_KEYS.find((k) => k.toLowerCase() === near);
+    return meant ? ` — did you mean '${meant}'?` : '';
+  };
+  return keys.filter((key) => !PRIMARY_ATTRIBUTE_KEYS.includes(key))
+    .map((key) => `${label}: unknown key '${key}' on primaryAttribute${hintFor(key)} (allowed: ${PRIMARY_ATTRIBUTE_KEYS.join(', ')})`);
+}
+
 // The most characters a table's primary name column may be asked for. A single line of text elsewhere in a table takes up
 // to 4,000, but the name column of a table does not: asked for more than 850 in a table create that also carried other columns, the
 // platform refuses it — HTTP 400, "The maximum length of Primary attribute 'new_name' is 4000. The maximum allowed limit
@@ -2507,6 +2546,11 @@ function validateAppSpec(spec, opts = {}) {
   // structural profile (teardown, preview) takes it as a warning in the same words, and so does read-only verification, which keeps the
   // deploy profile and passes `fieldOptionKeys: 'warn'`, as it passes `columnValues: 'warn'`. Nothing else about the entry moves.
   const fieldOptionKeyFindings = profile === 'structural' || opts.fieldOptionKeys === 'warn' ? warnings : errors;
+  // Where an unknown key of a table's `primaryAttribute` goes (primaryAttributeKeyProblems), by the same arrangement as fieldOptions keys
+  // above: the build ignores such a key, so every profile that builds or plans a build keeps it an error, while a release before the check
+  // accepted and built a spec carrying one — so the structural profile and read-only verification (`primaryAttributeKeys: 'warn'`) take it
+  // as a warning in the same words.
+  const primaryAttributeKeyFindings = profile === 'structural' || opts.primaryAttributeKeys === 'warn' ? warnings : errors;
   if (!VALIDATION_PROFILES.includes(profile)) {
     return { ok: false, errors: [`unknown validation profile '${profile}' (valid: ${VALIDATION_PROFILES.join(', ')})`], warnings };
   }
@@ -2684,6 +2728,7 @@ function validateAppSpec(spec, opts = {}) {
     if (!e.primaryAttribute || !e.primaryAttribute.schemaName) {
       errors.push(`entity ${e.schemaName}: primaryAttribute.schemaName required`);
     }
+    primaryAttributeKeyFindings.push(...primaryAttributeKeyProblems(e.primaryAttribute, `entity ${e.schemaName}`));
     // The length of the table's name column, asked for when the table is created (an existing table's column is left as it
     // is).
     if (e.primaryAttribute && typeof e.primaryAttribute === 'object') {
@@ -4597,6 +4642,8 @@ module.exports = {
   ENTITY_KEYS,
   invalidLanguageCodeMessage,
   ENTITY_KEY_HINTS,
+  PRIMARY_ATTRIBUTE_KEYS,
+  primaryAttributeKeyProblems,
   DIRECT_ENTRY_BEHAVIORS,
   COLUMN_VISUALIZATIONS,
   INTEGER_FORMATS,

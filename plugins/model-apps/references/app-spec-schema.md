@@ -499,7 +499,10 @@ required`.
   plus `statusReasons` / `alternateKeys` / `mainFormOrder`. Anything else — a misspelled `pluralname`, or a
   `languageCode` / `localizedLabels` asking for a per-table language or a parallel label block —
   fails validation naming the alternative, rather than validating clean and being dropped from the
-  build.
+  build. **`primaryAttribute` takes exactly `schemaName`, `displayName`, `autoNumberFormat`, `required`
+  and `maxLength`** — the same rule one level down: a `maxlength`, `autonumberFormat`, `requiredLevel` or
+  `type` there is refused, naming the key it most likely meant (the name column is always text, so it has
+  no `type`).
 - **Column `type`:** `Text · Memo · Choice · MultiChoice · Boolean · Money · DateTime ·
   Integer · BigInt · Decimal · Double · File · Image · AutoNumber · Customer`.
   **Lookups are NOT columns** — declare a `OneToMany` relationship instead.

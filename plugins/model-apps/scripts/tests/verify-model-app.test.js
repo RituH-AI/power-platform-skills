@@ -989,6 +989,22 @@ test('verify CLI still refuses such a spec for any other problem — before any 
   assert.deepStrictEqual(reads, [], 'nothing was read');
 });
 
+// --- a table whose primaryAttribute carries a key it does not take ---------------------------------------------------------------------
+// The build, the lint and the provisioning gate refuse a key a table's `primaryAttribute` does not take; a release before that check accepted
+// and ignored one. Verification passes primaryAttributeKeys: 'warn', as it passes fieldOptionKeys: 'warn': a warning that names the key and the
+// key it most likely meant, and the verdict is the deployment's.
+const PRIMARY_ATTRIBUTE_TYPO = "entity new_ticket: unknown key 'maxlength' on primaryAttribute — did you mean 'maxLength'? (allowed: schemaName, displayName, autoNumberFormat, required, maxLength)";
+
+test('verify CLI still verifies the deployment of a table whose primaryAttribute carries a key it does not take — and warns, naming the key', async () => {
+  const { reads, emitted, stderr } = await verifyOlderSpec(appSpec({ columns: [column({ type: 'Text' })], primaryAttribute: nameColumn({ maxlength: 200 }) }));
+  const result = JSON.parse(JSON.stringify(emitted.payload));
+  assert.strictEqual(emitted.ok, true, JSON.stringify(result));
+  assert.ok(result.total > 0 && result.present === result.total, `the deployment was checked: ${JSON.stringify(result)}`);
+  assert.ok(reads.includes('columns new_ticket'), `the deployed columns were read: ${JSON.stringify(reads)}`);
+  assert.ok(stderr.includes(`WARNING: ${PRIMARY_ATTRIBUTE_TYPO}\n`), stderr);
+  assert.deepStrictEqual(result.warnings, [PRIMARY_ATTRIBUTE_TYPO]);
+});
+
 // --- the result JSON carries what stderr warns -----------------------------------------------------------------------------------------
 // A person reads the `WARNING:` lines verify prints, but a caller that reads only the JSON result — a skill, a pipeline — lost them. The result's optional
 // `warnings` array holds the same messages, without the prefix and in the order they were printed, and is left out when there is none, as `unverified` is.

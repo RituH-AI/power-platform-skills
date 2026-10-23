@@ -156,6 +156,28 @@ test('such a spec is still refused before any teardown for any other problem, an
   assert.strictEqual(sdk.calls.length, 0, 'no SDK calls on a bad spec');
 });
 
+// A key a table's `primaryAttribute` does not take is refused the same way, and an earlier release accepted and ignored it just the
+// same: under the structural profile it is a warning, so such an app is still torn down, behind the same authorization.
+const PRIMARY_ATTRIBUTE_TYPO = "entity new_ticket: unknown key 'maxlength' on primaryAttribute — did you mean 'maxLength'? (allowed: schemaName, displayName, autoNumberFormat, required, maxLength)";
+function deskWithPrimaryAttributeTypo() {
+  const spec = JSON.parse(JSON.stringify(desk));
+  spec.entities.find((e) => e.schemaName === 'new_ticket').primaryAttribute.maxlength = 200;
+  return spec;
+}
+
+test('a spec whose primaryAttribute carries a key it does not take is still torn down: the dry run lists the same plan, and apply deletes', async () => {
+  const structural = validateAppSpec(deskWithPrimaryAttributeTypo(), { profile: 'structural' });
+  assert.deepStrictEqual([structural.ok, structural.errors, structural.warnings], [true, [], [PRIMARY_ATTRIBUTE_TYPO]], 'the finding is a warning there');
+  const r = await teardownModelApp(deskWithPrimaryAttributeTypo(), { apply: false }, { sdk: { queryRecords: async () => [] } });
+  assert.strictEqual(r.ok, true, JSON.stringify(r.errors));
+  const plain = await teardownModelApp(desk, { apply: false }, { sdk: { queryRecords: async () => [] } });
+  assert.deepStrictEqual(r.plan, plain.plan, 'the plan of the same spec without the key');
+  const sdk = presentSdk();
+  const applied = await teardownModelApp(deskWithPrimaryAttributeTypo(), { apply: true, allowDestructive: true }, { sdk });
+  assert.strictEqual(applied.ok, true, JSON.stringify(applied.errors));
+  assert.ok(sdk.calls.some((c) => c.method === 'deleteAppCascade'), 'app deleted');
+});
+
 // REVERSED by #587 item 5, deliberately. This test used to assert that teardown CONTINUES after a
 // failed app delete ("later steps still run after the app refusal"), on a best-effort rationale:
 // one failure should not strand the rest. Deep lifecycle testing showed that is the wrong rule for

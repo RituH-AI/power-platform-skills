@@ -645,7 +645,9 @@ async function main() {
   // `fieldOptionKeys: 'warn'` is the same arrangement for a key a form's `fieldOptions` entry does not take: the build refuses one, because it
   // would drop it and never apply the option, but a release before that check accepted it and built the form without the option — and
   // verification only reads that deployment. Every other finding about the entry stays an error.
-  const v = validateAppSpec(spec, { profile: 'deploy', relationshipCollisions: 'warn', columnValues: 'warn', fieldOptionKeys: 'warn' });
+  // `primaryAttributeKeys: 'warn'` is the same again for a key a table's `primaryAttribute` does not take: an earlier release accepted and
+  // ignored it, and the table was built without it.
+  const v = validateAppSpec(spec, { profile: 'deploy', relationshipCollisions: 'warn', columnValues: 'warn', fieldOptionKeys: 'warn', primaryAttributeKeys: 'warn' });
   // A warning is printed for a person and kept for the result JSON in one step, so the two cannot differ: a caller that reads only the JSON must not
   // lose what stderr says. The spec's are found before it is judged, so a spec that is refused reports the warnings it also has.
   const warnings = [];

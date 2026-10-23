@@ -1940,10 +1940,10 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   dropped and counted in `droppedSubareas`.
 - **`scripts/verify-model-app.js` → `scripts/lib/verify-spec.js`** — read-only reconcile of the App Spec
   against what actually deployed; exits non-zero and lists anything missing, catching silent partial
-  builds. It validates the spec first under the `deploy` profile, with three compatibility downgrades
-  (`relationshipCollisions: 'warn'`, `columnValues: 'warn'` and `fieldOptionKeys: 'warn'`): a spec an earlier release accepted and built — a 1:N and an N:N
+  builds. It validates the spec first under the `deploy` profile, with four compatibility downgrades
+  (`relationshipCollisions: 'warn'`, `columnValues: 'warn'`, `fieldOptionKeys: 'warn'` and `primaryAttributeKeys: 'warn'`): a spec an earlier release accepted and built — a 1:N and an N:N
   that share a schema name, an AutoNumber column with no format, a `required` that is not `true`, `false` or `"recommended"`, a key a form's
-  `fieldOptions` entry does not take — is verified, with a warning that names the fix, and is never refused before anything is read (the
+  `fieldOptions` entry does not take, a key a table's `primaryAttribute` does not take — is verified, with a warning that names the fix, and is never refused before anything is read (the
   build, the lint and the provisioning gate keep these as errors). **Every `WARNING:` line it prints on stderr — those findings, the spec's other warnings, and a page
   workspace it could not remove — is also in the result JSON's optional `warnings` array** (the same messages, without the prefix, in the order
   printed; left out when there is none, as `unverified` is), so a caller that reads only the JSON loses none of them. It is there on a failed
@@ -2507,8 +2507,13 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
     characters long), since the re-run that follows treats the table as an existing one — except for an auto-numbered
     name column, which keeps its length, and for 850, which the column comes out as either way. The
     build reads only `schemaName`, `displayName`, `autoNumberFormat`, `required` and `maxLength` from
-    `primaryAttribute`; any other key inside it is still accepted and ignored (unlike the table level, it has
-    no key allow-list).
+    `primaryAttribute`, and those are the only keys it takes (`PRIMARY_ATTRIBUTE_KEYS`, `primaryAttributeKeyProblems` in
+    `lib/app-spec.js`): any other key (`maxlength`, `autonumberFormat`, `requiredLevel`, `type`) used to be accepted and ignored,
+    so the table was made without what it asked, and is now refused, as an unknown table key is — naming the key, the key it most
+    likely meant and the allowed keys — by the build, the plan, the lint and the provision-entities gate (`lib/provision-input.js`,
+    the one rule). Like an unknown `fieldOptions` key, it is a warning in the same words for the structural profile (teardown,
+    preview) and for read-only verification (`primaryAttributeKeys: 'warn'`), which must still read a spec an earlier release
+    built. Pinned by `primary-attribute-keys.test.js`.
   - **Primary name column requirement level.** A `required` on `primaryAttribute` (`true` → `ApplicationRequired`, `"recommended"`
     → `Recommended`, `false` → `None`; an omitted one asks nothing) is sent in the table's create as the SDK's
     `createTable({ primaryColumnRequired })`. MEASURED on Dataverse 9.2.26101: an auto-numbered name column keeps the level the
