@@ -1,5 +1,6 @@
 'use strict';
 const { blankNonCodePreservingTemplateExpressions, isTrivia, isLineTerminator } = require('./source-literals.js');
+const { typescriptViews } = require('./typescript-views.js');
 
 // Pure STRUCTURAL resolver for generative-page cross-page navigation. Authors emit a link as a stable
 // symbolic token — pageId: "PAGEREF_<key>" — because the real GenPageId is minted by the server at
@@ -683,11 +684,24 @@ function tokenRange(tokens, from, to) {
 // the lexer takes the regex reading, and where that is wrong it blanks code up to the next `/` and reads on in the wrong state. The same
 // holds for every guess the lexer makes, and nothing short of a parser can tell which was wrong, so nothing at or after the earliest is
 // trusted: pageRefTokens marks every token there, strayPageRefs reports each, and no consumer rewrites a call that reaches it.
+// So where the lexer guessed, the parser is asked (typescript-views.js): the TypeScript compiler the pages are compiled with, which settles every guess. Where it
+// parses the page with no diagnostic, the mask is the one built from its parse — the lexer's own format, character for character (a test holds the two equal on
+// every page the lexer reads with no guess) — and nothing in the page is a guess any more: there is no frontier. Where it reports a diagnostic, the lexer's mask and
+// frontier stand. A JSX attribute string after trivia (`jsx-attribute`) is the one guess the parser does not settle: TypeScript reads it with escapes and other
+// compilers without, so they end it at different quotes, and a page with one keeps its frontier.
 function lexNavigation(src) {
   let frontier = null;
+  let jsxAttribute = false;
   const mask = blankNonCodePreservingTemplateExpressions(src, {
-    onAmbiguity: (at, kind) => { if (!frontier || at < frontier.at) frontier = { at, kind }; },
+    onAmbiguity: (at, kind) => {
+      if (kind === 'jsx-attribute') jsxAttribute = true;
+      if (!frontier || at < frontier.at) frontier = { at, kind };
+    },
   });
+  if (frontier !== null && !jsxAttribute) {
+    const views = typescriptViews(src);
+    if (views !== null) return { mask: views.keep, tokens: pageRefTokens(src, null), frontier: null };
+  }
   return { mask, tokens: pageRefTokens(src, frontier), frontier };
 }
 

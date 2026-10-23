@@ -1101,6 +1101,10 @@ const { enrichesDefaultViews } = require('../lib/sdk-build.js');
 const { appUniqueName } = require('../lib/sdk-build.js');
 const { resolvePageRefs, reverseResolveNavIds } = require('../lib/pageref-resolver.js');
 const { OBJECT_DIVISION_PAGE, LONG_KEY, lookBehindPage } = require('./helpers/misread-page.js');
+// What a guess costs a page where the TypeScript parser does not settle it (lib/typescript-views.js): these tests read the page with the lexer alone.
+// parser-check.test.js holds what the parser settles.
+const { setParserCheck } = require('../lib/typescript-views.js');
+const lexerAlone = (t) => { setParserCheck(false); t.after(() => setParserCheck(true)); };
 
 test('runDownload translates a fail-closed app read into a graceful error, not a raw SDK throw', async () => {
   // An unresolved or shared sitemap is not a partial download: none of its navigation can be trusted
@@ -1361,7 +1365,8 @@ test('download turns back a double-quoted id only, leaves any other as the id, a
 // The id of a call the lexer reads by guess is left alone, whatever its quotes: the corruption was a single-quoted id inside a
 // double-quoted string, which the lexer read as code after a misread, and which was rewritten to "PAGEREF_detail" — quotes ending the string.
 // The call after it is hidden by the same misread, and its id stays too: each is reported.
-test('download leaves an id after a place the lexer reads by guess, and says where that is', async () => {
+test('download leaves an id after a place the lexer reads by guess, and says where that is', async (t) => {
+  lexerAlone(t);
   const deployed = (id) => [
     'export default function Overview() {',
     `  navigateTo({pageType:"generative",pageId:"${id}"});`,
@@ -1389,7 +1394,8 @@ test('download leaves an id after a place the lexer reads by guess, and says whe
 
 // A call the lexer hid keeps its id, and no call it recognised holds it. The ids a download leaves are found by reading the result as text,
 // so the call is reported, and the warning fires: before, `left` was empty and nothing was said.
-test('download reports the id in a call the lexer hid, though no call it recognised holds it', async () => {
+test('download reports the id in a call the lexer hid, though no call it recognised holds it', async (t) => {
+  lexerAlone(t);
   const run = await downloadOverview((id) => OBJECT_DIVISION_PAGE.replaceAll('"PAGEREF_detail"', `"${id}"`));
   try {
     assert.ok(run.downloaded.ok, JSON.stringify(run.downloaded));
@@ -1398,6 +1404,24 @@ test('download reports the id in a call the lexer hid, though no call it recogni
     assert.deepStrictEqual(run.downloaded.navIdsLeft.map((l) => [l.page, l.id, l.line, l.why, l.frontier.kind, l.frontier.line]), [['Overview', run.detailId, 5, 'frontier', 'brace', 4]]);
     assert.match(run.warned, /WARNING: 1 page id\(s\) of this app remain in the downloaded page source instead of PAGEREF_ tokens \(page "Overview" line 5, column \d+: after the "brace" ambiguity at line 4, column \d+\)/);
   } finally { run.cleanup(); }
+});
+
+// The same pages, read as the TypeScript parser reads them where the lexer guessed (lib/typescript-views.js): every call is seen, so every id in one is a token
+// again, and the page of twenty calls in an `if` head — whose tokens the lexer alone would read past its look-behind — is written with its tokens, and nothing is left.
+test('download turns the ids of a page the lexer misreads back into tokens, read as TypeScript parses it', async () => {
+  const run = await downloadOverview((id) => OBJECT_DIVISION_PAGE.replaceAll('"PAGEREF_detail"', `"${id}"`));
+  try {
+    assert.ok(run.downloaded.ok, JSON.stringify(run.downloaded));
+    assert.strictEqual(run.code, OBJECT_DIVISION_PAGE);
+    assert.ok(!('navIdsLeft' in run.downloaded), 'nothing left, nothing to report');
+  } finally { run.cleanup(); }
+  const deployed = (id) => `${lookBehindPage(id, 20)}export default function Overview() { return null; }\n`;
+  const long = await downloadOverview(deployed, LONG_KEY);
+  try {
+    assert.ok(long.downloaded.ok, JSON.stringify(long.downloaded));
+    assert.strictEqual(long.code, deployed(long.detailId).replaceAll(long.detailId, `PAGEREF_${LONG_KEY}`));
+    assert.ok(!('navIdsLeft' in long.downloaded), 'nothing left, nothing to report');
+  } finally { long.cleanup(); }
 });
 
 test('download reports an id that stays as data, with its place in the page it is written to, and says it can stay', async () => {
@@ -1417,7 +1441,8 @@ test('download reports an id that stays as data, with its place in the page it i
 // the lexer's 2,000-character look-behind with ids, outside it with tokens. Written as tokens the page would have a `paren` ambiguity before the
 // call after the statement, and the build would refuse it, with nothing said at the download. So the download writes none: the page is as it was
 // deployed, every id is reported with the reason and the ambiguity, and the warning fires.
-test('download keeps every id of a page whose tokens the build would refuse, and says why', async () => {
+test('download keeps every id of a page whose tokens the build would refuse, and says why', async (t) => {
+  lexerAlone(t);
   const deployed = (id) => `${lookBehindPage(id, 20)}export default function Overview() { return null; }\n`;
   const run = await downloadOverview(deployed, LONG_KEY);
   try {

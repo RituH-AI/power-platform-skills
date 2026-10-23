@@ -12,6 +12,9 @@ const { execFileSync, spawnSync } = require('node:child_process');
 const { blankLiterals, blankNonCodePreservingTemplateExpressions, commentRanges, endsMidStatement, findElisionMarker, hasDefaultExport, hasUnbalancedBrackets, scanTemplateExpressionEnd, expressionPosition, opensTypeParameters, elementFailsAt, elementChildren, isTrivia, isSingleLineTrivia, trimTrivia, TRIVIA_CLASS, WS, AMBIGUITY_KINDS, ANGLE_AFTER, ANGLE_AFTER_LINE_BREAK, NO_MEMBER_BEFORE, RESERVED_WORDS, TYPE_PARAMETER_MODIFIERS, MEMBER_NAME_OPERATORS } = require('../lib/source-literals.js');
 const { navReferencedKeys, strayPageRefs, resolvePageRefs } = require('../lib/pageref-resolver.js');
 const { pageStructureProblems } = require('../lib/page-structure.js');
+// These tests hold the lexer to its own rules — what it reads for certain, what it reports as a guess, and what a guess costs a page — so they read pages with
+// the lexer alone. Where the lexer guesses, the gates ask the TypeScript parser (typescript-views.js), which parser-check.test.js tests.
+require('../lib/typescript-views.js').setParserCheck(false);
 
 const { loadTypescriptOracle, loadBabelOracle } = require('./helpers/typescript-oracle.js');
 const { FRAMES, tokenVocabulary, programsFor, cleanSourceFile, readingAt, isElement, SIGNATURE_ENDINGS, HIDING_ENDINGS, CERTAIN_ELEMENTS, GUESSED_ELEMENTS, HIDDEN_TEXT_ELEMENTS, UNREAD_LIST_ELEMENTS, MEMBER_ELEMENT_FRAMES, NO_MEMBER_ELEMENT_FRAMES, signaturePages, elementPages, SIGNATURE_FRAMES, DECOYS, signaturePage, EXACT_DEFAULTS, UNREAD_DEFAULTS, UNTERMINATED_DEFAULTS, PROSE_SHAPED_LINES, PROSE_OPEN_LINES, PROSE_HIDING_ELEMENTS, proseElements, PARAMETER_MODIFIERS } = require('./helpers/angle-frames.js');

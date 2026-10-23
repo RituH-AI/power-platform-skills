@@ -4077,8 +4077,10 @@ const EXPORTED_MEMBER_CHAIN = new RegExp(String.raw`^([\p{ID_Start}$_][\p{ID_Con
 const PARENTHESISED_FUNCTION_OR_CLASS = new RegExp(String.raw`^\(${WS}*(?:async${WS}+)?(?:function|class)\b`);
 const RETURN_TYPE_COLON = new RegExp(String.raw`^${WS}*:`);
 const DANGLING_CAST = new RegExp(String.raw`(?<![\p{ID_Continue}$])(?:as|satisfies|keyof)${WS}*$`, 'u');
-function hasDefaultExport(code) {
-  const bare = blankLiterals(code);
+function hasDefaultExport(code, views = null) {
+  // `views`, when given, are a parser's views of the page in this file's format (typescript-views.js in model-apps: page-structure.js passes them where the lexer
+  // guessed): its literal view stands for blankLiterals(code).
+  const bare = views && typeof views.literal === 'string' ? views.literal : blankLiterals(code);
   if (NAMED_DEFAULT_EXPORT.test(bare)) return true;
   // Any complete one will do: TypeScript overloads declare the signature(s) before the body —
   //   export default function f(x: string): string;
@@ -5043,8 +5045,8 @@ function hasDeclarationBody(rest, from) {
  * and `/\(/` do not count). `<` / `>` are never counted: JSX and TypeScript generics make them
  * legitimately unbalanced.
  */
-function hasUnbalancedBrackets(code) {
-  const bare = blankLiterals(code);
+function hasUnbalancedBrackets(code, views = null) {
+  const bare = views && typeof views.literal === 'string' ? views.literal : blankLiterals(code);
   const stack = [];
   const pairs = { ')': '(', ']': '[', '}': '{' };
   for (const ch of bare) {
@@ -5068,7 +5070,12 @@ const DANGLING_TAIL = new RegExp(String.raw`(?:=>|\?\.|[.,?:=&|^~*%<]|(?<!\+)\+|
  *   export default () => <div>Loading        const note = `unfinished        const total = count *
  * so hasUnbalancedBrackets cannot see these cuts. A complete module ends in plain code.
  */
-function endsMidStatement(code) {
+function endsMidStatement(code, views = null) {
+  // A parser's views (see hasDefaultExport) come from a parse with no diagnostic, which stops inside no string, template, comment or JSX element; what is left to
+  // ask is the token the file ends on, read from its literal view and the ends of its regexes and JSX tags.
+  if (views && typeof views.literal === 'string') {
+    return DANGLING_TAIL.test(views.literal) || hasDanglingFinalOperator(views.literal.split(''), views.regexEnds, views.jsxTagEnds);
+  }
   const src = String(code || '');
   const out = src.split('');
   const regexEnds = new Set();
@@ -5124,9 +5131,11 @@ const BARE_ELLIPSIS_LINE = new RegExp(String.raw`^${WS_SINGLE_LINE}*(\.\.\.|…)
  * @param {string} code
  * @returns {string|null}
  */
-function findElisionMarker(code) {
+function findElisionMarker(code, views = null) {
   const src = String(code || '');
-  for (const { text } of commentRanges(src)) {
+  // A parser's views (see hasDefaultExport) carry the page's comments and its executable view.
+  const parsed = views && typeof views.keep === 'string' && Array.isArray(views.comments);
+  for (const { text } of parsed ? views.comments : commentRanges(src)) {
     // The comment without its delimiters, or a JSDoc block's leading `*` on each line — so
     //   /**
     //    * TODO implement save
@@ -5150,7 +5159,7 @@ function findElisionMarker(code) {
   // always fails closed as a placeholder. The text alone cannot reliably distinguish every legal
   // multiline spread/rest from an elided block without a full parser, so generated code must write
   // the spread and operand together: `...rows`, not `...` followed by `rows` on the next line.
-  if (bareEllipsisElidesCode(blankNonCodePreservingTemplateExpressions(src))) return 'a bare `...` line standing in for code';
+  if (bareEllipsisElidesCode(parsed ? views.keep : blankNonCodePreservingTemplateExpressions(src))) return 'a bare `...` line standing in for code';
   return null;
 }
 

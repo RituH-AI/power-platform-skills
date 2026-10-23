@@ -7,6 +7,10 @@ const { SDK_ROLE_MARKER } = require('../lib/app-spec.js');
 const { parseTranslationWorkbook, readTranslationLabels } = require('../lib/translation-labels.js');
 const { workbookXml, exportZip, exportAnswer } = require('./helpers/translation-export.js');
 const { OBJECT_DIVISION_PAGE, MISREAD_PAGES, TEMPLATE_LINE_PAGE, JSX_TEXT_PAGE, ELEMENT_AFTER_OPERATOR_PAGES, ELEMENT_LOOKALIKE_PAGES, ELEMENT_PAGE_TOKEN_LINE, FUNCTION_TYPE_PAGES } = require('./helpers/misread-page.js');
+// What a guess costs a page where the TypeScript parser does not settle it (lib/typescript-views.js): these tests read the page with the lexer alone.
+// parser-check.test.js holds what the parser settles.
+const { setParserCheck } = require('../lib/typescript-views.js');
+const lexerAlone = (t) => { setParserCheck(false); t.after(() => setParserCheck(true)); };
 
 const idFor = (set) => ({ savedquery: 'savedqueryid', savedqueryvisualization: 'savedqueryvisualizationid', systemform: 'formid' }[set] || 'id');
 
@@ -493,7 +497,8 @@ test('verifySpec pages: an id in a call the lexer reads only by guess does not p
 
 // A PAGEREF_ token the lexer hides is still a token that shipped: this page was resolved the way a build resolved it, and its second call
 // sits behind a false comment, so the oracle finds no target for it and the old check passed.
-test('verifySpec pages: a PAGEREF_ token the lexer hid in deployed code FAILS the no-pageref check, naming where', async () => {
+test('verifySpec pages: a PAGEREF_ token the lexer hid in deployed code FAILS the no-pageref check, naming where', async (t) => {
+  lexerAlone(t);
   const deployed = OBJECT_DIVISION_PAGE.replace('"PAGEREF_detail"', `"${GP_DETAIL}"`);
   assert.strictEqual(deployed.split('PAGEREF_detail').length - 1, 1, 'one call resolved, one left');
   const read = pageRead({ sitemapIds: [GP_OVERVIEW, GP_DETAIL], existenceIds: [GP_OVERVIEW, GP_DETAIL], manifest: BOTH_MANIFEST, sitemap: SITEMAP_OK, code: { [GP_OVERVIEW]: deployed } });
@@ -513,6 +518,19 @@ test('verifySpec pages: a PAGEREF_ token the lexer hid in deployed code FAILS th
   const clean = await withComment('// the link was resolved at deploy');
   assert.ok(clean.checks.some((c) => c.kind === 'page-no-pageref' && c.present));
   assert.strictEqual(clean.ok, true, JSON.stringify(clean.missing));
+});
+
+// The same page, read as the TypeScript parser reads it where the lexer guessed (lib/typescript-views.js): the second call is seen, so its token is the token of a call
+// that the resolve step left — with no guess to name — and the check still fails.
+test('verifySpec pages: a PAGEREF_ token left in a call the lexer misreads FAILS the no-pageref check, read as TypeScript parses the page', async () => {
+  const deployed = OBJECT_DIVISION_PAGE.replace('"PAGEREF_detail"', `"${GP_DETAIL}"`);
+  const read = pageRead({ sitemapIds: [GP_OVERVIEW, GP_DETAIL], existenceIds: [GP_OVERVIEW, GP_DETAIL], manifest: BOTH_MANIFEST, sitemap: SITEMAP_OK, code: { [GP_OVERVIEW]: deployed } });
+  const r = await verifySpec(pageSpec(), read);
+  const check = r.checks.find((c) => c.kind === 'page-no-pageref');
+  assert.ok(check && !check.present);
+  assert.doesNotMatch(check.detail, /ambiguity/);
+  assert.ok(r.checks.some((c) => c.kind === 'page-nav' && c.present), 'the resolved call proves the edge');
+  assert.strictEqual(r.ok, false);
 });
 
 // A call is trusted only if all of it lies before the first place the lexer guessed. The members of an options object after a guess are

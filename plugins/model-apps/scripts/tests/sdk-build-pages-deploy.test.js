@@ -24,6 +24,10 @@ const { readPageOwnership, readPendingCreations, recordPagePending, recordPageCr
 const { currentReadSdk } = require('./helpers/app-membership-sdk.js');
 const { OBJECT_DIVISION_PAGE, MISREAD_PAGES, HIDDEN_CALL_PAGE, PREFIX_INCREMENT_PAGE, TEMPLATE_LINE_PAGE, JSX_TEXT_PAGE, ELEMENT_AFTER_OPERATOR_PAGES, ELEMENT_LOOKALIKE_PAGES, ELEMENT_PAGE_TOKEN_LINE, FUNCTION_TYPE_PAGES } = require('./helpers/misread-page.js');
 const { withPageType, PAGE_TYPE } = require('./helpers/page-component-type.js');
+// What a guess costs a page where the TypeScript parser does not settle it (lib/typescript-views.js): these tests read the page with the lexer alone.
+// parser-check.test.js holds what the parser settles.
+const { setParserCheck } = require('../lib/typescript-views.js');
+const lexerAlone = (t) => { setParserCheck(false); t.after(() => setParserCheck(true)); };
 
 // Real GUIDs for the three-authority sitemap mock. SELF_* resolve THIS app's appmodule + sitemap so
 // fetchSitemap(appUnique) returns opts.liveSitemapXml; a page-less EMPTY sitemap is the default membership.
@@ -291,7 +295,8 @@ test('deploy: a PAGEREF_ token no navigation rewrite resolves HALTs before any u
 // A page whose `/` after an object literal hides a call: JavaScript makes both navigations, but the lexer reads the `/` after the object literal on line 4 as a regex and
 // the `/*` in `/\/*$/` as a comment over the second call, so the build resolved the first and shipped "PAGEREF_detail" in the second —
 // with promotion, parity and the residue check all passing. It halts before any write, naming the call and the `/`.
-test('deploy: a page whose "/" after an object literal hides a navigation call HALTs before any upload, naming the call and the "/"', async () => {
+test('deploy: a page whose "/" after an object literal hides a navigation call HALTs before any upload, naming the call and the "/"', async (t) => {
+  lexerAlone(t);
   const { appDir, spec } = makeTwoPageApp();
   try {
     fs.writeFileSync(path.join(appDir, 'overview.tsx'), OBJECT_DIVISION_PAGE, 'utf8');
@@ -324,7 +329,8 @@ test('deploy: a page whose "/" after an object literal hides a navigation call H
 // Every way of making the lexer hide a navigation call, or read text as one, is a page the build refuses before any write
 // (tests/helpers/misread-page.js). From the first spot the lexer reads by guess, every PAGEREF_ token is stray and none is rewritten, so
 // the page is not half resolved. The message names the page, each token's line and column, and the kind and position of the guess.
-test('deploy: each misread page HALTs before any upload, naming the token and the guess', async () => {
+test('deploy: each misread page HALTs before any upload, naming the token and the guess', async (t) => {
+  lexerAlone(t);
   for (const [name, { kind, frontier, code, reaching }] of Object.entries(MISREAD_PAGES)) {
     const { appDir, spec } = makeTwoPageApp();
     try {
@@ -351,11 +357,30 @@ test('deploy: each misread page HALTs before any upload, naming the token and th
   }
 });
 
+// The same pages, read as the TypeScript parser reads them where the lexer guessed (lib/typescript-views.js): the `/` after the object literal is the division it is,
+// and so is `of/2`, so every call is seen, resolved and deployed — where the lexer alone halts the build.
+test('deploy: a page the lexer misreads is read as TypeScript parses it, and every call in it deploys resolved', async () => {
+  for (const [what, code, calls] of [['the object-division page', OBJECT_DIVISION_PAGE, 2], ['the page whose call the lexer hid', HIDDEN_CALL_PAGE.code, 1]]) {
+    const { appDir, spec } = makeTwoPageApp();
+    try {
+      fs.writeFileSync(path.join(appDir, 'overview.tsx'), code, 'utf8');
+      const { sdk } = mockSdk();
+      const genpageCli = mockGenpageCli();
+      await runSdkBuild(spec, { sdk, apply: true, env: 'https://x', appDir, genpageCli, phases: PHASES });
+      const overview = genpageCli.uploads.find((u) => u.name === 'Overview');
+      assert.strictEqual(overview.content.split(`"${DETAIL_ID}"`).length - 1, calls, `${what}: every call is resolved`);
+      assert.ok(!/PAGEREF_/.test(overview.content), what);
+      assert.strictEqual(fs.readFileSync(path.join(appDir, 'overview.tsx'), 'utf8'), code, `${what}: the canonical source is untouched`);
+    } finally { fs.rmSync(appDir, { recursive: true, force: true }); }
+  }
+});
+
 // A declared call the lexer cannot see is "declared-but-absent", and that alone sends the author looking for a call that is plainly there.
 // The page of a live run: `of/2` is read as the start of a regex whose `/*` opens a comment over the call. The halt names the guess that
 // hides it — which it is, where, what it could be, and what to change — and nothing is written. A page with no guess, and no call, is
 // told only what is missing.
-test('deploy: a declared call the lexer cannot see HALTs on parity, naming the guess that hides it', async () => {
+test('deploy: a declared call the lexer cannot see HALTs on parity, naming the guess that hides it', async (t) => {
+  lexerAlone(t);
   const { code, frontier } = HIDDEN_CALL_PAGE;
   const before = code.slice(0, frontier(code)).split('\n');
   const { appDir, spec } = makeTwoPageApp();

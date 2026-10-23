@@ -14,6 +14,9 @@ const { RESOLVED_PAGES, REFUSED_PAGES, HIDDEN_CLOSING_TAG_PAGES, TYPE_HEAD_PAGES
 const { OBJECT_DIVISION_PAGE, MISREAD_PAGES, HIDDEN_CALL_PAGE, PREFIX_INCREMENT_PAGE, TEMPLATE_LINE_PAGE, JSX_TEXT_PAGE, ELEMENT_AFTER_OPERATOR_PAGES, ELEMENT_LOOKALIKE_PAGES, ELEMENT_PAGE_TOKEN_LINE, FUNCTION_TYPE_PAGES, FUNCTION_TYPE_CALL_LINE, LONG_KEY, lookBehindPage, runnable } = require('./helpers/misread-page.js');
 const { AMBIGUITY_KINDS } = require('../lib/source-literals.js');
 const { pageStructureProblems } = require('../lib/page-structure.js');
+// These tests hold the lexer to its own rules — what it reads for certain, what it reports as a guess, and what a guess costs a page — so they read pages with
+// the lexer alone. Where the lexer guesses, the gates ask the TypeScript parser (typescript-views.js), which parser-check.test.js tests.
+require('../lib/typescript-views.js').setParserCheck(false);
 const {
   extractNavTargets,
   navReferencedKeys,

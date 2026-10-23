@@ -2831,6 +2831,7 @@ scripts/
     private-folder.js          ← a folder, and a file in it, that only the current user can use — the copy of a settings file that `pac solution import` is given: POSIX modes 0700 and 0600, set and read back; Windows an access list with the current user's SID as its ONE entry (`icacls /reset`, `/inheritance:r`, `/grant:r *<SID>:(OI)(CI)F`, read back as SDDL through `icacls /save`, the file's too before a byte is written; the SDDL aliases of the system accounts are compared as the SIDs they stand for, and `LA`/`LG` — the machine's own Administrator and Guest — only when the machine itself writes the user's SID that way, `spellingOf`), `whoami` and `icacls` looked up in the Windows folder's System32 alone through `process-runner.js`; whatever cannot be set or read back is an error with a `reason` (a tool, a step, a number — never a path or a value) and nothing is written
     exit-cleanup.js            ← a synchronous cleanup that runs if the process ends while a run's work is going — `process.exit`, an uncaught error, SIGINT, SIGTERM, SIGHUP, SIGBREAK — after which the process ends as it would have: BY the signal on POSIX (raised again once our listeners are off), with STATUS_CONTROL_C_EXIT (0xC000013A, 3221225786) on Windows, where a Ctrl+C is a console event and `process.kill` would end it with the status 1 of a failure; a program that has a handler of its own for the signal — one-shot and self-removing ones included, however they were put on the list — keeps the decision (ours is first in line, so that it sees them all, and stays first: a handler the program PREPENDS later is put behind it again before the call returns, `keepFirst`, which never puts back a cleanup that was released while it was being moved); a KILLED process runs nothing, which is its stated limit
     typescript-compiler.js     ← loads the vendored TypeScript 5.8.3 compiler (vendor/typescript/) for the SDK's page compile: lazily, once, only after its bytes match PROVENANCE.json
+    typescript-views.js        ← the parser check: where the lexer guessed, the lexer's views of a page built from that compiler's parse (no view where it reports a diagnostic), read by the navigation oracle and the structure gate — see "The parser check" below
     spec-lint.js / app-spec.js ← App Spec guardrail lint + validation
     lookup-labels.js           ← a lookup column's default label, environment-facing half: the parent table's label read, the old-default repair's column-label read (one per child table) (the pure rule is `lookupLabelFor`, app-spec.js); `lookup-cell-labels.js` repairs the form cell
     view-filter-labels.js      ← resolves a view filter's Choice labels against the environment's option metadata; the build's pre-flight (skipped for a spec with a localized label) and views-phase gate, the dry run, verify and lint all use it
@@ -3113,11 +3114,12 @@ or replacements still need fresh eligible discovery.
 ## TSX source lexer — known limits
 
 **`scripts/lib/source-literals.js` — known limits.** It is a hand-rolled TSX lexer, not a
-parser. The plugin does ship the TypeScript compiler (`scripts/vendor/typescript/`), but only the SDK's page
-compile loads it, and lazily: unpacking it takes ~15 ms and evaluating it ~200 ms, with ~20 MB of heap
+parser. The plugin does ship the TypeScript compiler (`scripts/vendor/typescript/`), and the SDK's page
+compile loads it, lazily: unpacking it takes ~15 ms and evaluating it ~200 ms, with ~20 MB of heap
 (`lib/typescript-compiler.js`) — more than a hook that runs after every code write (`hooks/validate-icon-imports.js`, a
-new process each time) or a gate that reads a page before it is deployed should pay, so those read source with
-this lexer. It tracks
+new process each time) or a gate that reads a page before it is deployed should pay on every page, so those read source with
+this lexer, and the navigation oracle and the structure gate ask the parser only about a page on which the lexer guessed (the parser
+check, under "Residual limits" below). It tracks
 code / line comment / block comment / string / template / regex / JSX tag / JSX text, and
 backs the page structural gate (`lib/page-structure.js`, shared by `promote-intent-pages.js` and
 `genpage-worker-output.js`) plus the eval's effect scoper. It also
@@ -3280,7 +3282,9 @@ rejected a complete page saved with CRLF endings.
   stray scan, promotion, the page build and the eval scorer, so nothing about comments is left for them to
   disagree about.
 - **The trust frontier.** The lexer has no parser, so some of what it decides is a guess: whether a `/` is a
-  regex or a division, whether a `<` opens an element, how a JSX tag with type arguments is scanned. Where a
+  regex or a division, whether a `<` opens an element, how a JSX tag with type arguments is scanned. (Where it guesses, the oracle asks the TypeScript
+  parser and, where that parses the page, reads it as the parser does, with no frontier — the parser check, under "Residual limits" below; what
+  follows is the frontier where the parser does not answer.) Where a
   guess is wrong it blanks real code or reads text as code, and from there on the mask is not what the page
   means. `blankNonCodePreservingTemplateExpressions(code, { onAmbiguity })` reports each such decision as data —
   `(at, kind)`, the offset of the `/`, `<` or construct — and the tokenization is **byte-identical** with or
@@ -3764,7 +3768,27 @@ corpus — keep it, and add to it rather than around it. The worker-output gate
 only) run the same kind of corpus: every committed page must pass them, because a false reject
 there throws away a good page or blocks a pattern the page builder was told to copy.
 
-Residual limits, accepted deliberately:
+Residual limits, accepted deliberately — **of the lexer alone**. Where the lexer guesses, the gates now ask the TypeScript parser, which settles
+every guess but one (the parser check, below), so what follows is what a page costs where the parser does not answer: a page TypeScript does not
+parse, a JSX attribute string after trivia, and the lexer's own tests, which run without the parser (`MODEL_APPS_LEXER_ALONE=1`, or
+`setParserCheck(false)` in `lib/typescript-views.js`).
+- **The parser check (`lib/typescript-views.js`).** Where the lexer reported a guess (`onAmbiguity`), the navigation oracle
+  (`pageref-resolver.js`, `lexNavigation`) and the structure gate (`page-structure.js`) ask the TypeScript compiler the pages are compiled with
+  (`lib/typescript-compiler.js`, 5.8.3, loaded lazily: ~200 ms and ~20 MB once per process, paid only by a page that hit a guess; the views of the last
+  few texts are kept, since a build reads one page several times). Where it parses the page with no diagnostic, the page is read from the views built
+  from its tokens — the lexer's own literal and executable views, character for character (strings, templates, regexes, JSX text and comments blanked
+  as the lexer blanks them, a template's substitutions code in the executable view with `;` for the `}` that closes one), with its comments and the ends
+  of its regexes and JSX tags — and nothing in the page is a guess any more: no frontier, no call refused for standing after one, and the structure
+  checks (`hasDefaultExport`, `hasUnbalancedBrackets`, `endsMidStatement`, `findElisionMarker`, the markdown fence) read the parser's views, which
+  they take as an optional argument. So `interface Api { <U>(x: U): U; }` no longer reads as a cut, a navigation call after an `angle`, `generic`,
+  `newline`, `operator`, `keyword`, `brace` or `paren` guess resolves, and so do JSX text with a `//` note and a later line that starts with a `/`, a
+  class head with a function expression or an object literal for its base, and type parameters on a method named by a keyword (`in<U>(y): void`,
+  `get<T>(…)`). Where the parser reports a diagnostic, the lexer's views and frontier stand, as before; and a page with a `jsx-attribute` guess keeps
+  its frontier, because that one is not TypeScript's to settle — Babel and esbuild end such a string at another quote. Off, the check only refuses
+  more. `parser-check.test.js` holds it: the views equal the lexer's on every page the lexer reads with no guess (the committed pages and every
+  generated valid page — over 40,000), the structure checks agree on them, every valid page TypeScript parses resolves its call with the data after
+  it untouched, the pages built to make the lexer misread make every call they made with its page id when run, and the cases where the parser does
+  not answer keep the lexer's reading.
 - **`<` disambiguation is TypeScript's own rule for `.tsx`, which is structural, not semantic.** Where an
   assignment expression starts, a `<` opens a generic arrow's type parameters only by the rule above (a `,`, an
   `=`, or `extends` and a token that is not `=`, `>` or `/`); anything else is an element — and after a unary or
