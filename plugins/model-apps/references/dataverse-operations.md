@@ -143,7 +143,10 @@ changed, and never as a partial file.
 | none, on an edit whose page already binds one | n/a | not passed | halt: no preserve evidence is no permission to delete the call |
 
 Removing every Custom API is a remove of each Custom API row: the built-in rows stay, byte for
-byte, and the file is never `[]` while one remains. Only the maker's clear choice — asked with two
+byte, and the file is never `[]` while one remains. With `custom-api` OFF no Custom API row is
+removed either: the builder keeps them, reports `Custom API removal not performed (custom-api
+disabled): <names>`, and the page's array stays as it is (no `--actions`) — a removal is never
+turned into a clear to get around the flag. Only the maker's clear choice — asked with two
 options and recorded right before the upload it covers as `Clear choice: Clear every action binding
 of page <page-id>, removing <names>` — empties the array; a yes to adding or keeping an operation
 never does.

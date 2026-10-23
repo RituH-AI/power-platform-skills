@@ -144,7 +144,7 @@ test('removing every Custom API keeps the built-in rows — `[]` only clears a p
   assert.ok(!/write `\[\]` and pass it to clear all `actionBindings`\./.test(skill), 'Phase 6: the unqualified [] clear is gone');
   has(skill, /removing every Custom API keeps them/);
   const builder = section(read('agents', 'genpage-customapi-builder.md'), '## Step 4');
-  has(builder, /\*\*Remove every Custom API:\*\* drop each Custom API row and keep every built-in row byte for byte/);
+  has(builder, /\*\*Remove every Custom API:\*\* with `custom-api` enabled, drop each Custom API row and keep every built-in row byte for byte/);
   has(builder, /`actions\.json` is `\[\]` only when no row of either kind remains/);
   has(squash(read('agents', 'genpage-edit-planner.md')), /Clearing the Custom APIs of a page that also binds a built-in operation removes each Custom API row and keeps the built-in calls and bindings/);
   has(squash(read('references', 'dataverse-operations.md')), /Removing every Custom API is a remove of each Custom API row: the built-in rows stay, byte for byte/);
@@ -238,4 +238,32 @@ test('a clear of a page that binds a built-in needs the maker\'s clear choice, r
   has(reference, /\| clear all \| after the maker's clear choice, which names the built-ins it removes \| `\[\]` \| delete every call \|/);
   has(reference, /recorded right before the upload it covers as `Clear choice: Clear every action binding of page <page-id>, removing <names>`/);
   has(section(read('skills', 'genpage', 'SKILL.md'), '### Phase 6: Deploy', '**Deploy through `scripts/genpage-upload.js`.**'), /only after the maker's clear choice naming each one \(edit-flow\.md, Edit Phase 6\)/);
+});
+
+// While `custom-api` is OFF the builder removes no Custom API row (it keeps them, as it keeps every Custom API binding then). Every recipe that
+// sends a removal through it must say what it will get back — the rows kept, the removal reported as not performed, nothing to upload when the
+// array is unchanged — and a removal is never turned into a clear to get around the flag. With the flag ON the rows go.
+test('with custom-api OFF a Custom API removal removes nothing — the builder keeps the rows and reports it, and every recipe says so; with it ON the rows go', () => {
+  const builder = read('agents', 'genpage-customapi-builder.md');
+  const off = section(builder, '**If `custom-api` prints `disabled`', 'Only when it prints `enabled`');
+  has(off, /A Custom API the intent asks to remove stays too — its table row and its `actions\.json` row — because the removal waits until the flag is on/);
+  has(off, /write `Custom API removal not performed \(custom-api disabled\): <names>` \(comma-separated\) into `workflow-log\.md` and return it/);
+  has(off, /never write `No custom API bindings\.` or `\[\]` in their place/);
+  const reconcile = section(builder, '## Step 4', '## Step 5');
+  has(reconcile, /\*\*Remove:\*\* drop the named binding\(s\) — a Custom API row only while `custom-api` is enabled; with it disabled the row stays and the removal is reported as not performed \(Step 1\)/);
+  has(reconcile, /With it disabled, keep every row — the Custom API table and rows too — and report the removal as not performed \(Step 1\); never turn it into a clear/);
+  has(section(builder, '## Step 5'), /the Custom API removals not performed because `custom-api` is disabled \(or "none"\)/);
+  const edit = read('skills', 'genpage', 'edit-flow.md');
+  const planning = section(edit, '## Edit Phase 3:', '## Edit Phase 4:');
+  has(planning, /With `custom-api` OFF the builder removes no Custom API row: it keeps them — table and rows — and reports `Custom API removal not performed \(custom-api disabled\): <names>`\. Relay that to the maker, keep those calls in the page/);
+  has(planning, /With `custom-api` OFF it keeps every row and reports the removal as not performed: relay that, and keep the Custom API table, rows and calls — never `No custom API bindings\.` or `\[\]` in their place, and never a clear to get around the flag/);
+  has(planning, /A clear is the maker's own request for an empty array, so no flag decides it/);
+  const deploy = section(edit, '## Edit Phase 6:', '## Edit Phase 7:');
+  has(deploy, /Include it only when that array differs from the page's current `actionBindings`: with `custom-api` OFF the builder removes no Custom API row, and an array it left unchanged is not uploaded — omit `--actions`/);
+  has(deploy, /with it OFF the builder kept every row, so omit `--actions` and relay the removal it did not perform/);
+  has(squash(read('references', 'dataverse-operations.md')), /With `custom-api` OFF no Custom API row is removed either: the builder keeps them, reports `Custom API removal not performed \(custom-api disabled\): <names>`, and the page's array stays as it is \(no `--actions`\)/);
+  has(squash(read('agents', 'genpage-edit-planner.md')), /With `custom-api` OFF the builder removes no Custom API row and reports the removal as not performed: keep those calls — they are still bound — and say in the plan that the removal waits for the flag/);
+  has(section(read('skills', 'genpage', 'SKILL.md'), '### Phase 6: Deploy', '**Deploy through `scripts/genpage-upload.js`.**'), /With `custom-api` OFF a Custom API removal removes nothing: the builder keeps the rows and says so, `--actions` is omitted while the array is unchanged, and a removal is never turned into a clear to get around the flag/);
+  // Planning describes the builder's OFF output as it is: no Custom API row, and the built-in rows a maker selected.
+  has(section(read('skills', 'genpage', 'SKILL.md'), '#### 1b.', '#### 1c.'), /writes `No custom API bindings\.` and no Custom API row when the gate is off or the page needs no Custom API \(`actions\.json` is then `\[\]`, unless built-in operation rows were selected — 1c\)/);
 });

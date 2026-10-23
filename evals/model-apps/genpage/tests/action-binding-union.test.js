@@ -413,3 +413,70 @@ test('clearing every binding of a page that binds WhoAmI needs the clear choice,
   const result = score(withUpdate(apiOnly, 'clear', { clear: true }, [], NO_CALLS));
   assert.equal(result.status, 'pass', result.reason);
 });
+
+// ── A Custom API removal while custom-api is OFF ─────────────────────────────────────────────────────────────────────────────────────
+// An edit of a downloaded page that binds the Custom API and WhoAmI; `remove` is what the maker asked to remove. With custom-api ON the builder drops
+// the Custom API row. With it OFF it removes no Custom API row (genpage-customapi-builder.md, Step 1): the row stays, the log says
+// `Custom API removal not performed (custom-api disabled): cnt_ApproveOrder`, and an array left unchanged is not uploaded (no --actions). A
+// built-in row named in the same removal still goes — no flag decides a built-in removal.
+const APP = '88888888-8888-4888-8888-888888888888';
+const DEFERRED = 'Custom API removal not performed (custom-api disabled): cnt_ApproveOrder';
+function removalEdit({ gate, remove = ['cnt_ApproveOrder'], rows, source, actions = true, log = '' }) {
+  const before = [API, WHO_AM_I];
+  const identity = JSON.stringify({ pageId: PAGE, appId: APP });
+  const env = 'https://contoso.crm.dynamics.com';
+  return {
+    contractVersion: 2,
+    files: [{ name: 'page.tsx', content: source }],
+    artifacts: {
+      'stages/page.tsx': source, 'actions.json': JSON.stringify(rows),
+      'before/config.json': JSON.stringify({ actionBindings: before }), 'after/config.json': JSON.stringify({ actionBindings: rows }),
+      'before/page.json': identity, 'after/page.json': identity,
+    },
+    genpagePlan: '## Custom API Bindings\nNo custom API bindings.\n',
+    workflowLog: `An edit that removes ${remove.join(' and ')} from a page that binds a Custom API and WhoAmI.${log ? `\n${log}` : ''}`,
+    manifest: {
+      customApi: {
+        outputs: { cnt_ApproveOrder: ['NewStatus'] },
+        stages: [{ id: 'edit', target: 'page.tsx', source: 'stages/page.tsx', actions: 'actions.json', beforeConfig: 'before/config.json', afterConfig: 'after/config.json', upload: 'edit', change: { remove } }],
+      },
+      uploads: [{ event: 'edit', mode: 'update', beforeConfig: 'before/config.json', afterConfig: 'after/config.json', beforePage: 'before/page.json', afterPage: 'after/page.json' }],
+    },
+    events: [
+      { id: 'download', command: `node genpage.js download --env ${env} --page-id ${PAGE} --app-id ${APP} --output-directory before`, result: { ok: true, pages: [{ pageId: PAGE }] } },
+      { id: 'custom-api-gate', command: 'node feature-flags.js custom-api', result: gate },
+      { id: 'builtin-gate', command: 'node feature-flags.js dataverse-operations', result: 'disabled' },
+      { id: 'write', command: 'Write page.tsx', artifact: 'stages/page.tsx' },
+      { id: 'edit', command: `node genpage-upload.js --env ${env} --page-id ${PAGE} --app-id ${APP} --code-file page.tsx${actions ? ' --actions actions.json' : ''}`, result: { ok: true, pageId: PAGE, appId: APP } },
+    ],
+  };
+}
+
+test('removing every Custom API of a mixed page: with custom-api ON the row goes; with it OFF it stays, the log says so, and nothing is uploaded for it — in both layers', () => {
+  const both = (fixture, status, label) => {
+    for (const layer of [1, 2]) {
+      const result = score(fixture, layer);
+      assert.equal(result.status, status, `${label}, layer ${layer}: ${result.reason}`);
+    }
+  };
+  // ON: the Custom API row goes and the built-in row stays; keeping it is not the removal the maker asked for.
+  both(removalEdit({ gate: 'enabled', rows: [WHO_AM_I], source: BUILT_IN_ONLY }), 'pass', 'ON, the row removed');
+  both(removalEdit({ gate: 'enabled', rows: [API, WHO_AM_I], source: SOURCE, actions: false }), 'fail', 'ON, the row kept');
+  // OFF: the row stays, the removal is reported, and the unchanged array is not uploaded.
+  both(removalEdit({ gate: 'disabled', rows: [API, WHO_AM_I], source: SOURCE, actions: false, log: DEFERRED }), 'pass', 'OFF, the row kept and reported');
+  // An unreadable gate is not ON: the builder fails closed, so the row stays as it does with the flag OFF.
+  both(removalEdit({ gate: 'maybe', rows: [API, WHO_AM_I], source: SOURCE, actions: false, log: DEFERRED }), 'pass', 'an unreadable gate, the row kept and reported');
+  // A built-in row named in the same removal still goes; the Custom API row stays and is reported.
+  both(removalEdit({ gate: 'disabled', remove: ['cnt_ApproveOrder', 'WhoAmI'], rows: [API], source: CUSTOM_ONLY, log: DEFERRED }), 'pass', 'OFF, WhoAmI removed beside the deferred Custom API');
+  for (const [label, fixture, problem] of [
+    ['OFF, the row deleted anyway', removalEdit({ gate: 'disabled', rows: [WHO_AM_I], source: BUILT_IN_ONLY, log: DEFERRED }), /^edit: API config read-back loses preservation or explicit-clear intent/],
+    ['OFF, turned into a clear', removalEdit({ gate: 'disabled', rows: [], source: NO_CALLS, log: DEFERRED }), /^edit: API config read-back loses preservation or explicit-clear intent/],
+    ['OFF, kept but not reported', removalEdit({ gate: 'disabled', rows: [API, WHO_AM_I], source: SOURCE, actions: false }), /^edit: custom-api was off, so cnt_ApproveOrder stayed — the log must say so/],
+    ['OFF, a report naming another Custom API', removalEdit({ gate: 'disabled', rows: [API, WHO_AM_I], source: SOURCE, actions: false, log: 'Custom API removal not performed (custom-api disabled): cnt_Other' }), /^edit: custom-api was off, so cnt_ApproveOrder stayed — the log must say so/],
+    ['OFF, the unchanged array uploaded', removalEdit({ gate: 'disabled', rows: [API, WHO_AM_I], source: SOURCE, log: DEFERRED }), /^edit: a removal the custom-api flag deferred changes nothing — omit --actions/],
+  ]) {
+    const found = customApiProblems(fixture);
+    assert.ok(found.some((entry) => problem.test(entry)), `${label}: ${JSON.stringify(found)}`);
+    both(fixture, 'fail', label);
+  }
+});

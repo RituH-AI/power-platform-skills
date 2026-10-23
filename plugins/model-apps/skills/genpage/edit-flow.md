@@ -246,6 +246,10 @@ Also read `config.json.connectorBindings` and `config.json.actionBindings`.
 >   bindings — any built-in operation row included — or `[]` when none remain) plus the
 >   matching `custom-api-bindings.md`. Pass `--actions` on
 >   upload — a full replace, so omitting it would leave the removed binding deployed.
+>   With `custom-api` OFF the builder removes no Custom API row: it keeps them — table and
+>   rows — and reports `Custom API removal not performed (custom-api disabled): <names>`. Relay
+>   that to the maker, keep those calls in the page (they are still bound), and let Edit Phase 6
+>   decide `--actions` from the array the builder actually wrote.
 > - **Preserve Custom APIs unchanged:** do not invoke the builder and do not create a
 >   replacement `actions.json`; omit `--actions` on upload so the page keeps its deployed
 >   bindings. Still pass the existing `actionBindings` summary into the edit planner so
@@ -253,15 +257,20 @@ Also read `config.json.connectorBindings` and `config.json.actionBindings`.
 > - **Remove every Custom API:** every built-in operation row (`WhoAmI`, `RetrieveVersion`)
 >   stays, byte for byte. On a page that holds none, this empties the array: use the clear below.
 >   On a page that binds one, invoke the builder the same way, with the remove intent naming every
->   Custom API row of the existing bindings; it drops those rows and nothing else, and writes the
->   remaining rows to `actions.json` and `No custom API bindings.` to `custom-api-bindings.md`.
->   Pass `--actions` on upload. A request to clear or remove "all Custom APIs" is this removal,
->   never permission to delete a built-in operation.
+>   Custom API row of the existing bindings. With `custom-api` ON it drops those rows and nothing
+>   else, and writes the remaining rows to `actions.json` and `No custom API bindings.` to
+>   `custom-api-bindings.md`; pass `--actions` on upload. With `custom-api` OFF it keeps every row
+>   and reports the removal as not performed: relay that, and keep the Custom API table, rows and
+>   calls — never `No custom API bindings.` or `[]` in their place, and never a clear to get around
+>   the flag. A request to clear or remove "all Custom APIs" is this removal, never permission to
+>   delete a built-in operation.
 > - **Clear every action binding:** write `[]` to `<working-dir>/actions.json` and a
 >   `custom-api-bindings.md` body of exactly `No custom API bindings.`, then pass `--actions`
 >   during upload so the page's `config.json.actionBindings` is cleared — only when the page
 >   holds no built-in operation row, or after the maker's clear choice naming each one it removes
->   (Edit Phase 6).
+>   (Edit Phase 6). A clear is the maker's own request for an empty array, so no flag decides it:
+>   on a page with no built-in row that is what removing every Custom API means, as before. It is
+>   never what a removal becomes because a flag is off.
 >
 > **The builder is headless and may return `{ "action": "needs_input", … }`** (for
 > example, when more than one discovered Custom API matches the intent). Drive the same
@@ -544,13 +553,16 @@ Custom API binding rules for edit deploy (identical matrix, `--actions` for
   agent (Mode: `edit`) has already gated on the flag and written the full desired binding
   set to `<working-dir>/actions.json` (a removal writes the remaining bindings). Include
   `--actions '<working-dir>/actions.json'` in the upload — a full replace that also deletes
-  any binding left out of the file.
+  any binding left out of the file. Include it only when that array differs from the page's
+  current `actionBindings`: with `custom-api` OFF the builder removes no Custom API row, and an
+  array it left unchanged is not uploaded — omit `--actions`.
 - **Code/visual-only edit (Custom APIs unchanged):** omit `--actions`; the page keeps its
   existing `actionBindings`.
 - **Remove every Custom API:** every built-in operation row (`WhoAmI`, `RetrieveVersion`) stays,
-  byte for byte. On a page that binds one, upload the `actions.json` the builder wrote (the
-  built-in rows) with `--actions` — never `[]` while a built-in row remains. On a page that holds
-  none, this is the clear below.
+  byte for byte. On a page that binds one, with `custom-api` ON upload the `actions.json` the
+  builder wrote (the built-in rows) with `--actions` — never `[]` while a built-in row remains;
+  with it OFF the builder kept every row, so omit `--actions` and relay the removal it did not
+  perform. On a page that holds none, this is the clear below.
 - **Clear every action binding:** write `[]` to `actions.json` and pass `--actions` so the page's
   `config.json.actionBindings` is cleared — only when the page holds no built-in operation row, or
   after the maker's clear choice naming each one it removes (below).

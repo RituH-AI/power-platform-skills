@@ -236,6 +236,19 @@ function runtimeProblems(code, bindings, declaredOutputs, lookupMetadata, author
   return problems;
 }
 
+// The builder's own account of a removal it did not perform while `custom-api` was OFF (genpage-customapi-builder.md, Step 1), one line of the
+// workflow log:
+//   Custom API removal not performed (custom-api disabled): cnt_ApproveOrder, cnt_RejectOrder
+// It must name exactly the Custom APIs this removal left in place — a report that names fewer, or more, does not say what happened.
+function deferredRemovalProblems(workflowLog, deferred, label) {
+  const want = [...deferred].sort().join(',');
+  const reported = String(workflowLog || '').split(/\r?\n/).some((line) => {
+    const report = /Custom API removal not performed \(custom-api disabled\):\s*(.+?)\s*$/.exec(line);
+    return Boolean(report) && report[1].split(/\s*,\s*/).filter(Boolean).sort().join(',') === want;
+  });
+  return reported ? [] : [`${label}: custom-api was off, so ${deferred.join(', ')} stayed — the log must say so: Custom API removal not performed (custom-api disabled): ${deferred.join(', ')}`];
+}
+
 function customApiProblems(fixture) {
   const problems = customApiGateProblems(fixture);
   if (fixture.manifest?.expectedOutcome === 'refused') return problems;
@@ -324,14 +337,24 @@ function customApiProblems(fixture) {
     if (previousId && (flags['page-id'] !== previousId || result.pageId !== previousId)) problems.push(`${stage.id}: update changes the API page's identity`);
     previousId = result?.pageId;
     const before = stage.beforeConfig ? beforeByStage.get(stage) : declared;
-    const desired = stage.beforeConfig ? desiredBindings(before, stage.change, 'name') : declared;
+    // With the custom-api gate OFF at this upload the builder removes no Custom API row (genpage-customapi-builder.md, Step 1): a removal of a
+    // Custom API name waits for the flag — the row stays, and the log says which removals were not performed. A built-in row named in the same
+    // removal still goes (no flag decides a built-in removal), and a clear — the maker's own request for an empty array — is never deferred.
+    let gate = null;
+    for (let index = uploadIndex - 1; index >= 0 && gate === null; index -= 1) if (isGate(calls[index].command)) gate = gateValue(calls[index]) || 'unreadable';
+    const deferred = stage.beforeConfig && gate !== 'enabled' ? (stage.change?.remove || []).filter((name) => !isBuiltInBinding({ name })) : [];
+    const change = deferred.length ? { ...stage.change, remove: stage.change.remove.filter((name) => !deferred.includes(name)) } : stage.change;
+    const desired = stage.beforeConfig ? desiredBindings(before, change, 'name') : declared;
+    const unchanged = deferred.length > 0 && sameBindings(desired, before, 'name');
+    if (deferred.length) problems.push(...deferredRemovalProblems(fixture.workflowLog, deferred, stage.id));
     if (stage.beforeConfig && stage.change?.clear === true) {
       problems.push(...clearConfirmationProblems({
         workflowLog: fixture.workflowLog, uploads: calls.filter((entry) => isUpload(entry.command)), call, pageId: flags['page-id'], before, label: stage.id,
       }));
     }
     if (stage.beforeConfig && stage.change === undefined && flags.actions) problems.push(`${stage.id}: unchanged APIs must omit --actions`);
-    if (!stage.beforeConfig || stage.change !== undefined) {
+    if (unchanged && flags.actions) problems.push(`${stage.id}: a removal the custom-api flag deferred changes nothing — omit --actions`);
+    if (!stage.beforeConfig || (stage.change !== undefined && !unchanged)) {
       if (!flags.actions || pathKey(flags.actions) !== pathKey(stage.actions) || !sameBindings(artifactJson(fixture, flags.actions), desired, 'name')) {
         problems.push(`${stage.id}: actions file must be the full desired bare array, including explicit [] to clear`);
       } else if (authoring.includes(stage.upload)) {

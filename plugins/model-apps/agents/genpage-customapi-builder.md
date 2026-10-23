@@ -146,7 +146,11 @@ disables it; a missing/unreadable feature config still fails closed.
   `No custom API bindings.`.
 - **edit:** the feature is OFF, so you must **not add or discover** new Custom API bindings.
   **Preserve** the existing Custom API bindings passed to you, unchanged, and reproduce them in
-  `custom-api-bindings.md`.
+  `custom-api-bindings.md`. A Custom API the intent asks to remove stays too — its table row and
+  its `actions.json` row — because the removal waits until the flag is on: write
+  `Custom API removal not performed (custom-api disabled): <names>` (comma-separated) into
+  `workflow-log.md` and return it, and never write `No custom API bindings.` or `[]` in their
+  place. A built-in row named in the same removal still goes (Step 4).
 - Then go on to the built-in branch (Step 2b) — it has its own gate. When neither branch
   changes anything, return `custom-api disabled — existing bindings preserved, none added`
   (edit) or `custom-api disabled — no bindings` (create).
@@ -267,10 +271,13 @@ Start from the **existing bindings** you were given and apply the edit intent:
 - **Add:** run Steps 2–3 for the new operation and append the binding.
 - **Replace:** discover the supported replacement (Steps 2–3) and swap it in by `name`.
   If discovery fails or finds no supported replacement, report it; do not silently drop the old binding.
-- **Remove:** drop the named binding(s).
-- **Remove every Custom API:** drop each Custom API row and keep every built-in row byte for byte
-  (`WhoAmI`, `RetrieveVersion`, exact names): `custom-api-bindings.md` is then
-  `No custom API bindings.` and `actions.json` holds the built-in rows. "Clear the Custom APIs" is
+- **Remove:** drop the named binding(s) — a Custom API row only while `custom-api` is enabled;
+  with it disabled the row stays and the removal is reported as not performed (Step 1).
+- **Remove every Custom API:** with `custom-api` enabled, drop each Custom API row and keep every
+  built-in row byte for byte (`WhoAmI`, `RetrieveVersion`, exact names): `custom-api-bindings.md`
+  is then `No custom API bindings.` and `actions.json` holds the built-in rows. With it disabled,
+  keep every row — the Custom API table and rows too — and report the removal as not performed
+  (Step 1); never turn it into a clear. "Clear the Custom APIs" is
   this removal; only the maker's clear choice, recorded as edit-flow.md Edit Phase 6 describes,
   permits `[]`.
 - Use ONLY names, kinds, bound entities, and parameter kinds you discovered this run or that
@@ -356,5 +363,6 @@ Write the final binding set to the output files (see "Outputs"):
   so the orchestrator forwards nothing. Built-in rows never go into `custom-api-bindings.md`.
 
 Return a concise summary: mode, both gate results, the `name`s of the Custom API bindings
-and of the built-in operations written (or "none"), and whether `dataverse-operations.md` was
-written this run.
+and of the built-in operations written (or "none"), whether `dataverse-operations.md` was
+written this run, and the Custom API removals not performed because `custom-api` is disabled
+(or "none").

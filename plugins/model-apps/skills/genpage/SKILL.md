@@ -373,7 +373,8 @@ detected.
   refreshed contract.
 
 The builder remains the single owner of the `custom-api` feature gate: it probes first, writes
-`No custom API bindings.` + `[]` when the gate is off or the page needs no Custom API, and
+`No custom API bindings.` and no Custom API row when the gate is off or the page needs no Custom
+API (`actions.json` is then `[]`, unless built-in operation rows were selected — 1c), and
 performs discovery only when one is required.
 
 #### 1c. Built-in Dataverse operations are orchestrator-owned too
@@ -1010,7 +1011,9 @@ The same array carries the built-in operation rows (`WhoAmI`, `RetrieveVersion`)
 rules hold for them: `--actions` is passed only when the whole desired set changed, a preserve
 omits it, a removal passes the array minus the named entries, and `[]` is passed only for a
 clear-all the maker chose — never as the result of a gate that turned off (Phase 4.6b, or in an edit the
-Edit Phase 4 re-probe, halts instead).
+Edit Phase 4 re-probe, halts instead). With `custom-api` OFF a Custom API removal removes nothing:
+the builder keeps the rows and says so, `--actions` is omitted while the array is unchanged, and a
+removal is never turned into a clear to get around the flag.
 
 **Deploy through `scripts/genpage-upload.js`.** It writes the page through the SDK — the same page backend
 `/app-builder` uses, signed in with the Azure CLI — and takes the maker's text **by file**
