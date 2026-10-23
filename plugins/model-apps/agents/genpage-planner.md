@@ -657,9 +657,10 @@ For a page that navigates to an existing page that this plan does not build (a p
 app, by its page id), read what that page accepts before you plan the call. Follow
 `${PLUGIN_ROOT}/references/rules.md` → **Page Input > What another page accepts**: download the page
 into `<working-dir>/targets` with `genpage.js download` and read its `pageInput` reads. Then write
-in the page's **Interactions** the target's page id and the exact `data` keys it reads, each with
-the type it converts the value to. If it reads none, write that it takes no input. The page-builder
-uses those keys and never guesses them.
+in the page's **Interactions** the target's page id, the exact `data` keys it reads (each with the
+type it converts the value to), and whether it reads record context (`pageInput.recordId`,
+`pageInput.entityName`), which the call passes at the top level, not in `data`. If it reads neither,
+write that it takes no input. The page-builder uses what you wrote and never guesses it.
 
 ### CRITICAL — Pre-write validation pass
 

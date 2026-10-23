@@ -326,13 +326,22 @@ const [lng] = useState(toNumberOrDefault(pageInput?.data?.longitude, 0));
 ### What another page accepts (read it before you pass it data)
 
 The platform shows no list of the inputs a page takes. A page's inputs are the values its own source
-reads from its `pageInput` prop: `pageInput.entityName`, `pageInput.recordId`, and each key it reads
-from `pageInput.data`. Before a page navigates to a page that this plan does not build, and passes it
-`data`, find out what that page reads:
+reads from its `pageInput` prop, and they are of two kinds, which travel in different places of the
+`navigateTo` call:
 
-1. **A page of an app that `/app-builder` built:** its App Spec declares the inputs as
+| The target reads | Kind | Pass it in `navigateTo` as |
+|---|---|---|
+| `pageInput.data.<key>` | a data key | `data: { <key>: <value> }` |
+| `pageInput.recordId` | record context | `recordId: <the record's id>`, at the top level beside `pageId` — not in `data` |
+| `pageInput.entityName` | record context | `entityName: "<the table's logical name>"`, at the top level — not in `data` |
+
+Before a page navigates to a page that this plan does not build, find out what that page reads:
+
+1. **A page of an app that `/app-builder` built:** its App Spec declares its data keys as
    `pages[].pageInput.data` (each key with its type). The producing page declares the same keys in
    `navigatesTo[].data`. `download-model-app.js` writes both into the spec from the app's page manifest.
+   The spec declares no record context: to know whether the page reads `pageInput.recordId` or
+   `pageInput.entityName`, read its source as in 2.
 2. **Any other page** (a `/genpage` page, or a page made in Maker): download it into a folder of its
    own. Do not use the working directory, and record no base marker, because this is a read:
 
@@ -340,15 +349,34 @@ from `pageInput.data`. Before a page navigates to a page that this plan does not
    node "${PLUGIN_ROOT}/scripts/genpage.js" download --env '<envUrl>' --page-id '<target-page-id>' --output-directory '<working-dir>/targets'
    ```
 
-   Then search `<working-dir>/targets/<target-page-id>/page.tsx` for `pageInput`. Each key read from
-   `pageInput.data` is an input: `pageInput?.data?.accountId`, `pageInput?.data?.["account-id"]`, or
-   a key read from a variable that holds `pageInput.data`. Note how the page converts each value (for
-   example `toNumberOrDefault(...)` or `=== "true"`), and send a value of that type. A read of
-   `pageInput.recordId` or `pageInput.entityName` is an input too.
+   Then search `<working-dir>/targets/<target-page-id>/page.tsx` for `pageInput`, and write down each
+   read with its path:
+   - Each key read from `pageInput.data` is a data key: `pageInput?.data?.accountId`,
+     `pageInput?.data?.["account-id"]`, or a key read from a variable that holds `pageInput.data`. Note
+     how the page converts each value (for example `toNumberOrDefault(...)` or `=== "true"`), and send a
+     value of that type.
+   - A read of `pageInput.recordId` or `pageInput.entityName` (also `const { recordId, entityName } =
+     pageInput`) is record context. Pass both at the top level of the call: the record's id, and the
+     logical name of its table.
 
-Pass only the keys the target reads, with the same names, in `data` of the `navigateTo` call. Values
-in `data` are primitives. The target ignores a key it does not read, so a guessed name fails
-silently. A page that reads no `pageInput` takes no input: navigate to it without `data`.
+Pass each input in the place the target reads it, with the same name: data keys in `data`, record
+context at the top level. Do not move one into the other: a target that reads `pageInput.recordId` gets
+nothing from `data: { recordId }`, and one that reads `pageInput.data.accountId` gets nothing from
+`recordId`. (When you write both pages, put a custom identifier in `data` — see **Passing a record ID
+between pages**. A page that already exists is called the way it reads its input.) Values in `data` are
+primitives. The target ignores a key it does not read, so a guessed name fails silently. A page that
+reads neither kind takes no input: navigate to it with its `pageId` alone.
+
+Example — a target that reads record context and one data key, and the call that feeds it:
+
+```typescript
+// The target's page.tsx reads:
+const accountId = pageInput?.recordId;   // record context
+const table = pageInput?.entityName;     // record context
+const view = pageInput?.data?.view;      // a data key
+// So the caller passes the record context at the top level, and the data key in data:
+Xrm.Navigation.navigateTo({ pageType: "generative", pageId: targetPageId, entityName: "account", recordId: selectedAccountId, data: { view: "summary" } });
+```
 
 ---
 
@@ -421,7 +449,7 @@ xrm.Navigation.navigateTo({ pageType: "generative", pageId: targetPageId, entity
 
 **CRITICAL — never use `pageType: "entityrecord"` or `pageType: "entitylist"` to navigate to another generative page.** Those open the standard OOB form/list, not the custom page. Always use `pageType: "generative"` with the target page's GUID.
 
-**Passing a record ID between pages:** Always put custom identifiers in `data`, not `recordId`. `recordId` is reserved for standard Dataverse record context (used by OOB forms/views); values placed there may not arrive reliably on the receiving genpage. Use `data: { accountId: selectedId }` and read it as `pageInput?.data?.accountId` on the target page. Never rely on `recordId` as the delivery channel for a custom ID.
+**Passing a record ID between pages:** Always put custom identifiers in `data`, not `recordId`. `recordId` is reserved for standard Dataverse record context (used by OOB forms/views); values placed there may not arrive reliably on the receiving genpage. Use `data: { accountId: selectedId }` and read it as `pageInput?.data?.accountId` on the target page. Never rely on `recordId` as the delivery channel for a custom ID. This is how to write the pages of this plan; a page this plan does not build may already read `pageInput.recordId` and `pageInput.entityName`, and is called the way it reads them (see **Page Input > What another page accepts**).
 
 **Passing data to a page this plan does not build:** first read the keys that page accepts — see **Page Input > What another page accepts**. Never guess the names.
 

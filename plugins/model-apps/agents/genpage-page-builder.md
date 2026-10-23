@@ -413,8 +413,10 @@ export default GeneratedComponent;
   identity. Using it emits `PAGEREF_page`, which fails nav parity and halts the build.
 
   Pass any custom identifier in `data:` (never `recordId`); it arrives on the target
-  as `pageInput?.data?.<field>`. When the target is a page that this plan does not build, use the
-  keys that page reads (rules.md **Page Input > What another page accepts**), never guessed names. Example:
+  as `pageInput?.data?.<field>`. When the target is a page that this plan does not build, pass what
+  that page reads, in the place it reads it (rules.md **Page Input > What another page accepts**): its
+  `pageInput.data` keys in `data`, and — only when it reads `pageInput.recordId` or
+  `pageInput.entityName` — `recordId` and `entityName` at the top level of the call. Never guessed names. Example:
   ```typescript
   Xrm.Navigation.navigateTo({
     pageType: "generative",

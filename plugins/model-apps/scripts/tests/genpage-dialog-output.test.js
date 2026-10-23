@@ -11,31 +11,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { makeTempDir } = require('./helpers/temp-dirs.js');
+const { generatedRuntimeTypes } = require('./helpers/generated-runtime-types.js');
 const { loadVendoredTypeScript } = require('../lib/typescript-compiler.js');
-const { createMakerSdk, createNodeWorkspaceStorage } = require('../lib/maker-sdk.js');
 const { griffelStyleProblems } = require('../lib/griffel-styles.js');
 const { extractNavTargets, navMalformedRefs, strayPageRefs } = require('../lib/pageref-resolver.js');
 const { pageStructureProblems } = require('../lib/page-structure.js');
 
 const RULES = fs.readFileSync(path.join(__dirname, '..', '..', 'references', 'rules.md'), 'utf8');
 const SECTION = '### Dialog output (`setPageOutput`)';
-
-// The RuntimeTypes text the SDK generates for one table, as `genpage.js types` writes it. The SDK reads each table's metadata through its own `fetchEntityMetadata`, which
-// is replaced here by the answer it would build for a table with an id and a name column, so the generator itself runs, offline.
-async function generatedRuntimeTypes() {
-  const sdk = createMakerSdk({
-    workspaceStorage: createNodeWorkspaceStorage(makeTempDir('dialog-output-')),
-    instanceUrl: 'https://contoso.crm.dynamics.com',
-    httpClient: { get: async () => ({ status: 404, headers: {}, body: null }), post: async () => ({ status: 404, headers: {}, body: null }) },
-  });
-  sdk.fetchEntityMetadata = async (logical) => ({
-    logicalName: logical, entitySetName: `${logical}s`, primaryIdAttribute: `${logical}id`, primaryNameAttribute: 'contoso_name', displayName: 'Item',
-    attributes: [{ logicalName: `${logical}id`, attributeType: 'Uniqueidentifier', isPrimaryId: true }, { logicalName: 'contoso_name', attributeType: 'String', isPrimaryName: true, maxLength: 100 }],
-    relationships: [], columnDetailComplete: true,
-  });
-  return sdk.generateGenPageRuntimeTypes(['contoso_item']);
-}
 
 // The globals a page's types touch, in place of lib.d.ts (`noLib`): the ones the compiler itself needs, and those the generated types and the snippets name.
 const GLOBALS = [
