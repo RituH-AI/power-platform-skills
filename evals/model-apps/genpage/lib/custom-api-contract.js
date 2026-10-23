@@ -136,12 +136,13 @@ function beforeConfigEvidence(fixture, stages, calls) {
   return { beforeByStage, verifiedBefore, problems };
 }
 
-// The custom-api gate decides new Custom API authoring: a create whose plan has Custom API rows, and a stage that adds or replaces a Custom API
-// row. A lifecycle stage whose before-config is verified (beforeConfigEvidence) and whose change adds or replaces none — an unrelated edit, a
-// removal (which the builder defers while the flag is OFF), a clear, or a built-in change — authors no Custom API row: it keeps the rows the
-// page already has. This returns the calls such a stage COVERS: the generations and uploads after the previous stage's upload, up to and
-// including its own. Covering is not attribution — a call inside that span may be the stage's own or an unrelated one, and the grader cannot
-// tell them apart — so a covered call is never passed for the gate (customApiGateVerdict). Anything unreadable covers nothing.
+// The custom-api gate decides new Custom API authoring: a create whose plan has Custom API rows or whose --actions file holds one, and a stage
+// that adds or replaces a Custom API row. A lifecycle stage whose before-config is verified (beforeConfigEvidence) and whose change adds or
+// replaces none — an unrelated edit, a removal (which the builder defers while the flag is OFF), a clear, or a built-in change — authors no
+// Custom API row: it keeps the rows the page already has. This returns the calls such a stage COVERS: the generations and uploads after the
+// previous stage's upload, up to and including its own. Covering is not attribution — a call inside that span may be the stage's own or an
+// unrelated one, and the grader cannot tell them apart — so a covered call is never passed for the gate (customApiGateVerdict), which needs
+// this only when the plan has Custom API rows. Anything unreadable covers nothing.
 function keepingStageCoverage(fixture, calls) {
   const stages = fixture.manifest?.customApi?.stages;
   const covered = new Set();
@@ -167,11 +168,52 @@ const GATE_HALT = 'disabled or unreadable Custom API gate must halt before gener
 // The one reason every rule that grades the gate gives when it cannot score a run (gradeWithGate).
 const CUSTOM_API_GATE_UNSCORED = 'custom-api OFF: a preserving stage\'s generation or upload cannot be attributed to that stage, so a page kept while the gate is OFF is not graded';
 
-// The gate's verdict on a run: its problems, and how many calls it could not attribute. A generation or upload after a disabled or unreadable
-// gate (with Custom API rows in the plan) is never passed for the gate:
-//   - an upload without --page-id is a create, and a create can never keep a page's rows: a problem;
-//   - a call no verified keeping stage covers (keepingStageCoverage) is new authoring as far as the evidence shows: a problem;
-//   - any other call is UNATTRIBUTED: it may be the keeping stage's own, or not, and the grader cannot prove which — neither a pass nor a problem.
+// Whether a recorded bindings list holds a Custom API row: anything but a reviewed built-in (WhoAmI, RetrieveVersion — isBuiltInBinding, which
+// knows a legacy built-in entry by its name too). A list that cannot be read — a missing or unparseable file, or anything but an array — counts
+// as holding one: no evidence, no pass.
+function holdsCustomApiRow(read) {
+  let list;
+  try { list = read(); } catch { return true; }
+  return !Array.isArray(list) || list.some((entry) => !isBuiltInBinding(entry));
+}
+// A recorded upload's --actions file — the list the upload gives the page; an upload with no --actions file binds nothing.
+function actionsHoldCustomApi(fixture, call) {
+  const file = commandInfo(call).flags.actions;
+  return file !== undefined && holdsCustomApiRow(() => artifactJson(fixture, file));
+}
+// A stage config's bindings, read as beforeConfigEvidence reads them: a config with no actionBindings holds none.
+function configBindings(fixture, file) {
+  const config = artifactJson(fixture, file);
+  return config.actionBindings === undefined ? [] : config.actionBindings;
+}
+
+// Whether the recorded lifecycle carries a Custom API row, whatever the plan's Custom API table says: in a recorded upload's --actions file, or in
+// a lifecycle stage's before- or after-config (manifest.customApi.stages). Only an --actions file writes a page's bindings, and the configs show the
+// rows a page holds, so these are the places a recorded run can carry one. Anything unreadable — a file, a stage with no after-config, stages
+// that are not a list, evidence that cannot be scanned — counts as carrying one.
+function carriesCustomApi(fixture, calls) {
+  try {
+    if ((calls || workflowCalls(fixture)).some((call) => isUpload(call.command) && actionsHoldCustomApi(fixture, call))) return true;
+    const stages = fixture.manifest?.customApi?.stages;
+    if (stages === undefined) return false;
+    if (!Array.isArray(stages)) return true;
+    return stages.some((stage) => !stage || typeof stage !== 'object'
+      || (stage.beforeConfig !== undefined && holdsCustomApiRow(() => configBindings(fixture, stage.beforeConfig)))
+      || holdsCustomApiRow(() => configBindings(fixture, stage.afterConfig)));
+  } catch {
+    return true;
+  }
+}
+
+// The gate's verdict on a run: its problems, and how many calls it could not attribute. The gate grades a workflow that bears Custom API rows —
+// its plan's Custom API table has rows, or its recorded lifecycle carries one (carriesCustomApi): an empty table is no permission. In such a
+// workflow a generation or upload made while the latest gate is not enabled — disabled, unreadable or never probed — is never passed:
+//   - a create (an upload without --page-id) whose --actions file holds a Custom API row, or cannot be read, is a problem whatever the plan says;
+//   - with Custom API rows in the plan, every other create is a problem too (a create can never keep a page's rows), and so is a call no verified
+//     keeping stage covers (keepingStageCoverage): new authoring as far as the evidence shows;
+//   - any other call is UNATTRIBUTED: it may be a keeping stage's own, or not, and the grader cannot prove which — neither a pass nor a problem.
+//     Under an empty plan table that is every call but such a create, with no keeping stage required: a run that planned no Custom API declares
+//     none. A workflow whose only rows are the built-ins (WhoAmI, RetrieveVersion) is outside the gate, which decides only Custom API authoring.
 // Why unscored rather than attributed: two ways to tie such a call to its stage have failed. Refusing every call after an OFF gate graded a
 // correct kept page (an unrelated edit, or a removal the builder defers) as forbidden authoring; exempting every call the stage covers let an
 // unrelated create beside it borrow the stage's proof. Matching calls to a stage by page id, source or time would be a third guess of the same
@@ -180,6 +222,7 @@ function customApiGateVerdict(fixture) {
   const bindings = planBindings(fixture);
   const calls = workflowCalls(fixture);
   const problems = unassociatedCallProblems(fixture);
+  const inScope = bindings.length > 0 || carriesCustomApi(fixture, calls);
   const covered = keepingStageCoverage(fixture, calls);
   let unattributed = 0;
   let latest = null;
@@ -192,12 +235,13 @@ function customApiGateVerdict(fixture) {
     } else if (/\blist-custom-apis\.js\b/.test(call.command)) {
       if (latest !== 'enabled') problems.push('Custom API discovery ran before an enabled feature gate');
       discoveryIndex = index;
-    } else if (bindings.length && (isGeneration(call.command) || isUpload(call.command))) {
+    } else if (inScope && (isGeneration(call.command) || isUpload(call.command))) {
       if (latest !== 'enabled') {
         const creates = isUpload(call.command) && !commandInfo(call).flags['page-id'];
-        if (!creates && covered.has(index)) unattributed += 1;
-        else problems.push(GATE_HALT);
-      } else if (gateIndex <= discoveryIndex) problems.push('Custom API generation must re-probe the feature gate after planning discovery');
+        if (creates && actionsHoldCustomApi(fixture, call)) problems.push(GATE_HALT);
+        else if (bindings.length && (creates || !covered.has(index))) problems.push(GATE_HALT);
+        else unattributed += 1;
+      } else if (bindings.length && gateIndex <= discoveryIndex) problems.push('Custom API generation must re-probe the feature gate after planning discovery');
     }
   }
   if (bindings.length && !calls.some((call) => isGate(call.command))) problems.push('Custom API table has no applicable feature gate');
@@ -467,5 +511,5 @@ function customApiProblems(fixture) {
 }
 
 module.exports = {
-  customApiProblems, customApiGateProblems, customApiGateVerdict, gradeCustomApi, gradeCustomApiGate, CUSTOM_API_GATE_UNSCORED,
+  customApiProblems, customApiGateProblems, customApiGateVerdict, gradeCustomApi, gradeCustomApiGate, carriesCustomApi, CUSTOM_API_GATE_UNSCORED,
 };
