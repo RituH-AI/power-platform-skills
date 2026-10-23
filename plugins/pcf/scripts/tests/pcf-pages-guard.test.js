@@ -313,6 +313,7 @@ for (const [name, relative] of [
     assert.match(text, /aliasing[^.\n]*`const d = context\.device; d\.captureImage\(\)`/i);
     assert.match(text, /dynamic dispatch/i);
     assert.match(text, /parenthesized receivers/i);
+    assert.match(text, /parenthesized receivers[^\n]*`\.bind`[^\n]*`Reflect\.apply`[^\n]*detected like direct calls/i);
     assert.match(text, /runtime verification on the target Power Pages site[^.\n]*required/i);
   });
 }
@@ -432,6 +433,70 @@ test('Pages detection never promotes non-null assertions or escaped keys into gu
     assert.deepEqual(codesFor(withinGuard(`${comparison}; ${CALL};`)), [], comparison);
   }
   assert.deepEqual(codesFor(`if (!context.device?.captureImage) { ${CALL}; }`), ['PCF_PAGES_API']);
+});
+
+const DISPATCH_FORMS = [
+  ['parenthesized namespace receiver', '(context.device).captureImage()'],
+  ['parenthesized root receiver', '(context).device.captureImage()'],
+  ['nested parenthesized receivers', '((context).device).captureImage()'],
+  ['parenthesized receiver with optional call', '(context.device)?.captureImage?.()'],
+  ['parenthesized receiver after return', 'return (context.device).captureImage()'],
+  ['template-literal method key', 'context.device[`captureImage`]()'],
+  ['template-literal namespace key', 'context[`device`].captureImage()'],
+  ['escaped template-literal key', 'context.device[`capture\\u0049mage`]()'],
+  ['call dispatch', 'context.device.captureImage.call(context.device)'],
+  ['apply dispatch', 'context.device.captureImage.apply(context.device, [])'],
+  ['bind dispatch', 'context.device.captureImage.bind(context.device)()'],
+  ['optional call dispatch', 'context.device.captureImage?.call(context.device)'],
+  ['Reflect.apply dispatch', 'Reflect.apply(context.device.captureImage, context.device, [])'],
+  ['Reflect.apply of a parenthesized receiver', 'Reflect.apply((context.device).captureImage, context.device, [])'],
+  ['utility call dispatch', 'context.utils.lookupObjects.call(undefined, {})', 'Utility', 'utils', 'lookupObjects'],
+  ['parenthesized utility receiver', '(context.utils).lookupObjects({})', 'Utility', 'utils', 'lookupObjects'],
+];
+
+for (const [name, call, feature = 'Device.captureImage', namespace = 'device', method = 'captureImage'] of DISPATCH_FORMS) {
+  test(`Pages detection recognizes ${name}`, () => {
+    const statement = `${call};`;
+    const body = call.startsWith('return ') ? `function f(context) { ${statement} }` : statement;
+    const guarded = `function g(context) { if (typeof context.${namespace}?.${method} === "function") { ${statement} } }`;
+    assert.deepEqual({
+      unguarded: codesFor(body, feature),
+      guarded: codesFor(guarded, feature),
+      invalidGuard: codesFor(guarded.replace('if (typeof', 'if (ready || typeof'), feature),
+      undeclared: codesFor(body, null, ['model']),
+      textOnly: codesFor(`// ${call}\nconst note = ${JSON.stringify(call)};`, null),
+      fallback: findingsFor(guarded, feature, ['pages'], { indexer: throwingIndexer }).map((finding) => finding.code),
+    }, {
+      unguarded: ['PCF_PAGES_API'],
+      guarded: [],
+      invalidGuard: ['PCF_PAGES_API'],
+      undeclared: ['PCF_FEATURE_UNDECLARED'],
+      textOnly: [],
+      fallback: ['PCF_PAGES_API'],
+    });
+  });
+}
+
+test('Pages detection keeps call results, comma groups and dynamic keys out of the dispatch forms', () => {
+  for (const text of [
+    'foo(context.device).captureImage();',
+    'context.device.captureImage.name;',
+    'const fn = context.device.captureImage.call;',
+    'Reflect.apply(other.captureImage, context.device, []);',
+    'Reflect.apply(fn, context.device, []);',
+    'Other.apply(context.device.captureImage, context.device, []);',
+    'context.device[`capture${suffix}`]();',
+  ]) {
+    assert.deepEqual(codesFor(text, null).filter((code) => code === 'PCF_PAGES_API'), [], text);
+  }
+  // The new forms are detected only: they are not new proof syntax.
+  for (const condition of [
+    'typeof (context.device)?.captureImage === "function"',
+    'typeof context.device[`captureImage`] === "function"',
+    'typeof context.device.captureImage.call === "function"',
+  ]) {
+    assert.deepEqual(codesFor(`if (${condition}) { ${CALL}; }`), ['PCF_PAGES_API'], condition);
+  }
 });
 
 test('Pages detection decodes escapes without evaluating malformed or non-identifier keys', () => {

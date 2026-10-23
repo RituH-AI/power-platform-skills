@@ -969,9 +969,17 @@ function decodeStaticKey(raw) {
 
 function indexedPath(index, start) {
   if (index.paths.has(start)) return index.paths.get(start);
+  const { tokens } = index;
+  const path = { ...readMemberPath(index, [tokens[start].name || tokens[start].value], start + 1),
+    token: start, start: tokens[start].start };
+  index.paths.set(start, path);
+  return path;
+}
+
+function readMemberPath(index, names, end) {
+  // Reads the members after names[0] (or after a group holding a path): .name, ?.name, ["name"] and
+  // [`name`]. Any other computed key makes the path `unknown`.
   const { tokens, text } = index;
-  const names = [tokens[start].name || tokens[start].value];
-  let end = start + 1;
   let unknown = false;
   while (end < tokens.length) {
     // Postfix ! is erased ONLY in this detection view. != / !== are whole operator
@@ -989,8 +997,14 @@ function indexedPath(index, start) {
     }
     if (tokens[member]?.value === '[' && tokens[member].match >= 0) {
       const close = tokens[member].match;
-      const key = close === member + 2 && tokens[member + 1].kind === 'string'
-        ? decodeStaticKey(text.slice(tokens[member + 1].start, tokens[member + 1].end)) : null;
+      let key = null;
+      if (close === member + 2 && tokens[member + 1].kind === 'string') {
+        key = decodeStaticKey(text.slice(tokens[member + 1].start, tokens[member + 1].end));
+      } else if (close === member + 3 && tokens[member + 1].value === TEMPLATE_QUOTE && tokens[member + 2].value === TEMPLATE_QUOTE) {
+        // The mask blanks template text and keeps `${…}` code, so two adjacent back-ticks are a
+        // template with no substitution: context.device[`captureImage`]() names the method.
+        key = decodeTemplateKey(text.slice(tokens[member + 1].start, tokens[member + 2].end));
+      }
       end = close + 1;
       if (!key) { unknown = true; break; }
       names.push(key);
@@ -999,9 +1013,14 @@ function indexedPath(index, start) {
     break;
   }
   const call = tokens[end]?.value === '(' || (tokens[end]?.value === '?.' && tokens[end + 1]?.value === '(');
-  const path = { names, end, unknown, call, token: start, start: tokens[start].start };
-  index.paths.set(start, path);
-  return path;
+  return { names, end, unknown, call };
+}
+
+function decodeTemplateKey(raw) {
+  // A no-substitution template is cooked like a string literal: the same escapes, line continuations
+  // and identifier test, so decode its body as one. https://tc39.es/ecma262/#sec-template-literals
+  if (raw.length < 2 || raw[0] !== TEMPLATE_QUOTE || raw.at(-1) !== TEMPLATE_QUOTE || raw.includes('${')) return null;
+  return decodeStaticKey(`"${raw.slice(1, -1)}"`);
 }
 
 function angleBoundary(tokens, start, direction) {
@@ -1733,26 +1752,86 @@ function indexSource(text, mask) {
 }
 
 function indexedMembers(index) {
-  const members = [];
+  // Members are keyed by their root token: a grouped path that reads on past its group replaces the
+  // shorter member at the same root, so (context.utils).lookupObjects() is one use, not two.
+  const members = new Map();
+  const add = (path, first) => {
+    const member = contextMember(path);
+    if (!member) return;
+    member.first = first;
+    if (!member.call && reflectApplyTarget(index, first, member)) member.call = true;
+    members.set(member.token, member);
+  };
   for (let i = 0; i < index.tokens.length; i += 1) {
     if (!index.tokens[i].name || ['.', '?.'].includes(index.tokens[i - 1]?.value)
       || index.rootRoles?.get(i) === 'member') continue;
-    const path = indexedPath(index, i);
-    const member = contextMember(path);
-    if (member) members.push(member);
+    add(indexedPath(index, i), i);
   }
-  return members;
+  // Grouping needs the control and container index (a `(` after `if (…)` groups, after a name it
+  // calls), so the first, root-collecting pass reads plain paths only. A guard proof is itself a
+  // plain path, so its root is collected there.
+  if (index.controlCloses) {
+    for (const [path, first] of groupedPaths(index)) {
+      if (index.rootRoles.get(path.token) !== 'member') add(path, first);
+    }
+  }
+  return [...members.values()].sort((a, b) => a.token - b.token);
 }
+
+function groupedPaths(index) {
+  // (context.device).captureImage() and ((context).device).captureImage(): a group that holds only a
+  // member path is that path, so reading continues after the `)`. A `(` that follows an operand calls
+  // it instead (foo(context.device).captureImage() calls whatever foo returns), and a group holding
+  // anything else, such as (0, context.device), is not unwrapped. Each run of directly nested groups
+  // is read once, from its innermost path outwards, so 8000 nested parentheses stay linear.
+  const { tokens } = index;
+  const grouping = (open) => tokens[open]?.value === '(' && tokens[open].match >= 0 && !canEndOperand(index, open - 1);
+  const paths = [];
+  for (let open = 0; open < tokens.length; open += 1) {
+    if (!grouping(open) || grouping(open - 1)) continue;
+    const run = [open];
+    while (grouping(run.at(-1) + 1)) run.push(run.at(-1) + 1);
+    const root = run.at(-1) + 1;
+    if (!tokens[root]?.name) continue;
+    let path = indexedPath(index, root);
+    for (let level = run.length - 1; level >= 0; level -= 1) {
+      const close = tokens[run[level]].match;
+      if (path.unknown || path.call || path.end !== close) break;
+      path = { ...readMemberPath(index, [...path.names], close + 1), token: root, start: tokens[root].start };
+      paths.push([path, run[level]]);
+    }
+  }
+  return paths;
+}
+
+function reflectApplyTarget(index, first, member) {
+  // Reflect.apply(context.device.captureImage, thisArg, args) calls the method it is given as its first
+  // argument. https://tc39.es/ecma262/#sec-reflect.apply
+  const { tokens } = index;
+  const open = first - 1;
+  return member.names.length === member.methodPath.split('.').length && !member.unknown
+    && tokens[open]?.value === '(' && tokens[open - 1]?.kind === 'identifier' && tokens[open - 1].value === 'apply'
+    && tokens[open - 2]?.value === '.'
+    && tokenKeyword(tokens, open - 3, 'Reflect')
+    && (tokens[member.end]?.value === ',' || member.end === tokens[open].match);
+}
+
+// `.call(`, `.apply(` and `.bind(` on a method invoke it with another `this` (binding returns a copy
+// whose only use is to be called). https://tc39.es/ecma262/#sec-properties-of-the-function-prototype-object
+const DISPATCH_METHODS = new Set(['call', 'apply', 'bind']);
 
 function contextMember(path) {
   // Only the name immediately before the namespace matters: props.context.device
   // and this._ctx.utils count, but this.state.device and helpers.utils do not.
   const namespaceIndex = path.names.findIndex((name, i) => i > 0 && CONTEXT_NAMESPACES.has(name) && CONTEXT_NAME.test(path.names[i - 1]));
   if (namespaceIndex < 0) return null;
-  return { ...path, namespace: path.names[namespaceIndex], method: path.names[namespaceIndex + 1],
+  const methodEnd = namespaceIndex + 2;
+  const dispatch = path.names.length === methodEnd + 1 && DISPATCH_METHODS.has(path.names[methodEnd]);
+  const names = dispatch ? path.names.slice(0, methodEnd) : path.names;
+  return { ...path, names, namespace: path.names[namespaceIndex], method: path.names[namespaceIndex + 1],
     namespacePath: path.names.slice(0, namespaceIndex + 1).join('.'),
-    methodPath: path.names.slice(0, namespaceIndex + 2).join('.'),
-    call: path.call && !path.unknown && path.names.length === namespaceIndex + 2 };
+    methodPath: path.names.slice(0, methodEnd).join('.'),
+    call: path.call && !path.unknown && (path.names.length === methodEnd || dispatch) };
 }
 
 function skipSourceSpace(mask, start) {
@@ -1765,7 +1844,8 @@ function fallbackMembers(text, mask) {
   // Read each reference once, advancing past consumed members, on the blanked mask:
   //   props.context?.device["captureImage"]!!()
   // Quoted static keys are decoded from the original offsets, never evaluated.
-  // No delimiter, scope, declaration or guard analysis is retried here.
+  // No delimiter, scope, declaration or guard analysis is retried here. A group that holds only a
+  // path is read through, (context.device).captureImage(), and Reflect.apply(<method>, …) is a call.
   const roots = new RegExp(`${IDENTIFIER.source}|\\\\`, 'gu');
   const members = [];
   let match;
@@ -1774,40 +1854,93 @@ function fallbackMembers(text, mask) {
     if (!root) continue;
     roots.lastIndex = root.end;
     if (!root.name || previousNonSpace(mask, match.index) === '.') continue;
-    const names = [root.name];
-    let end = root.end;
-    let unknown = false;
-    while (end < mask.length) {
-      let next = skipSourceSpace(mask, end);
-      let asserted = next;
-      while (mask[asserted] === '!') asserted = skipSourceSpace(mask, asserted + 1);
-      if (['.', '[', '('].includes(mask[asserted]) || mask.startsWith('?.', asserted)) next = asserted;
-      let member = next;
-      if (mask.startsWith('?.', member)) member = skipSourceSpace(mask, member + 2);
-      else if (mask[member] === '.') member = skipSourceSpace(mask, member + 1);
-      else if (mask[member] !== '[') { end = next; break; }
-      if (mask[member] === '[') {
-        const keyStart = skipSourceSpace(mask, member + 1);
-        const quoted = ['"', "'"].includes(mask[keyStart]) ? readQuotedLiteral(mask, keyStart) : null;
-        const close = quoted && skipSourceSpace(mask, quoted.end);
-        if (!quoted || mask[close] !== ']') { unknown = true; end = member; break; }
-        const key = decodeStaticKey(text.slice(keyStart, quoted.end));
-        end = close + 1;
-        if (!key) { unknown = true; break; }
-        names.push(key);
-      } else {
-        const name = member !== next && sourceIdentifierAt(mask, member);
-        if (!name?.name) { end = next; break; }
-        names.push(name.name);
-        end = name.end;
-      }
+    let path = readFallbackPath(text, mask, [root.name], root.end);
+    let first = match.index;
+    for (;;) {
+      const open = previousNonSpaceIndex(mask, first);
+      const close = skipSourceSpace(mask, path.end);
+      if (path.unknown || path.call || mask[open] !== '(' || mask[close] !== ')' || !fallbackGrouping(mask, open)) break;
+      path = readFallbackPath(text, mask, path.names, close + 1);
+      first = open;
     }
-    const call = mask[end] === '(' || (mask.startsWith('?.', end) && mask[skipSourceSpace(mask, end + 2)] === '(');
-    const member = contextMember({ names, start: match.index, unknown, call });
+    const member = contextMember({ names: path.names, start: match.index, unknown: path.unknown, call: path.call });
+    if (member && !member.call && member.names.length === member.methodPath.split('.').length && !member.unknown) {
+      const open = previousNonSpaceIndex(mask, first);
+      const after = mask[skipSourceSpace(mask, path.end)];
+      member.call = mask[open] === '(' && /(?:^|[^$\w.])Reflect\s*\.\s*apply\s*$/.test(mask.slice(Math.max(0, open - 64), open))
+        && (after === ',' || after === ')');
+    }
     if (member) members.push(member);
-    roots.lastIndex = Math.max(roots.lastIndex, end);
+    roots.lastIndex = Math.max(roots.lastIndex, path.end);
   }
   return members;
+}
+
+function readFallbackPath(text, mask, names, end) {
+  let unknown = false;
+  while (end < mask.length) {
+    let next = skipSourceSpace(mask, end);
+    let asserted = next;
+    while (mask[asserted] === '!') asserted = skipSourceSpace(mask, asserted + 1);
+    if (['.', '[', '('].includes(mask[asserted]) || mask.startsWith('?.', asserted)) next = asserted;
+    let member = next;
+    if (mask.startsWith('?.', member)) member = skipSourceSpace(mask, member + 2);
+    else if (mask[member] === '.') member = skipSourceSpace(mask, member + 1);
+    else if (mask[member] !== '[') { end = next; break; }
+    if (mask[member] === '[') {
+      const keyStart = skipSourceSpace(mask, member + 1);
+      let keyEnd = -1;
+      let key = null;
+      if (['"', "'"].includes(mask[keyStart])) {
+        const quoted = readQuotedLiteral(mask, keyStart);
+        keyEnd = quoted ? quoted.end : -1;
+        if (quoted) key = decodeStaticKey(text.slice(keyStart, quoted.end));
+      } else if (mask[keyStart] === TEMPLATE_QUOTE) {
+        keyEnd = templateEnd(text, keyStart);
+        if (keyEnd !== -1) key = decodeTemplateKey(text.slice(keyStart, keyEnd));
+      }
+      const close = keyEnd === -1 ? -1 : skipSourceSpace(mask, keyEnd);
+      if (close === -1 || mask[close] !== ']') { unknown = true; end = member; break; }
+      end = close + 1;
+      if (!key) { unknown = true; break; }
+      names.push(key);
+    } else {
+      const name = member !== next && sourceIdentifierAt(mask, member);
+      if (!name?.name) { end = next; break; }
+      names.push(name.name);
+      end = name.end;
+    }
+  }
+  const call = mask[end] === '(' || (mask.startsWith('?.', end) && mask[skipSourceSpace(mask, end + 2)] === '(');
+  return { names, end, unknown, call };
+}
+
+function templateEnd(text, start) {
+  // End (exclusive) of the template literal opened at `start`, or -1 when it holds a substitution.
+  for (let i = start + 1; i < text.length; i += 1) {
+    if (text[i] === '\\') i += 1;
+    else if (text[i] === TEMPLATE_QUOTE) return i + 1;
+    else if (text[i] === '$' && text[i + 1] === '{') return -1;
+  }
+  return -1;
+}
+
+function previousNonSpaceIndex(text, index) {
+  for (let i = index - 1; i >= 0; i -= 1) {
+    if (!/\s/.test(text[i])) return i;
+  }
+  return -1;
+}
+
+function fallbackGrouping(mask, open) {
+  // A `(` groups unless it follows an operand, which it then calls: foo(context.device).x is foo's
+  // result. After a keyword such as return or typeof an operand starts, so the `(` groups.
+  const before = previousNonSpaceIndex(mask, open);
+  if (before === -1) return true;
+  if (!IDENTIFIER_CONTINUE.test(mask[before]) && !/[)\]"'`]/.test(mask[before])) return true;
+  const word = /[$\w]+$/.exec(mask.slice(Math.max(0, before - 16), before + 1));
+  return Boolean(word) && ['return', 'typeof', 'await', 'void', 'yield', 'case', 'throw', 'in', 'of', 'new', 'delete', 'else', 'do']
+    .includes(word[0]) && previousNonSpace(mask, before + 1 - word[0].length) !== '.';
 }
 
 function firstAtOrAfter(positions, start) {
