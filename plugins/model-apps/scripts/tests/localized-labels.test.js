@@ -504,13 +504,14 @@ test('two options sharing one label held in another language keep that language,
 test('an option sharing its text with an option in ANOTHER language is the only kind written as a plain string, and each is named', () => {
   // "Open" in English on one option and in Spanish on another: as labels with their languages the validator refuses the collision (it
   // is not visible on the line) and the column would lose its type. Those two options alone are written as the plain strings an earlier
-  // download wrote (a duplicate the validator warns about), and each that loses a language is named; the others keep theirs.
+  // download wrote (a duplicate the validator warns about), and each that loses a language is named; the others keep theirs — the two
+  // French options sharing "Ferme" too, a duplicate in one language the validator only warns about.
   const meta = spanishOnlyTable();
-  meta.attributes.find((a) => a.logicalName === 'contoso_estado').optionSet.options = [onlyIn(1033, 'Open'), onlyIn(3082, 'Open'), onlyIn(3082, 'Cerrado'), onlyIn(1036, 'Ferme')];
+  meta.attributes.find((a) => a.logicalName === 'contoso_estado').optionSet.options = [onlyIn(1033, 'Open'), onlyIn(3082, 'Open'), onlyIn(3082, 'Cerrado'), onlyIn(1036, 'Ferme'), onlyIn(1036, 'Ferme')];
   const languageLost = [];
   const e = entityFromMetadata(meta, 'contoso_pedido', { languageCode: 1033, languageLost });
   const estado = e.columns.find((c) => c.schemaName === 'contoso_estado');
-  assert.deepStrictEqual(estado.options, ['Open', 'Open', { 3082: 'Cerrado' }, { 1036: 'Ferme' }]);
+  assert.deepStrictEqual(estado.options, ['Open', 'Open', { 3082: 'Cerrado' }, { 1036: 'Ferme' }, { 1036: 'Ferme' }]);
   assert.strictEqual(estado.type, 'Choice');
   assert.deepStrictEqual(languageLost, [{ table: 'contoso_pedido', column: 'contoso_estado', option: 1, label: 'Open', languageCode: 3082 }]);
   assert.deepStrictEqual(validateAppSpec(asSpec(e), { profile: 'plan', reconstructed: true }).errors, []);
