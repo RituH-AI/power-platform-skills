@@ -525,7 +525,7 @@ function addPagesApiFindings(findings, file, text, index) {
     const guardPath = member.names.slice(0, 2).join('.') + member.names.slice(2).map((name) => `?.${name}`).join('');
     findings.push(makeFinding(
       'PCF_PAGES_API',
-      `Heuristic diagnostic: Pages may not provide ${member.methodPath}; ${index.failed ? 'the guard could not be analyzed, so this call is treated as unguarded; ' : ''}guard the call by placing it inside an if (typeof ${guardPath} === 'function') { ... } block, or after if (typeof ${guardPath} !== 'function') return; in the same block (aliases and guard helpers are not recognized), or avoid the API for Pages hosts. See ${FEATURE_USAGE}`,
+      `Heuristic diagnostic: Pages may not provide ${member.methodPath}; ${index.failed ? 'the guard could not be analyzed, so this call is treated as unguarded; ' : ''}guard the call by placing it inside an if (typeof ${guardPath} === 'function') { ... } block, or directly after if (typeof ${guardPath} !== 'function') return; with no code in between (aliases and guard helpers are not recognized), or avoid the API for Pages hosts. See ${FEATURE_USAGE}`,
       file,
       lineOf(text, member.start),
     ));
@@ -1908,7 +1908,7 @@ function indexSource(text, mask) {
   // for each Pages call. This is a conservative index, not a JavaScript parser:
   // only recognized heads keep a binding; an opaque body creates a proof barrier.
   const index = { ...tokenizeSource(mask), text, mask, paths: new Map(), patternKeys: new Set(), patternContainers: new Set(),
-    rootRoles: new Map(), statements: new Map(), writes: new Map() };
+    rootRoles: new Map(), statements: new Map(), writes: new Map(), immediateGuards: new Map() };
   index.members = indexedMembers(index);
   index.roots = new Set(['context', 'this', ...index.members.map((member) => member.names[0])]);
   Object.assign(index, indexHeads(index));
@@ -1944,19 +1944,37 @@ function indexSource(text, mask) {
     const guardStart = index.tokens[control.keyword].start;
     if (scope) scope.guard = { start: guardStart, proofs, owner };
     if (!negated.size) continue;
-    // if (typeof m !== 'function') { … } else { m(); }: the else block runs only when the method is there.
+    // The exact negation of a proof covers only the call that runs right after it: the first statement
+    // of the else branch, or the statement after an if whose branch always leaves the block. Nothing
+    // may run in between, because any code there could remove the method again without a write the
+    // analyzer sees: Object.assign(context.device, { captureImage: undefined }), an alias, a helper.
+    //   if (typeof m !== 'function') { … } else { m(); }        if (typeof m !== 'function') return; m();
     const consequentEnd = indexedStatementEnd(index, control.body);
     const alternative = tokenKeyword(index.tokens, consequentEnd, 'else') ? consequentEnd + 1 : -1;
-    const elseScope = index.tokens[alternative]?.value === '{' ? index.blockScopes.get(alternative) : null;
-    if (elseScope && !elseScope.guard) elseScope.guard = { start: guardStart, proofs: negated, owner };
-    // if (typeof m !== 'function') return; m();: when the consequent always leaves the block, the
-    // rest of the block holding the if statement runs only when the method is there.
-    if (consequentLeavesBlock(index, control) && directBlockStatement(index, control, owner)) {
-      const after = index.tokens[indexedStatementEnd(index, control.keyword)]?.start ?? mask.length;
-      (owner.exitGuards ||= []).push({ start: guardStart, after, proofs: negated, owner });
+    let next = -1;
+    if (alternative >= 0) next = index.tokens[alternative]?.value === '{' ? alternative + 1 : alternative;
+    else if (consequentLeavesBlock(index, control) && directBlockStatement(index, control, owner)) {
+      next = indexedStatementEnd(index, control.keyword);
+    }
+    if (next >= 0 && index.tokens[next] && index.tokens[next].value !== '}') {
+      index.immediateGuards.set(leadingOperand(index, next), { start: guardStart, proofs: negated, owner });
     }
   }
   return index;
+}
+
+function leadingOperand(index, at) {
+  // The token where the statement at `at` starts evaluating code, past prefixes that run nothing
+  // before it: return, throw, void and await, and a declaration of or assignment to a plain name, as in
+  //   return context.device.captureImage();      const image = await context.device.captureImage();
+  const { tokens } = index;
+  let i = at;
+  if (['return', 'throw', 'void'].some((word) => tokenKeyword(tokens, i, word))) i += 1;
+  else if (['const', 'let', 'var'].some((word) => tokenKeyword(tokens, i, word))
+    && tokens[i + 1]?.kind === 'identifier' && tokens[i + 2]?.value === '=') i += 3;
+  else if (tokens[i]?.kind === 'identifier' && tokens[i + 1]?.value === '=' && !['.', '?.'].includes(tokens[i - 1]?.value)) i += 2;
+  if (tokenKeyword(tokens, i, 'await')) i += 1;
+  return i;
 }
 
 function consequentLeavesBlock(index, control) {
@@ -1978,8 +1996,9 @@ function consequentLeavesBlock(index, control) {
 }
 
 function directBlockStatement(index, control, owner) {
-  // The if must be a statement of the block that owns the exit guard: not an else-if, a nested if
-  // consequent, a labelled statement or a case clause (another case is entered without the guard).
+  // The if must be a statement of a block, so the statement after it is the one that runs next when
+  // the branch does not leave: not an else-if, a nested if consequent, a labelled statement or a case
+  // clause (another case is entered without the guard).
   const { tokens } = index;
   const keyword = control.keyword;
   if (keyword > 0 && !['{', '}', ';'].includes(tokens[keyword - 1].value)) return false;
@@ -2438,26 +2457,12 @@ function indexedProofChanged(index, guard, member) {
 
 function hasMethodGuard(index, member) {
   const key = member.names.join('.');
-  // An exit guard covers code after it, but a function declaration is hoisted to the top of its
-  // block: function later() { m(); } written after the guard can be called before it runs.
-  let hoisted = false;
   for (let scope = index.tokens[member.token].scope; scope; scope = scope.parent) {
     if (scope.guard?.proofs.has(key) && !indexedProofChanged(index, scope.guard, member)) return true;
-    if (!hoisted && scope.exitGuards?.some((guard) => member.start >= guard.after && guard.proofs.has(key)
-      && !indexedProofChanged(index, guard, member))) return true;
-    if (scope.kind === 'function' && scope.head && hoistedFunction(index, scope.head)) hoisted = true;
   }
-  return false;
-}
-
-function hoistedFunction(index, head) {
-  // Conservative: a `function` head is a hoisted declaration unless an operand position precedes it,
-  // as in const f = function () {}, run(function () {}) or return function () {}.
-  const { tokens } = index;
-  if (head.arrow || head.method || !tokenKeyword(tokens, head.keyword, 'function')) return false;
-  const previous = head.start - 1;
-  return !(['=', '(', '[', ',', '?', '=>', '||', '&&', '??', '!'].includes(tokens[previous]?.value)
-    || ['return', 'yield', 'new', 'await', 'typeof', 'void'].some((word) => tokenKeyword(tokens, previous, word)));
+  // A negated proof covers only the call its statement starts with (see indexSource).
+  const immediate = index.immediateGuards.get(member.first);
+  return Boolean(immediate?.proofs.has(key) && !indexedProofChanged(index, immediate, member));
 }
 
 function provePositiveCondition(raw, mask, methodPath, delimiters, base) {
