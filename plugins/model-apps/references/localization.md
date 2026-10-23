@@ -23,24 +23,39 @@ Only apply localization when `scripts/list-languages.js` (run by the planner dur
 
 ### Language Detection
 
-Detect the user's UI language at component mount using the Xrm global context:
+Detect the user's UI language from the Xrm global context, in a **top-level** function: the page's
+error bar and render boundary (`references/rules.md`, "Missing Error Handling") are top-level
+components that translate their copy too, and a value kept in a component's closure is out of their
+reach.
 
 ```typescript
-const language = React.useMemo(() => {
-  const uiLanguageId = (typeof Xrm !== "undefined" &&
-    Xrm.Utility?.getGlobalContext()?.userSettings?.languageId) || 1033;
-  const langMap: Record<number, { code: string; name: string; isRtl: boolean }> = {
-    // One entry per language in the plan's `## Environment` → `Languages` line, e.g.
-    //   English (1033, en-US); Arabic (Saudi Arabia) (1025, ar-SA) — RTL
-    // becomes 1033: { code: "en-US", name: "English", isRtl: false } and
-    // 1025: { code: "ar-SA", name: "Arabic (Saudi Arabia)", isRtl: true }.
-    // `isRtl` is true exactly where the line carries `— RTL` (see RTL Layout Support) — never from memory.
-    // A language the plan lists with no code has nothing to key a translation by: it gets no entry, and the
-    // fallback below serves that user in English.
-  };
-  return langMap[uiLanguageId] || { code: "en-US", name: "English", isRtl: false };
-}, []);
+type PageLanguage = { code: string; name: string; isRtl: boolean };
+// One entry per language in the plan's `## Environment` → `Languages` line, e.g.
+//   English (1033, en-US); Arabic (Saudi Arabia) (1025, ar-SA) — RTL
+// becomes the two entries below. `isRtl` is true exactly where the line carries `— RTL` (see RTL
+// Layout Support) — never from memory. A language the plan lists with no code has nothing to key a
+// translation by: it gets no entry, and the fallback below serves that user in English.
+const PAGE_LANGUAGES: Record<number, PageLanguage> = {
+  1033: { code: "en-US", name: "English", isRtl: false },
+  1025: { code: "ar-SA", name: "Arabic (Saudi Arabia)", isRtl: true },
+};
+const DEFAULT_LANGUAGE: PageLanguage = { code: "en-US", name: "English", isRtl: false };
+
+// Hook-free, so it is safe anywhere — even in the render boundary's fallback. A host without Xrm,
+// or one that throws, gets English instead of a second crash.
+function resolvePageLanguage(): PageLanguage {
+  try {
+    const uiLanguageId = (typeof Xrm !== "undefined" &&
+      Xrm.Utility?.getGlobalContext()?.userSettings?.languageId) || 1033;
+    return PAGE_LANGUAGES[uiLanguageId] || DEFAULT_LANGUAGE;
+  } catch {
+    return DEFAULT_LANGUAGE;
+  }
+}
 ```
+
+In the page component, read it once for the layout direction:
+`const language = React.useMemo(() => resolvePageLanguage(), []);`
 
 ### Translation Dictionary
 
@@ -54,18 +69,30 @@ const translations: Record<string, Record<string, string>> = {
     title: "Dashboard",
     save: "Save",
     cancel: "Cancel",
+    // The page error keys (references/rules.md, "Missing Error Handling") belong here too, in
+    // every language; a localized page has no separate English ERROR_COPY.
+    "error.read": "Unable to load data. Please try again.",
+    "error.write": "The change could not be saved. Refresh before trying again.",
+    "error.network": "The request did not go through. You can try again.",
+    "error.indeterminate": "We couldn't confirm this completed — refresh before retrying.",
+    "error.render": "This page hit a problem and could not render. Refresh the page.",
+    "error.tryAgain": "Try again",
     // ... all user-visible strings
   },
   "ar-SA": {
     title: "لوحة القيادة",
     save: "حفظ",
     cancel: "إلغاء",
+    // ... every key above, translated
   },
   // ... one entry per detected language
 };
 
-const translate = (key: string): string =>
-  translations[language.code]?.[key] || translations["en-US"]?.[key] || key;
+// Top level, so PageErrorBar and PageErrorBoundary use it as well as the page component.
+function translate(key: string): string {
+  const language = resolvePageLanguage();
+  return translations[language.code]?.[key] || translations["en-US"]?.[key] || key;
+}
 ```
 
 Usage: `<Text>{translate("title")}</Text>` — never `<Text>Dashboard</Text>`.
