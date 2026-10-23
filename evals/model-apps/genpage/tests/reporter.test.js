@@ -3,8 +3,12 @@
 // nothing. So a fixture passes only when at least one of its assertions was graded and none failed; a fixture whose every assertion skipped — or
 // that has none — is unscored: its line carries TAP's `# SKIP` directive, it is counted on a line of its own, and it is never counted as passed.
 // The `# fixtures N (pass P, fail F)` summary keeps its exact form, and a run with no unscored fixture prints exactly what it always printed.
+// The pcf eval runner prints through a byte-for-byte copy of this reporter (evals/pcf/lib/reporter.js); the last test here fails when the two
+// drift apart, so a change to this file takes the copy with it in the same PR (the pcf reporter tests check the same from their side).
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { TapReporter } = require('../lib/reporter.js');
 
 const PASS = { status: 'pass', reason: '' };
@@ -84,4 +88,10 @@ test('a run with no unscored fixture prints exactly what it always printed, and 
   assert.equal(reporter.exitCode, 1);
   const unscored = report([['all-skipped', [SKIP]]]).lines;
   assert.deepStrictEqual(unscored.filter((line) => line.startsWith('# fixtures')), ['# fixtures 1 (pass 0, fail 0)']);
+});
+
+test('the pcf eval runner\'s reporter is this reporter, byte for byte, so it grades and counts as these runners do', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'lib', 'reporter.js'));
+  const copy = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'pcf', 'lib', 'reporter.js'));
+  assert.ok(copy.equals(source), 'evals/pcf/lib/reporter.js differs from evals/model-apps/genpage/lib/reporter.js: change both in the same PR (copy the file over)');
 });
