@@ -1687,7 +1687,7 @@ test('griffel-styles: the time grows with the page, not with its square', (t) =>
     // Constants that are no styles — data — on a page with no style call, and beside one: whether each is at the top of the page and where its name is used are read
     // in one pass for all of them, and only on a page with a call (topLevelStyleConsts, constUses), where asking for each read the page again.
     ['constants and no style call', 1000, (n) => `${Array.from({ length: n }, (_, i) => `const value${i} = ${i};`).join('\n')}\nexport default function P() { return null; }\n`],
-    ['constants beside a style call', 1000, (n) => styles("{ root: { color: 'red' } }", `${IMPORT}${Array.from({ length: n }, (_, i) => `const value${i} = ${i};`).join('\n')}\n`)],
+    ['constants beside a style call', 2000, (n) => styles("{ root: { color: 'red' } }", `${IMPORT}${Array.from({ length: n }, (_, i) => `const value${i} = ${i};`).join('\n')}\n`)],
   ];
   const medianMs = (fn, runs) => {
     const times = [];
