@@ -525,7 +525,7 @@ function addPagesApiFindings(findings, file, text, index) {
     const guardPath = member.names.slice(0, 2).join('.') + member.names.slice(2).map((name) => `?.${name}`).join('');
     findings.push(makeFinding(
       'PCF_PAGES_API',
-      `Heuristic diagnostic: Pages may not provide ${member.methodPath}; ${index.failed ? 'the guard could not be analyzed, so this call is treated as unguarded; ' : ''}guard the call by placing it inside an if (typeof ${guardPath} === 'function') { ... } block, or directly after if (typeof ${guardPath} !== 'function') return; with no code in between (aliases and guard helpers are not recognized), or avoid the API for Pages hosts. See ${FEATURE_USAGE}`,
+      `Heuristic diagnostic: Pages may not provide ${member.methodPath}; ${index.failed ? 'the guard could not be analyzed, so this call is treated as unguarded; ' : ''}guard the call by placing it inside an if (typeof ${guardPath} === 'function') { ... } block (early-return guards and aliases are not recognized), or avoid the API for Pages hosts. See ${FEATURE_USAGE}`,
       file,
       lineOf(text, member.start),
     ));
@@ -1908,7 +1908,7 @@ function indexSource(text, mask) {
   // for each Pages call. This is a conservative index, not a JavaScript parser:
   // only recognized heads keep a binding; an opaque body creates a proof barrier.
   const index = { ...tokenizeSource(mask), text, mask, paths: new Map(), patternKeys: new Set(), patternContainers: new Set(),
-    rootRoles: new Map(), statements: new Map(), writes: new Map(), immediateGuards: new Map() };
+    rootRoles: new Map(), statements: new Map(), writes: new Map() };
   index.members = indexedMembers(index);
   index.roots = new Set(['context', 'this', ...index.members.map((member) => member.names[0])]);
   Object.assign(index, indexHeads(index));
@@ -1923,14 +1923,13 @@ function indexSource(text, mask) {
   const methods = new Map(index.members.filter((member) => member.call && ['device', 'utils'].includes(member.namespace))
     .map((member) => [member.names.join('.'), member.names]));
   for (const control of index.controls) {
-    if (control.kind !== 'if') continue;
-    const block = index.tokens[control.body]?.value === '{' && index.tokens[control.body].match >= 0;
-    const scope = block ? index.blockScopes.get(control.body) : null;
+    if (control.kind !== 'if' || index.tokens[control.body]?.value !== '{' || index.tokens[control.body].match < 0) continue;
+    const scope = index.blockScopes.get(control.body);
+    if (!scope) continue;
     const start = index.tokens[control.open].end;
     const end = index.tokens[control.close].start;
     const raw = withoutComments(text.slice(start, end));
     const proofs = new Set();
-    const negated = new Set();
     const candidates = new Set();
     for (let i = control.open + 1; i < control.close; i += 1) {
       const path = index.paths.get(i);
@@ -1938,150 +1937,11 @@ function indexSource(text, mask) {
     }
     for (const key of candidates) {
       if (provePositiveCondition(raw, mask.slice(start, end), methods.get(key), index.delimiters, start)) proofs.add(key);
-      else if (proveNegatedCondition(raw, mask.slice(start, end), methods.get(key))) negated.add(key);
     }
     const owner = index.tokens[control.keyword].scope;
-    const guardStart = index.tokens[control.keyword].start;
-    if (scope) scope.guard = { start: guardStart, proofs, owner };
-    if (!negated.size) continue;
-    // The exact negation of a proof covers only the call that runs right after it: the first statement
-    // of the else branch, or the statement after an if whose branch always leaves the block. Nothing
-    // may run in between, because any code there could remove the method again without a write the
-    // analyzer sees: Object.assign(context.device, { captureImage: undefined }), an alias, a helper.
-    //   if (typeof m !== 'function') { … } else { m(); }        if (typeof m !== 'function') return; m();
-    const consequentEnd = indexedStatementEnd(index, control.body);
-    const alternative = tokenKeyword(index.tokens, consequentEnd, 'else') ? consequentEnd + 1 : -1;
-    let next = -1;
-    if (alternative >= 0) next = index.tokens[alternative]?.value === '{' ? alternative + 1 : alternative;
-    else if (consequentLeavesBlock(index, control) && directBlockStatement(index, control, owner)) {
-      next = indexedStatementEnd(index, control.keyword);
-    }
-    if (next >= 0 && index.tokens[next] && index.tokens[next].value !== '}') {
-      index.immediateGuards.set(leadingOperand(index, next), { start: guardStart, proofs: negated, owner });
-    }
+    scope.guard = { start: index.tokens[control.keyword].start, proofs, owner };
   }
   return index;
-}
-
-function leadingOperand(index, at) {
-  // The token where the statement at `at` starts evaluating code, past prefixes that run nothing
-  // before it: return, throw, void and await, and a declaration of or assignment to a plain name, as in
-  //   return context.device.captureImage();      const image = await context.device.captureImage();
-  const { tokens } = index;
-  let i = at;
-  if (['return', 'throw', 'void'].some((word) => tokenKeyword(tokens, i, word))) i += 1;
-  else if (['const', 'let', 'var'].some((word) => tokenKeyword(tokens, i, word))
-    && tokens[i + 1]?.kind === 'identifier' && tokens[i + 2]?.value === '=') i += 3;
-  else if (tokens[i]?.kind === 'identifier' && tokens[i + 1]?.value === '=' && !['.', '?.'].includes(tokens[i - 1]?.value)) i += 2;
-  if (tokenKeyword(tokens, i, 'await')) i += 1;
-  return i;
-}
-
-function consequentLeavesBlock(index, control) {
-  // The consequent is one return/throw/break/continue statement, or a block whose last statement is
-  // one. Each of these leaves the block that holds the if statement: break and continue target an
-  // enclosing statement, and a label on the if itself is refused by directBlockStatement.
-  const { tokens } = index;
-  const leaves = (at) => ['return', 'throw', 'break', 'continue'].some((word) => tokenKeyword(tokens, at, word));
-  if (tokens[control.body]?.value !== '{') return leaves(control.body);
-  const close = tokens[control.body].match;
-  let last = -1;
-  for (let at = control.body + 1; at < close;) {
-    const next = indexedStatementEnd(index, at);
-    if (next <= at || next > close) return false;
-    last = at;
-    at = next;
-  }
-  return last >= 0 && leaves(last);
-}
-
-function directBlockStatement(index, control, owner) {
-  // The if must be a statement of a block, so the statement after it is the one that runs next when
-  // the branch does not leave: not an else-if, a nested if consequent, a labelled statement or a case
-  // clause (another case is entered without the guard).
-  const { tokens } = index;
-  const keyword = control.keyword;
-  if (keyword > 0 && !['{', '}', ';'].includes(tokens[keyword - 1].value)) return false;
-  const parent = tokens[keyword].parent;
-  if (parent === -1) return owner.kind === 'program';
-  if (tokens[parent].value !== '{' || owner.body !== tokens[parent].start) return false;
-  return !index.controls.some((other) => other.kind === 'switch' && other.body === parent);
-}
-
-function proveNegatedCondition(raw, mask, methodPath) {
-  // The negation of a guard condition is a positive proof when the condition is a disjunction of
-  // negated proof operands (De Morgan), evaluated left to right like the positive conjunction:
-  //   typeof context.device?.captureImage !== "function"      → typeof … === "function"
-  //   !context.device || typeof context.device.captureImage !== "function"
-  //   busy || !context.device?.captureImage                    → !busy && context.device?.captureImage
-  //   !(context.device && typeof context.device.captureImage === "function")
-  // Each disjunct is turned into its positive operand, and the conjunction goes through
-  // provePositiveCondition, so no operand form is accepted here that a positive guard refuses.
-  const assignment = /(?<![=!<>])=(?!=)|(?:\*\*|>>>|<<|>>|&&|\|\||\?\?|[+\-*/%&|^])=/;
-  if (mask.includes('=>') || assignment.test(mask) || /\?(?!\.)/.test(mask) || mask.includes('??')) return false;
-  const structural = blankLiterals(raw);
-  const groups = parenGroups(structural);
-  if (!groups) return false;
-  const whole = unwrapRange(raw, structural, 0, raw.length, groups);
-  const positives = [];
-  let from = whole.start;
-  const disjuncts = [];
-  for (let i = whole.start; i < whole.end; i += 1) {
-    if ('([{'.includes(structural[i])) i = groups.get(i) ?? i;
-    else if (structural.startsWith('||', i)) { disjuncts.push([from, i]); i += 1; from = i + 1; }
-  }
-  disjuncts.push([from, whole.end]);
-  for (const [start, end] of disjuncts) {
-    const range = unwrapRange(raw, structural, start, end, groups);
-    const text = raw.slice(range.start, range.end);
-    const shape = structural.slice(range.start, range.end);
-    if (!text || shape.includes('&&') || shape.includes('||')) {
-      // Only a negated group may hold a conjunction: !(a && b) is the operand pair a && b.
-      if (!(shape[0] === '!' && /^!\s*\(/.test(shape) && groups.get(range.start + shape.indexOf('(')) === range.end - 1)) return false;
-    }
-    const typeofLeft = /^typeof\s+(.+?)\s*!==?\s*(['"])function\2$/.exec(text);
-    const typeofRight = /^(['"])function\1\s*!==?\s*typeof\s+(.+)$/.exec(text);
-    const isNull = /^(.+?[^=!<>\s])\s*==\s*null$/.exec(text);
-    if (/^!\s*\(/.test(shape) && groups.get(range.start + shape.indexOf('(')) === range.end - 1) {
-      positives.push(text.slice(text.indexOf('(')));
-    } else if (typeofLeft) positives.push(`typeof ${typeofLeft[1]} === "function"`);
-    else if (typeofRight) positives.push(`typeof ${typeofRight[2]} === "function"`);
-    else if (isNull) positives.push(`${isNull[1]} != null`);
-    else if (/^!(?!=)/.test(text)) {
-      // !path and !!path only: in !typeof m === "function" or !a === b the ! binds to the operand
-      // alone, so dropping it would change the comparison.
-      const rest = text.slice(1).trim();
-      if (!parseGuardPath(rest.replace(/^!\s*/, ''))) return false;
-      positives.push(rest);
-    } else if (/^[^!=<>]+(?:===|!==|==|!=|<=|>=|<|>)[^=<>]+$/.test(shape)) {
-      const swap = { '===': '!==', '!==': '===', '==': '!=', '!=': '==', '<=': '>', '>=': '<', '<': '>=', '>': '<=' };
-      const comparison = /^(.+?)\s*(===|!==|==|!=|<=|>=|<|>)\s*(.+)$/.exec(text);
-      if (!comparison) return false;
-      positives.push(`${comparison[1]} ${swap[comparison[2]]} ${comparison[3]}`);
-    } else if (parseGuardPath(text)) positives.push(`!${text}`);
-    else return false;
-  }
-  const conjunction = positives.map((operand) => `(${operand})`).join(' && ');
-  const conjunctionMask = blankLiterals(conjunction);
-  const conjunctionGroups = parenGroups(conjunctionMask, '([{', ')]}');
-  return Boolean(conjunctionGroups) && provePositiveCondition(conjunction, conjunctionMask, methodPath, conjunctionGroups, 0);
-}
-
-function parenGroups(mask, opens = '([{', closes = ')]}') {
-  // Offsets of matching brackets in both directions, as tokenizeSource records them, or null when
-  // the text is unbalanced.
-  const groups = new Map();
-  const stack = [];
-  for (let i = 0; i < mask.length; i += 1) {
-    if (opens.includes(mask[i])) stack.push(i);
-    else if (closes.includes(mask[i])) {
-      const open = stack.pop();
-      if (open === undefined || opens.indexOf(mask[open]) !== closes.indexOf(mask[i])) return null;
-      groups.set(open, i);
-      groups.set(i, open);
-    }
-  }
-  return stack.length ? null : groups;
 }
 
 function localObjectMember(index, member) {
@@ -2519,9 +2379,7 @@ function hasMethodGuard(index, member) {
   for (let scope = index.tokens[member.token].scope; scope; scope = scope.parent) {
     if (scope.guard?.proofs.has(key) && !indexedProofChanged(index, scope.guard, member)) return true;
   }
-  // A negated proof covers only the call its statement starts with (see indexSource).
-  const immediate = index.immediateGuards.get(member.first);
-  return Boolean(immediate?.proofs.has(key) && !indexedProofChanged(index, immediate, member));
+  return false;
 }
 
 function provePositiveCondition(raw, mask, methodPath, delimiters, base) {
