@@ -31,7 +31,8 @@
 // The keys have to be written where the checker can see them, and a style object it cannot see is never reported as clean. `makeStyles(styles)` — an object built
 // elsewhere — a slot or a nested selector whose object is a variable (`root: base`, `':hover': hover`), and a spread of anything but an object written inline
 // (`...base`, `...helper()`) are each an `unread-style-object` problem: the keys behind them may be any of the ten, and a gate that let them through would deploy
-// exactly what it exists to stop. Written inline, the same keys are checked, so the remedy is always to write them there. So is a getter that runs, whatever key
+// exactly what it exists to stop. Written inline, the same keys are checked, so the remedy is always to write them there — or in a `const` at the top of the page
+// that nothing but the styles uses, which is read where it is used as if written there (a style constant: topLevelStyleConsts). So is a getter that runs, whatever key
 // it defines (`get root() { return … }`, `get color() { … }`): Griffel calls it as it reads the key, and a spread as it copies its object, and its body is code the
 // check does not read, which may return any value and change what else its object holds before Griffel reads that (ranGetter). And so is a computed key the check
 // cannot read as one string (`[key]`, `['border' + 'Width']`), which may name any of the ten, or a selector whose object it does not read — unless it is a template
@@ -623,9 +624,10 @@ function typeEnd(mask, angles, from, end) {
   return word && (word.name === 'as' || word.name === 'satisfies') ? k : -1;
 }
 // ─── Style objects ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
-// The members of the object literal whose `{` is at `open`, as { name, nameAt, spread, valueFrom, valueTo, head, keyText, getter, proto }: `name` is the key where it
-// is a name, a number or a string literal (null for a computed key that is not one), `nameAt` where the key starts in the source, and [valueFrom, valueTo) the value —
-// empty for a shorthand member (`{ borderColor }`), and the expression after the dots for a spread (`spread: true`, no name). A computed key also has `keyText`, as
+// The members of the object literal whose `{` is at `open`, as { name, nameAt, spread, valueFrom, valueTo, head, keyText, getter, proto, shorthand }: `name` is the key
+// where it is a name, a number or a string literal (null for a computed key that is not one), `nameAt` where the key starts in the source, and [valueFrom, valueTo) the
+// value — the name itself for a shorthand member (`{ borderColor }`, `shorthand: true`: its value is the variable of that name), and the expression after the dots for a
+// spread (`spread: true`, no name). A computed key also has `keyText`, as
 // written (`[key]`), and a template key with a substitution has `head`, its text before the first `${` — all that can be known of what it names (scanStyleObject).
 // `proto` marks `__proto__: …` written as a name or a string, which sets the object's prototype rather than a key: `for … in` reads what the prototype holds as
 // the object's own (https://tc39.es/ecma262/#sec-runtime-semantics-propertydefinitionevaluation; a computed `['__proto__']` and a shorthand are ordinary keys). A
@@ -736,8 +738,9 @@ function objectMembers(ctx, open) {
     } else if (mask[params] === '(') {
       i = functionEnd(ctx, params, close) + 1; // a method
     } else if ((mask[after] === ',' || after >= close) && shorthandAllowed) {
-      // `{ borderColor }`: an unquoted key whose value is the variable of the same name — still a key named borderColor.
-      members.push({ name, nameAt, spread: false, valueFrom: after, valueTo: after });
+      // `{ borderColor }`: an unquoted key whose value is the variable of the same name — still a key named borderColor. Its value is that name, as written
+      // (a top-level `const` it names is read: topLevelStyleConsts).
+      members.push({ name, nameAt, spread: false, valueFrom: nameAt, valueTo: afterName, shorthand: true });
       i = after + 1;
     } else {
       i = memberEnd(after) + 1;
@@ -821,7 +824,7 @@ function objectsIn({ mask, match }, from, to) {
 // is read as the text it holds (so 'red' and "red" are one value, whichever quotes a page was saved with), and nothing else is evaluated — `tokens.colorBrandStroke1` is that text,
 // whatever the token resolves to, and a variable is its name. A shorthand member (`{ borderColor }`) writes no value; its value is the variable of the same name, so it is that name.
 function valueText({ mask, src }, member) {
-  if (member.valueFrom === member.valueTo) return member.name;
+  if (member.shorthand || member.valueFrom === member.valueTo) return member.name;
   const from = member.valueFrom;
   let to = member.valueTo;
   while (to > from && isTrivia(mask[to - 1])) to -= 1; // the mask holds a comment as white space
@@ -897,6 +900,7 @@ function topLevelOperators(ctx, a, b) {
 //   X as T, X satisfies T   X, when nothing but casts follows it: the type is jumped (topLevelOperators), and `x as T < 10` is a comparison, not an object
 //   ( X ), X!               X: parentheses and a non-null assertion change nothing at run time
 //   { … }                   read: the keys are in it
+//   NAME                    what NAME is bound to, where it is a style constant the check reads (boundStyleObjects, topLevelStyleConsts)
 // Anything else — a variable, a member, a call — holds keys the checker cannot see.
 function styleObjectsOf(ctx, from, to, helpers = false, depth = 0) {
   const { mask, match } = ctx;
@@ -940,7 +944,117 @@ function styleObjectsOf(ctx, from, to, helpers = false, depth = 0) {
   }
   if (mask[a] === '(' && match[a] === b - 1) return styleObjectsOf(ctx, a + 1, b - 1, helpers, depth + 1);
   if (mask[a] === '{' && match[a] === b - 1) return [a];
+  const bound = boundStyleObjects(ctx, a, b, helpers, depth);
+  if (bound !== undefined) return bound;
   return helpers && trustedHelperValue(ctx, a, b) ? [] : null;
+}
+
+// A value that is the name of a style constant — a `const` at the top of the page (topLevelStyleConsts) — read as the value it is bound to, or undefined where [a, b) is
+// no such name. Where the name stands in a value the check reads (`ctx.trustedValue`: a call's argument, or a member of an object it reached that way) the place is
+// noted (`requests`), and the name is read only once every use of it in the page is such a place (`resolvable`).
+function boundStyleObjects(ctx, a, b, helpers, depth) {
+  const consts = ctx.styleConsts;
+  if (!consts || consts.candidates.size === 0) return undefined;
+  const id = readIdentifier(ctx.mask, a);
+  if (!id || id.end !== b) return undefined;
+  const binding = consts.candidates.get(id.name);
+  if (!binding) return undefined;
+  if (ctx.trustedValue) consts.requests.add(a);
+  if (!consts.resolvable.has(id.name)) return undefined;
+  return styleObjectsOf(ctx, binding.from, binding.to, helpers, depth + 1);
+}
+
+// ─── Style constants ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// A style object a page writes once, in a `const` at its top, and then uses where the check reads styles — `makeStyles(styles)`, `root: base`, `{ ...base, color }`,
+// `{ base }` — is read where it is used, as if it were written there. The constants (`candidates`) are every `const NAME = VALUE;` at the top of the page: not inside
+// any bracket, not exported or declared, one declarator, ended by its own `;` — whatever VALUE is (styleObjectsOf reads it where NAME is used, so a value it cannot read
+// stays unread). What makes the object the one Griffel gets is that nothing else in the page uses the name: a `const` binding cannot be assigned, and an object no
+// code reaches cannot be changed, so where EVERY use of the name in the page is a place the check reads as a style value — a call's argument, or the value of a slot, a
+// selector, a spread or a prototype in an object it reached the same way (`requests`) — or is the key of such an object (`keySites`), the object is handed to Griffel
+// as written. Any other use leaves the name unread, as before: `base.borderWidth = …`, `Object.assign(base, …)`, `const alias = base` (code that can change it), a
+// parameter or a variable of the same name in a function (where a use inside it means that one), a type query, a JSX tag, a use in an object the check found inside a
+// value it does not read (a call's argument, a function), and a use before the declaration ends (where the binding is not yet set). A name declared twice at the top is
+// none. Uses are found in the code with the template substitutions in it (blankNonCodePreservingTemplateExpressions), a property name after a `.` excepted; and where
+// the lexer guessed anywhere in the page, what is code after the guess is not known for certain, so no constant is read.
+function topLevelStyleConsts(ctx, guessed) {
+  const { mask } = ctx;
+  const candidates = new Map();
+  if (guessed) return candidates;
+  const twice = new Set();
+  const declaration = new RegExp('(?<![\\p{ID_Continue}$.])const(?![\\p{ID_Continue}$])', 'gu');
+  for (let m = declaration.exec(mask); m; m = declaration.exec(mask)) {
+    if (enclosed(ctx, m.index)) continue;
+    const prior = identifierEndingAt(mask, previousSignificant(mask, m.index) + 1);
+    if (prior && (prior.name === 'export' || prior.name === 'declare')) continue;
+    const nameAt = skipSpace(mask, m.index + m[0].length);
+    const id = readIdentifier(mask, nameAt);
+    if (!id || id.name === 'enum') continue;
+    let eq = skipSpace(mask, id.end);
+    if (mask[eq] === ':') eq = annotationEnd(ctx, eq + 1);
+    if (eq === -1 || mask[eq] !== '=' || mask[eq + 1] === '=' || mask[eq + 1] === '>') continue;
+    const end = declarationEnd(ctx, eq + 1);
+    if (end === -1) continue;
+    if (candidates.has(id.name)) twice.add(id.name);
+    candidates.set(id.name, { nameAt, from: eq + 1, to: end, end: end + 1 });
+  }
+  for (const name of twice) candidates.delete(name);
+  return candidates;
+}
+
+// The `;` that ends the initializer starting at `from` at the top of the page, or -1: where a `,` comes first (another declarator), or a word that begins a statement
+// or a declaration, or the end of the source (a statement no `;` ends, which ASI ends where this does not read), or a bracket closes that it did not open.
+const DECLARATION_BREAKS = new Set(['const', 'let', 'var', 'function', 'class', 'export', 'import', 'interface', 'enum', 'if', 'for', 'while', 'do', 'return', 'switch',
+  'try', 'throw']);
+function declarationEnd({ mask, match }, from) {
+  for (let k = from; k < mask.length; k += 1) {
+    const c = mask[k];
+    if (c === ';') return k;
+    if (c === ',' || c === ')' || c === ']' || c === '}') return -1;
+    if (c === '{' || c === '(' || c === '[') {
+      if (match[k] === -1) return -1;
+      k = match[k];
+    } else if (c === '"' || c === "'" || c === '`') {
+      const close = mask.indexOf(c, k + 1);
+      if (close === -1) return -1;
+      k = close;
+    } else if (ID_START.test(c) && !ID_PART.test(mask[k - 1] || '')) {
+      const id = readIdentifier(mask, k);
+      if (!id) continue;
+      const before = previousSignificant(mask, k);
+      // `as const` asserts the value; a property name after a `.` is no keyword.
+      const assertion = id.name === 'const' && identifierEndingAt(mask, before + 1)?.name === 'as';
+      if (DECLARATION_BREAKS.has(id.name) && mask[before] !== '.' && !assertion) return -1;
+      k = id.end - 1;
+    }
+  }
+  return -1;
+}
+
+// Whether every use of the constant `name`, declared as `binding`, is one the check reads (topLevelStyleConsts): a style value it reached, after the declaration ends,
+// or the key of an object it reached. The name's own declaration and a property name after a `.` (`x.base`, `x?.base`; not a spread's `...base`) are no uses.
+function constUsesAreRead(ctx, name, binding) {
+  const { keep, styleConsts } = ctx;
+  const uses = new RegExp(`(?<![\\p{ID_Continue}$\\u200c\\u200d])${escapeRegExp(name)}(?![\\p{ID_Continue}$\\u200c\\u200d])`, 'gu');
+  for (const m of keep.matchAll(uses)) {
+    if (m.index === binding.nameAt || styleConsts.keySites.has(m.index)) continue;
+    const before = previousSignificant(keep, m.index);
+    if (before >= 0 && keep[before] === '.' && keep[before - 1] !== '.') continue;
+    if (!styleConsts.requests.has(m.index) || m.index < binding.end) return false;
+  }
+  return true;
+}
+
+// One round of topLevelStyleConsts: the constants every use of which the rounds so far have read become readable. The places only ever grow (a place the check reads
+// is one whatever round finds it), so the readable constants do too; true while they still grow.
+function settleStyleConsts(ctx) {
+  const consts = ctx.styleConsts;
+  let grew = false;
+  for (const [name, binding] of consts.candidates) {
+    if (consts.resolvable.has(name) || !constUsesAreRead(ctx, name, binding)) continue;
+    consts.resolvable.add(name);
+    grew = true;
+  }
+  return grew;
 }
 
 // Whether the expression in [a, b) is a trusted Griffel-module export (STYLE_HELPERS): `shorthands.<name>(…)` or `typographyStyles.<name>`, by a name the page imported
@@ -1049,11 +1163,14 @@ function scanStyleObject(ctx, open, findings, slotObject, trail = [], arms = [])
     findings.push({ unread: 'deep', at: open, within: trail, value: '' });
     return;
   }
-  for (const { member, within, arms: heldArms, slot } of heldMembers(ctx, open, findings, slotObject, trail, false, 0, arms)) {
+  for (const { member, within, arms: heldArms, slot, trusted } of heldMembers(ctx, open, findings, slotObject, trail, false, 0, arms)) {
+    // The key of a member of an object the check reads where it stands is a property's name, never a binding (topLevelStyleConsts).
+    if (trusted && member.nameAt !== undefined && ID_START.test(ctx.mask[member.nameAt] || '')) ctx.styleConsts.keySites.add(member.nameAt);
     if (!slotObject && member.name !== null && UNSUPPORTED_GRIFFEL_SHORTHANDS.has(member.name)) {
       findings.push({ name: member.name, at: member.nameAt, longhands: UNSUPPORTED_GRIFFEL_SHORTHANDS.get(member.name), within, arms: heldArms, value: valueText(ctx, member) });
     }
     const here = [...within, member.name === null ? '[…]' : member.name];
+    let bound = [];
     // Keyframes are not style objects (see the header), so an animation's frames are not read. A SLOT may be called animationName: its object is a style object.
     // A getter that defines the key still runs when Griffel reads it (ranGetter).
     if (!slotObject && member.name === 'animationName') {
@@ -1072,10 +1189,16 @@ function scanStyleObject(ctx, open, findings, slotObject, trail = [], arms = [])
       const holdsStyleObject = slotObject || (member.head !== undefined ? NESTED_START.test(member.head) : !isPropertyKey(member.name));
       if (holdsStyleObject) {
         ctx.unreadCast = false;
+        ctx.trustedValue = trusted;
         // A getter's value is what its body returns, which is never read, however it is written: its text, `get <name>(…) {…}`, is no object (`!member.getter`
         // says so rather than leaving it to what styleObjectsOf makes of a function's text — a getter called `as` would read as a cast).
-        const read = !member.getter
-          && (styleObjectsOf(ctx, member.valueFrom, member.valueTo) !== null || primitiveValue(ctx, member.valueFrom, member.valueTo));
+        const objects = member.getter ? null : styleObjectsOf(ctx, member.valueFrom, member.valueTo);
+        const read = !member.getter && (objects !== null || primitiveValue(ctx, member.valueFrom, member.valueTo));
+        if (objects !== null) {
+          if (trusted) for (const object of objects) ctx.trusted.add(object);
+          // The objects of a style constant the value names stand elsewhere in the page: they are read here, as the value's.
+          bound = objects.filter((object) => object < member.valueFrom || object >= member.valueTo);
+        }
         if (!read) {
           const unread = ctx.unreadCast ? 'cast' : slotObject ? 'slot' : 'selector';
           findings.push({ unread, at: member.nameAt, within: here, value: valueText(ctx, member) });
@@ -1086,7 +1209,9 @@ function scanStyleObject(ctx, open, findings, slotObject, trail = [], arms = [])
       }
     }
     // A getter's body is code, not an object: it is not searched for objects written inline. Any other member's objects are style objects one level down, each told by its order among those written in the value.
+    // The objects of a style constant the value names follow, each told by its order among those (`c0`, `c1`, …), apart from the ones written in the value.
     if (!member.getter) objectsIn(ctx, member.valueFrom, member.valueTo).forEach((nested, index) => scanStyleObject(ctx, nested, findings, false, here, [...heldArms, armOf(slot, index)]));
+    bound.forEach((nested, index) => scanStyleObject(ctx, nested, findings, false, here, [...heldArms, armOf(slot, `c${index}`)]));
   }
 }
 
@@ -1120,12 +1245,14 @@ function memberSlots(members) {
 function heldMembers(ctx, open, findings, slotObject, trail, ownOnly = false, depth = 0, arms = []) {
   const own = [];
   const inherited = [];
+  // Whether the check reached this object through values it reads (topLevelStyleConsts): its members say so (`trusted`), and so do the objects of its spreads.
+  const trusted = ctx.trusted.has(open);
   const members = objectMembers(ctx, open);
   const slots = memberSlots(members);
   for (const member of members) {
     const slot = slots.get(member) || '';
     if (!member.spread && !member.proto) {
-      own.push({ member, within: trail, arms, slot, certain: true });
+      own.push({ member, within: trail, arms, slot, certain: true, trusted });
       continue;
     }
     if (member.proto && ownOnly) continue;
@@ -1139,6 +1266,7 @@ function heldMembers(ctx, open, findings, slotObject, trail, ownOnly = false, de
     const ran = (entry) => entry.ran || (member.spread && entry.member.getter === true);
     ctx.unreadCast = false;
     ctx.conditional = false;
+    ctx.trustedValue = trusted;
     const objects = depth < MAX_STYLE_DEPTH ? styleObjectsOf(ctx, member.valueFrom, member.valueTo, member.spread && !slotObject) : null;
     if (objects === null) {
       if (!primitiveValue(ctx, member.valueFrom, member.valueTo)) {
@@ -1153,6 +1281,7 @@ function heldMembers(ctx, open, findings, slotObject, trail, ownOnly = false, de
       continue;
     }
     const certain = member.spread && !ctx.conditional && objects.length === 1;
+    if (trusted) for (const object of objects) ctx.trusted.add(object);
     objects.forEach((object, index) => {
       for (const entry of heldMembers(ctx, object, findings, slotObject, within, copied, depth + 1, [...arms, armOf(slot, index)])) into.push({ ...entry, certain: certain && entry.certain, ran: ran(entry) });
     });
@@ -1298,14 +1427,13 @@ function griffelStyleProblems(source) {
   // ambiguity listener, which only the other entry point offers. The tokenization is the same with or without a listener (source-literals.js).
   const mask = blankLiterals(src);
   let guess = null;
-  blankNonCodePreservingTemplateExpressions(src, { onAmbiguity: (at, kind) => { if (!guess || at < guess.at) guess = { at, kind }; } });
+  const keep = blankNonCodePreservingTemplateExpressions(src, { onAmbiguity: (at, kind) => { if (!guess || at < guess.at) guess = { at, kind }; } });
   const match = matchBrackets(mask);
   const angles = matchAngles(mask);
   const { local, helpers, helperNamespaces } = styleFunctionBindings(mask, src);
-  const ctx = { mask, src, match, angles, helpers, helperNamespaces };
+  const ctx = { mask, src, match, angles, helpers, helperNamespaces, keep, trusted: new Set(), trustedValue: false };
+  ctx.styleConsts = { candidates: topLevelStyleConsts(ctx, guess !== null), resolvable: new Set(), requests: new Set(), keySites: new Set() };
   const starts = lineStarts(src);
-  const problems = [];
-  let read = 0;
   const calls = styleFunctionCalls(mask, src, match, angles);
   // Each call is told by the name its hook is bound to (bindingNameOf): every call starts its own slots, so two hooks both have a `root`, and a page compared with an earlier version of itself
   // (griffelProblemsNotIn) must know a key's call to say it is the one the page had. Only a name the page proves, and uses once, tells: every call is counted, the ones that are not read as well, so a call that
@@ -1314,6 +1442,22 @@ function griffelStyleProblems(source) {
   const uses = new Map();
   for (const name of bound) if (name !== null) uses.set(name, (uses.get(name) || 0) + 1);
   calls.forEach((call, i) => { call.owner = bound[i] !== null && uses.get(bound[i]) === 1 ? bound[i] : null; });
+  // Which style constants are read (topLevelStyleConsts): the calls are read in rounds, what they find set aside, until a round finds no more — a constant used only in
+  // another one is found once that one is read.
+  for (let more = ctx.styleConsts.candidates.size > 0; more;) {
+    for (const call of calls) {
+      if (call.close === -1 || (call.objectOpen !== -1 && call.objectClose === -1)) continue;
+      ctx.unreadCast = false;
+      ctx.trustedValue = true;
+      for (const open of styleObjectsOf(ctx, call.argFrom, call.argTo) || []) {
+        ctx.trusted.add(open);
+        scanStyleObject(ctx, open, [], call.spec.slots);
+      }
+    }
+    more = settleStyleConsts(ctx);
+  }
+  const problems = [];
+  let read = 0;
   for (const call of calls) {
     const at = locate(starts, call.callee);
     const unbalanced = call.close === -1 || (call.objectOpen !== -1 && call.objectClose === -1);
@@ -1335,11 +1479,13 @@ function griffelStyleProblems(source) {
     }
     // The argument is read as a slot's value is (styleObjectsOf): an object written in the call, maybe in parentheses, with an assertion or chosen by a condition.
     ctx.unreadCast = false;
+    ctx.trustedValue = true;
     const slots = styleObjectsOf(ctx, call.argFrom, call.argTo);
     if (slots === null) {
       problems.push({ code: 'unread-style-object', ...at, within: [], message: unreadMessage(ctx.unreadCast ? 'cast' : 'call', '', src.slice(call.argFrom, call.argTo)) });
       continue;
     }
+    for (const open of slots) ctx.trusted.add(open);
     read += 1;
     const findings = [];
     // `branch` is which of the call's style objects a key is in: a condition chooses between them (`dark ? { … } : { … }`), and styleObjectsOf lists them in the order they are written, arms of a nested

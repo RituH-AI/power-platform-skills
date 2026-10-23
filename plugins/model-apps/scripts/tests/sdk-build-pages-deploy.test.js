@@ -1107,7 +1107,7 @@ const GRIFFEL_CLEAN = `${GRIFFEL_IMPORT}// borderWidth: 1\nconst useStyles = mak
 // Valid TSX that the lexer cannot read for certain: after `if (s) { }` a `/` could start a regex or divide, so the makeStyles call below it is not one the checker can vouch for.
 const GRIFFEL_UNREADABLE = `${GRIFFEL_IMPORT}export function skip(s: string) { if (s) { } /x/.test(s); }\nconst useStyles = makeStyles({ root: { padding: '4px' } });\nexport default function Detail() { return null; }\n`;
 // A style object written elsewhere: its keys — here one Griffel drops — are not in the call, so the checker cannot see them.
-const GRIFFEL_INDIRECT = `${GRIFFEL_IMPORT}const styles = { root: { borderWidth: '1px' } };\nconst useStyles = makeStyles(styles);\nexport default function Detail() { return null; }\n`;
+const GRIFFEL_INDIRECT = `${GRIFFEL_IMPORT}let styles = { root: { borderWidth: '1px' } };\nconst useStyles = makeStyles(styles);\nexport default function Detail() { return null; }\n`;
 const BOTH_WAYS_OUT = 'Deleting a key changes nothing on screen, because Griffel never applied it; writing the longhands (for `all`, the properties you want) makes the style start to render, which changes how the page looks.';
 
 // What an earlier APPLY left in last-applied.json, read back as build-model-app.js reads it for the next build (`opts.baselineSpec`): the real writer and the real reader, so each page's

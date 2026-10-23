@@ -861,11 +861,14 @@ subagent. Inline the page-builder workflow directly in the orchestrator:
    or a style object it cannot read, with what to change — and exits 3 while any is
    left: fix what it reports and run it again, and do not transpile or upload the
    page until it exits 0. It reads the style objects written inline in the call,
-   `makeStyles({ … })`, so write them there: one passed or spread in from elsewhere
-   (`makeStyles(styles)`, `...base`) is reported, because the check cannot see its
-   keys, and so is a key computed from an expression (`[key]: …`), whose name it
-   cannot see (a template that starts with `--`, `&`, `:` or `@` is read); Fluent's
-   `...shorthands.*(…)` and `...typographyStyles.*` may be spread as they are.
+   `makeStyles({ … })`, and one kept in a `const` at the top of the page (declared
+   above its use and ended by `;`) that nothing but the styles uses, so write them
+   there: one passed or spread in from anywhere else (a parameter, an import, a
+   `let`, a `const` the page also uses outside its styles) is reported, because the
+   check cannot see its keys, and so is a key computed from an expression
+   (`[key]: …`), whose name it cannot see (a template that starts with `--`, `&`,
+   `:` or `@` is read); Fluent's `...shorthands.*(…)` and `...typographyStyles.*`
+   may be spread as they are.
 10. Run the completeness gate on the page you wrote — the same one 5c runs on a
     worker's page, and this is also the page a 5c fallback produces:
 
