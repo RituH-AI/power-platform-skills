@@ -1126,6 +1126,18 @@ test('Pages proof expires after a this write in a computed class member key', ()
     'run() {} [this._context.device = null]() {}',
     'static { consume(1); } [this._context.device = null]() {}',
     'value\n[this._context.device = null]() {}',
+    'value: number\n[this._context.device = null]() {}',
+    'value?: string\n[this._context.device = null]() {}',
+    '#value\n[this._context.device = null]() {}',
+    'static #value\n[this._context.device = null]() {}',
+    '@decorate [this._context.device = null]() {}',
+    '@decorate() [this._context.device = null]() {}',
+    '@scope.decorate [this._context.device = null]() {}',
+    '@decorate\n[this._context.device = null]() {}',
+    'handler = () => {}\n[this._context.device = null]() {}',
+    'count = next++\n[this._context.device = null]() {}',
+    'first = 1\nsecond\n[this._context.device = null]() {}',
+    'run(): void\n[this._context.device = null]() {}',
   ]) {
     assert.deepEqual(codesFor(inGuardedMethod(member)), ['PCF_PAGES_API'], member);
   }
@@ -1138,11 +1150,19 @@ test('Pages proof keeps the class instance as this inside class member bodies an
     '[key] = (this._context.device = null);',
     'static { this._context = null; }',
     'value = { a: 1 }\n[this._context.device = null];',
+    'value = source\n[this._context.device = null];',
+    'value = read()\n[this._context.device = null];',
+    'value: number[] = []\n[this._context.device = null];',
+    'value = function () { return {}; }\n[this._context.device = null];',
+    'value = class {}\n[this._context.device = null];',
+    'value = () => source\n[this._context.device = null];',
   ]) {
     assert.deepEqual(codesFor(inGuardedMethod(member)), [], member);
   }
   // A call in a computed key runs under the enclosing proof; one in a member body does not.
   assert.deepEqual(codesFor(inGuardedMethod(`[${THIS_CONTEXT_CALL}]() {}`, '')), []);
+  assert.deepEqual(codesFor(inGuardedMethod(`value: number\n[${THIS_CONTEXT_CALL}]() {}`, '')), []);
+  assert.deepEqual(codesFor(inGuardedMethod(`value = source\n[${THIS_CONTEXT_CALL}];`, '')), ['PCF_PAGES_API']);
   assert.deepEqual(codesFor(`class D { [${THIS_CONTEXT_CALL}]() {} }`), ['PCF_PAGES_API']);
   assert.deepEqual(codesFor(inGuardedMethod(`run() { ${THIS_CONTEXT_CALL}; }`, '')), ['PCF_PAGES_API']);
 });

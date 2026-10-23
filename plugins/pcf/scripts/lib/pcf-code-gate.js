@@ -1175,13 +1175,16 @@ function angleBoundary(tokens, start, direction) {
   return tokens.angles.get(start) ?? -1;
 }
 
-function typedHeadBody(tokens, close) {
+function typedHeadBody(tokens, close, mask) {
   let i = close + 1;
   if (tokens[i]?.value !== ':') return tokens[i]?.value === '{' ? i : -1;
   let needsType = true;
   for (i += 1; i < tokens.length; i += 1) {
     const token = tokens[i];
     if (token.value === '{' && !needsType) return i;
+    // A return type does not continue across a line break into `[`: in a class body
+    // run(): void\n[key]() {} is an overload signature and a computed member, not one method.
+    if (token.value === '[' && !needsType && mask && LINE_TERMINATOR.test(mask.slice(tokens[i - 1].end, token.start))) return -1;
     if (['(', '[', '{', '<'].includes(token.value)) {
       const end = token.value === '<' ? angleBoundary(tokens, i, 1) : token.match;
       if (end < 0) return -1;
@@ -1329,7 +1332,7 @@ function indexHeads(index) {
         next += 1;
       }
       if (tokens[next]?.value !== '(' || tokens[next].match < 0) continue;
-      const body = typedHeadBody(tokens, tokens[next].match);
+      const body = typedHeadBody(tokens, tokens[next].match, index.mask);
       addHead({ kind: 'function', arrow: false, start: tokenKeyword(tokens, i - 1, 'async') ? i - 1 : i, keyword: i, name, parameters: next, body });
     } else if (tokenKeyword(tokens, i, 'class') && !inMethodPosition(i)) {
       let body = i + 1;
@@ -1375,7 +1378,7 @@ function indexHeads(index) {
   }
   for (let open = 0; open < tokens.length; open += 1) {
     if (tokens[open].value !== '(' || tokens[open].match < 0 || !inContainer(open)) continue;
-    const body = typedHeadBody(tokens, tokens[open].match);
+    const body = typedHeadBody(tokens, tokens[open].match, index.mask);
     if (body < 0 || bodies.has(body)) continue;
     let name = open - 1;
     if (tokens[name]?.value === '>') {
@@ -1456,12 +1459,8 @@ function indexScopes(index) {
   for (const head of heads) {
     const open = head.body;
     if (head.kind !== 'class' || tokens[open]?.value !== '{' || tokens[open].match < 0) continue;
-    for (let i = open + 1; i < tokens[open].match; i += 1) {
-      const token = tokens[i];
-      if (token.value === '[' && token.match >= 0 && classMemberKey(index, open, i)) {
-        scopes.push({ kind: 'class-key', start: token.start, body: token.start, end: tokens[token.match].end, roots: new Set() });
-      }
-      if (['(', '[', '{'].includes(token.value) && token.match > i) i = token.match;
+    for (const key of classMemberKeys(index, open)) {
+      scopes.push({ kind: 'class-key', start: tokens[key].start, body: tokens[key].start, end: tokens[tokens[key].match].end, roots: new Set() });
     }
   }
   for (const control of controls) {
@@ -1502,28 +1501,72 @@ function indexScopes(index) {
   index.blockScopes = blockScopes;
 }
 
-function classMemberKey(index, classBody, open) {
-  // True when the `[` at `open`, a direct child of the class body, begins a member's computed key:
+function classMemberKeys(index, classBody) {
+  // The `[` tokens of a class body that begin a member's computed key. Members are read forwards, one
+  // class-level token or bracketed group at a time:
   //   class D { [k]() {} }   x = 1; [k] = 2   static [k]() {}   get [k]() {}   *[k]() {}   m() {} [k]() {}
-  // and after a field written without a semicolon, where the line break ends the field (ASI):
-  //   value
-  //   [k]() {}
-  const { tokens, mask } = index;
-  const boundary = (at) => {
-    let i = at - 1;
-    while (tokens[i]?.value === '*' || (tokens[i]?.kind === 'identifier' && CLASS_MEMBER_MODIFIERS.has(tokens[i].value))) i -= 1;
-    if (i === classBody || tokens[i]?.value === ';') return true;
-    if (tokens[i]?.value !== '}' || tokens[i].match < 0) return false;
-    // A `}` ends a member only when it closes a method body or a static block, never an initializer's
-    // object literal or function expression.
-    const closed = tokens[i].match;
-    return Boolean(index.bodies.get(closed)?.method)
-      || (tokenKeyword(tokens, closed - 1, 'static') && tokens[closed].parent === classBody);
+  //   @decorate [k]() {}     @decorate() [k]() {}
+  // A member ends at `;`, after a method body or static block, or at a line break the next token cannot
+  // continue (ASI). Before a `[` on a new line that is:
+  //   - always, after a member with no initializer: value / #value / value: number / m(): void. A type
+  //     does not continue across a line break into `[` (TypeScript reads `number\n[k]` as two members);
+  //   - after an initializer only when it cannot be indexed: an arrow function body `() => {}` or a
+  //     postfix `++`/`--`. Otherwise value = {}\n[k] indexes the initializer, whose `this` is the instance.
+  // https://tc39.es/ecma262/#sec-rules-of-automatic-semicolon-insertion and
+  // https://www.typescriptlang.org/docs/handbook/decorators.html
+  const { tokens, mask, bodies, containers } = index;
+  const keys = [];
+  const close = tokens[classBody].match;
+  let member;
+  const reset = () => { member = { named: false, initializer: false, decorator: null, last: -1 }; };
+  reset();
+  const indexable = (last) => {
+    const token = tokens[last];
+    if (['++', '--'].includes(token.value)) return false;
+    if (token.value !== '}' || token.match < 0) return true;
+    return !bodies.get(token.match)?.arrow || containers.has(token.match);
   };
-  if (boundary(open)) return true;
-  const name = open - 1;
-  return tokens[name]?.kind === 'identifier' && tokens[name].parent === classBody
-    && LINE_TERMINATOR.test(mask.slice(tokens[name].end, tokens[open].start)) && boundary(name);
+  const endsOperand = (last) => ['}', '++', '--'].includes(tokens[last].value) || canEndOperand(index, last);
+  for (let i = classBody + 1; i < close; i += 1) {
+    const token = tokens[i];
+    const lineBreak = member.last >= 0 && LINE_TERMINATOR.test(mask.slice(tokens[member.last].end, token.start));
+    if (token.value === '[' && lineBreak && member.named && (!member.initializer || !indexable(member.last))) reset();
+    // first = 1\nsecond: an initializer that ends an operand cannot run on into a name, so the line
+    // break ends the member.
+    else if (lineBreak && member.initializer && endsOperand(member.last)
+      && ((token.kind !== 'punctuation' && !['in', 'instanceof', 'as', 'satisfies'].includes(token.value))
+        || ['#', '@'].includes(token.value))) reset();
+    const end = ['(', '[', '{'].includes(token.value) && token.match > i ? token.match : i;
+    if (member.decorator) {
+      // @a.b.c, @a(…) and @(…) decorate the member that follows; they do not name it.
+      const name = member.decorator === 'name' && token.kind === 'identifier';
+      if (name || (member.decorator === 'dot' && token.value === '.')) {
+        member.decorator = name ? 'dot' : 'name';
+        member.last = i;
+        continue;
+      }
+      member.decorator = null;
+      if (token.value === '(' && end > i) { member.last = end; i = end; continue; }
+    }
+    if (token.value === ';') { reset(); continue; }
+    if (token.value === '@') member.decorator = 'name';
+    else if (token.value === '[') {
+      if (!member.named) keys.push(i);
+      member.named = true;
+    } else if (token.value === '{' && !member.initializer
+      && (bodies.get(i)?.method || tokenKeyword(tokens, i - 1, 'static'))) {
+      reset();
+      i = end;
+      continue;
+    } else if (token.value === '=') {
+      member.initializer = true;
+      member.named = true;
+    } else if (!(token.kind === 'identifier' && CLASS_MEMBER_MODIFIERS.has(token.value) && !member.named)
+      && !['*', '#'].includes(token.value)) member.named = true;
+    member.last = end;
+    i = end;
+  }
+  return keys;
 }
 
 function hasParameterExpressions(tokens, head) {
