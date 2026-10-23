@@ -2183,7 +2183,8 @@ function groupedPaths(index) {
   // anything else, such as (0, context.device), is not unwrapped. Each run of directly nested groups
   // is read once, from its innermost path outwards, so 8000 nested parentheses stay linear.
   const { tokens } = index;
-  const grouping = (open) => tokens[open]?.value === '(' && tokens[open].match >= 0 && !canEndOperand(index, open - 1);
+  const grouping = (open) => tokens[open]?.value === '(' && tokens[open].match >= 0 && !canEndOperand(index, open - 1)
+    && !callHead(index, open);
   const paths = [];
   for (let open = 0; open < tokens.length; open += 1) {
     if (!grouping(open) || grouping(open - 1)) continue;
@@ -2200,6 +2201,21 @@ function groupedPaths(index) {
     }
   }
   return paths;
+}
+
+function callHead(index, open) {
+  // A `(` also calls when it follows an optional-call `?.` or a type-argument list after a callee:
+  //   factory?.(context.device).captureImage()          calls factory, then a method of its result
+  //   factory<T>(context.device).captureImage()          TypeScript generic call (likewise obj.m<T>(…))
+  // Neither `(` groups, so the argument is not the receiver of the method after the `)`.
+  // https://tc39.es/ecma262/#prod-OptionalChain and
+  // https://www.typescriptlang.org/docs/handbook/2/generics.html#generic-types
+  const { tokens } = index;
+  const previous = open - 1;
+  if (tokens[previous]?.value === '?.') return true;
+  if (tokens[previous]?.value !== '>') return false;
+  const less = angleBoundary(tokens, previous, -1);
+  return less > 0 && canEndOperand(index, less - 1);
 }
 
 function reflectApplyTarget(index, first, member) {
@@ -2335,6 +2351,8 @@ function fallbackGrouping(mask, open) {
   // result. After a keyword such as return or typeof an operand starts, so the `(` groups.
   const before = previousNonSpaceIndex(mask, open);
   if (before === -1) return true;
+  // factory?.(context.device) is an optional call: its argument is not a receiver.
+  if (mask[before] === '.' && mask[before - 1] === '?') return false;
   if (!IDENTIFIER_CONTINUE.test(mask[before]) && !/[)\]"'`]/.test(mask[before])) return true;
   const word = /[$\w]+$/.exec(mask.slice(Math.max(0, before - 16), before + 1));
   return Boolean(word) && ['return', 'typeof', 'await', 'void', 'yield', 'case', 'throw', 'in', 'of', 'new', 'delete', 'else', 'do']

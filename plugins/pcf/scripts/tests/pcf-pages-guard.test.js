@@ -504,6 +504,29 @@ test('Pages detection keeps call results, comma groups and dynamic keys out of t
 
 const NEGATED_PROOF = 'typeof context.device?.captureImage !== "function"';
 
+test('Pages detection reads optional and generic call arguments as arguments, not grouped receivers', () => {
+  const factory = 'const factory = (value) => ({ captureImage() { return "local"; } });\n';
+  const generic = 'function factory<T>(value: T) { return { captureImage() { return "local"; } }; }\n';
+  const method = 'const factory = { create<T>(value: T) { return { captureImage() { return "local"; } }; } };\n';
+  for (const text of [
+    `${factory}function run(context) { return factory?.(context.device).captureImage(); }`,
+    `${factory}function run(context) { return factory?.(context.device)?.captureImage(); }`,
+    `${generic}function run(context) { return factory<unknown>(context.device).captureImage(); }`,
+    `${method}function run(context) { return factory.create<unknown>(context.device).captureImage(); }`,
+    `${factory}function run(context) { return factory(context.device).captureImage(); }`,
+  ]) {
+    assert.deepEqual(codesFor(text, null), [], text);
+    assert.deepEqual(codesFor(text, null, ['model']), [], text);
+  }
+  // After an analyzer failure the fallback reads the optional call the same way.
+  assert.deepEqual(findingsFor(`${factory}factory?.(context.device).captureImage();`, null, ['pages'], { indexer: throwingIndexer })
+    .map((finding) => finding.code), []);
+  // A grouped receiver after an operator or keyword is still read through.
+  for (const text of ['ready && (context.device).captureImage();', 'value = (context.device).captureImage();', 'void (context.device).captureImage();']) {
+    assert.deepEqual(codesFor(text, null), ['PCF_FEATURE_UNDECLARED', 'PCF_PAGES_API'], text);
+  }
+});
+
 test('Pages proof accepts an early exit on a negated method proof for the rest of the block', () => {
   for (const body of [
     `if (${NEGATED_PROOF}) return; ${CALL};`,
