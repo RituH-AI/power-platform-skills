@@ -329,7 +329,10 @@ spec pins `languageCode` or the build is given `--language-code`. Two Choice opt
 the same text keep their language when it is one language (two equal one-language maps, a duplicate
 validation warns about); when the text is in two languages — an English `"Open"` on one option, a Spanish
 `"Open"` on another — the spec can hold those two options only as plain strings, so they alone are written
-that way, and the download warns that their labels could not keep their language. The download emits
+that way, and the download warns that their labels could not keep their language. A lookup that sets no
+label is labelled like the table it points at (see `lookup.displayName` below), so the download leaves a
+lookup's label out only when that label is the lookup's own, language for language: an English `"Contact"`
+on a lookup to a table labelled only in French `"Contact"` is written out. The download emits
 `pluralName` alongside a localized `displayName`, so its own output re-validates, and beside a plain one
 whenever it is not the `"<displayName>s"` a rebuild would derive — `"Tag Catalog"` for `"Tag"` comes back,
 `"Tags"` does not (it is the default).
