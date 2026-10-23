@@ -313,6 +313,8 @@ for (const [name, relative] of [
     assert.match(text, /aliasing[^.\n]*`const d = context\.device; d\.captureImage\(\)`/i);
     assert.match(text, /dynamic dispatch/i);
     assert.match(text, /parenthesized receivers/i);
+    assert.match(text, /exact negation[^\n]*always leaves the block[^\n]*`return`, `throw`, `break` or `continue`/i);
+    assert.match(text, /guard helper[^\n]*reported by design/i);
     assert.match(text, /parenthesized receivers[^\n]*`\.bind`[^\n]*`Reflect\.apply`[^\n]*detected like direct calls/i);
     assert.match(text, /runtime verification on the target Power Pages site[^.\n]*required/i);
   });
@@ -497,6 +499,75 @@ test('Pages detection keeps call results, comma groups and dynamic keys out of t
   ]) {
     assert.deepEqual(codesFor(`if (${condition}) { ${CALL}; }`), ['PCF_PAGES_API'], condition);
   }
+});
+
+const NEGATED_PROOF = 'typeof context.device?.captureImage !== "function"';
+
+test('Pages proof accepts an early exit on a negated method proof for the rest of the block', () => {
+  for (const body of [
+    `if (${NEGATED_PROOF}) return; ${CALL};`,
+    `if (${NEGATED_PROOF}) { return; } ${CALL};`,
+    `if (${NEGATED_PROOF}) { consume(); return; } ${CALL};`,
+    `if (${NEGATED_PROOF}) throw new Error("no camera"); ${CALL};`,
+    `if ("function" !== typeof context.device?.captureImage) return; ${CALL};`,
+    `if (typeof context.device?.captureImage != "function") return; ${CALL};`,
+    `if (!context.device?.captureImage) return; ${CALL};`,
+    `if (!context.device || typeof context.device.captureImage !== "function") return; ${CALL};`,
+    `if (context.device == null || !context.device.captureImage) return; ${CALL};`,
+    `if (busy || ${NEGATED_PROOF}) return; ${CALL};`,
+    `if (!(${PROOF})) return; ${CALL};`,
+    `if (!(context.device && typeof context.device.captureImage === "function")) return; ${CALL};`,
+    `if (${NEGATED_PROOF}) return; if (ready) { ${CALL}; }`,
+    `if (${NEGATED_PROOF}) return; button.onclick = () => ${CALL};`,
+    `if (${NEGATED_PROOF}) return; else consume(); ${CALL};`,
+    `if (${NEGATED_PROOF}) return; const run = function () { ${CALL}; }; run();`,
+  ]) {
+    assert.deepEqual(codesFor(`function capture(context) { ${body} }`), [], body);
+  }
+  for (const exit of ['continue', 'break']) {
+    assert.deepEqual(codesFor(`function capture(contexts) { for (const context of contexts) { if (${NEGATED_PROOF}) ${exit}; ${CALL}; } }`), [], exit);
+  }
+  assert.deepEqual(codesFor(`if (${NEGATED_PROOF}) throw new Error("no camera");\n${CALL};`), []);
+});
+
+test('Pages proof accepts the else branch of a negated method proof', () => {
+  for (const condition of [NEGATED_PROOF, '!context.device?.captureImage', `!(${PROOF})`]) {
+    assert.deepEqual(codesFor(`if (${condition}) { consume(); } else { ${CALL}; }`), [], condition);
+    assert.deepEqual(codesFor(`if (${condition}) { ${CALL}; } else { consume(); }`), ['PCF_PAGES_API'], condition);
+  }
+});
+
+test('Pages proof keeps refusing exits and else branches that do not cover the call', () => {
+  for (const body of [
+    `${CALL}; if (${NEGATED_PROOF}) return;`,
+    `if (${NEGATED_PROOF}) return; context.device = next; ${CALL};`,
+    `if (${NEGATED_PROOF}) return; context = next; ${CALL};`,
+    `if (${NEGATED_PROOF}) return; { let context = next; ${CALL}; }`,
+    `if (${NEGATED_PROOF}) consume(); ${CALL};`,
+    `if (${NEGATED_PROOF}) { if (ready) return; } ${CALL};`,
+    `if (ready) consume(); else if (${NEGATED_PROOF}) return; ${CALL};`,
+    `if (ready) if (${NEGATED_PROOF}) return; ${CALL};`,
+    `exit: if (${NEGATED_PROOF}) break exit; ${CALL};`,
+    `if (${NEGATED_PROOF}) return; function later() { ${CALL}; }`,
+    `if (${PROOF}) return; ${CALL};`,
+    `if (!context.device) return; ${CALL};`,
+    `if (${NEGATED_PROOF} && ready) return; ${CALL};`,
+    `if (!(ready || ${PROOF})) return; ${CALL};`,
+    `if (${NEGATED_PROOF} || (context = next)) return; ${CALL};`,
+    `if (${NEGATED_PROOF} ? ready : busy) return; ${CALL};`,
+    `if (typeof context.device?.captureImage !== "object") return; ${CALL};`,
+    `if (!typeof context.device?.captureImage === "function") return; ${CALL};`,
+    `if (!context.device?.captureImage === false) return; ${CALL};`,
+    `if (!context.device?.captureImage == null) return; ${CALL};`,
+    `if (!canCapture(context)) return; ${CALL};`,
+  ]) {
+    assert.deepEqual(codesFor(`function capture(context) { ${body} }`), ['PCF_PAGES_API'], body);
+  }
+  // Another case clause is entered without passing the guard.
+  assert.deepEqual(codesFor(`function capture(context, k) { switch (k) { case 1: if (${NEGATED_PROOF}) return; ${CALL}; break; case 2: ${CALL}; } }`),
+    ['PCF_PAGES_API', 'PCF_PAGES_API']);
+  // `!` binds to the operand alone: !typeof m === "function" is always false, so its else branch is unproven.
+  assert.deepEqual(codesFor(`if (!typeof context.device?.captureImage === "function") { consume(); } else { ${CALL}; }`), ['PCF_PAGES_API']);
 });
 
 test('Pages detection decodes escapes without evaluating malformed or non-identifier keys', () => {
