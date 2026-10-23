@@ -866,19 +866,239 @@ import { processData } from "@package";
 ```
 
 ### 2. Missing Error Handling
-Always wrap async dataApi calls in try-catch.
-```typescript
-// Error: Unhandled promise rejection
-const data = await dataApi.queryTable("table1", {});
+A `try`/`catch` that logs the thrown value and sets an ad-hoc string is not enough: it logs whatever
+record text the host put in the message, drops the error code, and leaves each page reporting
+failures its own way. Every failed data operation goes through the page's one top-level
+`reportPageError`, the view it returns goes into that operation's error state, and `PageErrorBar`
+renders it. The whole page renders inside one `PageErrorBoundary`.
 
-// Fix: Wrap in try-catch
-try {
-  const data = await dataApi.queryTable("table1", {});
-  setRecords(data.rows);
-} catch (error) {
-  console.error("Failed to load data:", error);
-  setErrorMessage("Unable to load data. Please try again.");
+Copy the block below unchanged — the reporter, the error copy, the bar, the boundary and the
+default export — and set `PAGE_NAME` to the plan's display name for the page (a fixed literal,
+never the file name). `PageBody` is where the page itself lives: its hooks, state and handlers.
+`reportPageError(pageName, operation, code, message, kind, retry?, appInsights?)` takes five
+required arguments:
+
+- `operation` — one stable literal per logical operation (`'loadAccounts'`, `'createAccount'`),
+  shared by its success and failure branches; never built from a record.
+- `code` — the host's error code when a returned result carries one (`res.error?.code`), otherwise
+  `undefined`.
+- `message` — the result's `res.error?.message`, or the caught value itself (`error`). Never pass
+  the result object, its outputs, a row, a lookup reference or an identity.
+- `kind` — a string literal the caller decides from the operation, never from the code or the
+  wording:
+
+| Operation or result | `kind` | `retry` (sixth argument) |
+|---|---|---|
+| `queryTable`, `retrieveRow`, `getChoices`, `queryConnectorTable`, `listBoundActions`; a rejected navigation | `'read'` | a named reload, or none |
+| `createRow`, `updateRow`, `deleteRow`, `executeAction`; a connector operation not known to be a read | `'write'` | none |
+| a Custom API result with `res.indeterminate` or `res.error?.code === 'indeterminate'` (check both first) | `'indeterminate'` | none |
+| a failed Custom API result with `res.error?.code === 'network'`, after both indeterminate checks | `'network'` | a named manual retry only |
+| a WhoAmI or RetrieveVersion failure | `'read'` | none |
+| a render crash (the boundary) | `'render'` | none |
+
+The reporter logs one line, `[<page name>] <operation> failed` with `{ code, message }` (the code at
+most 80 characters, the message its first line and at most 300), and returns
+`{ operation, message, fallbackKey, code?, kind, retry? }`. It reads only `code`, `errorCode`,
+`message`, `error.code` and `error.message` of a thrown value, never logs the value itself, never
+sets state and never calls `retry`. An indeterminate or render failure shows only its fixed copy and
+never offers a retry, whatever its code says. Nothing retries automatically: a retry is a button the
+user presses.
+
+Store the view in the same single state update as the operation's other results (Critical Rule 14):
+error state is `PageErrorView | null`, never a string. Only that operation's own success, or an
+explicit dismissal, clears it — another operation's success must not erase it. A failed form stays
+visible; a failed list may show the error above its empty state. A null lookup, zero rows or an
+absent optional value is a normal state, not a failure. The boundary catches render crashes only —
+not rejected promises or event handlers — and has no reset; never call `PageBody(props)` yourself.
+
+```tsx
+import * as React from 'react';
+import { Button, Input, MessageBar, MessageBarActions, MessageBarBody } from '@fluentui/react-components';
+import type { GeneratedComponentProps } from './RuntimeTypes';
+
+type PageErrorKind = 'read' | 'write' | 'indeterminate' | 'network' | 'render';
+type PageErrorView = {
+  operation: string;
+  message: string;
+  fallbackKey: string;
+  code?: string;
+  kind: PageErrorKind;
+  retry?: () => void;
+};
+type PageErrorTelemetry = {
+  trackException?: (error: unknown, properties?: Record<string, unknown>) => void;
+};
+
+// The plan's display name for this page: a fixed literal, not the file name.
+const PAGE_NAME = 'Account Overview';
+
+// The error copy of an English-only page. A localized page keeps these keys in its translations
+// dictionary instead (references/localization.md). Keep the built-in keys only on a page that calls
+// WhoAmI or RetrieveVersion.
+const ERROR_COPY: Record<string, string> = {
+  'error.read': 'Unable to load data. Please try again.',
+  'error.write': 'The change could not be saved. Refresh before trying again.',
+  'error.network': 'The request did not go through. You can try again.',
+  'error.indeterminate': "We couldn't confirm this completed — refresh before retrying.",
+  'error.render': 'This page hit a problem and could not render. Refresh the page.',
+  'error.tryAgain': 'Try again',
+  'error.builtinFailed': 'The operation failed. No result was displayed.',
+  'error.builtinUnavailable': 'The selected operation is unavailable in this environment or player. No fallback was attempted.',
+  'error.builtinUnexpected': 'The operation returned an unexpected response. No result was displayed.',
+  'error.builtinUnsupported': 'This page player cannot call built-in Dataverse operations.',
+};
+
+function translate(key: string): string {
+  return ERROR_COPY[key] || key;
 }
+
+// The page's one error reporter. It logs bounded diagnostics once and returns the view the failed
+// operation stores; it never sets state, never calls retry, and reads only the named fields of a
+// thrown value, each on its own, so a throwing getter leaves that one field empty.
+function reportPageError(
+  pageName: string,
+  operation: string,
+  code: unknown,
+  message: unknown,
+  kind: PageErrorKind,
+  retry?: () => void,
+  appInsights?: PageErrorTelemetry,
+): PageErrorView {
+  const fields: Record<string, unknown> = {};
+  for (const path of ['code', 'errorCode', 'message', 'error.code', 'error.message']) {
+    try {
+      let value: unknown = message;
+      for (const part of path.split('.')) {
+        value = value !== null && typeof value === 'object' ? (value as Record<string, unknown>)[part] : undefined;
+      }
+      fields[path] = value;
+    } catch {
+      fields[path] = undefined;
+    }
+  }
+  let normalizedCode = '';
+  for (const candidate of [code, fields['code'], fields['errorCode'], fields['error.code']]) {
+    const text = typeof candidate === 'string' ? candidate : typeof candidate === 'number' && Number.isFinite(candidate) ? String(candidate) : '';
+    normalizedCode = text.replace(/[\s\u0000-\u001f\u007f-\u009f]+/g, ' ').trim().slice(0, 80);
+    if (normalizedCode) break;
+  }
+  let normalizedMessage = '';
+  for (const candidate of [message, fields['message'], fields['error.message']]) {
+    const line = typeof candidate === 'string' ? candidate.trim().split(/[\r\n\u2028\u2029]/)[0].replace(/[\s\u0000-\u001f\u007f-\u009f]+/g, ' ').trim() : '';
+    if (!line || /^\[object [^\]]*\]$/.test(line) || /^at\s.*(?::\d+:\d+\)?|\((?:native|<anonymous>)\))$/.test(line)) continue;
+    normalizedMessage = line.length > 300 ? line.slice(0, 299) + '\u2026' : line;
+    break;
+  }
+  console.error('[' + String(pageName).replace(/[\r\n\]]/g, '') + '] ' + operation + ' failed', { code: normalizedCode, message: normalizedMessage });
+  const quiet = kind === 'indeterminate' || kind === 'render';
+  const view: PageErrorView = { operation, message: quiet ? '' : normalizedMessage, fallbackKey: 'error.' + kind, kind };
+  if (normalizedCode) view.code = normalizedCode;
+  if (typeof retry === 'function' && (kind === 'read' || kind === 'network')) view.retry = retry;
+  return view;
+}
+
+function PageErrorBar(props: { error: PageErrorView | null }) {
+  const { error } = props;
+  if (!error) return null;
+  return (
+    <MessageBar intent="error">
+      <MessageBarBody>{error.message || translate(error.fallbackKey)}</MessageBarBody>
+      {error.retry && (
+        <MessageBarActions>
+          <Button onClick={error.retry}>{translate('error.tryAgain')}</Button>
+        </MessageBarActions>
+      )}
+    </MessageBar>
+  );
+}
+
+// The page's one class component: it catches a render crash below it and shows a fixed message.
+class PageErrorBoundary extends React.Component<
+  { children: React.ReactNode; appInsights?: PageErrorTelemetry },
+  { failed: boolean }
+> {
+  public state = { failed: false };
+
+  public static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  public componentDidCatch(error: Error): void {
+    reportPageError(PAGE_NAME, 'render', undefined, error, 'render');
+  }
+
+  public render(): React.ReactNode {
+    if (this.state.failed) {
+      return (
+        <MessageBar intent="error">
+          <MessageBarBody>{translate('error.render')}</MessageBarBody>
+        </MessageBar>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function PageBody(props: GeneratedComponentProps) {
+  const { dataApi } = props;
+  const [name, setName] = React.useState('');
+  const [save, setSave] = React.useState<{ saving: boolean; error: PageErrorView | null }>({ saving: false, error: null });
+  const pending = React.useRef(false);
+
+  async function createAccount() {
+    if (pending.current) return;
+    pending.current = true;
+    setSave({ saving: true, error: null });
+    try {
+      await dataApi.createRow('account', { name });
+      setSave({ saving: false, error: null });
+    } catch (error) {
+      setSave({ saving: false, error: reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'write') });
+    } finally {
+      pending.current = false;
+    }
+  }
+
+  return (
+    <div>
+      <PageErrorBar error={save.error} />
+      <Input aria-label="Account name" value={name} onChange={(_, data) => setName(data.value)} />
+      <Button appearance="primary" disabled={save.saving || !name.trim()} onClick={() => void createAccount()}>
+        Create account
+      </Button>
+    </div>
+  );
+}
+
+const GeneratedComponent = (props: GeneratedComponentProps) => (
+  <PageErrorBoundary>
+    <PageBody {...props} />
+  </PageErrorBoundary>
+);
+
+export default GeneratedComponent;
+```
+
+The boundary uses `React.Component`; on a page that imports React only by name, import `Component`
+and `ReactNode` from `'react'` and write `extends Component<…>`. On a page where no operation passes
+a retry, leave out the bar's `error.retry` part and the `MessageBarActions` import.
+
+**Failure telemetry** — only when the dispatch says `Telemetry: enabled` **and** the maker asked to
+report failures (`references/page-telemetry.md`). Insert these lines immediately after the
+reporter's `console.error` line, and pass `props.appInsights` as the seventh argument only at the
+call sites the request covers (render crashes: `<PageErrorBoundary appInsights={props.appInsights}>`
+and `reportPageError(PAGE_NAME, 'render', undefined, error, 'render', undefined, this.props.appInsights)`
+in `componentDidCatch`). It sends a new `<operation> failed` error with approved properties only —
+never the thrown value, host text, a row or an identity — and a recognized code (a documented
+Custom API code or a Dataverse `0x` error code) as `statusCode`; any other code stays in the log.
+
+```tsx
+  appInsights?.trackException?.(new Error(operation + ' failed'), {
+    outcome: 'failure',
+    category: kind === 'render' ? 'errorBoundary' : 'page',
+    source: operation,
+    ...(/^(?:wrong_operation_kind|invalid_parameter|invalid_bound_to|not_bound|not_permitted|not_enabled|indeterminate|network|0x[0-9a-fA-F]{8})$/.test(normalizedCode) ? { statusCode: normalizedCode } : {}),
+  });
 ```
 
 ### 3. Inline Styles Instead of makeStyles
