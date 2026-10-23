@@ -2951,12 +2951,13 @@ test('main changed-only full-fast-noop cycle uses the real flow', async () => {
     assert.strictEqual(fast.verify.ok, true);
     assert.deepStrictEqual(fast.changedOnly.pageKeys, ['overview']);
     assert.deepStrictEqual(uploads, [{ name: 'Overview', pageId: pageIds.Overview, requestedId: pageIds.Overview, code: deployedCode }]);
-    // The page it writes is re-asserted in the spec's solution, as the manifest is: this double keeps no solution, so neither is found there and both are added.
+    // Each page is re-asserted in the spec's solution, as the manifest is: the one the fast apply writes, and the one it leaves as it is (sdk-build.js, the page manifest
+    // step), which gets the add and no write. This double keeps no solution, so none of them is found there and each is added.
     assert.ok(writes.every((w) => w.method === 'updateWebResource' || (w.method === 'addSolutionComponent' && (w.args[0].componentType === 61
-      || (w.args[0].componentType === PAGE_TYPE && w.args[0].componentId === pageIds.Overview)))),
-      `fast apply writes only the page manifest and the solution membership of the page it changed, never the data model or sitemap: ${JSON.stringify(writes)}`);
-    assert.ok(writes.some((w) => w.method === 'addSolutionComponent' && w.args[0].componentType === PAGE_TYPE && w.args[0].componentId === pageIds.Overview && w.args[0].addRequiredComponents === true),
-      'the changed page is in the spec\'s solution, with its files');
+      || (w.args[0].componentType === PAGE_TYPE && [pageIds.Overview, pageIds.Detail].includes(w.args[0].componentId))))),
+      `fast apply writes only the page manifest and the solution membership of the app's pages, never the data model or sitemap: ${JSON.stringify(writes)}`);
+    assert.deepStrictEqual(writes.filter((w) => w.method === 'addSolutionComponent' && w.args[0].componentType === PAGE_TYPE).map((w) => [w.args[0].componentId, w.args[0].addRequiredComponents]),
+      [[pageIds.Overview, true], [pageIds.Detail, true]], 'both pages are in the spec\'s solution, with their files: the changed one as it is written, the other once the pages are');
     const eligible = snapshotStore.readSnapshot(workspaceDir);
     assert.strictEqual(eligible.eligible, true);
     assert.notStrictEqual(eligible.generation, baseline.generation);

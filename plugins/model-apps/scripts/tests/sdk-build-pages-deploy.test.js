@@ -728,6 +728,120 @@ test('solution: an environment that cannot say the page table\u2019s type halts 
   }
 });
 
+// A changed-only run (a fast apply: the changed page only, the app's navigation left as it is) over an environment that keeps what each run wrote — the page manifest, the
+// pages and the solution's pages — so a second run sees what the first one left. Overview is the changed page. Detail, the page it navigates to, is not selected: `detail`
+// is its id, or null for a page deleted in Maker since the last apply, which the run makes again because Overview's link needs it. `members` are the pages the solution
+// holds; `refuse(id)` says whether the solution add of a page is refused (a 503, before anything is written).
+const DELETED_DETAIL_ID = '33333333-0000-4000-8000-000000000003';
+function changedOnlyEnvironment({ detail, members, refuse = () => false }) {
+  const { spec, appDir } = makeTwoPageApp();
+  const workspaceDir = path.join(appDir, 'workspace');
+  fs.mkdirSync(workspaceDir);
+  const live = [{ pageId: OVERVIEW_ID, name: 'Overview' }, ...(detail ? [{ pageId: detail, name: 'Detail' }] : [])];
+  const held = new Set(members);
+  // The options mockSdk reads at every request, so a write below changes what the next read answers.
+  const remote = {
+    pageManifest: Buffer.from(JSON.stringify({ schemaVersion: 1, pages: [{ key: 'overview', name: 'Overview', pageId: OVERVIEW_ID }, { key: 'detail', name: 'Detail', pageId: detail || DELETED_DETAIL_ID }] })).toString('base64'),
+    manifestId: 'wr-manifest',
+    liveSitemapXml: pageSitemap([OVERVIEW_ID, detail || DELETED_DETAIL_ID]),
+    selfAppUnique: appUniqueName(spec),
+    pageRows: live.map((p) => ({ uxagentprojectid: p.pageId, name: p.name })),
+  };
+  const run = async () => {
+    const { sdk, calls } = mockSdk(remote);
+    const query = sdk.queryRecords;
+    sdk.queryRecords = async (entity, options) => {
+      if (entity === 'solution') return [{ solutionid: '5a5a5a5a-0000-4000-8000-00000000005a' }];
+      if (entity === 'solutioncomponent') {
+        calls.push({ name: 'queryRecords', args: [entity, options] });
+        return options.filter.includes(`componenttype eq ${PAGE_TYPE}`) ? [...held].map((id) => ({ objectid: id, componenttype: PAGE_TYPE, rootcomponentbehavior: null })) : [];
+      }
+      return query(entity, options);
+    };
+    for (const method of ['createWebResource', 'updateWebResource']) {
+      const write = sdk[method];
+      sdk[method] = async (...args) => {
+        const body = method === 'createWebResource' ? args[0] : args[1];
+        if (body.content) remote.pageManifest = Buffer.from(body.content, 'utf8').toString('base64');
+        return write(...args);
+      };
+    }
+    const add = sdk.addSolutionComponent;
+    sdk.addSolutionComponent = async (o) => {
+      await add(o);
+      if (o.componentType !== PAGE_TYPE) return;
+      if (refuse(o.componentId)) throw Object.assign(new Error('Service Unavailable'), { statusCode: 503 });
+      held.add(o.componentId);
+    };
+    const genpageCli = mockGenpageCli(live);
+    const create = genpageCli.create;
+    genpageCli.create = async (o) => {
+      const made = await create(o);
+      live.push({ pageId: made.pageId, name: made.name });
+      remote.pageRows = live.map((p) => ({ uxagentprojectid: p.pageId, name: p.name }));
+      return made;
+    };
+    let halt = null;
+    try {
+      await runSdkBuild(spec, {
+        sdk, apply: true, env: 'https://contoso.crm.dynamics.com', appDir, workspaceDir, genpageCli, phases: ['pages'],
+        changedOnly: { fastApply: true, resolvedAppId: APP_ID, skipSitemapFinalize: true, selectedKeys: ['overview'], deployedKeys: ['overview', 'detail'] },
+      });
+    } catch (e) { halt = e; }
+    return {
+      halt,
+      uploads: genpageCli.uploads.map((u) => `${u.requestedId ? 'update' : 'create'} ${u.name}`),
+      pageAdds: pageAdds(calls).map((a) => a.componentId),
+      pageMembershipReads: calls.filter((c) => c.name === 'queryRecords' && c.args[0] === 'solutioncomponent' && c.args[1].filter.includes(`componenttype eq ${PAGE_TYPE}`)).length,
+    };
+  };
+  return { spec, held, run, dispose: () => fs.rmSync(appDir, { recursive: true, force: true }) };
+}
+
+// The page a changed-only run makes is not one it selected, so a run taken again — the build's own retry of a halt it takes for transient keeps the same selection — finds it
+// bound by its creation receipt and leaves it as it is. Its solution add is not left with it: the run asserts every page it keeps, not only those it writes.
+test('solution: a changed-only run whose add of a page it made was refused adds that page when the run is taken again — and does not write the page again', async () => {
+  const { isTransientHalt } = require('../build-model-app.js');
+  let refused = false;
+  const env = changedOnlyEnvironment({ detail: null, members: [OVERVIEW_ID], refuse: (id) => id === DETAIL_ID && !refused && (refused = true) });
+  try {
+    const first = await env.run();
+    assert.ok(first.halt && first.halt.phase === 'pages', `the refused add stops the pages phase: ${first.halt && first.halt.stack}`);
+    assert.strictEqual(isTransientHalt(first.halt, { spec: env.spec }), true, 'a 503 is run again, with the same selection');
+    assert.deepStrictEqual(first.uploads, ['create Detail'], 'the absent target is made first, and its add is refused');
+    assert.deepStrictEqual(first.pageAdds, [DETAIL_ID]);
+    assert.ok(!env.held.has(DETAIL_ID), 'the solution does not hold the page yet');
+
+    const second = await env.run();
+    assert.strictEqual(second.halt, null, `the run taken again completes: ${second.halt && second.halt.stack}`);
+    assert.deepStrictEqual(second.uploads, ['update Overview'], 'the page the first run made is bound now, and left as it is: only the changed page is written');
+    assert.deepStrictEqual(second.pageAdds, [DETAIL_ID], 'the page the first run made, and could not add, joins the solution');
+    assert.ok(env.held.has(DETAIL_ID));
+  } finally { env.dispose(); }
+});
+
+test('solution: a changed-only run asserts the pages it leaves as they are, with the one read — a page the solution does not hold joins it, and none of them is written', async () => {
+  const env = changedOnlyEnvironment({ detail: DETAIL_ID, members: [OVERVIEW_ID] });
+  try {
+    const run = await env.run();
+    assert.strictEqual(run.halt, null, run.halt && run.halt.stack);
+    assert.deepStrictEqual(run.uploads, ['update Overview'], 'the page it leaves as it is is not written');
+    assert.deepStrictEqual(run.pageAdds, [DETAIL_ID], 'it joins the solution, as a full build would add it');
+    assert.strictEqual(run.pageMembershipReads, 1, 'the solution\u2019s pages are read once, for every page');
+  } finally { env.dispose(); }
+});
+
+test('solution: a changed-only run over pages the solution already holds adds none of them, and writes only the page it changed', async () => {
+  const env = changedOnlyEnvironment({ detail: DETAIL_ID, members: [OVERVIEW_ID, DETAIL_ID] });
+  try {
+    const run = await env.run();
+    assert.strictEqual(run.halt, null, run.halt && run.halt.stack);
+    assert.deepStrictEqual(run.uploads, ['update Overview']);
+    assert.deepStrictEqual(run.pageAdds, []);
+    assert.strictEqual(run.pageMembershipReads, 1);
+  } finally { env.dispose(); }
+});
+
 // Duplicate page names: validateAppSpec TOLERATES a duplicate name when both pages carry a
 // pageId, but a pageId is only a CLAIM. A STALE snapshot (a page deleted in Maker since download) reconciles
 // its id as ABSENT, so the upload loop would CREATE it fresh and re-materialize the duplicate. The

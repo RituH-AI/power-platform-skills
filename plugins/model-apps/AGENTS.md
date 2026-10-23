@@ -837,7 +837,11 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   written — a read that fails halts the phase (`pages-solution-type-unreadable`) with nothing in it
   written — adds each page it creates with its file rows (AddRequiredComponents), and re-asserts each
   page it updates through its own membership read of that type, so a page an earlier build made outside
-  the solution joins it and one the solution holds costs no write. A system solution is not added to,
+  the solution joins it and one the solution holds costs no write. Once the pages are written it
+  re-asserts every other page the manifest binds the same way: a changed-only run leaves the pages it did
+  not select as they are, and a navigation target that an earlier attempt of the run made and could not
+  add is one of them — bound now, and not written again — so this is what adds it (one read for all
+  pages; no write for a page the solution holds). A system solution is not added to,
   and an SDK double with no raw client adds no page. What an unchanged rebuild still sends: the
   phase-8 envelope; the SDK's own default-view enrichment (it pushes both generated views of each table
   it enriches); the default-form promotion of a table the build owns (`isdefault`); the existing app's

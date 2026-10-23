@@ -145,7 +145,7 @@ apart deliberately.
   `None` — 6/6.
 
 ### App shell & navigation — ✅ verified live
-- App module + sitemap; **multi-area sitemaps** — every `appShell.areas[]` maps to its own `<Area>` (icon + groups + subareas; order follows array order). The app is **self-contained for export/import**: its **sitemap** is added to the solution (componenttype 62), each **generative page** the build writes joins it too (as the page table's own component type, read from the environment — offline-tested; the add of the app never brings the pages), and its **tile icon** is an in-solution web resource — `app.icon` (a declared image web resource) or a generated default SVG — never an arbitrary external/managed icon.
+- App module + sitemap; **multi-area sitemaps** — every `appShell.areas[]` maps to its own `<Area>` (icon + groups + subareas; order follows array order). The app is **self-contained for export/import**: its **sitemap** is added to the solution (componenttype 62), each **generative page** the build writes or keeps joins it too (as the page table's own component type, read from the environment — offline-tested; the add of the app never brings the pages), and its **tile icon** is an in-solution web resource — `app.icon` (a declared image web resource) or a generated default SVG — never an arbitrary external/managed icon.
 - **App membership (offline-tested; reference transport measured):** `app.tables` preserves hidden
   table components independently of navigation; `app.mainForms` selects active Main forms by name.
   Create is exact for Main membership; updates stop adding excluded forms but never remove existing

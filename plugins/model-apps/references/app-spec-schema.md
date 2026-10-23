@@ -71,7 +71,8 @@ sample data (incl. multi-parent junction links + status reasons), and publish.
   **Omit it** and the build generates a simple default SVG icon **inside the solution** — either
   way the app never depends on an arbitrary external/managed icon (which would fail to import into
   a new environment). The app's **sitemap** is also added to the solution automatically, and so is every
-  **generative page** the build writes: the add of the app brings its sitemap but never the pages its
+  **generative page** the build writes or keeps (a changed-only run asserts the pages it leaves as they are
+  too): the add of the app brings its sitemap but never the pages its
   navigation opens, so each page is added on its own (a system solution such as `Default` holds them already).
   **The icon is set when the app is created, and a rebuild cannot change it** (the platform stores it once): when
   `app.icon` names a web resource that is not the icon the app has, the build warns that it was **not applied** —

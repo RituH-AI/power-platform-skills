@@ -7166,9 +7166,11 @@ async function runSdkBuildPhases(spec, opts, owed) {
       // explicitly — the add of the app brings its sitemap, never the pages its navigation opens (lib/page-solution.js) — so a build made "in" a solution left
       // its pages out of it, and the solution exported an app whose navigation opens pages the target environment does not have. A page this run CREATES is
       // added as soon as it is made; one it UPDATES is re-asserted, as every component the build reuses is (lib/solution-membership.js): a page an earlier build
-      // made outside the solution, or whose add failed, joins it now, and one the solution is proven to hold costs a read and no write. The add brings the page's
-      // file rows with it (AddRequiredComponents). The page table's component type is the environment's: read HERE, before the first page is written, so an
-      // environment that cannot say it halts the phase with nothing in it written. A system solution holds every component already and is not added to.
+      // made outside the solution, or whose add failed, joins it now, and one the solution is proven to hold costs a read and no write. A page the run KEEPS without
+      // writing it — a changed-only run leaves the pages it did not select as they are — is re-asserted the same way once the pages are written (the page manifest
+      // step, below). The add brings the page's file rows with it (AddRequiredComponents). The page table's component type is the environment's: read HERE, before
+      // the first page is written, so an environment that cannot say it halts the phase with nothing in it written. A system solution holds every component already
+      // and is not added to.
       const pagesJoinSolution = !!(sol && sol.uniqueName) && !isRestrictedSolution(sol.uniqueName) && implemented.some(uploadedThisRun)
         // An SDK with no raw client to read with is a test double, as everywhere in this file: the real one always has it, so there is no type to read and no page is added.
         && !!(provision.dataverse && typeof provision.dataverse.get === 'function');
@@ -7459,8 +7461,18 @@ async function runSdkBuildPhases(spec, opts, owed) {
       //     (removal-only / detach) run — there is no page identity to record, and writing an empty manifest
       //     would needlessly create/update the web resource. The scan/create/upload steps above are already
       //     no-ops when spec.pages is empty (they iterate over spec.pages / implemented).
+      //     The solution holds every page the manifest binds, not only the pages this run wrote (AB#6443257). A changed-only run writes the pages it selected
+      //     and leaves the rest as they are — their content is the maker's to keep — but not out of the solution: a navigation target an earlier attempt of the
+      //     run made, and whose add was refused or never sent, is bound by its creation receipt now and not written again, so nothing else would add it, and the
+      //     build's retry, which keeps the selection, would succeed with that page outside the solution. Each such page is asserted as a page the run updates is
+      //     (pageIntoSolution): the one read of the solution's pages answers all of them, and only a page the solution is not proven to hold is added, as a full
+      //     build adds it. A page this run wrote was asserted then, and costs nothing here; a run that writes no page asserts none.
       if ((spec.pages || []).length) {
-        await runner.run('pages', `page manifest ${manifestResourceName(appUnique)}`, async () => { await persistNow(); return manifestResourceName(appUnique); });
+        await runner.run('pages', `page manifest ${manifestResourceName(appUnique)}`, async () => {
+          await persistNow();
+          for (const p of implemented) if (keyToId.has(keyOf(p))) await pageIntoSolution(keyToId.get(keyOf(p)), { created: false });
+          return manifestResourceName(appUnique);
+        });
       }
       // (6) Finalize the sitemap (the true commit point — only after all resolved uploads succeed). For a
       //     page-backed app this writes the resolved GenPage SubAreas. For an EXISTING app the app-shell
