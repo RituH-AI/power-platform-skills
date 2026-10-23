@@ -3,10 +3,11 @@
 //
 // The reference is the pattern plugins/model-apps/references/dataverse-operations.md teaches — read from that document, so the document and the
 // evaluator cannot drift apart. It must pass; and each departure the reference forbids must fail, with the problem that names it: a call on mount
-// or at render, a partial identity, a spread or serialized result, a member read, a read from the root or `res.value`, outputs read before
-// `res.ok`, no object check for an empty answer, an unbounded Version, raw fault text, a status read out of the message, a message that says to
-// deploy a Custom API, a pre-dispatch check that does not return, extra request fields, no disabled button, one shared pending state, no stale
-// request guard, no catch, and a logged result. A whole built-in-only lifecycle through the Phase 5 evaluator passes with it too.
+// or at render, a handler handed to a timer, an effect, a ref or a child (or through an alias), a partial identity, a spread or serialized result,
+// a member read, a read from the root or `res.value`, outputs read before `res.ok`, no object check for an empty answer, an unbounded Version, raw
+// fault text, a status read out of the message, a message that says to deploy a Custom API, a pre-dispatch check that does not return, extra
+// request fields, no disabled button, one shared pending state, no stale request guard, no catch, and a logged result. A whole built-in-only
+// lifecycle through the Phase 5 evaluator passes with it too — and a built-in entry the page already held keeps the contract it declares.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -269,4 +270,41 @@ test('a built-in this run adds or replaces is held to the catalogue\'s contract,
   widened.manifest.customApi.outputs = { WhoAmI: ['UserId', 'SystemUserName'] };
   const read = customApiProblems(widened);
   assert.ok(read.includes('WhoAmI: runtime reads an undeclared output'), JSON.stringify(read));
+});
+
+// ── A handler handed on, not called ──────────────────────────────────────────────────────────────────────────────────────────────────
+// `setTimeout(showIdentity, 0)` names the handler without calling it, and the timer then calls it with no click. Handing a handler or a helper to
+// an effect, a memo, a timer, a frame or a microtask fails, whatever else also calls it — a button included. A constant that names it is another
+// name for it, followed the same way. Any other hand-off (a ref, a child's prop) could call it without a click too. Naming it in the button's own
+// onClick, through an alias the button calls, or in a hook's dependency list calls nothing.
+const BEFORE_RENDER = '  return (\n    <div>';
+const atRender = (lines) => mutated(BEFORE_RENDER, `${lines}\n${BEFORE_RENDER}`);
+
+test('a handler or helper handed to an effect, a timer, a frame, a microtask, a ref or a child — or through an alias — fails in both layers, even when its button also calls it', () => {
+  for (const [label, source, reason] of [
+    ['a timer in an effect', atRender('  React.useEffect(() => {\n    const timer = setTimeout(showIdentity, 0);\n    return () => clearTimeout(timer);\n  }, []);'), /^WhoAmI: handed to an effect, a memo or a timer/],
+    ['a frame', atRender('  React.useEffect(() => { requestAnimationFrame(showVersion); }, []);'), /^RetrieveVersion: handed to an effect, a memo or a timer/],
+    ['a microtask at render', atRender('  queueMicrotask(showVersion);'), /^RetrieveVersion: handed to an effect, a memo or a timer/],
+    ['the effect callback itself', atRender('  React.useEffect(showIdentity as unknown as () => void, []);'), /^WhoAmI: handed to an effect, a memo or a timer/],
+    ['an interval of the helper', atRender('  React.useEffect(() => { const id = setInterval(readVersion, 60000, api); return () => clearInterval(id); }, []);'), /^RetrieveVersion: handed to an effect, a memo or a timer/],
+    ['an alias handed to a timer', atRender('  const run = showIdentity;\n  React.useEffect(() => { const timer = setTimeout(run, 0); return () => clearTimeout(timer); }, []);'), /^WhoAmI: handed to an effect, a memo or a timer/],
+    ['a ref callback', mutated('      {identity.message && <Text>', '      <div ref={showIdentity as unknown as React.Ref<HTMLDivElement>} />\n      {identity.message && <Text>'), /^WhoAmI: showIdentity is handed somewhere other than its button's onClick/],
+    ['a child component', mutated('      {version.message && <Text>', '      <Watcher onReady={showVersion} />\n      {version.message && <Text>'), /^RetrieveVersion: showVersion is handed somewhere other than its button's onClick/],
+    ['a subscription, not a rename', atRender('  const unsubscribe = subscribeToRefresh(showIdentity);'), /^WhoAmI: showIdentity is handed somewhere other than its button's onClick/],
+    ['a memo factory with a type argument', atRender('  React.useMemo<Promise<void>>(showVersion, []);'), /^RetrieveVersion: handed to an effect, a memo or a timer/],
+  ]) {
+    const found = problems(source);
+    assert.ok(found.some((p) => reason.test(p)), `${label}: ${JSON.stringify(found)}`);
+    for (const [index, result] of verdicts(fixture(source)).entries()) assert.equal(result.status, 'fail', `${label}, layer ${index + 1}`);
+  }
+  // Naming it calls nothing: in the button's own onClick, through an alias the button calls, a memoized alias, or a hook's dependency list.
+  for (const [label, source] of [
+    ['onClick names the handler', mutated('onClick={() => void showIdentity()}', 'onClick={showIdentity}')],
+    ['an alias the button calls', mutated('onClick={() => void showVersion()}', 'onClick={() => void onVersion()}').replace(BEFORE_RENDER, `  const onVersion = showVersion;\n${BEFORE_RENDER}`)],
+    ['a memoized alias', mutated('onClick={() => void showIdentity()}', 'onClick={onIdentity}').replace(BEFORE_RENDER, `  const onIdentity = React.useCallback(showIdentity, [showIdentity]);\n${BEFORE_RENDER}`)],
+    ['a dependency list', mutated('React.useEffect(() => () => { mounted.current = false; }, []);', 'React.useEffect(() => () => { mounted.current = false; }, [showIdentity]);')],
+  ]) {
+    assert.deepStrictEqual(problems(source), [], label);
+    for (const [index, result] of verdicts(fixture(source)).entries()) assert.equal(result.status, 'pass', `${label}, layer ${index + 1}: ${result.reason}`);
+  }
 });

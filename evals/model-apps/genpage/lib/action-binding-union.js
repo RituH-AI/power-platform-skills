@@ -169,8 +169,9 @@ function builtInGateProblems(calls, authoring) {
 // keeps (custom-api-contract.js runtimeProblems: presence check on the page's dataApi, failure returned before `res.outputs` is read, sanitized
 // error.message only):
 //   - the request is exactly `{ name: 'WhoAmI' }` / `{ name: 'RetrieveVersion' }`, and a presence check that fails RETURNS: no request at all;
-//   - the call is user-triggered: its helper is reached only from a button's onClick, through named handlers — never from an effect, a memo, a
-//     timer or the render itself, and never by calling itself again;
+//   - the call is user-triggered: its helper is reached only from a button's onClick, through named handlers (or constants that name them) —
+//     never from an effect, a memo, a timer or the render itself, never handed to one (`setTimeout(showIdentity, 0)`), a ref or a child, and
+//     never by calling itself again;
 //   - the button that triggers it is disabled while its call is pending, a separate state per operation; its handler ignores a stale request (a
 //     `.current` counter it increments and compares after the await) and catches a rejected promise;
 //   - outputs are read only after a non-null, non-array object check, through own-property reads, never from the result root, by a literal member,
@@ -185,8 +186,8 @@ const IDENTITY_FIELDS = ['UserId', 'BusinessUnitId', 'OrganizationId'];
 const DTO = 'BusinessUnitId|UserId|OrganizationId|Version';
 // What a page must never do with an operation's result: log it, keep it, copy it or send it anywhere.
 const LEAKS = /\bconsole\s*\.|\blocalStorage\b|\bsessionStorage\b|\bclipboard\b|\bappInsights\b|\.track(?:Event|Metric|Trace|Exception|Dependency)\s*\(|\bURLSearchParams\b|\bhistory\s*\.\s*(?:push|replace)State\b|\bdocument\s*\.\s*cookie\b/;
-// Where a call is not a user's: an effect, a memo, a timer, a frame or a microtask.
-const NOT_A_USER = /\b(?:useEffect|useLayoutEffect|useInsertionEffect|useMemo|setTimeout|setInterval|requestAnimationFrame|queueMicrotask)\s*\(/g;
+// Where a call is not a user's: an effect, a memo, a timer, a frame or a microtask (a hook's type argument list, `useMemo<string>(…)`, included).
+const NOT_A_USER = /\b(?:useEffect|useLayoutEffect|useInsertionEffect|useMemo|setTimeout|setInterval|requestAnimationFrame|queueMicrotask)\s*(?:<(?:[^<>()]|<[^<>()]*>)*>\s*)?\(/g;
 
 // The `if (…)` guards of a text that end in a return: [{ condition }], the condition as raw text.
 function returningGuards(text, mask) {
@@ -219,6 +220,54 @@ function functionDeclarations(mask) {
   return out;
 }
 
+// The constants initialized with something other than a function — `const run = showIdentity;`, `const onIdentity = useCallback(showIdentity, [])`.
+// [{ name, init, end }], `init` where the initializer starts. Which of them only rename a function is decided where a mention is read (aliasAt).
+function aliasDeclarations(mask) {
+  const out = [];
+  for (const match of mask.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=(?!=)\s*/g)) {
+    const init = match.index + match[0].length;
+    let end;
+    try { end = expressionEnd(mask, init); } catch { continue; }
+    if (!/=>|^\s*(?:async\s+)?function\b/.test(mask.slice(init, end))) out.push({ name: match[1], init, end });
+  }
+  return out;
+}
+
+// Every place a function is named without being called: `setTimeout(fn, 0)`, `onClick={fn}`, `ref={fn}`, `const run = fn`. Not a call `fn(…)`
+// (callSites follows those), not its own declaration, not a member (`x.fn`) and not an object key (`{ fn: … }`).
+function mentions(mask, name) {
+  const out = [];
+  for (const match of mask.matchAll(new RegExp(`(?<![\\w$.])${escapeRe(name)}(?![\\w$])`, 'g'))) {
+    const before = mask.slice(Math.max(0, match.index - 40), match.index);
+    const after = mask.slice(match.index + name.length);
+    if (/^\s*\(/.test(after)) continue;
+    if (/\b(?:function\s*\*?|const|let|var)\s*$/.test(before)) continue;
+    if (/^\s*:(?!:)/.test(after) && /[{,]\s*$/.test(before)) continue;
+    out.push(match.index);
+  }
+  return out;
+}
+
+// The dependency list of a hook — the `[a, b]` of `useEffect(fn, [a, b])`: naming a function there calls nothing. [[open, close]] of each list.
+function dependencyLists(mask) {
+  const out = [];
+  for (const match of mask.matchAll(/\buse(?:Effect|LayoutEffect|InsertionEffect|Memo|Callback)\s*(?:<(?:[^<>()]|<[^<>()]*>)*>\s*)?\(/g)) {
+    const open = match.index + match[0].length - 1;
+    try {
+      const close = groupEnd(mask, open);
+      let comma = -1;
+      for (let i = open + 1; i < close && comma === -1; i += 1) {
+        if ('({['.includes(mask[i])) i = groupEnd(mask, i);
+        else if (mask[i] === ',') comma = i;
+      }
+      if (comma === -1) continue;
+      const start = comma + 1 + mask.slice(comma + 1, close).search(/\S/);
+      if (mask[start] === '[') out.push([start, groupEnd(mask, start)]);
+    } catch { /* not gradeable here; actionCalls refuses it */ }
+  }
+  return out;
+}
+
 function builtInRuntimeProblems(code, names) {
   const problems = [];
   if (!names.length) return problems;
@@ -234,7 +283,21 @@ function builtInRuntimeProblems(code, names) {
   });
   const notAUser = ranges(NOT_A_USER);
   const clicks = ranges(/\bonClick\s*=\s*\{/g);
+  const dependencies = dependencyLists(mask);
+  const aliases = aliasDeclarations(mask);
   const within = (list, at) => list.some(([a, b]) => a < at && at < b);
+  // The constant a mention of `fn` names: `const run = fn;` (a cast or `!` allowed) or `const run = useCallback(fn, […])`. Any other initializer
+  // — `store.subscribe(fn)`, `{ go: fn }`, a function that hands it on later — passes it to code this check does not follow.
+  const aliasAt = (at, fn) => {
+    const alias = aliases.filter((d) => d.init <= at && at < d.end).reduce((best, d) => (!best || d.init > best.init ? d : best), null);
+    const holder = enclosing(at);
+    if (!alias || (holder && holder.start > alias.init)) return null;
+    const head = mask.slice(alias.init, at);
+    const tail = mask.slice(at + fn.length, alias.end);
+    const renamed = /^\s*$/.test(head) && /^\s*(?:!\s*)?(?:(?:as|satisfies)\b[\s\S]*)?$/.test(tail);
+    const memoized = /^\s*(?:React\s*\.\s*)?useCallback\s*(?:<(?:[^<>()]|<[^<>()]*>)*>\s*)?\(\s*$/.test(head) && /^\s*[,)]/.test(tail);
+    return renamed || memoized ? alias.name : null;
+  };
   // A page-wide rule: nothing of a built-in operation's failure tells the maker to deploy a Custom API, and no stack is shown.
   for (const literal of code.match(/'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`[^`]*`/g) || []) {
     if (/unavailable|not found|not available|\b404\b/i.test(literal) && /deploy|custom api/i.test(literal)) problems.push('a built-in operation message must not tell the maker to deploy a Custom API');
@@ -261,7 +324,10 @@ function builtInRuntimeProblems(code, names) {
         try { returns = /^\s*(?:return\b|\{[^}]*\breturn\b)/.test(prefixMask.slice(groupEnd(prefixMask, prefixMask.indexOf('(', guard.index)) + 1)); } catch { returns = false; }
       }
       if (!returns) problems.push(`${at}: a failed presence check must return before any request is made`);
-      // User-triggered: every way to the helper starts at a button's onClick.
+      // User-triggered: every way to the helper starts at a button's onClick. A function is reached by a call (`fn(…)`) or by a mention that hands
+      // it on (`setTimeout(fn, 0)`, `ref={fn}`, `const run = fn`). A mention in a button's onClick is the user's; one in an effect, a memo, a
+      // timer, a frame or a microtask is not, whatever else also calls it; one in a hook's dependency list calls nothing; one that initializes a
+      // constant makes that constant another name for it, followed the same way. Any other mention hands it to code that could call it unclicked.
       const reached = new Set();
       const handlers = [];
       const queue = [helper.name];
@@ -274,8 +340,17 @@ function builtInRuntimeProblems(code, names) {
           if (fn === helper.name && site.at > helper.start && site.at < helper.end) problems.push(`${at}: the helper calls itself (an automatic retry)`);
           else sites.push(site);
         }
-        const referenced = clicks.some(([a, b]) => new RegExp(`(?<![\\w$.])${escapeRe(fn)}(?![\\w$])`).test(mask.slice(a, b)));
-        if (!sites.length && !referenced) problems.push(`${at}: ${fn} is not reached from a button's onClick`);
+        let referenced = false;
+        let aliased = false;
+        for (const mention of mentions(mask, fn)) {
+          if (within(dependencies, mention)) continue;
+          if (within(notAUser, mention)) { problems.push(`${at}: handed to an effect, a memo or a timer — a built-in operation is called only when the user clicks its button`); continue; }
+          if (within(clicks, mention)) { referenced = true; continue; }
+          const alias = aliasAt(mention, fn);
+          if (alias) { aliased = true; queue.push(alias); continue; }
+          problems.push(`${at}: ${fn} is handed somewhere other than its button's onClick — a ref, a child or a timer could call it without a click`);
+        }
+        if (!sites.length && !referenced && !aliased) problems.push(`${at}: ${fn} is not reached from a button's onClick`);
         for (const site of sites) {
           if (within(notAUser, site.at)) { problems.push(`${at}: called from an effect, a memo or a timer — a built-in operation is called only when the user clicks its button`); continue; }
           if (within(clicks, site.at)) continue;

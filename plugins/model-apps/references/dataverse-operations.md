@@ -169,7 +169,9 @@ left by an earlier run is no evidence); the planner copies it verbatim and never
 ## Generated call
 
 Only for a current-run add/replace, and only from a button. Never in a `useEffect`, at render,
-in a filter, on a timer or on mount.
+in a filter, on a timer or on mount — and never hand its handler or helper to one
+(`setTimeout(showIdentity, 0)`), to a `ref` or to a child component: only the button's
+`onClick` names it.
 
 ```tsx
 type BuiltInResult = { ok: boolean; outputs?: Record<string, unknown>; error?: { message?: string; status?: number } };
