@@ -31,6 +31,7 @@ When using plan mode, include these in `allowedPrompts`:
     { "tool": "Bash", "prompt": "initialize power apps project (pa app init)" },
     { "tool": "Bash", "prompt": "list connections, datasets, and tables (pa connection list, list-datasets, list-tables)" },
     { "tool": "Bash", "prompt": "add data sources (pa app add data-source)" },
+    { "tool": "Bash", "prompt": "create connections (pa connection create)" },
     { "tool": "Bash", "prompt": "deploy to power platform (pa app push)" }
   ]
 }
