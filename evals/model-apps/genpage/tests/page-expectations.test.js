@@ -161,6 +161,24 @@ test('eval 5: components and utilities are top level; handlers that close over s
 };`), []);
 });
 
+// The page error evaluator (lib/page-error-evidence.js) reads function scopes through this export rather than keeping a
+// second scope reader. A missing export must fail here, by name — never surface later as a TypeError a caller turns into
+// a skip — and exporting it changes nothing about the top-level check above.
+test('tsx-structure exports its function scope reader, and the top-level check is unchanged by it', () => {
+  const structure = require('../lib/tsx-structure.js');
+  assert.equal(typeof structure.functionScopes, 'function', 'functionScopes is exported');
+  const code = structure.sourceView(`function load(id: string) { return id; }
+const PageBody = (props: Props) => { const go = async () => { await load('x'); }; return null; };`).code;
+  const scopes = structure.functionScopes(code);
+  assert.deepEqual(scopes.map((scope) => scope.params).sort((a, b) => a.join().localeCompare(b.join())), [[], ['id'], ['props']]);
+  assert.ok(scopes.every((scope) => scope.start < scope.end && code.slice(scope.start, scope.end).trim()), 'each scope is a body range');
+  assert.deepEqual(nestedDefinitionProblems(`function PageBody(props: Props) {
+  const { dataApi } = props;
+  async function save() { await dataApi.createRow('task', {}); }
+  return null;
+}`), [], 'a handler that closes over the props is not a nested utility');
+});
+
 // --- Eval 12: the revised plan -----------------------------------------------------------------------
 
 const E12 = '12-account-plan-revision';

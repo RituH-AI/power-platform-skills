@@ -1069,3 +1069,14 @@ test('before-page download source: recorded destination forms preserve the corre
     }
   }
 });
+
+// The complete reference tests of the page error contract (page-error-evidence.test.js) assemble a full Action page and
+// grade it with the same runtime check the lifecycle scorer applies. That check must be importable by name: a missing
+// export fails here, never as a TypeError a caller could turn into a skip.
+test('runtimeProblems is exported, and it is the check the lifecycle scorer applies', () => {
+  const { runtimeProblems } = require('../lib/custom-api-contract.js');
+  assert.equal(typeof runtimeProblems, 'function', 'runtimeProblems is exported');
+  assert.deepEqual(runtimeProblems(source, bindings, { cnt_ApproveOrder: ['NewStatus'], cnt_GetOrderSummary: ['Total'] }, new Map()), []);
+  const unguarded = runtimeProblems(source.replace('if (!res.ok)', 'if (false)'), bindings, { cnt_ApproveOrder: ['NewStatus'], cnt_GetOrderSummary: ['Total'] }, new Map());
+  assert.ok(unguarded.some((problem) => /response\.ok must refuse before outputs are read/.test(problem)), JSON.stringify(unguarded));
+});
