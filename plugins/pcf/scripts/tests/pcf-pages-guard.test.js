@@ -316,6 +316,7 @@ for (const [name, relative] of [
     assert.match(text, /except a function- or block-local `const` bound to an object literal[^\n]*used only to call those functions[^\n]*fail closed/i);
     assert.match(text, /early-return guards and calls in `else` branches are reported by design[^\n]*deliberate fail-closed limit[^\n]*positive guard block/i);
     assert.match(text, /parenthesized receivers[^\n]*`\.bind`[^\n]*`Reflect\.apply`[^\n]*detected like direct calls/i);
+    assert.match(text, /`factory\?\.<T>\(context\.device\)\.captureImage\(\)`[^\n]*over-report/);
     assert.match(text, /runtime verification on the target Power Pages site[^.\n]*required/i);
   });
 }
@@ -518,6 +519,14 @@ test('Pages detection reads optional and generic call arguments as arguments, no
   // After an analyzer failure the fallback reads the optional call the same way.
   assert.deepEqual(findingsFor(`${factory}factory?.(context.device).captureImage();`, null, ['pages'], { indexer: throwingIndexer })
     .map((finding) => finding.code), []);
+  // Known limit, in the safe direction: after an optional call with type arguments the parenthesis is still
+  // read as a grouped receiver, so the factory result's method is reported as a Pages call (an over-report).
+  for (const text of [
+    `${generic}function run(context) { return factory?.<unknown>(context.device).captureImage(); }`,
+    `${method}function run(context) { return factory.create?.<unknown>(context.device).captureImage(); }`,
+  ]) {
+    assert.deepEqual(codesFor(text, null), ['PCF_FEATURE_UNDECLARED', 'PCF_PAGES_API'], text);
+  }
   // A grouped receiver after an operator or keyword is still read through.
   for (const text of ['ready && (context.device).captureImage();', 'value = (context.device).captureImage();', 'void (context.device).captureImage();']) {
     assert.deepEqual(codesFor(text, null), ['PCF_FEATURE_UNDECLARED', 'PCF_PAGES_API'], text);
