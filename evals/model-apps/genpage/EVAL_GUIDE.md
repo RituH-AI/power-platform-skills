@@ -638,7 +638,8 @@ When a new rule is added to `rules.md` or a new phase requirement lands in `SKIL
 
 Currently red: **none**. Every fixture — synthetic and real capture alike — is green under both
 runners, and CI runs both runners on every PR that touches `evals/model-apps/**`
-(`.github/workflows/model-apps-script-tests.yml`, job `test-model-apps-evals`).
+(`.github/workflows/model-apps-script-tests.yml`, job `test-model-apps-evals`, on ubuntu, windows and
+macos with Node 20 and 22).
 
 **Aggregate state for CI gating:** every stored fixture must pass. Expected rejection is an explicit
 outcome with associated failed-gate/no-mutation evidence, not an excuse for a red fixture. Put bad

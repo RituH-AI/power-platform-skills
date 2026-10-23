@@ -389,6 +389,51 @@ test('the model-apps CI workflow runs the suite once with pinned TypeScript and 
   if (release !== null) assert.strictEqual(JSON.parse(release).version, '2.13.0', 'the fetched commit is the 2.13.0 release');
 });
 
+// The eval tests and runners read committed fixtures, which a Windows checkout gives CRLF line ends, and the routing runner starts agent CLIs as
+// child processes (.cmd shims on Windows), so the eval job runs on every system and Node version the suite job runs on; the lexer's oracle
+// sweeps compare it with parsers whose identifier tables are not those of the Node version's engine, so they run on both Node versions. Text
+// assertions again: a list is read from the job's own `matrix:` block, in either form YAML writes it.
+//   matrix:
+//       os:
+//           - ubuntu-latest
+//       node: [20, 22]
+function workflowJob(wf, id) {
+  const start = wf.search(new RegExp(`^ {4}${id}:\\s*$`, 'm'));
+  assert.ok(start >= 0, `the workflow has a job ${id}`);
+  const rest = wf.slice(start).split(/\r?\n/).slice(1);
+  const end = rest.findIndex((line) => /^ {4}[a-z0-9-]+:\s*$/i.test(line));
+  return (end === -1 ? rest : rest.slice(0, end)).join('\n');
+}
+function matrixList(job, key) {
+  const lines = job.split('\n');
+  const at = lines.findIndex((line) => line.startsWith(`                ${key}:`));
+  if (at === -1) return null;
+  const inline = /\[([^\]]*)\]\s*$/.exec(lines[at]);
+  if (inline) return inline[1].split(',').map((item) => item.trim()).filter(Boolean);
+  const items = [];
+  for (const line of lines.slice(at + 1)) {
+    const item = /^ {20}- (\S+)\s*$/.exec(line);
+    if (!item) break;
+    items.push(item[1]);
+  }
+  return items;
+}
+test('the model-apps CI workflow runs the eval job on every system and Node version the suite job runs on, and the lexer oracles on both Node versions', () => {
+  const wf = fs.readFileSync(WORKFLOW, 'utf8');
+  const suite = workflowJob(wf, 'test-model-apps-scripts');
+  const evals = workflowJob(wf, 'test-model-apps-evals');
+  const oracles = workflowJob(wf, 'test-model-apps-lexer-oracles');
+  assert.deepStrictEqual(matrixList(suite, 'os'), ['ubuntu-latest', 'windows-latest', 'macos-latest']);
+  assert.deepStrictEqual(matrixList(suite, 'node'), ['20', '22']);
+  assert.deepStrictEqual(matrixList(evals, 'os'), matrixList(suite, 'os'), 'the eval job runs on every system the suite runs on');
+  assert.deepStrictEqual(matrixList(evals, 'node'), matrixList(suite, 'node'), 'and on every Node version');
+  assert.match(evals, /^ {8}runs-on: \$\{\{ matrix\.os \}\}[ \t]*$/m, 'on the system of its matrix entry');
+  assert.match(evals, /^ {18}node-version: \$\{\{ matrix\.node \}\}[ \t]*$/m, 'with the Node version of its matrix entry');
+  assert.match(evals, /^ {12}fail-fast: false[ \t]*$/m, 'and one entry that fails does not cancel the others');
+  assert.deepStrictEqual(matrixList(oracles, 'node'), matrixList(suite, 'node'), 'the lexer oracles run on every Node version');
+  assert.match(oracles, /^ {18}node-version: \$\{\{ matrix\.node \}\}[ \t]*$/m);
+});
+
 // --- committed lock files must not carry a registry URL ---------------------------------------
 // `resolved` records the exact feed a package came from. Public npm is blocked on some Microsoft
 // networks, so a contributor installing through an internal Azure Artifacts feed would rewrite

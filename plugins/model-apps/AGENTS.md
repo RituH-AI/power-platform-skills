@@ -3619,7 +3619,8 @@ rejected a complete page saved with CRLF endings.
   the generator, and fix the rule. **The oracle tests skip themselves where the variable is not set** (`TYPESCRIPT_ORACLE_PATH`, `BABEL_ORACLE_PATH`, `BASE_LIB_PATH`) **and fail where it is set and the package or the lexer cannot be loaded**
   (`tests/helpers/typescript-oracle.js` throws), so a wrong path or a renamed file cannot turn the job green without running them. The CI job `test-model-apps-lexer-oracles` (`.github/workflows/model-apps-script-tests.yml`) installs
   TypeScript 5.8.3 and `@babel/parser` 7.29.7 under `$RUNNER_TEMP` — outside the plugin, which ships no dependency, with `--ignore-scripts`, at exact versions — fetches the lexer of the 2.13.0 release by its commit hash, sets
-  the three variables, and runs `node scripts/run-tests.js`. A new TypeScript release can change what a sweep judges: raise the pin in the same change, and run the sweeps.
+  the three variables, and runs `node scripts/run-tests.js`, on Ubuntu with Node 20 and with Node 22: the lexer reads identifier characters by
+  Unicode property escapes, whose tables come with each Node version's engine. A new TypeScript release can change what a sweep judges: raise the pin in the same change, and run the sweeps.
 - **The residual net does not depend on the lexer, and has no exemption.** After forward resolution the
   RESOLVED source is read again — the copy can read differently from the source, because each token became a
   longer page id, which can move a `(` out of the look-behind — as plain text: any `PAGEREF_` token left in it
@@ -4143,7 +4144,9 @@ NODE20_BIN=/path/to/node20/bin node scripts/run-tests.js --with-sdk /path/to/pow
   contract), plus the runners (`node evals/model-apps/genpage/run-layer-{1,2}.js --tier smoke`,
   `node evals/model-apps/app-builder/run-app-builder.js`). See `## Eval Suite` below. CI's
   `test-model-apps-evals` job runs the eval tests AND all three runners (genpage Layer 1/2, app-builder)
-  over every committed fixture — offline, no org — so a fixture that falls out of step fails the PR.
+  over every committed fixture — offline, no org — on ubuntu × windows × macos and Node 20 × 22, as the
+  plugin suite runs (a Windows checkout gives the fixtures CRLF line ends), so a fixture that falls out of
+  step fails the PR.
 
 **The vendored SDK lives in a separate repo.** The Dataverse mechanics are in
 `power-platform-ux` (Azure DevOps `msazure/OneAgile`), package `packages/cds-maker-sdk`. This plugin
