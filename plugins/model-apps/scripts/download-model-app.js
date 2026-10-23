@@ -1952,7 +1952,9 @@ function untypedColumnNames(entities) {
 // nothing shows they were not authored (`{ table, column, typeName }`), so the caller can name them (see the end of the filter).
 // `incomplete`, when given, is filled with the File and Image columns written without detail an answered read should have carried
 // (`{ table, column, type, missing }`, missingMediaDetail), so the caller can name those too.
-function entityFromMetadata(meta, logical, { unexpressible, incomplete, schemaOmissions = [], languageCode } = {}) {
+// `languageLost`, when given, is filled with the inline Choice option labels written without the one language they hold
+// (`{ table, column, option, label, languageCode }`, see the option screen below), so the caller can name them.
+function entityFromMetadata(meta, logical, { unexpressible, incomplete, schemaOmissions = [], languageCode, languageLost } = {}) {
   const primary = meta && (meta.primaryNameAttribute || meta.primaryNameLogicalName);
   const attrs = Array.isArray(meta && meta.attributes) ? meta.attributes : (Array.isArray(meta && meta.Attributes) ? meta.Attributes : []);
   const primaryLower = String(primary || '').toLowerCase();
@@ -2124,14 +2126,33 @@ function entityFromMetadata(meta, logical, { unexpressible, incomplete, schemaOm
     // the validator can never disagree about what "ambiguous" means.
     //
     // Options held in one language other than the authoring one come back as one-entry LCID maps
-    // (labelFromDataverse), and the validator counts a collision involving a map as hidden — so two
-    // options sharing one such label would leave a column untyped that the same labels as plain strings
-    // (the shape an earlier download wrote, which the validator only warns about) kept typed. That one
-    // case keeps the plain strings, as before; every other set keeps each option's language.
+    // (labelFromDataverse). Two of them sharing their text in the SAME language are a duplicate the
+    // validator warns about, as it does two plain strings, so they keep their language. One that shares
+    // its text with an option in ANOTHER language — a plain label (the authoring language) or a one-entry
+    // map of another — is a collision the validator refuses, which would leave the column untyped. Only
+    // the one-entry maps of such a collision are written as the plain strings an earlier download wrote
+    // (a visible duplicate, which the validator only warns about), and each is reported in `languageLost`,
+    // because a rebuild labels it in the language it resolves rather than its own; every other option
+    // keeps its language. A collision involving a label of several languages has no plain-string form:
+    // the column is left untyped, as before.
     const inlineLabels = (lcid) => optionSet.options.map((l) => localizedSpecLabel(l, lcid));
     const hiddenCollision = (options) => ambiguousChoiceAliases(options).some((c) => c.hidden);
     let inlineOptions = optionSet && !(optionSet.isGlobal && optionSet.name) ? inlineLabels(languageCode) : null;
-    if (inlineOptions && hiddenCollision(inlineOptions) && !hiddenCollision(inlineLabels(undefined))) inlineOptions = inlineLabels(undefined);
+    let lostLanguages = [];
+    if (inlineOptions && hiddenCollision(inlineOptions)) {
+      const hidden = new Set(ambiguousChoiceAliases(inlineOptions).filter((c) => c.hidden).map((c) => c.alias));
+      const lost = [];
+      const flattened = inlineOptions.map((label, i) => {
+        const keys = isLocalizedLabelMap(label) ? Object.keys(label) : [];
+        if (keys.length !== 1 || !hidden.has(label[keys[0]])) return label;
+        lost.push({ option: i, label: label[keys[0]], languageCode: Number(keys[0]) });
+        return label[keys[0]];
+      });
+      if (!hiddenCollision(flattened)) {
+        inlineOptions = flattened;
+        lostLanguages = lost;
+      }
+    }
     const inlineIsAmbiguous = inlineOptions ? hiddenCollision(inlineOptions) : false;
     const usableOptionSet = inlineIsAmbiguous ? null : optionSet;
     const specType = TYPES_NEEDING_COMPANION_DATA.has(mapped) && !usableOptionSet ? undefined : mapped;
@@ -2139,6 +2160,7 @@ function entityFromMetadata(meta, logical, { unexpressible, incomplete, schemaOm
       : (usableOptionSet.isGlobal && usableOptionSet.name
         ? { globalChoice: usableOptionSet.name }
         : { options: inlineOptions });
+    if (schemaName && Array.isArray(languageLost)) for (const l of lostLanguages) languageLost.push({ table: logical, column: schemaName, ...l });
     if ((specType === 'File' || specType === 'Image') && schemaName && Array.isArray(incomplete)) {
       const missing = missingMediaDetail(meta, a, specType);
       if (missing.length) incomplete.push({ table: logical, column: schemaName, type: specType, missing });
@@ -3087,6 +3109,8 @@ async function runDownload({ sdk, genpage, outDir, appId, appUnique, allowLossy 
   const incompleteMediaColumns = [];
   // Columns left out because the App Spec has no type for them (entityFromMetadata's `unexpressible`), of the tables the spec keeps.
   const unexpressibleColumns = [];
+  // Choice option labels written without the one language they hold (entityFromMetadata's `languageLost`), of the tables the spec keeps.
+  const optionLanguageLosses = [];
   // Shared option sets bound by a downloaded column, keyed by lower-cased name so a set used by
   // several tables is declared once.
   const globalChoiceDecls = new Map();
@@ -3097,6 +3121,7 @@ async function runDownload({ sdk, genpage, outDir, appId, appUnique, allowLossy 
     const leftOut = [];
     const shortOf = [];
     const schemaOmissions = [];
+    const lostLabels = [];
     // A metadata READ failure is not the same as metadata that reports no primary name, and it must
     // not be swallowed: a 429/503 on a sitemap table used to drop it silently, leaving its subarea
     // behind so validation later complained about a "sitemap subArea references unknown entity" —
@@ -3109,7 +3134,7 @@ async function runDownload({ sdk, genpage, outDir, appId, appUnique, allowLossy 
       if (meta && meta.optionSetReadFailed) optionSetReadFailures.set(logical, meta.optionSetReadFailed);
       for (const [type, reason] of Object.entries((meta && meta.mediaReadFailures) || {})) if (mediaReadFailures[type]) mediaReadFailures[type].set(logical, reason);
       collectGlobalChoices(meta, globalChoiceDecls);
-      e = entityFromMetadata(meta, logical, { unexpressible: leftOut, incomplete: shortOf, schemaOmissions, languageCode });
+      e = entityFromMetadata(meta, logical, { unexpressible: leftOut, incomplete: shortOf, schemaOmissions, languageCode, languageLost: lostLabels });
       if (meta && typeof meta.IconVectorName === 'string' && meta.IconVectorName.trim()) tableVectorIcons.set(logical, meta.IconVectorName);
       const missingSchema = [...((meta && meta.schemaReadFailures) || []), ...schemaOmissions];
       if (missingSchema.length) schemaReadFailures.set(logical, missingSchema.join('; '));
@@ -3135,6 +3160,7 @@ async function runDownload({ sdk, genpage, outDir, appId, appUnique, allowLossy 
     entities.push(e);
     for (const c of leftOut) unexpressibleColumns.push(`${e.schemaName}.${c.column} (${c.typeName})`);
     for (const c of shortOf) incompleteMediaColumns.push({ name: `${e.schemaName}.${c.column}`, missing: c.missing });
+    for (const l of lostLabels) optionLanguageLosses.push(`${e.schemaName}.${l.column} options[${l.option}] '${l.label}' (${l.languageCode})`);
   }
   const withReason = (list) => list.map((l) => (metadataErrors.has(l) ? `${l} (metadata read failed: ${metadataErrors.get(l)})` : l)).join(', ');
   if (noPrimaryName.length) {
@@ -3214,6 +3240,13 @@ async function runDownload({ sdk, genpage, outDir, appId, appUnique, allowLossy 
   // FRESH environment would not make it at all, so each is named rather than dropped without a word.
   if (unexpressibleColumns.length) {
     process.stderr.write(`WARNING: ${unexpressibleColumns.length} column(s) have a type the App Spec cannot express and were left out of the spec (${unexpressibleColumns.join(', ')}). Rebuilding this spec into an environment that already has the table leaves them as they are, but rebuilding into a FRESH environment would not create them: add them there in Maker after the rebuild.\n`);
+  }
+  // A Choice option labelled in one language other than the authoring one, whose text another option of its column holds in another
+  // language (entityFromMetadata's `languageLost`): the spec can hold the two only as plain strings, which a rebuild labels in the language
+  // it resolves, so each label that loses its language is named rather than moved without a word. A rebuild into an environment that
+  // already has the column leaves its options as they are.
+  if (optionLanguageLosses.length) {
+    process.stderr.write(`WARNING: the language of ${optionLanguageLosses.length} Choice option label(s) could not be kept (${optionLanguageLosses.join(', ')}): each shares its text with another option of its column in another language, which the App Spec can hold only as plain strings, so rebuilding into a FRESH environment labels them in the language the build resolves. Rename one of those options in Maker and download again, or relabel them in Maker after the rebuild.\n`);
   }
 
   // App identity comes from the app's REAL, immutable uniquename (`appUnique`, captured from Dataverse as

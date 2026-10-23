@@ -1280,18 +1280,36 @@ function labelAliases(value) {
 // Returns the offending aliases so the error can name them, each flagged `hidden` when at least one
 // side is a LOCALIZED label — that is the case the author cannot see by reading the line, and the
 // only one severe enough to fail a spec that provisioned correctly before this rule existed.
+//
+// One localized shape is NOT hidden: two labels that each hold ONE language, the SAME one —
+//   [ { "1036": "Ouvert" }, { "1036": "Ouvert" } ]
+// A one-entry map shows its only text on the line as a plain string does, so this is the duplicate
+// `["Ouvert", "Ouvert"]` is, in one stated language, and it is reported the same way (a warning).
+// It is the shape a download writes for two options a maker labelled alike in a language other than
+// its authoring one, which Dataverse allows; refusing it made the download write them as plain
+// strings, which a rebuild labels in another language. A one-entry map beside a plain string, or
+// beside one of another language, still names two options in two languages, and stays hidden.
 function ambiguousChoiceAliases(options) {
-  const seen = new Map(); // alias -> { index, localized }
+  const seen = new Map(); // alias -> { index, localized, only }
   const clashes = [];
   (options || []).forEach((label, i) => {
     const localized = isLocalizedLabelMap(label);
+    const only = soleLabelLanguage(label);
     for (const alias of labelAliases(label)) {
       const prior = seen.get(alias);
-      if (prior && prior.index !== i) clashes.push({ alias, first: prior.index, second: i, hidden: localized || prior.localized });
-      else if (!prior) seen.set(alias, { index: i, localized });
+      if (prior && prior.index !== i) clashes.push({ alias, first: prior.index, second: i, hidden: (localized || prior.localized) && !(only !== null && only === prior.only) });
+      else if (!prior) seen.set(alias, { index: i, localized, only });
     }
   });
   return clashes;
+}
+
+// The LCID of a localized label that holds exactly one language, or null for anything else (a plain
+// string, a map of several languages, a map whose one key is not a canonical LCID).
+function soleLabelLanguage(label) {
+  if (!isLocalizedLabelMap(label) || Object.keys(label).length !== 1) return null;
+  const lcids = localizedLabelLcids(label);
+  return lcids.length === 1 ? lcids[0] : null;
 }
 
 // Reject a LOCALIZED label on a global choice. AB#6686428.
