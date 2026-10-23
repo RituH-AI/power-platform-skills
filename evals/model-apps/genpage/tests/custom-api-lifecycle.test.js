@@ -103,7 +103,9 @@ test('custom API gate and bindings match generated runtime calls', () => {
   for (const layer of [1, 2]) assert.equal(score(good, layer).status, 'pass');
   for (const mutate of [
     (fixture) => { event(fixture, 'gate-create').result = 'disabled'; },
-    (fixture) => { event(fixture, 'gate-preserve').result = 'unreadable'; },
+    // The create's re-probe: an unreadable gate stops new Custom API authoring. (A verified preserve stage keeps the page's rows and is not
+    // refused for its gate — custom-api-contract.js keepingStageCalls; action-binding-union.test.js pins that.)
+    (fixture) => { event(fixture, 'gate-generate').result = 'unreadable'; },
     (fixture) => { event(fixture, 'discovery').result.ok = false; },
     (fixture) => { event(fixture, 'discovery').result.customApis[0].parameterKinds.Amount = 'Boolean'; },
     (fixture) => { fixture.artifacts['actions.json'] = JSON.stringify({ actionBindings: bindings }); },

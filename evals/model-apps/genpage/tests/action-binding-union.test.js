@@ -6,7 +6,7 @@
 // consult the built-in gate. The built-in call is held to the same order as a Custom API call: a failure returns before `res.outputs` is read.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { PHASE_EXPECTATIONS } = require('../lib/assertions-layer-1.js');
+const { PHASE_EXPECTATIONS, WORKFLOW_ASSERTIONS } = require('../lib/assertions-layer-1.js');
 const { PHASE5_EXPECTATIONS } = require('../lib/assertions-layer-2.js');
 const union = require('../lib/action-binding-union.js');
 const { customApiProblems } = require('../lib/custom-api-contract.js');
@@ -421,7 +421,7 @@ test('clearing every binding of a page that binds WhoAmI needs the clear choice,
 // built-in row named in the same removal still goes — no flag decides a built-in removal.
 const APP = '88888888-8888-4888-8888-888888888888';
 const DEFERRED = 'Custom API removal not performed (custom-api disabled): cnt_ApproveOrder';
-function removalEdit({ gate, remove = ['cnt_ApproveOrder'], rows, source, actions = true, log = '' }) {
+function removalEdit({ gate, remove = ['cnt_ApproveOrder'], change = { remove }, rows, source, actions = true, log = '' }) {
   const before = [API, WHO_AM_I];
   const identity = JSON.stringify({ pageId: PAGE, appId: APP });
   const env = 'https://contoso.crm.dynamics.com';
@@ -438,7 +438,7 @@ function removalEdit({ gate, remove = ['cnt_ApproveOrder'], rows, source, action
     manifest: {
       customApi: {
         outputs: { cnt_ApproveOrder: ['NewStatus'] },
-        stages: [{ id: 'edit', target: 'page.tsx', source: 'stages/page.tsx', actions: 'actions.json', beforeConfig: 'before/config.json', afterConfig: 'after/config.json', upload: 'edit', change: { remove } }],
+        stages: [{ id: 'edit', target: 'page.tsx', source: 'stages/page.tsx', actions: 'actions.json', beforeConfig: 'before/config.json', afterConfig: 'after/config.json', upload: 'edit', change }],
       },
       uploads: [{ event: 'edit', mode: 'update', beforeConfig: 'before/config.json', afterConfig: 'after/config.json', beforePage: 'before/page.json', afterPage: 'after/page.json' }],
     },
@@ -479,4 +479,64 @@ test('removing every Custom API of a mixed page: with custom-api ON the row goes
     assert.ok(found.some((entry) => problem.test(entry)), `${label}: ${JSON.stringify(found)}`);
     both(fixture, 'fail', label);
   }
+});
+
+// ── Keeping the page's Custom API rows is not new authoring ────────────────────────────────────────────────────────────────────────────
+// The custom-api gate decides new Custom API authoring: a create whose plan has Custom API rows, and a stage that adds or replaces one. A stage
+// whose before-config is verified as the page it updates, and that only keeps the Custom API rows that page already has — an unrelated edit, a
+// removal the flag defers, a clear — authors none, so it is graded with the flag OFF too, with the plan's Custom API table left as it truly is. The
+// rows it keeps are still checked against the page's source and before-config, and without verified provenance there is no such stage.
+const GATE_RULE = 'Phase 4.6: A populated Custom API plan never discovers, generates or uploads after a disabled or unreadable feature gate';
+const HALT = 'disabled or unreadable Custom API gate must halt before generation or upload';
+const NEW_API = { name: 'cnt_RejectOrder', isFunction: false, displayName: 'Reject Order', parameterKinds: { Reason: 'String' } };
+// Every rule that grades the custom-api gate: the Phase 5 rule in both layers and the Phase 4.6 workflow rule.
+const gateVerdicts = (fixture) => [score(fixture, 1), score(fixture, 2), WORKFLOW_ASSERTIONS.get(GATE_RULE)({ fixture, files: fixture.files, eval: { id: 24 } })];
+// The OFF removal of every Custom API, its row kept and reported, with the plan's Custom API table as it truly is (not the no-bindings sentence).
+const retainedRemoval = () => {
+  const fixture = removalEdit({ gate: 'disabled', rows: [API, WHO_AM_I], source: SOURCE, actions: false, log: DEFERRED });
+  fixture.genpagePlan = CUSTOM_PLAN;
+  return fixture;
+};
+
+test('a verified stage that only keeps the page\'s Custom API rows needs no enabled custom-api gate — with the plan\'s table kept and after a normal lifecycle; new authoring while OFF still halts', () => {
+  // The same OFF removal after the ordinary create and preserve stages, the plan's table left intact.
+  const afterLifecycle = withUpdate(mixedFixture(), 'deferred-remove', { remove: [API.name] }, [API, WHO_AM_I], SOURCE);
+  event(afterLifecycle, 'gate-deferred-remove').result = 'disabled';
+  event(afterLifecycle, 'deferred-remove').command = event(afterLifecycle, 'deferred-remove').command.replace(' --actions deferred-remove-actions.json', '');
+  afterLifecycle.workflowLog += `\n${DEFERRED}`;
+  // An unrelated edit of the created page while the flag is OFF, or unreadable: the preserve stage keeps both rows.
+  const preserveOff = mixedFixture();
+  event(preserveOff, 'gate-preserve').result = 'disabled';
+  const preserveUnreadable = mixedFixture();
+  event(preserveUnreadable, 'gate-preserve').result = 'unreadable';
+  for (const [label, fixture] of [
+    ['the OFF removal with the retained Custom API table', retainedRemoval()],
+    ['the OFF removal after a normal create and preserve lifecycle', afterLifecycle],
+    ['an unrelated edit while custom-api is OFF', preserveOff],
+    ['an unrelated edit while the custom-api gate is unreadable', preserveUnreadable],
+  ]) {
+    for (const [index, result] of gateVerdicts(fixture).entries()) assert.equal(result.status, 'pass', `${label}, rule ${index + 1}: ${result.reason}`);
+  }
+  // New authoring while the flag is OFF still halts: a create with Custom API rows, an addition, a replacement — and a stage whose before-config
+  // is not proven to be the page it updates is not a keeping stage at all.
+  const unverified = retainedRemoval();
+  unverified.manifest.uploads = [];
+  const withPlan = (fixture, plan) => Object.assign(fixture, { genpagePlan: plan });
+  const API_ROW = '| cnt_ApproveOrder | Action | salesorder | Approve Order | Comment: String, Amount: Decimal |';
+  for (const [label, fixture] of [
+    ['a create with Custom API rows', createFixture({ rows: [API], plan: CUSTOM_PLAN, source: CUSTOM_ONLY, customApi: 'disabled', builtIns: 'disabled' })],
+    ['an addition', withPlan(removalEdit({ gate: 'disabled', change: { add: [NEW_API] }, rows: [API, WHO_AM_I, NEW_API], source: SOURCE }),
+      CUSTOM_PLAN.replace(API_ROW, `${API_ROW}\n| cnt_RejectOrder | Action | (Global) | Reject Order | Reason: String |`))],
+    ['a replacement', withPlan(removalEdit({ gate: 'disabled', change: { add: [{ ...API, displayName: 'Approve order (v2)' }] }, rows: [{ ...API, displayName: 'Approve order (v2)' }, WHO_AM_I], source: SOURCE }),
+      CUSTOM_PLAN.replace(API_ROW, API_ROW.replace('Approve Order', 'Approve order (v2)')))],
+    ['a removal from an unproven before-config', unverified],
+  ]) {
+    const found = customApiProblems(fixture);
+    assert.ok(found.includes(HALT), `${label}: ${JSON.stringify(found)}`);
+    for (const [index, result] of gateVerdicts(fixture).entries()) assert.equal(result.status, 'fail', `${label}, rule ${index + 1}`);
+  }
+  // The ON removal stays the control: the row goes.
+  const on = removalEdit({ gate: 'enabled', rows: [WHO_AM_I], source: BUILT_IN_ONLY });
+  on.genpagePlan = CUSTOM_PLAN;
+  for (const [index, result] of gateVerdicts(on).entries()) assert.equal(result.status, 'pass', `ON removal, rule ${index + 1}: ${result.reason}`);
 });

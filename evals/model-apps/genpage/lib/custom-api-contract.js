@@ -80,10 +80,94 @@ function discoveredLookupParameters(entry) {
   return lookups;
 }
 
+// A binding a page already holds, as an evaluator compares it: a built-in entry is carried as the page holds it — a legacy one with no isFunction
+// included — so it is never held to the Custom API projection.
+const projectExisting = (entry) => (isBuiltInBinding(entry) ? entry : projectBinding(entry));
+
+// The update stages whose before-config is provably the page they update: the upload names an existing page and returns it, and either the
+// scenario's upload row ties the before-page snapshot to that upload, or an earlier stage of this lifecycle produced that exact read-back for
+// the same page and app. Only these stages' existing bindings count as kept; any other "existing" binding is a claim, not evidence. Returns
+// each stage's before-config bindings, the verified stages, and the identity problems of the others.
+function beforeConfigEvidence(fixture, stages, calls) {
+  const beforeByStage = new Map();
+  const verifiedBefore = new Set();
+  const producedConfigs = new Map();
+  const problems = [];
+  for (const stage of stages) {
+    const uploads = calls.filter((entry) => entry.id === stage.upload && isUpload(entry.command));
+    const call = uploads.length === 1 ? uploads[0] : null;
+    const flags = call ? commandInfo(call).flags : {};
+    const result = call ? resultObject(call) : null;
+    if (stage.beforeConfig) {
+      const config = artifactJson(fixture, stage.beforeConfig);
+      const before = config.actionBindings === undefined ? [] : config.actionBindings;
+      desiredBindings(before, undefined, 'name');
+      for (const binding of before) projectExisting(binding);
+      beforeByStage.set(stage, before);
+      const identityProblems = [];
+      if (!call || !flags['page-id'] || result?.ok !== true || !uploadResultIdentityMatches(flags, result)) {
+        identityProblems.push(`${stage.id}: before-config preservation requires an unambiguous existing update target`);
+      }
+      const rows = fixture.manifest?.uploads;
+      if (rows !== undefined) {
+        const associated = Array.isArray(rows) ? rows.filter((row) => row.event === stage.upload) : [];
+        if (associated.length !== 1) {
+          identityProblems.push(`${stage.id}: before-page identity evidence has no unique upload association`);
+        } else if (call) {
+          identityProblems.push(...beforePageIdentityProblems(fixture, associated[0], call, stage.beforeConfig, stage.afterConfig));
+        }
+      } else {
+        // A prior successful lifecycle stage can associate its exact read-back snapshot with its
+        // result identity. A first-stage arbitrary artifact path cannot establish page ownership.
+        const prior = producedConfigs.get(pathKey(stage.beforeConfig));
+        if (!prior || prior.pageId !== flags['page-id'] || prior.appId !== flags['app-id']) {
+          identityProblems.push(`${stage.id}: before-config lacks same-page/app identity provenance`);
+        } else if (prior.env !== undefined && !sameRecordedEnvironment(prior.env, flags.env)) {
+          identityProblems.push(`${stage.id}: before-config environment differs from the update target`);
+        }
+      }
+      problems.push(...identityProblems);
+      if (!identityProblems.length) verifiedBefore.add(stage);
+    }
+    if (call && result?.ok === true && uploadResultIdentityMatches(flags, result)) {
+      producedConfigs.set(pathKey(stage.afterConfig), { pageId: result.pageId, appId: result.appId, env: flags.env });
+    }
+  }
+  return { beforeByStage, verifiedBefore, problems };
+}
+
+// The custom-api gate decides new Custom API authoring: a create whose plan has Custom API rows, and a stage that adds or replaces a Custom API
+// row. A lifecycle stage whose before-config is verified (beforeConfigEvidence) and whose change adds or replaces none — an unrelated edit, a
+// removal (which the builder defers while the flag is OFF), a clear, or a built-in change — authors no Custom API row: it keeps the rows the
+// page already has, so its generation and upload are not refused for a disabled gate merely because the plan's table still lists those rows.
+// The rows it keeps are still checked against the page's source and before-config by customApiProblems. A stage's calls are the generations
+// and uploads after the previous stage's upload, up to and including its own. Anything unreadable leaves no exemption: the gate then applies.
+function keepingStageCalls(fixture, calls) {
+  const stages = fixture.manifest?.customApi?.stages;
+  const keeping = new Set();
+  if (!Array.isArray(stages) || !stages.length) return keeping;
+  let verified;
+  try { verified = beforeConfigEvidence(fixture, stages, calls).verifiedBefore; } catch { return keeping; }
+  let previous = -1;
+  for (const stage of stages) {
+    const upload = calls.findIndex((call) => call.id === stage.upload && isUpload(call.command));
+    if (upload === -1) continue;
+    const authorsCustomApi = !stage.beforeConfig || (stage.change?.add || []).some((row) => !isBuiltInBinding(row));
+    if (!authorsCustomApi && verified.has(stage)) {
+      for (let index = previous + 1; index <= upload; index += 1) {
+        if (isGeneration(calls[index].command) || isUpload(calls[index].command)) keeping.add(index);
+      }
+    }
+    previous = upload;
+  }
+  return keeping;
+}
+
 function customApiGateProblems(fixture) {
   const bindings = planBindings(fixture);
   const calls = workflowCalls(fixture);
   const problems = unassociatedCallProblems(fixture);
+  const keeping = keepingStageCalls(fixture, calls);
   let latest = null;
   let gateIndex = -1;
   let discoveryIndex = -1;
@@ -94,7 +178,7 @@ function customApiGateProblems(fixture) {
     } else if (/\blist-custom-apis\.js\b/.test(call.command)) {
       if (latest !== 'enabled') problems.push('Custom API discovery ran before an enabled feature gate');
       discoveryIndex = index;
-    } else if (bindings.length && (isGeneration(call.command) || isUpload(call.command))) {
+    } else if (bindings.length && (isGeneration(call.command) || isUpload(call.command)) && !keeping.has(index)) {
       if (latest !== 'enabled') problems.push('disabled or unreadable Custom API gate must halt before generation or upload');
       else if (gateIndex <= discoveryIndex) problems.push('Custom API generation must re-probe the feature gate after planning discovery');
     }
@@ -271,55 +355,13 @@ function customApiProblems(fixture) {
   const listed = listedBuiltIns(calls);
   problems.push(...listed.problems);
   for (const [name, row] of listed.offered) discovered.set(name, row);
-  // A preserved built-in entry is carried as the page holds it — a legacy one with no isFunction included — so it is never held to the Custom API projection.
-  const project = (entry) => (isBuiltInBinding(entry) ? entry : projectBinding(entry));
+  const project = projectExisting;
   const authoring = contract.stages
     .filter((stage) => (stage.beforeConfig ? (stage.change?.add || []).some(isBuiltInBinding) : partitionBindings(declared).builtIns.length > 0))
     .map((stage) => stage.upload);
   problems.push(...builtInGateProblems(calls, authoring));
-  const beforeByStage = new Map();
-  const verifiedBefore = new Set();
-  const producedConfigs = new Map();
-  for (const stage of contract.stages) {
-    const uploads = calls.filter((entry) => entry.id === stage.upload && isUpload(entry.command));
-    const call = uploads.length === 1 ? uploads[0] : null;
-    const flags = call ? commandInfo(call).flags : {};
-    const result = call ? resultObject(call) : null;
-    if (stage.beforeConfig) {
-      const config = artifactJson(fixture, stage.beforeConfig);
-      const before = config.actionBindings === undefined ? [] : config.actionBindings;
-      desiredBindings(before, undefined, 'name');
-      for (const binding of before) project(binding);
-      beforeByStage.set(stage, before);
-      const identityProblems = [];
-      if (!call || !flags['page-id'] || result?.ok !== true || !uploadResultIdentityMatches(flags, result)) {
-        identityProblems.push(`${stage.id}: before-config preservation requires an unambiguous existing update target`);
-      }
-      const rows = fixture.manifest?.uploads;
-      if (rows !== undefined) {
-        const associated = Array.isArray(rows) ? rows.filter((row) => row.event === stage.upload) : [];
-        if (associated.length !== 1) {
-          identityProblems.push(`${stage.id}: before-page identity evidence has no unique upload association`);
-        } else if (call) {
-          identityProblems.push(...beforePageIdentityProblems(fixture, associated[0], call, stage.beforeConfig, stage.afterConfig));
-        }
-      } else {
-        // A prior successful lifecycle stage can associate its exact read-back snapshot with its
-        // result identity. A first-stage arbitrary artifact path cannot establish page ownership.
-        const prior = producedConfigs.get(pathKey(stage.beforeConfig));
-        if (!prior || prior.pageId !== flags['page-id'] || prior.appId !== flags['app-id']) {
-          identityProblems.push(`${stage.id}: before-config lacks same-page/app identity provenance`);
-        } else if (prior.env !== undefined && !sameRecordedEnvironment(prior.env, flags.env)) {
-          identityProblems.push(`${stage.id}: before-config environment differs from the update target`);
-        }
-      }
-      problems.push(...identityProblems);
-      if (!identityProblems.length) verifiedBefore.add(stage);
-    }
-    if (call && result?.ok === true && uploadResultIdentityMatches(flags, result)) {
-      producedConfigs.set(pathKey(stage.afterConfig), { pageId: result.pageId, appId: result.appId, env: flags.env });
-    }
-  }
+  const { beforeByStage, verifiedBefore, problems: identityProblems } = beforeConfigEvidence(fixture, contract.stages, calls);
+  problems.push(...identityProblems);
   const beforeBindings = [...verifiedBefore].flatMap((stage) => beforeByStage.get(stage));
   for (const binding of declared) {
     const fresh = isDeepStrictEqual(discovered.get(binding.name), binding);
