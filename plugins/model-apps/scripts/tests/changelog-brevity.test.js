@@ -32,14 +32,17 @@ const MAX_BULLET_WORDS = 45;
 // CommonMark line shapes, read one line at a time (https://spec.commonmark.org/0.31.2/):
 //   ATX heading           `## [2.20.0]`, `### Fixed` (up to three spaces of indent, then 1-6 `#`)
 //   definition            `[#680]: https://github.com/...` (a label, a colon, then a destination)
-//   fence                 three or more backticks or tildes; nothing inside is read as Markdown
+//   fence                 three or more backticks or tildes; nothing inside is read as Markdown. A fence
+//                         may be indented: inside a list item it sits at the item's content column.
 //   thematic break        `---`, `***`, `- - -`
 //   list item             `- text`, `* text`, `+ text`, `1. text`, `1) text`
 const HEADING = /^ {0,3}(#{1,6})(?:[ \t]|$)/;
 const DEFINITION = /^ {0,3}\[([^\]]+)\]:[ \t]*\S/;
-const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+const FENCE = /^([ \t]*)(`{3,}|~{3,})/;
 const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 const LIST_ITEM = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\S/;
+// A line indented at least two columns belongs to the list item above it (its content starts after `- `).
+const INDENTED = /^(?: {2,}|\t)/;
 
 const countWords = (text) => text.split(/\s+/).filter(Boolean).length;
 // Labels match case-insensitively, with inner white space collapsed (CommonMark "matching" of labels).
@@ -80,18 +83,43 @@ function parseChangelog(text) {
   let afterBlank = false;
   let fence = null;
 
+  // Adds a line to the bullet that owns it: its words count toward the bullet's limit.
+  const extend = (item, line) => {
+    item.text += ` ${line.trim()}`;
+    item.words += countWords(line);
+  };
+
   lines.forEach((line, index) => {
     const lineNumber = index + 1;
     if (fence) {
+      // A line indented less than the list item ends the item, and with it a fence the item held but did not
+      // close (CommonMark closes a container's open blocks with it); that line is then read as usual.
+      if (fence.owner && line.trim() && !INDENTED.test(line)) {
+        fence = null;
+        bullet = null;
+      }
+    }
+    if (fence) {
+      // Inside a fence nothing is Markdown, but every word still counts: toward the entry, and toward the
+      // list item when the fence is part of one (an indented example under a bullet). Without that, a code
+      // block inside a bullet would carry any number of words past the bullet limit.
       if (entry) entry.words += countWords(line);
-      if (new RegExp(`^ {0,3}${fence[0] === '`' ? '`' : '~'}{${fence.length},}[ \\t]*$`).test(line)) fence = null;
+      if (fence.owner) extend(fence.owner, line);
+      if (new RegExp(`^[ \\t]*${fence.marker[0] === '`' ? '`' : '~'}{${fence.marker.length},}[ \\t]*$`).test(line)) {
+        bullet = fence.owner;
+        fence = null;
+        afterBlank = false;
+      }
       return;
     }
     const opening = line.match(FENCE);
     if (opening) {
-      fence = opening[1];
+      // An indented fence under an open bullet is a block of that list item; an unindented one ends the list.
+      const owner = bullet && INDENTED.test(line) ? bullet : null;
+      fence = { marker: opening[2], owner };
       bullet = null;
       if (entry) entry.words += countWords(line);
+      if (owner) extend(owner, line);
       return;
     }
     const definition = line.match(DEFINITION);
@@ -122,10 +150,9 @@ function parseChangelog(text) {
     } else if (LIST_ITEM.test(line)) {
       bullet = entry ? { line: lineNumber, text: line.trim(), words: countWords(line) } : null;
       if (bullet) entry.bullets.push(bullet);
-    } else if (bullet && (!afterBlank || /^[ \t]{2,}\S/.test(line))) {
+    } else if (bullet && (!afterBlank || INDENTED.test(line))) {
       // A continuation line, or after a blank line an indented one: a list item's later paragraph.
-      bullet.text += ` ${line.trim()}`;
-      bullet.words += countWords(line);
+      extend(bullet, line);
     } else {
       bullet = null;
     }
@@ -268,5 +295,45 @@ test('the reader: a reference is a [label] in prose, not in a code span, an inli
     '[#1] (line 13): defined again; line 9 already defines it',
     '[#7] (line 5): no link reference definition; add one to the block at the end of the file, or escape the brackets',
     '[#8] (line 12): defined but never used; remove it',
+  ]);
+});
+
+test('the reader: a fenced block inside a list item counts toward that bullet, and nothing in a fence is read as Markdown', () => {
+  const text = [
+    '## [99.0.0]',
+    '',
+    '- Migration example.',
+    '  ```text',
+    `  ${Array.from({ length: 45 }, (_, i) => `w${i}`).join(' ')}`,
+    '  ```',
+    '- Short item.',
+    '',
+    '  ~~~',
+    '  - not a bullet',
+    '  ## not a heading',
+    '  [#9]: not a definition',
+    '  see [#9]',
+    '  ~~~',
+    '',
+  ].join('\n');
+  const p = parseChangelog(text);
+  // 3 (`- Migration example.`) + 2 fence lines + 45; and 3 + 2 fence lines + 14 for the block after the blank line.
+  assert.deepEqual(p.entries[0].bullets.map((b) => [b.line, b.words]), [[3, 50], [7, 19]]);
+  assert.equal(p.entries[0].words, 71);
+  assert.equal(p.entries.length, 1);
+  assert.deepEqual([p.definitions, p.references], [[], []]);
+  const { bullets } = limitProblems(p);
+  assert.equal(bullets.length, 1);
+  assert.match(bullets[0], /^\[99\.0\.0\] \(line 3\): a bullet of 50 words, over 45: "- Migration example\. ```text w0 w1/);
+});
+
+test('the reader: an unindented fence is no part of the list above it, and a line indented less than an item closes a fence it left open', () => {
+  const after = parseChangelog(['## [1.0.0]', '', '- item one', '```', 'code words here', '```', 'after the fence', ''].join('\n'));
+  assert.deepEqual(after.entries[0].bullets.map((b) => [b.line, b.words]), [[3, 3]]);
+  assert.equal(after.entries[0].words, 13);
+  const open = parseChangelog(['## [1.0.0]', '', '- item', '  ```', '  code', '## 0.9.0', '', '- other', ''].join('\n'));
+  assert.deepEqual(open.entries.map((e) => [e.heading, e.words, e.bullets.map((b) => [b.line, b.words])]), [
+    ['## [1.0.0]', 6, [[3, 4]]],
+    ['## 0.9.0', 4, [[8, 2]]],
   ]);
 });

@@ -35,8 +35,7 @@ page calls.
 
 ## [2.19.0]
 
-The bundled SDK is unchanged (power-platform-ux a3443479, as in 2.18.0). This release fixes a `--changed-only` regression of 2.18.0
-and several build stops.
+The bundled SDK is unchanged (power-platform-ux a3443479, as in 2.18.0).
 
 ### Changed
 
@@ -58,8 +57,8 @@ and several build stops.
 - **A generated page whose default export is a generic arrow function is accepted.** The `async` forms of two rare return types
   that 2.18.0 let through are now refused; name such a type with a type alias.
 - The stop for an unconfirmed page manifest now says correctly what the next build does.
-- **An access token is also kept out of the base64 of each of its parts and out of the bytes given to the plugin's file writers**
-  (#757); pcf's copy matches.
+- **A token the process obtained is also kept out of the base64 of each part of 24 or more characters and of bytes given to the
+  plugin's file writers** (#757), unless split between two appends; pcf's copy of the module covers the same spellings.
 
 ## [2.18.0]
 
@@ -67,8 +66,7 @@ The bundled SDK is updated to power-platform-ux a3443479.
 
 ### Added
 
-- **A new app whose navigation holds only generative pages is built** (no longer `app-navigation-empty`): its pages are created
-  first.
+- **A new app whose navigation holds only generative pages is built** (no longer `app-navigation-empty`).
 - **A download writes a generative page's `pages[].connectorBindings` and `pages[].actionBindings` into the App Spec; a
   rebuild writes them back**; a conflicting connection reference stops the build (`pages-binding-reference-conflict`).
 - **A download keeps much more table schema** (formats, ranges, status reasons, alternate keys, icons), still not a clone.
@@ -77,8 +75,7 @@ The bundled SDK is updated to power-platform-ux a3443479.
 
 ### Changed
 
-- **Bundled SDK**: a web resource write is read back once published (`WEB_RESOURCE_UNVERIFIED` if not confirmed); an app's sitemap
-  is found by its SiteMap component.
+- **Bundled SDK**: a web resource write is read back once published (`WEB_RESOURCE_UNVERIFIED` if not confirmed).
 - **The HTTP client sends a publish once**; a 401 and a service-protection 429 still retry. pcf's copy matches.
 - **Supported public Custom APIs are discovered by default**; `GENPAGE_ENABLE_CUSTOM_API=0` opts out for a run.
 
@@ -87,9 +84,10 @@ The bundled SDK is updated to power-platform-ux a3443479.
 - **A download of an app whose sitemap's unique name is not the app's no longer fails on its sitemap** (#746).
 - **A web resource or dashboard a stopped build left behind is finished by the workspace's next build**
   (`web-resource-unconfirmed.*.json`, `dashboard-creation.*.json`).
-- **An unknown key in a form's `fieldOptions` entry is refused instead of ignored** (lint, dry run and build).
-- **A Custom API lookup parameter is passed as `{ entityName, id }`**, which the runtime takes.
-- **An access token is also kept out of bytes, its other spellings, and cut or split text**; pcf's copy matches.
+- **An unknown key in a form's `fieldOptions` entry is refused instead of ignored.**
+- **A Custom API lookup parameter is passed as `{ entityName, id }`.**
+- **A token the process obtained is also kept out of bytes written to stdout or stderr, its base64, percent-encoded and HTML
+  spellings, and pieces of 24 or more characters cut by an ellipsis or split between two writes**; pcf's module copy matches.
 - **A rebuild no longer stops at something that already exists when answered in another language, nor at an unseen 1:N
   relationship** (`0x80072551`).
 - **Teardown removes a published app whose navigation names a sitemap that no longer exists.**
@@ -104,7 +102,7 @@ The bundled SDK is updated to power-platform-ux d603c799.
   localized app name or description holds back only its own edit.
 - `verify-model-app.js` also returns its warnings in the result JSON, printed as pure ASCII.
 - Lint warns when no persona or `roleGrants[]` entry grants a new table; `write-app-spec-doc.js --env` lists the app's associated roles.
-- `/genpage`, `/app-builder` and the `genpage-*` agents say what they are not for; the routing eval has 35 cases.
+- `/genpage`, `/app-builder` and the `genpage-*` agents say what they are not for.
 
 ### Fixed
 
@@ -118,7 +116,8 @@ The bundled SDK is updated to power-platform-ux d603c799.
   nothing started.
 - `--verify` checks localized tab and section captions from one translation export.
 - A multilingual alternate key over a new table's name column no longer stops the first build (`0x80060895`).
-- **An access token never reaches anything a script writes** — output, journal, files, the SDK workspace, pcf's push receipt.
+- **An access token the process obtained no longer reaches the text a script writes**: output, the journal, files, the SDK
+  workspace. pcf: the push receipt no longer carries one a refused read quoted, and push-workspace files are guarded too.
 - A download keeps File and Image columns (`maxSizeKb`, `isPrimaryImage`) and a table's plural.
 - Large results are no longer cut short on Linux and macOS.
 - Lint no longer calls an app with no personas administrator-only (AB#6770008).
@@ -145,10 +144,11 @@ and navigation titles survive a download and rebuild in any base language.
 
 - A `required` primary name column is applied when its table is created.
 - Navigation titles survive a download and rebuild when the base language is not 1033, and a rebuild never clears a title the spec
-  does not state.
+  does not state unless the baseline shows the spec used to state one.
 - Teardown no longer reports a row summary it did not delete, and keeps what only a kept table blocks instead of reporting the
   platform's refusals.
-- A run cut short removes the temporary workspaces and folder it made.
+- A run ended by `process.exit` or an uncaught error removes the workspaces it made and did not lend, then the plugin's temporary
+  folder (`power-platform-skills-model-apps`) if empty; after a POSIX signal, the next run's sweep does.
 - The plan shows a `"recommended"` column as recommended, and the test suite leaves no `.maker-workspace` behind.
 
 ## [2.15.0]
@@ -162,23 +162,24 @@ Most `pac` commands move to the bundled SDK, which needs `az`.
 - `scripts/genpage.js` replaces `pac model genpage`: `list` (`--include-unpublished`), `download`, `types`
   (`GENPAGE_TABLE_NOT_FOUND`), `add-to-app`, and new `remove-from-app` (`--allow-empty-navigation`) and `delete`
   (`--allow-destructive`; `GENPAGE_DELETE_NOT_CONFIRMED`, `GENPAGE_IN_APP`).
-- `scripts/connector.js` and `scripts/solution-settings.js` (`template`, `import`) replace `pac`'s connector and settings
-  commands.
+- `scripts/connector.js` (`schema --dataset --table` still asks `pac`) and `scripts/solution-settings.js` (`template`,
+  `import`) replace `pac`'s connector and settings commands.
 
 ### Changed
 
 - `POWER_PLATFORM_SKILLS_PAC_TIMEOUT_MS` is no longer read.
-- `genpage-upload.js` creates pages without `--app-id` (`--add-to-sitemap` and updates still need it); an update omitting
-  `--model`, `--name` or `--data-sources` keeps the page's own; workspace resets should keep `page-ownership.*.json`, `last-applied.json` and `destructive-approval.json`.
+- `genpage-upload.js` creates pages without `--app-id` (not for `--add-to-sitemap` or updates); updates omitting `--model`,
+  `--name` or `--data-sources` keep the page's own; workspace resets should keep `page-ownership.*.json`,
+  `last-applied.json`, `destructive-approval.json`.
 - Throttling waits stop after five minutes per run (`throttle-budget-exhausted`).
-- `solution-settings.js import` keeps `pac`'s defaults and reports `importJobId`, `importAttempts` and `importRefusals`; a
+- `solution-settings.js import` keeps `pac`'s defaults and reports `importJobId`, `importAttempts`, `importRefusals`; a
   settings copy not made private fails (`PAC_SETTINGS_COPY_FAILED`). `template` overwrites `--out` only with `--force`
-  (`IO_ERROR` without hard-link support); output redacts quoted settings values.
+  (`IO_ERROR` without hard links); output redacts quoted settings values.
 - **Not redacted**: values partly quoted, hashed, base64-encoded, Unicode-normalized, nested over three encodings or written with
   HTML entities beyond XML's five; non-secret values under six characters; untyped ones under six glued to letters, digits,
   marks or underscores or inside an undecoded escape.
 - `pac` fallbacks are time-bounded and labelled (`source`/`fallback`, `connectionsSource`/`connectionsFallback`);
-  `list-connections.js` failures print `{ ok: false, error, code }`.
+  `list-connections.js` failures print `{ok: false, error, code}`.
 - Bundled cds-maker-sdk updated; it refuses a rule with no action (`business-rule-NO_ACTION`). Two rare page shapes are
   refused (`generic`, `identifier`).
 
@@ -188,12 +189,12 @@ Most `pac` commands move to the bundled SDK, which needs `az`.
 
 ### Fixed
 
-- New apps need a non-page navigation entry (`app-navigation-empty`); single-language keys over a new table's
-  name column wait for `primaryAttribute.maxLength` (`alt-key-name-length-not-set`); unreadable table lists fail
+- New apps need a non-page navigation entry (`app-navigation-empty`); a new table's single-language
+  name-column keys wait for `primaryAttribute.maxLength` (`alt-key-name-length-not-set`); unreadable table lists fail
   (`TABLES_UNREADABLE`, `table-list-unreadable`).
 - Rebuilds apply changed `app.name`/`app.description` (re-run if `APP_HEADER_NOT_PLAIN_TEXT` halts); `--verify` compares
   tab/section labels (`verify-model-app.js --language-code`).
-- Failures no longer leak the access token.
+- Dataverse failures no longer carry the access token into script output.
 - Downloads keep page keys (`page-keys-ambiguous`, `--reset-page-keys`).
 
 ## [2.14.0]
@@ -394,7 +395,7 @@ is refreshed.
 - **`app.aiDescription`** routes agents between sibling apps; **`personas[].excludes[]`** records what
   an app leaves out ([#583]).
 - **Form layouts**: multi-column tabs, cell `colspan`/`rowspan`, `expanded`/`visible`/`showLabel`.
-- **A live dry run** marks each item create, reuse or unknown ([#559]); `--no-live-plan` keeps the
+- **A live dry run** marks items create, reuse or unknown ([#559]); `--no-live-plan` keeps the
   offline listing.
 - **Sample-data hierarchies**: `$parent` may target the row's own table ([#544]); `$parent.lookup` is
   now required when two relationships connect the same pair.
@@ -406,23 +407,22 @@ is refreshed.
 
 - **`/app-builder` is GA**; `--changed-only` stays experimental, off by default. **Connector
   authoring is on by default** (public preview); the `connectors` flag stays one release.
-- **`write-page-plan.js` no longer takes `--out`**; it writes only a plain file in the working
-  directory.
+- **`write-page-plan.js` no longer takes `--out`**: it writes only a plain working-directory file.
 
 ### Fixed
 
 - **Business rules**: `dataType` reaches Dataverse as a real type; rebuild any app whose
   `businessRules[]` were built before 2.9.0.
 - **Forms** take an explicit layout's shape ([#575]) and spans ([#581]); the wireframe shows `hidden`
-  and `readOnly` fields ([#591]); **verify** checks layout, view filters, app roles and the default
-  Main form.
+  and `readOnly` fields ([#591]).
 - **`/genpage`** uses the quoting-safe upload path ([#589]), keeps multi-line prompts ([#565]) and
   bindings on update, runs only the approved plan ([#585]) and checks page file names first ([#588]).
 - **Downloads** round-trip Choice columns ([#564]) and relationships ([#567]), invent no columns
   ([#574]) and pass their own lint ([#572]).
 - **Dashboards** belong to an app through its solution ([#586]).
-- **Safety**: `--clear-workspace` deletes only a real workspace, teardown stops when the app delete
-  fails ([#587]), and `generate-page-manifest --force` and `genpage-upload.js` refuse links.
+- **Safety**: `--clear-workspace` deletes only a real workspace; teardown stops when the app delete fails ([#587]) and keeps
+  a downloaded spec's relationships and choices and any security role whose sharing check cannot be read;
+  `generate-page-manifest --force` and `genpage-upload.js` refuse links.
 - **The vendored SDK is refreshed** (`@xmldom/xmldom` 0.8.15).
 
 ### Known limitations
@@ -613,80 +613,192 @@ and jobs-to-be-done checkable.
 
 ## [2.4.2]
 
+Fixes a malformed app module: generated apps did not actually contain their tables.
+
 ### Fixed
 
-- **Generated apps contain their real tables**, not an invalid `entity` component (ADO 6612527).
+- **Generated apps contained an invalid `entity` table component instead of their real tables**
+  (ADO 6612527), which also broke unrelated app-processing paths. Tables are now pinned by OData
+  **reference**.
+- **An unresolvable table halts the build, naming it**; a silently skipped one used to empty the
+  app's component list.
+- **App components are read back and verified after the write**; the write and `ValidateApp` both
+  reported success for a corrupt app.
+
+### Known limitations
+
+- **Download still drops entity components not in the sitemap** (ADO 6603388); the download-side
+  fix is unverified.
 
 ## 2.4.1
 
+Bug fixes for apps built on **out-of-the-box** tables, and the matching SDK uptake. No change to
+any skill's public surface.
+
 ### Fixed
 
-- **AI app features had no effect on a new app**, though `--verify` passed; `ai.appFeatures` accepts
-  non-boolean values; teardown deletes an app and its sitemap atomically.
+- **AI app features had no effect on a newly built app**: an app-scope setting write is a no-op
+  until the app is published, yet the build reported success. **`--verify` passed anyway**; it now
+  proves an app-scope override row.
+- **`ai.appFeatures` accepts non-boolean values** such as `2` ("on for everyone").
+- **Download invented primary-name columns**, **replaced the solution's publisher prefix with
+  `new`**, and **dropped tables with no sitemap entry** — all three now read from Dataverse.
+- **Teardown could permanently burn an app's unique name** by stranding its sitemap; the app module
+  and its sitemap are now deleted atomically in one OData `$batch`.
 
 ### Changed
 
-- An injected `HttpClient` must implement `postRaw` (re-vendored `cds-maker-sdk`).
+- Re-vendored `cds-maker-sdk`. An injected `HttpClient` must now implement `postRaw` for the atomic
+  `$batch`.
+- **model-apps now runs in CI** (ubuntu × windows × macos, Node 20 × 22, plus the offline evals).
 
 ## 2.4.0
 
+A new **`/app-builder`** skill (Preview) that builds and edits whole model-driven apps, plus
+local-dev ergonomics, sample coverage, and an automated eval suite. No breaking changes.
+
 ### Added
 
-- **`/app-builder` (Preview)** builds and edits model-driven apps, with `personas[]`, an `ai` block,
-  `model-app-plan.md`, `scripts/preview-app.js` and `--changed-only` (Preview, off by default).
+- **`/app-builder` (Preview)**: natural-language intent → deployed model-driven app (tables, forms,
+  views, charts, dashboards, generative pages, app + sitemap, sample data) via the headless vendored
+  `cds-maker-sdk`.
+- **Security roles per persona (`personas[]`)**, sized to each persona's jobs and associated with the
+  app so it opens for non-admins.
+- **`model-app-plan.md`**, a design document rendered from the spec, and **`scripts/preview-app.js`**
+  to review the design before building.
+- **AI-first features** (`ai` block): form fill, NL search, NL charts, M365 Copilot and row
+  summaries, admin-gated by a preflight.
+- **`--changed-only` partial apply (Preview, off by default)**: a page-only `.tsx` edit re-runs just
+  the pages phase.
+
+### Changed
+
+- **Edits are first-class**: forms and views update in place, a form edit can *remove* a field, and
+  a built main form becomes the entity default.
+- **Identity is unambiguous**: forms resolve by `(entity, name, type)`, views by `entity|name`, and
+  an app by its real `uniquename`, so a rebuild cannot duplicate or cross-wire.
+- Re-vendored `cds-maker-sdk`; page generation reuses the `/genpage` worker.
 
 ### Fixed
 
-- **The Dataverse token is never sent to another origin**; a lossy download fails unless
-  `--allow-lossy-download`; `--apply --only` with no phase list fails.
+- **Teardown removes everything the app owns** and reports cascade failures; reused/system tables
+  are skipped. The **publisher** is deliberately left behind: it can own other solutions.
+- **Exported solutions are self-contained**, and **the Dataverse token is never sent to another
+  origin**.
+- **A lossy download fails** (`--allow-lossy-download` opts in), and **CLI flags fail loudly**:
+  `--apply --only` with no phase list used to run a *full* apply.
 
 ### Removed
 
-- Standalone entity/solution scripts, now `provision-entities.js` and `provision-solution.js`.
+- Standalone entity/solution scripts, consolidated into `provision-entities.js` and
+  `provision-solution.js`.
+
+### Known limitations
+
+- **App EDIT does not re-pin a new chart**: a chart added to an existing app needs a manual pin or a
+  rebuild.
 
 ## 2.3.0 — 2026-07-23
 
+Plugin observability and authoring guardrails. No breaking changes.
+
 ### Added
 
-- **Anonymous telemetry** with no user-level identifier, on by default once provisioned:
-  `/model-apps:telemetry on|off|status`; CI opts out with `POWER_PLATFORM_SKILLS_TELEMETRY_MODEL_APPS_OPTOUT=1`.
+- **Anonymous 1DS telemetry** (default-on, ships `disabled` until provisioned) with a local
+  diagnostic mirror, a `/model-apps:telemetry on|off|status` control skill, and a CI opt-out via
+  `POWER_PLATFORM_SKILLS_TELEMETRY_MODEL_APPS_OPTOUT=1`. Fail-closed, with **no user-level
+  identifier**.
+- **PostToolUse validators**, including a `@fluentui/react-icons` allowlist check that blocks a
+  hallucinated icon name at write time.
+- **PreToolUse write-safety guard**: flags writes outside the cwd, only during an active genpage
+  session.
+
+### Fixed
+
+- **Generated-page double-fetch / render flash on open**: guidance and every exemplar de-dupe
+  in-flight fetches with a window cache, and `dataApi` is forbidden in any dependency array.
+- **Playwright MCP launcher** exports `launch()` per the `.mcp.json` contract, avoids the npx
+  first-run prompt hang, and quotes config paths so Windows paths with spaces work.
 
 ## 2.2.0
 
+Local-dev ergonomics, sample coverage, and an automated eval suite. No breaking changes.
+
 ### Added
 
-- `package.json` and `genpage.d.ts` for local dev, `capture-fixture.js` for evals, and connectors
-  behind a flag (default OFF).
+- **Local-dev manifest** — working dirs get `package.json` and `genpage.d.ts`, so `npm install` and
+  editor IntelliSense work after generation.
+- **Eval suite** — TAP v13 runners for workflow and code assertions, 10 shipping fixtures, and
+  `capture-fixture.js` to turn a real `/genpage` run into one.
+- **Dialog and overlay guidance** plus samples — portalled Fluent surfaces are confined to the page
+  so a modal cannot escape the preview and cover the designer.
+- **Feature-flag gate for connectors (default OFF)**, with all connector work owned by a single
+  `genpage-connector-builder` agent invoked from both the create and edit flows.
+
+### Fixed
+
+- **`queryTable` returns a `DataTable`, not an array** — 7 samples and fixtures iterated the result
+  directly, producing `X.map is not a function` at runtime.
 
 ## 2.1.0 — 2026-05-13
 
-Node.js Web API scripts replace the Dataverse MCP server and Python SDK fallback.
+Replaces the Dataverse MCP server + Python SDK fallback with Node.js Web API scripts. Adds solution
+selection, prefix discipline, and a consolidated auth pre-flight.
 
 ### Breaking
-- **`az` is required** for entity creation; the Dataverse Skills plugin is not.
+- **Azure CLI (`az`) is now required** for entity creation, with access to the target environment.
+- **The Dataverse Skills plugin is no longer required.**
+
+### Added
+- Node.js Web API scripts under `scripts/` (auth, request, table/column/relationship/record
+  creation with `$batch` bulk, solution management).
+- Solution selection with prefix-conflict warnings, and a transactional creation log.
 
 ### Fixed
-- `pac model create` always passes `--solution`.
+- **Prefix drift is structurally impossible** — the plan stores logical-name suffixes only, and the
+  full name is constructed from one source of truth.
+- **`pac model create` always passes `--solution`** — the CLI's "active solution" fallback errors
+  in practice.
+
+### Performance
+- ~27K tokens saved per page-builder run (icon list is no longer loaded upfront; reference docs and
+  the opt-in browser-verification flow were extracted or trimmed).
+
+### Added (samples)
+- Dashboard with D3 charts, a list page using the window-cache pattern, and its paired detail page
+  demonstrating `pageInput` and the formatted-value lookup.
 
 ### Migration from 2.0
-1. `az login` as your `pac auth who` identity.
-2. Uninstall the Dataverse Skills plugin if only `/genpage` used it.
-3. No code or page changes needed.
+1. `az login` (use the same identity as `pac auth who`).
+2. Uninstall the Dataverse Skills plugin if it was only for `/genpage`.
+3. No code or page changes needed; existing pages keep working.
+
+---
 
 ## 2.0.0 — 2026-05-12
 
-`/genpage` becomes agent-orchestrated.
+Major refactor of `/genpage` into an agent-orchestrated architecture.
 
 ### Breaking
-- Requires PAC CLI ≥ 2.7.0; output goes to a per-invocation working directory; plan approval is mandatory.
+- **PAC CLI ≥ 2.7.0** required.
+- Skill output now lives in a per-invocation working directory.
+- Plan-mode approval is mandatory; no skip or auto-accept.
+
+### Added
+- Four specialist agents (planner, entity-builder, page-builder, edit-planner).
+- Multi-page parallel generation with cross-page navigation via `PAGEREF_<filename>` placeholders.
+- A plan schema contract, a verified Fluent icon list, and a 16-eval suite across three tiers.
 
 ### Migration from 1.x
-1. `dotnet tool update --global Microsoft.PowerApps.CLI.Tool`.
-2. Existing deployed pages keep working.
+1. `dotnet tool update --global Microsoft.PowerApps.CLI.Tool` (to ≥ 2.7.0).
+2. Existing deployed pages keep working — only the local workflow and layout changed.
+
+---
 
 ## 1.0.6 — earlier in 2026
 
-PageInput support, FluentProvider flicker fix, lookup `$select` rule, data caching pattern.
+PageInput support, FluentProvider flicker fix, lookup `$select` rule, data caching pattern. See git
+history for details.
 
 [#680]: https://github.com/microsoft/power-platform-skills/issues/680
 [#705]: https://github.com/microsoft/power-platform-skills/issues/705
