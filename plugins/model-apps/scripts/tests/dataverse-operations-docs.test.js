@@ -41,7 +41,7 @@ test('the reference says why nothing beyond the pair is offered, and that the of
   has(reference, /Listing is an offer, not a check/);
   has(reference, /a page's first call can answer 404/);
   has(reference, /`genpage-upload\.js --actions` writes the array it is given and resolves no name/);
-  has(reference, /2\.17 and 2\.18 do not offer these operations/);
+  has(reference, /2\.17, 2\.18 and 2\.19 do not offer these operations/);
 });
 
 test('the builder probes two independent gates — custom-api OFF no longer ends the run or writes [] over kept bindings — and owns the offer, the selection and the one actions.json', () => {

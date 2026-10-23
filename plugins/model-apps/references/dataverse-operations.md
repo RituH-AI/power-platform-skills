@@ -354,7 +354,7 @@ built-in (wrong case is a Custom API name):
 ## Compatibility
 
 The wire shape is unchanged, so no migration and no `minimumPluginVersion` bump. Model-apps
-2.17 and 2.18 do not offer these operations, and their download and rebuild still describe them
-as Custom APIs; they do not strip a valid binding. A hand-written page or a hand-written
+2.17, 2.18 and 2.19 do not offer these operations, and their download and rebuild still describe
+them as Custom APIs; they do not strip a valid binding. A hand-written page or a hand-written
 `actions.json` is outside this catalogue: `genpage-upload.js --actions` writes the array it is
 given and resolves no name.
