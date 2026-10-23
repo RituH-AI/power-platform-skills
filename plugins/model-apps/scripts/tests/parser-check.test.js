@@ -238,7 +238,7 @@ const ATTRIBUTES = [
   ['a string after a space, with no backslash', " 'a' />", true],
 ];
 
-test('parser check: a JSX attribute string after trivia keeps the lexer\'s reading for the navigation oracle and the structure gate alike, though a misread hid it from the lexer', (t) => {
+test('parser check: a JSX attribute string after trivia keeps the navigation oracle\'s frontier, though a misread hid it from the lexer', (t) => {
   const babel = loadBabelOracle();
   // The page the parsers read differently: TypeScript reads the call; Babel ends the string at its first quote and reads the call in a comment.
   const differ = 'const n = {valueOf(){return 12;}}/2; const e = <C x= \'\\\'/>;//\' />; navigateTo({pageType:"generative",pageId:"PAGEREF_detail"});\n'
@@ -252,14 +252,8 @@ test('parser check: a JSX attribute string after trivia keeps the lexer\'s readi
   assert.deepEqual(residual.map(({ token }) => token), ['PAGEREF_detail'], 'the token is reported');
   assert.equal(guessedPageViews(differ).views, null);
   if (babel) assert.equal(BABEL_CALLS(babel, differ), 0, 'Babel reads no call');
-  // The page Babel refuses: the structure gate reads it as the lexer does, and refuses it as cut off, as before.
-  const refused = "interface Api { <U>(x:U):U; }\nconst e = <C x= 'it\\'s'/>;\nexport default function P(){return null;}";
-  assert.equal(parses(refused).parseDiagnostics.length, 0);
-  assert.equal(pageStructureProblems(refused).length, 3);
-  assert.equal(guessedPageViews(refused).views, null);
-  if (babel) assert.equal(BABEL_CALLS(babel, refused), null, 'Babel refuses the page');
   // Each guess the lexer names (GUESSED_SHAPES) before each attribute: where the two parsers read the string alike the parser vouches for the page and the call resolves;
-  // where they do not, the lexer's reading stands for both consumers, whether or not the lexer saw the attribute after its guess.
+  // where they do not, the frontier stands, whether or not the lexer saw the attribute after its guess.
   let compared = 0;
   for (const [what, snippet, kind] of GUESSED_SHAPES) {
     for (const [attributeWhat, attribute, alike] of ATTRIBUTES) {
@@ -268,15 +262,6 @@ test('parser check: a JSX attribute string after trivia keeps the lexer\'s readi
       assert.equal(parses(code).parseDiagnostics.length, 0, `TypeScript parses ${name}`);
       assert.ok(guesses(code).has(kind), `${name}: the lexer guesses "${kind}"`);
       assert.equal(reading(code).resolves, alike, `${name}: the call resolves`);
-      if (!alike) {
-        const problems = pageStructureProblems(code);
-        setParserCheck(false);
-        try {
-          assert.deepEqual(problems, pageStructureProblems(code), `${name}: the structure gate reads it as the lexer does`);
-        } finally {
-          setParserCheck(true);
-        }
-      }
       assert.equal(guessedPageViews(code).views !== null, alike, `${name}: the parser vouches for it`);
       if (babel && alike) assert.equal(BABEL_CALLS(babel, code), 1, `${name}: Babel reads the call`);
       compared += 1;
@@ -284,6 +269,29 @@ test('parser check: a JSX attribute string after trivia keeps the lexer\'s readi
   }
   assert.equal(compared, GUESSED_SHAPES.length * ATTRIBUTES.length);
   if (!babel) t.diagnostic('no Babel parser oracle: set BABEL_ORACLE_PATH to an @babel/parser package to compare the readings');
+});
+
+test('parser check: the structure gate reads a page with a JSX attribute string after trivia as the lexer does, as the navigation oracle does', () => {
+  const babel = loadBabelOracle();
+  // The page Babel refuses (the string ends at its escaped quote): the structure gate reads it as the lexer does, and refuses it as cut off, as before.
+  const refused = "interface Api { <U>(x:U):U; }\nconst e = <C x= 'it\\'s'/>;\nexport default function P(){return null;}";
+  assert.equal(parses(refused).parseDiagnostics.length, 0);
+  assert.equal(pageStructureProblems(refused).length, 3);
+  if (babel) assert.equal(BABEL_CALLS(babel, refused), null, 'Babel refuses the page');
+  // Each guess before each attribute the two parsers read differently: the structure gate's answer is the lexer's, whether or not the lexer saw the attribute.
+  for (const [what, snippet] of GUESSED_SHAPES) {
+    for (const [attributeWhat, attribute, alike] of ATTRIBUTES) {
+      if (alike) continue;
+      const code = WRAP(`${snippet}\nconst e = <C x=${attribute};`);
+      const problems = pageStructureProblems(code);
+      setParserCheck(false);
+      try {
+        assert.deepEqual(problems, pageStructureProblems(code), `${what}, ${attributeWhat}: the structure gate reads it as the lexer does`);
+      } finally {
+        setParserCheck(true);
+      }
+    }
+  }
 });
 
 // Grammar TypeScript's parser takes and leaves to its checker, which Babel's parser refuses, on a page the lexer guessed on: the parser vouches for nothing, and the
