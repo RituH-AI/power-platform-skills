@@ -264,6 +264,26 @@ Also read `config.json.connectorBindings` and `config.json.actionBindings`.
 > read `agents/genpage-customapi-builder.md`, and run its read-only discovery and
 > binding-output workflow inline with the same feature gate, environment, page
 > tables, existing bindings, and intent.
+>
+> **Built-in Dataverse operations (`WhoAmI`, `RetrieveVersion`) share `actionBindings`**
+> (`${PLUGIN_ROOT}/references/dataverse-operations.md`). Classify the edit intent from this
+> page's `config.json.actionBindings` and the request, and keep
+> `{ intent, selected, beforeNames, provenance }` in this run's context (`provenance`:
+> `before-config` or `current-run-selection`):
+>
+> | Intent | `dataverse-operations` gate | `--actions` | Page source |
+> |---|---|---|---|
+> | preserve (an unrelated edit) | not consulted | omit | keep existing calls exactly as written |
+> | add / replace | must be ON (the builder probes it; Phase 4.6b re-probes it) | the full desired array | the button pattern, for the new names only |
+> | remove | not consulted | the array minus the named entries | delete those calls only |
+> | clear all | after the maker confirms; the confirmation names the built-ins removed | `[]` | delete every call |
+> | none, but the page binds one | n/a | do not pass | halt: no preserve evidence is no permission to delete the call |
+>
+> An add or replace dispatches `genpage-customapi-builder` (Mode: `edit`) with the existing
+> bindings and the maker's own words, once, together with any Custom API need. A mention,
+> question or "do not add" is not an add. A preserve never consults the flag, so an unrelated
+> edit while it is OFF neither halts nor drops a built-in binding; a remove of Custom APIs
+> leaves the built-ins, and the reverse.
 
 ## Edit Phase 4: Plan the Edit
 
@@ -472,6 +492,10 @@ Custom API binding rules for edit deploy (identical matrix, `--actions` for
   existing `actionBindings`.
 - **Remove every Custom API:** write `[]` to `actions.json` and pass `--actions` so the page's
   `config.json.actionBindings` is cleared.
+- **Built-in operations** ride the same array: an add/replace passes the full desired array the
+  builder wrote (Custom API rows, then the built-in rows); a preserve omits `--actions`; a removal
+  passes the array minus the named entries; `[]` is passed only for a confirmed clear-all —
+  never because the `dataverse-operations` gate turned off (Phase 4.6b halts instead).
 
 The edit request is arbitrary user text, and a downloaded prompt is a multi-line conversation
 transcript. Both go to the upload BY FILE via `scripts/genpage-upload.js`, never through a shell command:

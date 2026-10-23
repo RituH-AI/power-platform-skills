@@ -46,9 +46,9 @@ async function approveOrder(api: ActionApi, recordId: string, amount: number, pe
   } catch { setError('Network failed.'); }
   finally { pending.current = false; }
 }
-function ownGuid(outputs: Record<string, unknown>, field: string): string | undefined {
+function ownString(outputs: Record<string, unknown>, field: string): string | undefined {
   const value = Object.prototype.hasOwnProperty.call(outputs, field) ? outputs[field] : undefined;
-  return typeof value === 'string' && GUID.test(value) ? value : undefined;
+  return typeof value === 'string' ? value : undefined;
 }
 async function readIdentity(api: ActionApi): Promise<IdentityView> {
   if (typeof api.executeFunction !== 'function') return { message: UNSUPPORTED };
@@ -58,11 +58,11 @@ async function readIdentity(api: ActionApi): Promise<IdentityView> {
   }
   const outputs = res.outputs;
   if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) return { message: UNEXPECTED };
-  const userId = ownGuid(outputs, 'UserId');
-  const businessUnitId = ownGuid(outputs, 'BusinessUnitId');
-  const organizationId = ownGuid(outputs, 'OrganizationId');
-  if (!userId || !businessUnitId || !organizationId) return { message: UNEXPECTED };
-  return { identity: { userId, businessUnitId, organizationId } };
+  const userId = ownString(outputs, 'UserId');
+  const businessUnitId = ownString(outputs, 'BusinessUnitId');
+  const organizationId = ownString(outputs, 'OrganizationId');
+  if (![userId, businessUnitId, organizationId].every((id) => typeof id === 'string' && GUID.test(id))) return { message: UNEXPECTED };
+  return { identity: { userId: userId as string, businessUnitId: businessUnitId as string, organizationId: organizationId as string } };
 }
 const GeneratedComponent = (props: Props) => {
   const { dataApi } = props;
@@ -231,7 +231,7 @@ test('a built-in call is held to the Custom API order: a failure returns before 
     ['outputs read before the success check', (text) => text.replace('  if (res.ok !== true) {\n    return { message: res.error?.status === 404 ? UNAVAILABLE : res.error?.message || FAILED };\n  }\n  const outputs = res.outputs;', '  const outputs = res.outputs;\n  if (res.ok !== true) {\n    return { message: res.error?.status === 404 ? UNAVAILABLE : res.error?.message || FAILED };\n  }')],
     ['no success check at all', (text) => text.replace('if (res.ok !== true) {', 'if (false) {')],
     ['outputs from res.value', (text) => text.replace('const outputs = res.outputs;', 'const outputs = res.value;')],
-    ['an undeclared output', (text) => text.replace("ownGuid(outputs, 'UserId')", 'ownGuid(outputs, String(res.outputs?.SystemUserName))')],
+    ['an undeclared output', (text) => text.replace("ownString(outputs, 'UserId')", 'ownString(outputs, String(res.outputs?.SystemUserName))')],
     ['raw fault text', (text) => text.replace('res.error?.message || FAILED', 'res.error?.stack || FAILED')],
   ]) {
     const bad = mixedFixture();

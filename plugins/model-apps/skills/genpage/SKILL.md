@@ -32,6 +32,9 @@ This skill orchestrates specialist agents across the create and edit flows:
    (discovery is mutating), then the planner is re-invoked with its contract.
    **`genpage-customapi-builder`** — the same top-level dispatch for server-side
    Custom API (Action/Function) needs; writes `custom-api-bindings.md` + `actions.json`.
+   It also owns the default-off offer of the two built-in Dataverse Functions
+   (`WhoAmI`, `RetrieveVersion`; `dataverse_operation_discovery_required`) and writes
+   `dataverse-operations.md` for a selection made this run.
 3. **`genpage-entity-builder`** — creates Dataverse entities (tables, columns,
    relationships, choices, sample data) via the plugin's Node.js Web API scripts
 4. **`genpage-page-builder`** — generates one complete `.tsx` file per page; multiple
@@ -43,7 +46,8 @@ This skill orchestrates specialist agents across the create and edit flows:
    replaces, discovers, removes, or clears connector bindings; preserves unchanged bindings
    when the edit does not touch them.
    **`genpage-customapi-builder`** — the same top-level dispatch when an edit adds, replaces,
-   discovers, removes, or clears Custom API bindings.
+   discovers, removes, or clears Custom API bindings, or adds, replaces or removes a built-in
+   Dataverse operation binding.
 6. **`genpage-edit-planner`** — reads the downloaded page artifacts, gathers change
    requirements, presents an edit plan, writes `genpage-edit-plan.md`
 
@@ -244,7 +248,9 @@ missing and stop, so the run can be re-driven with the decision supplied.
    `{ "action": "custom_api_discovery_required" }`, invoke `genpage-customapi-builder`
    the same way (same mode, resolved environment URL, plus the returned `pageTables`),
    then re-run the planner with the builder's `## Custom API Bindings` contract and
-   `actions.json` status (see 1b).
+   `actions.json` status (see 1b). A `dataverse_operation_discovery_required` signal —
+   alone or beside `custom_api_discovery_required` — dispatches that same builder **once**
+   for both needs (see 1c).
    If `genpage-connector-builder` or `genpage-customapi-builder` instead reports
    that its declared file or process-execution tools are unavailable, do **not**
    retry the same worker. Record the worker failure, read that worker's agent
@@ -370,6 +376,25 @@ The builder remains the single owner of the `custom-api` feature gate: it probes
 `No custom API bindings.` + `[]` when the gate is off or the page needs no Custom API, and
 performs discovery only when one is required.
 
+#### 1c. Built-in Dataverse operations are orchestrator-owned too
+
+`WhoAmI` and `RetrieveVersion` are two reviewed built-in Dataverse Functions a page can call from
+a button — not Custom APIs (`${PLUGIN_ROOT}/references/dataverse-operations.md`). Their offer is
+behind the default-OFF `dataverse-operations` flag, owned by `genpage-customapi-builder`, which
+also stays the one writer of `actions.json` (Custom API rows first, then the built-in rows).
+
+- A planner returns `{ "action": "dataverse_operation_discovery_required", "intent": "...",
+  "resolvedAction": "create" | "edit", "envUrl": "..." }` when the maker affirmatively asks for
+  one of them or for the identity or server version a page should show. A mention, a question,
+  "do not add WhoAmI", or the `whoAmI` of the auth preflight is not that signal. Dispatch the
+  builder once, with both needs when a Custom API is needed too.
+- Selection is the maker's: an affirmative request or an explicit answer to the builder's
+  `needs_input` picker. Ask that question here with `AskUserQuestion`; an unattended run never
+  treats "no answer" as consent, and the selected names stay in this run's context.
+- When the builder reports `dataverse-operations.md` written **this run**, forward its body to
+  the planner as the `## Dataverse Operations` contract, delimited like the other contracts. A
+  file left by an earlier run is not forwarded. With none, the plan has no such section.
+
 #### Invocation prompt
 
 Pass a prompt that includes:
@@ -385,6 +410,10 @@ Pass a prompt that includes:
   or the literal `No custom API bindings.` when discovery was not needed
 - The Custom API upload file status: `<working-dir>/actions.json` exists and is
   a bare JSON array, or `no actions.json; omit --actions`
+- The built-in operation contract, only when this run's builder wrote it: the full body of
+  `<working-dir>/dataverse-operations.md` between `----- BEGIN/END DATAVERSE OPERATIONS -----`
+  delimiters (copied verbatim into an optional `## Dataverse Operations` section right after
+  `## Custom API Bindings`); otherwise nothing, and the plan has no such section
 
 Example:
 
@@ -437,6 +466,16 @@ Example:
 > `{ "action": "custom_api_discovery_required", "intent": "<operation>",
 > "resolvedAction": "create" | "edit", "envUrl": "<the environment you resolved>",
 > "pageTables": "<page tables or none>" }` instead of trying to discover it yourself.
+>
+> [Only when this run's builder wrote `dataverse-operations.md`:] The built-in Dataverse
+> operation contract is between the `----- BEGIN/END DATAVERSE OPERATIONS -----` lines below
+> (prompt delimiters, not content). Copy what is between them verbatim into an optional
+> `## Dataverse Operations` section right after `## Custom API Bindings`; with no such block,
+> write no such section. If your clarification reveals an affirmative request for `WhoAmI` or
+> `RetrieveVersion` (or for the identity or server version a page shows) that this contract does
+> not cover, return `{ "action": "dataverse_operation_discovery_required", "intent": "<the
+> maker's words>", "resolvedAction": "create" | "edit", "envUrl": "<the environment you
+> resolved>" }`.
 >
 > Follow the instructions in your agent file. Validate prereqs and confirm auth.
 > The create/edit decision and the resolved environment are supplied to you by the
@@ -653,6 +692,29 @@ it is missing, derive it as a **bare JSON array** of
 `isFunction:false`, Function `true`; `boundEntityLogicalName` only for an entity-bound, non-
 `(Global)`, row) — see `${PLUGIN_ROOT}/references/custom-api.md`. Never the
 `{ "actionBindings": [...] }` object wrapper (the deployed `config.json` shape the upload writes).
+Compare only the **Custom API rows** of `actions.json` with this table: a built-in operation row
+(`WhoAmI`, `RetrieveVersion`) belongs to Phase 4.6b, never fails this match, and is never
+uploaded by this branch alone.
+
+### Phase 4.6b: Built-in Dataverse Operations (Conditional)
+
+Only when the plan has a `## Dataverse Operations` section holding the built-in operation table
+— an add or replace of this run — re-probe its own gate:
+
+```powershell
+node "${PLUGIN_ROOT}/scripts/lib/feature-flags.js" dataverse-operations
+```
+
+**If it prints `disabled`:** halt before page generation. Write no replacement `actions.json`,
+pass no `--actions`, and never write `[]` in its place (`[]` is only an explicit clear-all): the
+page keeps the bindings it has. Tell the user to turn the flag back on or re-run planning. An
+absent section, or exactly `No Dataverse operations.`, needs no probe and adds nothing; a
+preserve-only edit never consults this gate.
+
+**If it prints `enabled`:** verify that `actions.json` holds every row of the table as the
+four-key projection the builder wrote (Custom API rows first, then the built-in rows in
+catalogue order). If the builder selected a built-in operation but the plan lost its table,
+halt and re-invoke the planner — do not generate.
 
 ### Phase 4.7: Page Telemetry (Conditional)
 
@@ -728,6 +790,11 @@ subagent. Inline the page-builder workflow directly in the orchestrator:
    missing, empty, or malformed, halt before inline generation (same contract as
    Phase 4.6); do not downgrade a planner/schema failure to "no Custom APIs."
    (A `disabled` probe with a binding table has already halted in Phase 4.6.)
+3c. Only when the Phase 4.6b probe printed `enabled` **and** the plan has a
+   `## Dataverse Operations` table, also read
+   `${PLUGIN_ROOT}/references/dataverse-operations.md` and generate its button-only
+   pattern for exactly those rows. Without that section (or with exactly
+   `No Dataverse operations.`), emit no built-in operation call.
 4. If the plan's Per-Page Specification has `Needs caching: true`, also read
    `${PLUGIN_ROOT}/references/data-caching.md`
 5. If the plan's `## Environment` indicates non-English languages, also read
@@ -914,6 +981,10 @@ Custom API deployment follows the **identical matrix** as connectors, substituti
 `--actions '<working-dir>/actions.json'` for `--connectors`: pass it on create; on an edit only
 when bindings changed/added/removed (full replace); omit it on an unrelated edit (the page keeps
 its deployed `actionBindings`); write `[]` and pass it to clear all `actionBindings`.
+The same array carries the built-in operation rows (`WhoAmI`, `RetrieveVersion`), so the same
+rules hold for them: `--actions` is passed only when the whole desired set changed, a preserve
+omits it, a removal passes the array minus the named entries, and `[]` is passed only for a
+confirmed clear-all — never as the result of a gate that turned off (Phase 4.6b halts instead).
 
 **Deploy through `scripts/genpage-upload.js`.** It writes the page through the SDK — the same page backend
 `/app-builder` uses, signed in with the Azure CLI — and takes the maker's text **by file**
@@ -1219,6 +1290,8 @@ encoding is not recognised.
 Custom API bindings need **no** extra ALM step: `config.json`'s `actionBindings` travels
 automatically in the `uxagentprojectfile` rows already pulled with the GenPage. The
 referenced Custom APIs are a separate deployment prerequisite (bound by `name`), not added here.
+A built-in operation binding (`WhoAmI`, `RetrieveVersion`) needs nothing at all: it names an
+operation the platform defines, so there is no component to add or deploy.
 
 ### Phase 7: Verify in Browser (Optional)
 

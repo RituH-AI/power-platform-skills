@@ -22,6 +22,8 @@ const {
 } = require('../../../../plugins/model-apps/scripts/lib/dataverse-operations.js');
 const { planSection, parseMarkdownRows } = require('./plan-evidence.js');
 const { isGeneration, isUpload, resultObject } = require('./workflow-evidence.js');
+const { actionCalls, groupEnd, literalString, escapeRe, callSites, expressionEnd } = require('./source-evidence.js');
+const { blankNonCodePreservingTemplateExpressions } = require('../../../../plugins/model-apps/scripts/lib/source-literals.js');
 
 const SECTION = 'Dataverse Operations';
 const SENTINEL = 'No Dataverse operations.';
@@ -162,7 +164,201 @@ function builtInGateProblems(calls, authoring) {
   return problems;
 }
 
+// ── The generated call of a NEWLY authored built-in operation (references/dataverse-operations.md, "Generated call") ─────────────────────────────
+// The page source is read, never run (source-evidence.js). A call is held to what the reference requires of it, beside the order every action call
+// keeps (custom-api-contract.js runtimeProblems: presence check on the page's dataApi, failure returned before `res.outputs` is read, sanitized
+// error.message only):
+//   - the request is exactly `{ name: 'WhoAmI' }` / `{ name: 'RetrieveVersion' }`, and a presence check that fails RETURNS: no request at all;
+//   - the call is user-triggered: its helper is reached only from a button's onClick, through named handlers — never from an effect, a memo, a
+//     timer or the render itself, and never by calling itself again;
+//   - the button that triggers it is disabled while its call is pending, a separate state per operation; its handler ignores a stale request (a
+//     `.current` counter it increments and compares after the await) and catches a rejected promise;
+//   - outputs are read only after a non-null, non-array object check, through own-property reads, never from the result root, by a literal member,
+//     by a spread, an iteration or JSON.stringify, and nothing of the result is logged, stored, copied or sent;
+//   - WhoAmI shows all three identifiers or none: one guard that returns tests every one of them with the GUID pattern; RetrieveVersion shows a
+//     Version of 1 to 128 characters or nothing; an unexpected shape says the fixed sentence;
+//   - a status is never read out of the message's words, and nothing says to deploy a Custom API.
+const GUID_SOURCE = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
+const UNEXPECTED = 'The operation returned an unexpected response. No result was displayed.';
+const UNAVAILABLE = 'The selected operation is unavailable in this environment or player. No fallback was attempted.';
+const IDENTITY_FIELDS = ['UserId', 'BusinessUnitId', 'OrganizationId'];
+const DTO = 'BusinessUnitId|UserId|OrganizationId|Version';
+// What a page must never do with an operation's result: log it, keep it, copy it or send it anywhere.
+const LEAKS = /\bconsole\s*\.|\blocalStorage\b|\bsessionStorage\b|\bclipboard\b|\bappInsights\b|\.track(?:Event|Metric|Trace|Exception|Dependency)\s*\(|\bURLSearchParams\b|\bhistory\s*\.\s*(?:push|replace)State\b|\bdocument\s*\.\s*cookie\b/;
+// Where a call is not a user's: an effect, a memo, a timer, a frame or a microtask.
+const NOT_A_USER = /\b(?:useEffect|useLayoutEffect|useInsertionEffect|useMemo|setTimeout|setInterval|requestAnimationFrame|queueMicrotask)\s*\(/g;
+
+// The `if (…)` guards of a text that end in a return: [{ condition }], the condition as raw text.
+function returningGuards(text, mask) {
+  const guards = [];
+  for (const match of mask.matchAll(/\bif\s*\(/g)) {
+    const open = match.index + match[0].length - 1;
+    let close;
+    try { close = groupEnd(mask, open); } catch { continue; }
+    if (/^\s*(?:return\b|\{[^}]*\breturn\b)/.test(mask.slice(close + 1))) guards.push({ condition: text.slice(open + 1, close) });
+  }
+  return guards;
+}
+
+// The declarations a call can sit in: named functions and constants initialized with a function (an arrow, `function`, or a hook that wraps one).
+function functionDeclarations(mask) {
+  const out = [];
+  for (const match of mask.matchAll(/\b(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g)) {
+    try {
+      const paramsEnd = groupEnd(mask, match.index + match[0].length - 1);
+      const body = mask.indexOf('{', paramsEnd);
+      if (body !== -1) out.push({ name: match[1], start: match.index, end: groupEnd(mask, body) });
+    } catch { /* not gradeable here; actionCalls refuses it */ }
+  }
+  for (const match of mask.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=(?!=)\s*/g)) {
+    const start = match.index + match[0].length;
+    let end;
+    try { end = expressionEnd(mask, start); } catch { continue; }
+    if (/=>|^\s*(?:async\s+)?function\b/.test(mask.slice(start, end))) out.push({ name: match[1], start: match.index, end });
+  }
+  return out;
+}
+
+function builtInRuntimeProblems(code, names) {
+  const problems = [];
+  if (!names.length) return problems;
+  let calls;
+  try { calls = actionCalls(code); } catch (error) { return [`built-in operation calls are not gradeable (${error.message})`]; }
+  const mask = blankNonCodePreservingTemplateExpressions(code);
+  const decls = functionDeclarations(mask);
+  const exported = /\bexport\s+default\s+(?:async\s+)?(?:function\s+)?([A-Za-z_$][\w$]*)/.exec(mask)?.[1];
+  const enclosing = (at) => decls.filter((d) => d.start < at && at < d.end).reduce((best, d) => (!best || d.start > best.start ? d : best), null);
+  const ranges = (pattern) => [...mask.matchAll(pattern)].map((m) => {
+    const open = m.index + m[0].length - 1;
+    try { return [open, groupEnd(mask, open)]; } catch { return [open, mask.length]; }
+  });
+  const notAUser = ranges(NOT_A_USER);
+  const clicks = ranges(/\bonClick\s*=\s*\{/g);
+  const within = (list, at) => list.some(([a, b]) => a < at && at < b);
+  // A page-wide rule: nothing of a built-in operation's failure tells the maker to deploy a Custom API, and no stack is shown.
+  for (const literal of code.match(/'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`[^`]*`/g) || []) {
+    if (/unavailable|not found|not available|\b404\b/i.test(literal) && /deploy|custom api/i.test(literal)) problems.push('a built-in operation message must not tell the maker to deploy a Custom API');
+  }
+  if (/\.\s*stack\b/.test(mask)) problems.push('a built-in operation failure must not show a stack');
+  const disabledBy = new Map();
+  for (const name of names) {
+    const own = calls.filter((call) => literalString(call.fields.get('name') || '') === name);
+    if (!own.length) continue;
+    for (const call of own) {
+      const at = `${name}`;
+      const helper = call.scope;
+      const result = call.resultName;
+      const prefix = code.slice(helper.start, call.start);
+      const prefixMask = mask.slice(helper.start, call.start);
+      const post = code.slice(call.end + 1, helper.end);
+      const postMask = mask.slice(call.end + 1, helper.end);
+      if ([...call.fields.keys()].join(',') !== 'name') problems.push(`${at}: the request must be exactly { name } — no parameters and no boundTo`);
+      // The presence check must return before the call: a page whose player lacks executeFunction sends nothing.
+      const receiver = call.receiver ? call.receiver.split('.').map(escapeRe).join('\\s*\\??\\.\\s*') : '(?!)';
+      const guard = new RegExp(`\\bif\\s*\\(\\s*typeof\\s+${receiver}\\s*\\??\\.\\s*executeFunction\\s*!==?\\s*(['"])`).exec(prefixMask);
+      let returns = false;
+      if (guard && /^['"]function['"]/.test(prefix.slice(guard.index + guard[0].length - 1))) {
+        try { returns = /^\s*(?:return\b|\{[^}]*\breturn\b)/.test(prefixMask.slice(groupEnd(prefixMask, prefixMask.indexOf('(', guard.index)) + 1)); } catch { returns = false; }
+      }
+      if (!returns) problems.push(`${at}: a failed presence check must return before any request is made`);
+      // User-triggered: every way to the helper starts at a button's onClick.
+      const reached = new Set();
+      const handlers = [];
+      const queue = [helper.name];
+      while (queue.length) {
+        const fn = queue.shift();
+        if (reached.has(fn)) continue;
+        reached.add(fn);
+        const sites = [];
+        for (const site of callSites(mask, fn)) {
+          if (fn === helper.name && site.at > helper.start && site.at < helper.end) problems.push(`${at}: the helper calls itself (an automatic retry)`);
+          else sites.push(site);
+        }
+        const referenced = clicks.some(([a, b]) => new RegExp(`(?<![\\w$.])${escapeRe(fn)}(?![\\w$])`).test(mask.slice(a, b)));
+        if (!sites.length && !referenced) problems.push(`${at}: ${fn} is not reached from a button's onClick`);
+        for (const site of sites) {
+          if (within(notAUser, site.at)) { problems.push(`${at}: called from an effect, a memo or a timer — a built-in operation is called only when the user clicks its button`); continue; }
+          if (within(clicks, site.at)) continue;
+          const outer = enclosing(site.at);
+          if (!outer || outer.name === exported) { problems.push(`${at}: called while the page renders — a built-in operation is called only when the user clicks its button`); continue; }
+          if (outer.name !== helper.name) { handlers.push(outer); queue.push(outer.name); }
+        }
+      }
+      // The button: disabled while pending; a state of its own per operation.
+      for (const [open] of clicks) {
+        const region = mask.slice(open, groupEnd(mask, open));
+        if (![...reached].some((fn) => new RegExp(`(?<![\\w$.])${escapeRe(fn)}(?![\\w$])`).test(region))) continue;
+        const tagStart = mask.lastIndexOf('<', open);
+        let depth = 0;
+        let tagEnd = mask.length;
+        for (let i = tagStart; i < mask.length; i += 1) {
+          if (mask[i] === '{') depth += 1;
+          else if (mask[i] === '}') depth -= 1;
+          else if (mask[i] === '>' && depth === 0 && mask[i - 1] !== '=') { tagEnd = i; break; }
+        }
+        const disabled = /\bdisabled\s*=\s*\{([^}]*)\}/.exec(code.slice(tagStart, tagEnd));
+        if (!disabled) problems.push(`${at}: its button is not disabled while the call is pending`);
+        else disabledBy.set(name, disabled[1].replace(/\s+/g, ''));
+      }
+      const handlerText = handlers.map((h) => code.slice(h.start, h.end)).join('\n');
+      if (!/\+\+\s*[\w$.]+\.current\b|[\w$.]+\.current\s*(?:\+\+|\+=\s*1\b)/.test(handlerText) || !/[!=]==?\s*[\w$.]+\.current\b|[\w$.]+\.current\s*[!=]==?/.test(handlerText)) {
+        problems.push(`${at}: the handler does not ignore a stale request (a .current counter incremented before the call and compared after it)`);
+      }
+      if (!/\bcatch\b/.test(handlerText + prefix + post)) problems.push(`${at}: a rejected call is not caught`);
+      if (LEAKS.test(mask.slice(helper.start, helper.end)) || LEAKS.test(handlers.map((h) => mask.slice(h.start, h.end)).join('\n'))) {
+        problems.push(`${at}: the result must not be logged, stored, copied or sent`);
+      }
+      // Outputs: an object check, own-property reads, never a literal member, the root, a spread, an iteration or a serialization.
+      if (!/\bArray\s*\.\s*isArray\s*\(/.test(postMask) || !/\btypeof\s+[\w$.?]+\s*!==?\s*(['"])object\1/.test(post)) {
+        problems.push(`${at}: res.outputs must be checked to be a non-null, non-array object before it is read (an empty or 204 answer)`);
+      }
+      if (!/\bObject\s*\.\s*prototype\s*\.\s*hasOwnProperty\s*\.\s*call\s*\(|\bObject\s*\.\s*hasOwn\s*\(/.test(mask)) problems.push(`${at}: outputs must be read through own-property checks`);
+      const sources = `(?:${escapeRe(result)}|[\\w$]*[oO]utputs)`;
+      if (new RegExp(`\\b[\\w$]*[oO]utputs\\s*(?:\\?\\.|\\.)\\s*(?:${DTO})\\b`).test(mask)
+        || new RegExp(`\\b[\\w$]*[oO]utputs\\s*(?:\\?\\.)?\\s*\\[\\s*(['"])(?:${DTO})\\1\\s*\\]`).test(code)
+        || new RegExp(`\\{[^{}]*\\b(?:${DTO})\\b[^{}]*\\}\\s*=\\s*[\\w$.?]*[oO]utputs\\b`).test(mask)) {
+        problems.push(`${at}: an output is read as a member instead of through an own-property check`);
+      }
+      if (new RegExp(`\\b${escapeRe(result)}\\s*\\??\\.\\s*(?:${DTO})\\b`).test(mask)
+        || new RegExp(`\\.\\s*(?:${DTO})\\b`).test(mask.slice(helper.start, helper.end))) {
+        problems.push(`${at}: a DTO field is read as a member — from the result root, res.value or a cast — instead of through an own-property check of res.outputs`);
+      }
+      if (new RegExp(`\\.\\.\\.\\s*${sources}\\b|JSON\\s*\\.\\s*stringify\\s*\\(\\s*${sources}\\b|Object\\s*\\.\\s*(?:keys|values|entries)\\s*\\(\\s*${sources}\\b|Object\\s*\\.\\s*assign\\s*\\([^)]*\\b${sources}\\b|\\bfor\\s*\\([^)]*\\bin\\s+${sources}\\b`).test(mask)) {
+        problems.push(`${at}: outputs are spread, iterated or serialized — read the named properties only`);
+      }
+      if (/\.\s*message\s*\??\.\s*(?:includes|match|search|indexOf|startsWith|endsWith|toLowerCase)\s*\(|\.\s*test\s*\(\s*[\w$.?]*\.\s*message\b/.test(postMask)) {
+        problems.push(`${at}: a status must never be read out of the message's words`);
+      }
+      if (!code.includes(UNEXPECTED)) problems.push(`${at}: an unexpected shape must say "${UNEXPECTED}"`);
+      if (/\b404\b/.test(postMask) && !code.includes(UNAVAILABLE)) problems.push(`${at}: an actual 404 must say "${UNAVAILABLE}"`);
+      const guards = returningGuards(post, postMask);
+      if (name === 'WhoAmI') {
+        // All or nothing: the three own-property reads, and ONE returning guard that tests every one of them with the GUID pattern.
+        if (!code.includes(`/${GUID_SOURCE}/`)) problems.push(`${at}: the GUID pattern ${GUID_SOURCE} is not used`);
+        const locals = new Map();
+        for (const field of IDENTITY_FIELDS) {
+          if (!new RegExp(`(['"])${field}\\1`).test(post)) problems.push(`${at}: ${field} is not read`);
+          const local = new RegExp(`\\b(?:const|let)\\s+([A-Za-z_$][\\w$]*)\\s*=[^;\\n]*(['"])${field}\\2`).exec(post);
+          locals.set(field, local ? local[1] : field);
+        }
+        const tested = (condition) => (/\.every\s*\(/.test(condition) && /\.test\s*\(/.test(condition)) || (condition.match(/\.test\s*\(/g) || []).length >= IDENTITY_FIELDS.length;
+        const allOrNothing = guards.some(({ condition }) => tested(condition)
+          && [...locals.values()].every((local) => new RegExp(`(?<![\\w$])${escapeRe(local)}(?![\\w$])`).test(condition)));
+        if (!allOrNothing) problems.push(`${at}: the three identifiers must be shown all or none — one guard that returns must test every one with the GUID pattern`);
+      }
+      if (name === 'RetrieveVersion') {
+        if (!/(['"])Version\1/.test(post)) problems.push(`${at}: Version is not read`);
+        const bounded = guards.some(({ condition }) => /\b128\b/.test(condition) && (/!\s*[A-Za-z_$]/.test(condition) || /\.length\s*(?:<\s*1\b|===?\s*0\b|>=?\s*1\b|>\s*0\b)/.test(condition)));
+        if (!bounded) problems.push(`${at}: Version must be a string of 1 to 128 characters, or nothing is shown`);
+      }
+    }
+  }
+  if (disabledBy.size === 2 && new Set(disabledBy.values()).size === 1) problems.push('each built-in operation needs a pending state of its own: one call must not disable the other\'s button');
+  return [...new Set(problems)];
+}
+
 module.exports = {
   SECTION, SENTINEL, VERIFICATION_LINE, BUILT_IN_OUTPUTS,
   isBuiltInBinding, partitionBindings, plannedBuiltIns, unionBindings, listedBuiltIns, unionOrderProblems, builtInGateProblems,
+  builtInRuntimeProblems,
 };

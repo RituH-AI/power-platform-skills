@@ -23,6 +23,7 @@ const { workerProblems } = require('./worker-contract.js');
 const { uploadProblems, uploadPreservationProblems } = require('./upload-contract.js');
 const { planSection, findMarkdownTable, parseMarkdownRows } = require('./plan-evidence.js');
 const { customApiProblems, customApiGateProblems } = require('./custom-api-contract.js');
+const { plannedBuiltIns } = require('./action-binding-union.js');
 const { packagingProblems, isPackaging } = require('./packaging-contract.js');
 const { preservationProblems } = require('./preservation-contract.js');
 const { columnProblems } = require('./column-contract.js');
@@ -176,7 +177,7 @@ const REQUIRED_PLAN_SECTIONS = [
   'Per-Page Specifications',
 ];
 
-const OPTIONAL_PLAN_SECTIONS = new Set(['Solution Packaging']);
+const OPTIONAL_PLAN_SECTIONS = new Set(['Dataverse Operations', 'Solution Packaging']);
 
 const REQUIRED_PER_PAGE_FIELDS = [
   'File',
@@ -345,9 +346,12 @@ function validateGenpagePlanSchema(plan) {
   // Solution Packaging is optional and sits between Custom API Bindings and Design Preferences, as in
   // references/plan-schema.md. Split at that point by NAME: an index goes stale the moment a required
   // section is added before it — which is exactly how Custom API Bindings ended up expected after it.
+  // Dataverse Operations is optional too, and sits right after Custom API Bindings, before Solution
+  // Packaging; either is checked for order only when the plan has it, so a plan without them is unchanged.
   const packagingAt = REQUIRED_PLAN_SECTIONS.indexOf('Design Preferences');
   const expected = [
     ...REQUIRED_PLAN_SECTIONS.slice(0, packagingAt),
+    ...(observed.includes('Dataverse Operations') ? ['Dataverse Operations'] : []),
     ...(observed.includes('Solution Packaging') ? ['Solution Packaging'] : []),
     ...REQUIRED_PLAN_SECTIONS.slice(packagingAt),
   ];
@@ -391,6 +395,16 @@ function validateGenpagePlanSchema(plan) {
           break;
         }
       }
+    }
+  }
+
+  // Optional: absent is no new built-in authoring. Present, it is the exact sentinel or the catalogue's own table, read by the same rule the
+  // lifecycle evaluator uses (action-binding-union.js) — anything else halts, so an unreadable selection is never read as "none".
+  if (byTitle.has('Dataverse Operations')) {
+    try {
+      plannedBuiltIns(plan);
+    } catch (error) {
+      errors.push(schemaError('invalid-dataverse-operations', `## Dataverse Operations must be the exact sentinel "No Dataverse operations." or the built-in operation table: ${error.message}`, { section: 'Dataverse Operations' }));
     }
   }
 

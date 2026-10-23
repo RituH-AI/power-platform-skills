@@ -14,6 +14,7 @@ const {
 // evaluator compares the WHOLE union — never the Custom API partition alone (action-binding-union.js).
 const {
   BUILT_IN_OUTPUTS, isBuiltInBinding, partitionBindings, plannedBuiltIns, unionBindings, listedBuiltIns, unionOrderProblems, builtInGateProblems,
+  builtInRuntimeProblems,
 } = require('./action-binding-union.js');
 
 const KINDS = new Set(Object.values(PARAMETER_KIND_BY_TYPE));
@@ -340,6 +341,11 @@ function customApiProblems(fixture) {
     if (!write || artifactText(fixture, write.artifact) !== code) problems.push(`${stage.id}: uploaded API source is not the actual preceding generated snapshot`);
     // A built-in operation's outputs are its catalogue response's properties, whatever a fixture declares.
     problems.push(...runtimeProblems(code, desired, { ...contract.outputs, ...BUILT_IN_OUTPUTS }, lookupMetadata));
+    // A stage that authors a built-in call holds it to the generated pattern; a preserved call is kept as it was written.
+    if (authoring.includes(stage.upload)) {
+      const authored = stage.beforeConfig ? (stage.change?.add || []).filter(isBuiltInBinding) : partitionBindings(desired).builtIns;
+      problems.push(...builtInRuntimeProblems(code, authored.map((binding) => binding.name)));
+    }
   }
   const last = contract.stages.at(-1);
   if (artifactText(fixture, last.target) !== artifactText(fixture, last.source)) problems.push('final API TSX differs from the final lifecycle stage');

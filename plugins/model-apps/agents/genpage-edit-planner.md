@@ -207,6 +207,28 @@ at a time (you are headless — see the interaction contract below):
 >   page whose Custom API calls have **no deployed binding**. The orchestrator will run
 >   discovery and re-invoke you with a real Custom API contract and upload-file status.
 
+> **Built-in Dataverse operations** (`WhoAmI`, `RetrieveVersion`; see
+> `${PLUGIN_ROOT}/references/dataverse-operations.md`): they share `actionBindings` with the
+> Custom APIs but are not Custom APIs, and `genpage-customapi-builder` owns their
+> `dataverse-operations` gate. Classify the intent from this page's `config.json.actionBindings`
+> and the request, and record it in the plan as `{ intent, selected, beforeNames, provenance }`
+> (`provenance` is `before-config` or `current-run-selection`):
+>
+> - **preserve** (an unrelated change) — no gate, no discovery; the existing calls and bindings
+>   stay exactly as they are (upload omits `--actions`). A table carried for preservation while
+>   the flag is off is not new authoring and does not halt.
+> - **add / replace** — only on the maker's affirmative request or picker answer (a mention, a
+>   question or "do not add" is not one): stop and return
+>   `{ "action": "dataverse_operation_discovery_required", "intent": "<the maker's words>",
+>   "resolvedAction": "edit", "envUrl": "<the environment URL you were given>" }` unless this
+>   run's builder already forwarded a `## Dataverse Operations` block. A call on load, on a
+>   filter or in the background is refused (`explicit_trigger_required`): only a button.
+> - **remove** — drop only the named calls and bindings; nothing else.
+> - **clear all** — only after the maker confirms; the confirmation names the built-in bindings
+>   it removes.
+> - If the page already binds WhoAmI or RetrieveVersion and you cannot tell the intent, halt
+>   with `needs_input`: missing preserve evidence is not permission to delete the call.
+
 Mark "Analyze existing page" task complete.
 
 ## Step 3 — Hand the Edit Plan Back for Approval
@@ -234,6 +256,11 @@ Return this plan to the orchestrator, which presents it with `EnterPlanMode`:
 ### Custom API Changes
 - [none | add <operation> | replace <name> with <operation> | remove <name>]
   (the orchestrator delegates any add/replace/remove to genpage-customapi-builder)
+
+### Built-in Operation Changes
+- [none | preserve | add WhoAmI / RetrieveVersion (button) | remove <name> | clear all (confirmed)]
+  with `{ intent, selected, beforeNames, provenance }`
+  (the orchestrator delegates any add/replace to genpage-customapi-builder)
 
 ### Preservation Constraints
 - [What must remain unchanged — feature preservation, specific behaviors]
