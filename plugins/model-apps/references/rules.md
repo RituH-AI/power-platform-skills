@@ -633,6 +633,39 @@ What you can rely on from RuntimeTypes:
 - `BaseUxAgentDataApi<TR, ER>` — the dataApi interface with `createRow`,
   `updateRow`, `deleteRow`, `retrieveRow`, `queryTable`, `getChoices`
 
+### Dialog output (`setPageOutput`)
+
+A page opened as a dialog can return a value to the page that opened it. The runtime's data API
+has `setPageOutput(value: unknown): void`. It stores the value and does **not** close the dialog.
+Then `Xrm.Navigation.navigateBack()` closes the dialog, and the caller's `navigateTo` promise
+resolves with `{ returnValue: <the value> }`. A dialog closed without `setPageOutput` gives
+`returnValue: undefined`. The method is synchronous: do not `await` it.
+
+The generated `RuntimeTypes.ts` does **not** declare `setPageOutput`, so
+`dataApi.setPageOutput(...)` fails type checking with "Property 'setPageOutput' does not exist on
+type 'UxAgentDataApi'". Use this narrow typed intersection. Do not use `any`, and do not change
+`RuntimeTypes.ts`:
+
+```typescript
+// In the dialog page: return the selection, then close.
+const outputApi = dataApi as typeof dataApi & { setPageOutput(value: unknown): void };
+if (typeof outputApi.setPageOutput === "function") outputApi.setPageOutput({ action: "selected", accountId: selectedId });
+(window as any).Xrm.Navigation.navigateBack();
+```
+
+```typescript
+// In the calling page: open the dialog (target 2) and read what it returned.
+const result = await (window as any).Xrm.Navigation.navigateTo(
+    { pageType: "generative", pageId: targetPageId, data: { mode: "pick" } },
+    { target: 2, position: 1, width: { value: 50, unit: "%" } },
+);
+const output = result?.returnValue;   // undefined when the dialog was closed without an output
+```
+
+The caller reads `returnValue` as an `unknown`: check its shape before you use it. Call
+`setPageOutput` only in a page that is opened as a dialog, and only when the user completes the
+dialog's action. Do not call it on mount.
+
 ### Connector DataAPI (optional — only when the plan has Connector Bindings)
 
 When the plan's `## Connector Bindings` is non-empty, the page may call Power
