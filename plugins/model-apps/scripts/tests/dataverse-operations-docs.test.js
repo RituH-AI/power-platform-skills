@@ -199,6 +199,9 @@ test('the edit flow handles the built-in signal, forwards this run\'s contract t
   has(planning, /Dispatch `genpage-customapi-builder` once with \*\*Mode: `edit`\*\*/);
   has(planning, /re-invoke the edit planner with this run's `dataverse-operations\.md` body as the built-in operation contract and `<working-dir>\/actions\.json` as the upload file status/);
   has(planning, /- \*\*`\{ "action": "dataverse_operation_discovery_required", … \}`\*\* — handled above\./);
+  // A builder that adds nothing does not send the planner back into the same signal.
+  has(planning, /re-invoke the planner with the built-in operation intent `none — not added this run` and no contract, so it plans the edit without that call/);
+  has(squash(read('agents', 'genpage-edit-planner.md')), /When your prompt says `none — not added this run`, the builder added none: plan the edit without that call and do not signal again/);
   has(planning, /every prior discovery \(connector, Custom API and built-in operation contracts, and their upload file status; entities\)/);
   // Turned off in between: the edit intent selects a re-probe right before the source is edited, and OFF halts without touching the bindings.
   has(planning, /node "\$\{PLUGIN_ROOT\}\/scripts\/lib\/feature-flags\.js" dataverse-operations/);

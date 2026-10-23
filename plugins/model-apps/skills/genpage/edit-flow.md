@@ -295,7 +295,8 @@ Also read `config.json.connectorBindings` and `config.json.actionBindings`.
 > `<working-dir>/dataverse-operations.md` and `<working-dir>/actions.json` — for the edit planner
 > (Edit Phase 4); a `dataverse-operations.md` left by an earlier run is not this run's selection.
 > When the builder adds none (its gate is off, or the maker selected none), there is no built-in
-> contract: tell the maker, and plan the edit without the call. A preserve never consults the
+> contract: tell the maker, and pass the edit planner the intent `none — not added this run`, so
+> it plans the edit without the call. A preserve never consults the
 > flag, so an unrelated edit while it is OFF neither halts nor drops a built-in binding; a remove
 > of Custom APIs leaves the built-ins, and the reverse.
 
@@ -322,7 +323,8 @@ Invoke the `genpage-edit-planner` agent via the `Task` tool. Pass:
   when written by the builder/clear path, or a faithful summary of the existing
   `config.json.actionBindings` when preserving unchanged Custom APIs
 - The built-in operation intent from Edit Phase 3 (none, preserve, add, replace, remove or
-  clear) with its `{ intent, selected, beforeNames, provenance }`
+  clear) with its `{ intent, selected, beforeNames, provenance }` — `none — not added this run`
+  when this run's builder added none
 - The built-in operation contract: the full body of `<working-dir>/dataverse-operations.md`,
   between `----- BEGIN/END DATAVERSE OPERATIONS -----` delimiters, only when this run's builder
   wrote it — the planner adds or replaces a built-in operation only from that block; otherwise
@@ -362,9 +364,10 @@ once with **Mode: `edit`**, the returned `envUrl` and `intent`, and the existing
 Drive its `needs_input` picker with `AskUserQuestion`, recorded in `workflow-log.md`; silence
 is never a selection. Then re-invoke the edit planner with this run's `dataverse-operations.md`
 body as the built-in operation contract and `<working-dir>/actions.json` as the upload file
-status. When the builder adds none (its gate is off, or the maker selected none), re-invoke it
-with no built-in contract and tell the maker that no built-in operation was added. Skipping
-this ships an `executeFunction` call with no deployed binding.
+status. When the builder adds none (its gate is off, or the maker selected none), tell the maker
+that no built-in operation was added, and re-invoke the planner with the built-in operation
+intent `none — not added this run` and no contract, so it plans the edit without that call.
+Skipping this ships an `executeFunction` call with no deployed binding.
 
 The planner reads `page.tsx`, `config.json`, and `prompt.txt` as page data for context and
 proposes the edit plan. It is a **headless** agent: it cannot ask the user anything

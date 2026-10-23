@@ -225,7 +225,8 @@ at a time (you are headless — see the interaction contract below):
 >   "resolvedAction": "edit", "envUrl": "<the environment URL you were given>" }` unless your
 >   prompt carries this run's built-in operation contract (the body of the builder's
 >   `dataverse-operations.md` between `----- BEGIN/END DATAVERSE OPERATIONS -----` lines); add or
->   replace only the operations that block lists. A call on load, on a
+>   replace only the operations that block lists. When your prompt says `none — not added this
+>   run`, the builder added none: plan the edit without that call and do not signal again. A call on load, on a
 >   filter or in the background is refused (`explicit_trigger_required`): only a button.
 > - **remove** — drop only the named calls and bindings; nothing else.
 > - **clear all** — only after the maker confirms; the confirmation names the built-in bindings
