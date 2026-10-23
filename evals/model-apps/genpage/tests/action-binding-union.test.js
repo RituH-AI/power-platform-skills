@@ -10,6 +10,9 @@ const { PHASE_EXPECTATIONS, WORKFLOW_ASSERTIONS } = require('../lib/assertions-l
 const { PHASE5_EXPECTATIONS } = require('../lib/assertions-layer-2.js');
 const union = require('../lib/action-binding-union.js');
 const { customApiProblems, customApiGateVerdict, CUSTOM_API_GATE_UNSCORED } = require('../lib/custom-api-contract.js');
+const { TapReporter } = require('../lib/reporter.js');
+const layer1 = require('../run-layer-1.js');
+const layer2 = require('../run-layer-2.js');
 const { getDataverseOperationCatalogue } = require('../../../../plugins/model-apps/scripts/lib/dataverse-operations.js');
 
 const RULE = 'Phase 5: Custom API discovery, gate, bare bindings, runtime calls and update preservation or explicit clear agree';
@@ -694,4 +697,28 @@ test('the gate\'s scope comes from the plan table or a Custom API row in an acti
   // The two gates stay independent: a built-in-only create with custom-api OFF passes all three rules.
   const builtInOnly = createFixture({ rows: [WHO_AM_I], plan: SENTINEL_PLAN, source: BUILT_IN_ONLY, customApi: 'disabled', builtIns: 'enabled' });
   for (const [index, result] of gateVerdicts(builtInOnly).entries()) assert.equal(result.status, 'pass', `built-in-only create, rule ${index + 1}: ${result.reason}`);
+});
+
+// What a runner prints for such a page: the runners' own grading, through the reporter they share. A fixture with nothing graded is unscored —
+// its line carries `# SKIP`, and it is counted apart from the passed fixtures — while the ON removal beside it is graded and passes.
+test('the runners report a page kept while custom-api is OFF as an unscored fixture, never a passed one', () => {
+  const data = { common_workflow_assertions: [GATE_RULE], common_code_assertions: [] };
+  const ev = { id: 24, expectations: [RULE] };
+  const on = removalEdit({ gate: 'enabled', rows: [WHO_AM_I], source: BUILT_IN_ONLY });
+  on.genpagePlan = CUSTOM_PLAN;
+  let text = '';
+  const reporter = new TapReporter({ write: (chunk) => { text += chunk; } });
+  reporter.start(2);
+  for (const [name, fixture] of [['kept-while-off', retainedRemoval()], ['removed-while-on', on]]) {
+    reporter.startFixture(name);
+    for (const { text: assertion, result } of [...layer1.gradeFixture(fixture, ev, data), ...layer2.gradeFixture(fixture, ev, data)]) reporter.assertion(assertion, result);
+    reporter.endFixture();
+  }
+  reporter.end();
+  const lines = text.split('\n');
+  assert.ok(lines.includes('ok 1 - kept-while-off # SKIP no expectation graded'), text);
+  assert.ok(lines.includes('ok 2 - removed-while-on'), text);
+  assert.deepStrictEqual(lines.filter((line) => /^# (?:pass|fail|skip|fixtures|unscored)/.test(line)),
+    ['# pass  3', '# fail  0', '# skip  3', '# fixtures 2 (pass 1, fail 0)', '# unscored fixtures 1']);
+  assert.equal(reporter.exitCode, 0);
 });

@@ -439,12 +439,12 @@ Read this output as:
 - **Top of each subtest:** `# Subtest: <fixture-folder-name>` — which fixture is being graded.
 - **Per-assertion line:** `ok N - <assertion text>` (pass) or `not ok N - <assertion text>` (fail) or `ok N - <text> # SKIP <reason>` (not applicable).
 - **YAML block under `not ok`:** the `reason` field names the offending file and what specifically violated the assertion.
-- **Aggregate:** `ok N - <fixture-name>` (all assertions passed) or `not ok N - <fixture-name>` (at least one fail).
-- **Final summary:** `# tests <N>` / `# pass <N>` / `# fail <N>` / `# skip <N>` / `# fixtures <N> (pass X, fail Y)`.
+- **Aggregate:** `ok N - <fixture-name>` (at least one assertion graded, and none failed), `ok N - <fixture-name> # SKIP no expectation graded` (unscored: every assertion skipped, or there was none — nothing was graded, so it is not a pass) or `not ok N - <fixture-name>` (at least one fail).
+- **Final summary:** `# tests <N>` / `# pass <N>` / `# fail <N>` / `# skip <N>` / `# fixtures <N> (pass X, fail Y)`, then `# unscored fixtures <U>` only when U > 0. An unscored fixture is in neither X nor Y, so X + Y + U = N. The app-builder runner shares this reporter and prints the same lines.
 
 **Skipped vs failed:**
-- `# SKIP <reason>` — the assertion doesn't apply (e.g., "no Dataverse files in this fixture" for a mock-data assertion), or a registered check cannot grade the stored evidence yet (e.g., "column-name verification requires RuntimeTypes.ts fixture"). **Does not fail the fixture.**
-- `not ok` — actual failure. Fixture fails. Exit code becomes 1.
+- `# SKIP <reason>` — the assertion doesn't apply (e.g., "no Dataverse files in this fixture" for a mock-data assertion), or a registered check cannot grade the stored evidence yet (e.g., "column-name verification requires RuntimeTypes.ts fixture"). **Does not fail the fixture** — but a fixture whose every assertion skips is unscored, not passed.
+- `not ok` — actual failure. Fixture fails. Exit code becomes 1. An unscored fixture does not change the exit code.
 
 **Three common skip reasons in our suite:**
 1. `no Dataverse files / no <feature> detected` — the fixture doesn't exercise this code path
