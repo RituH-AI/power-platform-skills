@@ -451,6 +451,8 @@ Read this output as:
 2. `not graded yet` / `requires RuntimeTypes.ts fixture` — a check that cannot grade the stored evidence: a correct check would fail a historical fixture's real drift, or the capture did not keep what the check reads. `evals/model-apps/tests/eval-coverage-baseline.json` records the reason for each
 3. `no check registered for this expectation` — the assertion text in `evals.json` doesn't have a corresponding check in the runner library. Either add the check or accept the skip as documentation-only.
 
+**One known unscored case:** `custom-api OFF: a preserving stage's generation or upload cannot be attributed to that stage, …` — a page kept while `custom-api` is OFF (an unrelated edit, or a Custom API removal the builder defers) is not graded against the gate by the Phase 4.6 rule or either Phase 5 rule, because the grader cannot tie those calls to the verified preserving stage; a create, a call no verified preserving stage covers, or a new or replaced Custom API row while OFF still fails.
+
 ---
 
 ## Manual grep patterns

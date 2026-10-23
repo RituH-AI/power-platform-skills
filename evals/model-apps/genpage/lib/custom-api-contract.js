@@ -4,7 +4,7 @@ const { isDeepStrictEqual } = require('node:util');
 const { PARAMETER_KIND_BY_TYPE } = require('../../../../plugins/model-apps/scripts/list-custom-apis.js');
 const { pageStructureProblems } = require('../../../../plugins/model-apps/scripts/lib/page-structure.js');
 const { workflowCalls, isGeneration, isUpload, isMutation, resultObject, unassociatedCallProblems } = require('./workflow-evidence.js');
-const { artifactText, artifactJson, commandInfo, fileName, isGuid, pathKey } = require('./evidence-utils.js');
+const { artifactText, artifactJson, commandInfo, fileName, isGuid, pathKey, gradeEvidence } = require('./evidence-utils.js');
 const { planSection, parseMarkdownRows } = require('./plan-evidence.js');
 const { actionCalls, literalString, objectFields, receiverIsDataApi, stringRecordMemberIsInput, escapeRe } = require('./source-evidence.js');
 const {
@@ -139,15 +139,15 @@ function beforeConfigEvidence(fixture, stages, calls) {
 // The custom-api gate decides new Custom API authoring: a create whose plan has Custom API rows, and a stage that adds or replaces a Custom API
 // row. A lifecycle stage whose before-config is verified (beforeConfigEvidence) and whose change adds or replaces none — an unrelated edit, a
 // removal (which the builder defers while the flag is OFF), a clear, or a built-in change — authors no Custom API row: it keeps the rows the
-// page already has, so its generation and upload are not refused for a disabled gate merely because the plan's table still lists those rows.
-// The rows it keeps are still checked against the page's source and before-config by customApiProblems. A stage's calls are the generations
-// and uploads after the previous stage's upload, up to and including its own. Anything unreadable leaves no exemption: the gate then applies.
-function keepingStageCalls(fixture, calls) {
+// page already has. This returns the calls such a stage COVERS: the generations and uploads after the previous stage's upload, up to and
+// including its own. Covering is not attribution — a call inside that span may be the stage's own or an unrelated one, and the grader cannot
+// tell them apart — so a covered call is never passed for the gate (customApiGateVerdict). Anything unreadable covers nothing.
+function keepingStageCoverage(fixture, calls) {
   const stages = fixture.manifest?.customApi?.stages;
-  const keeping = new Set();
-  if (!Array.isArray(stages) || !stages.length) return keeping;
+  const covered = new Set();
+  if (!Array.isArray(stages) || !stages.length) return covered;
   let verified;
-  try { verified = beforeConfigEvidence(fixture, stages, calls).verifiedBefore; } catch { return keeping; }
+  try { verified = beforeConfigEvidence(fixture, stages, calls).verifiedBefore; } catch { return covered; }
   let previous = -1;
   for (const stage of stages) {
     const upload = calls.findIndex((call) => call.id === stage.upload && isUpload(call.command));
@@ -155,19 +155,33 @@ function keepingStageCalls(fixture, calls) {
     const authorsCustomApi = !stage.beforeConfig || (stage.change?.add || []).some((row) => !isBuiltInBinding(row));
     if (!authorsCustomApi && verified.has(stage)) {
       for (let index = previous + 1; index <= upload; index += 1) {
-        if (isGeneration(calls[index].command) || isUpload(calls[index].command)) keeping.add(index);
+        if (isGeneration(calls[index].command) || isUpload(calls[index].command)) covered.add(index);
       }
     }
     previous = upload;
   }
-  return keeping;
+  return covered;
 }
 
-function customApiGateProblems(fixture) {
+const GATE_HALT = 'disabled or unreadable Custom API gate must halt before generation or upload';
+// The one reason every rule that grades the gate gives when it cannot score a run (gradeWithGate).
+const CUSTOM_API_GATE_UNSCORED = 'custom-api OFF: a preserving stage\'s generation or upload cannot be attributed to that stage, so a page kept while the gate is OFF is not graded';
+
+// The gate's verdict on a run: its problems, and how many calls it could not attribute. A generation or upload after a disabled or unreadable
+// gate (with Custom API rows in the plan) is never passed for the gate:
+//   - an upload without --page-id is a create, and a create can never keep a page's rows: a problem;
+//   - a call no verified keeping stage covers (keepingStageCoverage) is new authoring as far as the evidence shows: a problem;
+//   - any other call is UNATTRIBUTED: it may be the keeping stage's own, or not, and the grader cannot prove which — neither a pass nor a problem.
+// Why unscored rather than attributed: two ways to tie such a call to its stage have failed. Refusing every call after an OFF gate graded a
+// correct kept page (an unrelated edit, or a removal the builder defers) as forbidden authoring; exempting every call the stage covers let an
+// unrelated create beside it borrow the stage's proof. Matching calls to a stage by page id, source or time would be a third guess of the same
+// kind, so the rules that grade the gate leave such a run unscored instead (gradeWithGate). Everything else the gate checks is unchanged.
+function customApiGateVerdict(fixture) {
   const bindings = planBindings(fixture);
   const calls = workflowCalls(fixture);
   const problems = unassociatedCallProblems(fixture);
-  const keeping = keepingStageCalls(fixture, calls);
+  const covered = keepingStageCoverage(fixture, calls);
+  let unattributed = 0;
   let latest = null;
   let gateIndex = -1;
   let discoveryIndex = -1;
@@ -178,9 +192,12 @@ function customApiGateProblems(fixture) {
     } else if (/\blist-custom-apis\.js\b/.test(call.command)) {
       if (latest !== 'enabled') problems.push('Custom API discovery ran before an enabled feature gate');
       discoveryIndex = index;
-    } else if (bindings.length && (isGeneration(call.command) || isUpload(call.command)) && !keeping.has(index)) {
-      if (latest !== 'enabled') problems.push('disabled or unreadable Custom API gate must halt before generation or upload');
-      else if (gateIndex <= discoveryIndex) problems.push('Custom API generation must re-probe the feature gate after planning discovery');
+    } else if (bindings.length && (isGeneration(call.command) || isUpload(call.command))) {
+      if (latest !== 'enabled') {
+        const creates = isUpload(call.command) && !commandInfo(call).flags['page-id'];
+        if (!creates && covered.has(index)) unattributed += 1;
+        else problems.push(GATE_HALT);
+      } else if (gateIndex <= discoveryIndex) problems.push('Custom API generation must re-probe the feature gate after planning discovery');
     }
   }
   if (bindings.length && !calls.some((call) => isGate(call.command))) problems.push('Custom API table has no applicable feature gate');
@@ -190,8 +207,28 @@ function customApiGateProblems(fixture) {
     }
     if (!/\bhalt(?:ed)?\b|\bneeds_input\b/i.test(fixture.workflowLog || '')) problems.push('Custom API gate refusal did not surface a halt');
   }
-  return problems;
+  return { problems, unattributed };
 }
+
+// The gate's problems alone, for the callers that grade only problems: customApiProblems, and an expected refusal (workflow-evidence.js
+// refusalProblems), where any generation or upload is itself a refusal problem, so an unattributed call can never leave it unscored.
+function customApiGateProblems(fixture) {
+  return customApiGateVerdict(fixture).problems;
+}
+
+// A rule that grades the gate, in the framework's { status, reason } (evidence-utils.js gradeEvidence): any problem fails it, exactly as before;
+// with none, a call the gate could not attribute leaves it unscored — `skip`, counted apart from passes by the runners — rather than passed.
+// This wraps the existing problem lists instead of changing their shape, so every other caller of them is untouched.
+function gradeWithGate(check, fixture) {
+  const graded = gradeEvidence(check, fixture);
+  if (graded.status !== 'pass') return graded;
+  let unattributed;
+  try { ({ unattributed } = customApiGateVerdict(fixture)); } catch (error) { return { status: 'fail', reason: error.message }; }
+  return unattributed ? { status: 'skip', reason: CUSTOM_API_GATE_UNSCORED } : graded;
+}
+// The Phase 4.6 workflow rule, and the Phase 5 rule of both layers.
+const gradeCustomApiGate = (fixture) => gradeWithGate(customApiGateProblems, fixture);
+const gradeCustomApi = (fixture) => gradeWithGate(customApiProblems, fixture);
 
 function parameterMatches(value, kind, prefix) {
   const literal = literalString(value);
@@ -429,4 +466,6 @@ function customApiProblems(fixture) {
   return problems;
 }
 
-module.exports = { customApiProblems, customApiGateProblems };
+module.exports = {
+  customApiProblems, customApiGateProblems, customApiGateVerdict, gradeCustomApi, gradeCustomApiGate, CUSTOM_API_GATE_UNSCORED,
+};

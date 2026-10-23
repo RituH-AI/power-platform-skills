@@ -22,7 +22,7 @@ const { navigationProblems, navTargets } = require('./navigation-contract.js');
 const { workerProblems } = require('./worker-contract.js');
 const { uploadProblems, uploadPreservationProblems } = require('./upload-contract.js');
 const { planSection, findMarkdownTable, parseMarkdownRows } = require('./plan-evidence.js');
-const { customApiProblems, customApiGateProblems } = require('./custom-api-contract.js');
+const { gradeCustomApi, gradeCustomApiGate } = require('./custom-api-contract.js');
 const { plannedBuiltIns } = require('./action-binding-union.js');
 const { packagingProblems, isPackaging } = require('./packaging-contract.js');
 const { preservationProblems } = require('./preservation-contract.js');
@@ -766,13 +766,14 @@ WORKFLOW_ASSERTIONS.set(
   ({ fixture }) => {
     const body = planSection(fixture.genpagePlan, 'Custom API Bindings');
     if (!fixture.manifest?.customApi && (!body || body === 'No custom API bindings.')) return skip('no Custom API lifecycle in this workflow');
-    return gradeEvidence(customApiGateProblems, fixture);
+    // A page kept while the gate is OFF is unscored here (skip), never passed — custom-api-contract.js customApiGateVerdict.
+    return gradeCustomApiGate(fixture);
   }
 );
 
 PHASE_EXPECTATIONS.set(
   'Phase 5: Custom API discovery, gate, bare bindings, runtime calls and update preservation or explicit clear agree',
-  ({ fixture }) => gradeEvidence(customApiProblems, fixture)
+  ({ fixture }) => gradeCustomApi(fixture)
 );
 
 PHASE_EXPECTATIONS.set(

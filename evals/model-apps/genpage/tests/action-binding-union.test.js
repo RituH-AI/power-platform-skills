@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const { PHASE_EXPECTATIONS, WORKFLOW_ASSERTIONS } = require('../lib/assertions-layer-1.js');
 const { PHASE5_EXPECTATIONS } = require('../lib/assertions-layer-2.js');
 const union = require('../lib/action-binding-union.js');
-const { customApiProblems } = require('../lib/custom-api-contract.js');
+const { customApiProblems, CUSTOM_API_GATE_UNSCORED } = require('../lib/custom-api-contract.js');
 const { getDataverseOperationCatalogue } = require('../../../../plugins/model-apps/scripts/lib/dataverse-operations.js');
 
 const RULE = 'Phase 5: Custom API discovery, gate, bare bindings, runtime calls and update preservation or explicit clear agree';
@@ -481,11 +481,14 @@ test('removing every Custom API of a mixed page: with custom-api ON the row goes
   }
 });
 
-// ── Keeping the page's Custom API rows is not new authoring ────────────────────────────────────────────────────────────────────────────
+// ── The custom-api gate and a page kept while it is OFF ──────────────────────────────────────────────────────────────────────────────
 // The custom-api gate decides new Custom API authoring: a create whose plan has Custom API rows, and a stage that adds or replaces one. A stage
 // whose before-config is verified as the page it updates, and that only keeps the Custom API rows that page already has — an unrelated edit, a
-// removal the flag defers, a clear — authors none, so it is graded with the flag OFF too, with the plan's Custom API table left as it truly is. The
-// rows it keeps are still checked against the page's source and before-config, and without verified provenance there is no such stage.
+// removal the flag defers, a clear — authors none. But the grader cannot tell which generation or upload after an OFF gate belongs to that stage:
+// refusing them all graded a correct kept page as forbidden authoring, and exempting every call around the stage let an unrelated create borrow
+// its proof. So a page kept while the gate is OFF is not graded against the gate: the three rules that grade it SKIP with one reason, never pass.
+// A create — an upload with no --page-id — can never keep a page's rows, and a call no verified keeping stage covers is not one either: both
+// still fail. The plan's Custom API table is left as it truly is in every case.
 const GATE_RULE = 'Phase 4.6: A populated Custom API plan never discovers, generates or uploads after a disabled or unreadable feature gate';
 const HALT = 'disabled or unreadable Custom API gate must halt before generation or upload';
 const NEW_API = { name: 'cnt_RejectOrder', isFunction: false, displayName: 'Reject Order', parameterKinds: { Reason: 'String' } };
@@ -497,28 +500,59 @@ const retainedRemoval = () => {
   fixture.genpagePlan = CUSTOM_PLAN;
   return fixture;
 };
+// The mixed page's lifecycle with the gate before its preserve stage OFF and `calls` recorded right after that gate (inside the preserve stage's
+// span) or at the very end (after it).
+function offPreserveWith(calls, position = 'inside') {
+  const fixture = mixedFixture();
+  event(fixture, 'gate-preserve').result = 'disabled';
+  const at = position === 'inside' ? fixture.events.indexOf(event(fixture, 'gate-preserve')) + 1 : fixture.events.length;
+  fixture.events.splice(at, 0, ...calls);
+  return fixture;
+}
+// Another file's page created while the flag is OFF.
+function otherPageCreate(position) {
+  const fixture = offPreserveWith([
+    { id: 'write-other', command: 'Write other.tsx', artifact: 'stages/other.tsx' },
+    { id: 'create-other', command: 'node genpage-upload.js --code-file other.tsx --actions actions.json', result: { ok: true, pageId: OTHER_PAGE } },
+  ], position);
+  fixture.files.push({ name: 'other.tsx', content: SOURCE });
+  fixture.artifacts['stages/other.tsx'] = SOURCE;
+  return fixture;
+}
 
-test('a verified stage that only keeps the page\'s Custom API rows needs no enabled custom-api gate — with the plan\'s table kept and after a normal lifecycle; new authoring while OFF still halts', () => {
+test('a page kept while custom-api is OFF is unscored, never passed: its calls cannot be attributed to the verified keeping stage', () => {
   // The same OFF removal after the ordinary create and preserve stages, the plan's table left intact.
   const afterLifecycle = withUpdate(mixedFixture(), 'deferred-remove', { remove: [API.name] }, [API, WHO_AM_I], SOURCE);
   event(afterLifecycle, 'gate-deferred-remove').result = 'disabled';
   event(afterLifecycle, 'deferred-remove').command = event(afterLifecycle, 'deferred-remove').command.replace(' --actions deferred-remove-actions.json', '');
   afterLifecycle.workflowLog += `\n${DEFERRED}`;
   // An unrelated edit of the created page while the flag is OFF, or unreadable: the preserve stage keeps both rows.
-  const preserveOff = mixedFixture();
-  event(preserveOff, 'gate-preserve').result = 'disabled';
   const preserveUnreadable = mixedFixture();
   event(preserveUnreadable, 'gate-preserve').result = 'unreadable';
+  // An update of ANOTHER page inside the preserve stage's span: it names a page, so it is no create, and the grader cannot tell it from the stage's
+  // own upload — unscored like the rest, never passed.
+  const otherPageUpdate = offPreserveWith([
+    { id: 'update-other', command: `node genpage-upload.js --page-id ${OTHER_PAGE} --code-file page.tsx`, result: { ok: true, pageId: OTHER_PAGE } },
+  ]);
   for (const [label, fixture] of [
     ['the OFF removal with the retained Custom API table', retainedRemoval()],
     ['the OFF removal after a normal create and preserve lifecycle', afterLifecycle],
-    ['an unrelated edit while custom-api is OFF', preserveOff],
+    ['an unrelated edit while custom-api is OFF', offPreserveWith([])],
     ['an unrelated edit while the custom-api gate is unreadable', preserveUnreadable],
+    ['an update of another page inside the preserve stage\'s span', otherPageUpdate],
   ]) {
-    for (const [index, result] of gateVerdicts(fixture).entries()) assert.equal(result.status, 'pass', `${label}, rule ${index + 1}: ${result.reason}`);
+    assert.deepStrictEqual(customApiProblems(fixture), [], `${label}: no problem — the gate's calls are only unattributed`);
+    for (const [index, result] of gateVerdicts(fixture).entries()) {
+      assert.deepStrictEqual(result, { status: 'skip', reason: CUSTOM_API_GATE_UNSCORED }, `${label}, rule ${index + 1}: ${JSON.stringify(result)}`);
+    }
   }
-  // New authoring while the flag is OFF still halts: a create with Custom API rows, an addition, a replacement — and a stage whose before-config
-  // is not proven to be the page it updates is not a keeping stage at all.
+  // The ON removal stays the control: the row goes, and the rules pass.
+  const on = removalEdit({ gate: 'enabled', rows: [WHO_AM_I], source: BUILT_IN_ONLY });
+  on.genpagePlan = CUSTOM_PLAN;
+  for (const [index, result] of gateVerdicts(on).entries()) assert.equal(result.status, 'pass', `ON removal, rule ${index + 1}: ${result.reason}`);
+});
+
+test('new authoring while custom-api is OFF still fails in all three rules: a create — wherever it sits, the same source or another — an addition, a replacement, an unproven before-config', () => {
   const unverified = retainedRemoval();
   unverified.manifest.uploads = [];
   const withPlan = (fixture, plan) => Object.assign(fixture, { genpagePlan: plan });
@@ -530,13 +564,15 @@ test('a verified stage that only keeps the page\'s Custom API rows needs no enab
     ['a replacement', withPlan(removalEdit({ gate: 'disabled', change: { add: [{ ...API, displayName: 'Approve order (v2)' }] }, rows: [{ ...API, displayName: 'Approve order (v2)' }, WHO_AM_I], source: SOURCE }),
       CUSTOM_PLAN.replace(API_ROW, API_ROW.replace('Approve Order', 'Approve order (v2)')))],
     ['a removal from an unproven before-config', unverified],
+    // A create cannot borrow the proof of the preserving stage it sits beside.
+    ['another page created inside the preserve stage\'s span', otherPageCreate('inside')],
+    ['another page created after the preserve stage', otherPageCreate('after')],
+    ['the same source created again, unlisted, before the preserving upload', offPreserveWith([
+      { id: 'unintended-create', command: 'node genpage-upload.js --code-file page.tsx --actions actions.json', result: { ok: true, pageId: OTHER_PAGE } },
+    ])],
   ]) {
     const found = customApiProblems(fixture);
     assert.ok(found.includes(HALT), `${label}: ${JSON.stringify(found)}`);
-    for (const [index, result] of gateVerdicts(fixture).entries()) assert.equal(result.status, 'fail', `${label}, rule ${index + 1}`);
+    for (const [index, result] of gateVerdicts(fixture).entries()) assert.equal(result.status, 'fail', `${label}, rule ${index + 1}: ${JSON.stringify(result)}`);
   }
-  // The ON removal stays the control: the row goes.
-  const on = removalEdit({ gate: 'enabled', rows: [WHO_AM_I], source: BUILT_IN_ONLY });
-  on.genpagePlan = CUSTOM_PLAN;
-  for (const [index, result] of gateVerdicts(on).entries()) assert.equal(result.status, 'pass', `ON removal, rule ${index + 1}: ${result.reason}`);
 });
