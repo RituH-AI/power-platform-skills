@@ -6,10 +6,9 @@ token** (no broker, no impersonation). The `name` string a page passes to
 `dataApi.executeAction` / `executeFunction` **MUST** equal an `actionBindings[].name` value
 in the page `config.json`, and that Custom API must exist in the target environment.
 
-> **Custom API discovery is enabled by default**, with a retained `custom-api` feature flag.
-> Set `GENPAGE_ENABLE_CUSTOM_API=0` to opt out. Unknown flags and missing/unreadable config
-> still fail closed. When OFF, no new Custom API bindings or calls are authored; unrelated
-> edits preserve existing bindings unchanged. The `genpage-customapi-builder` agent owns this gate.
+> **Custom API support has no feature flag.** Discovery, authoring and upload are always
+> available; the `custom-api` flag that once gated them was removed, and
+> `GENPAGE_ENABLE_CUSTOM_API` is ignored. The `genpage-customapi-builder` agent owns discovery.
 
 > **Vocabulary.** Makers author **Custom APIs** (the Dataverse `customapi` artifact); each is
 > either an **Action** (POST; call with `executeAction`) or a **Function** (GET;
@@ -92,8 +91,7 @@ a spec that states one is refused (see `references/app-spec-schema.md` → `page
 itself never reads or writes the spec. The spec carries the list and not the Custom APIs it names: each must
 already exist in the environment you rebuild into, deployed in a solution. A rebuild reads the environment's Custom
 APIs before it writes and says by name one that is not there, one that is the other kind (Action or Function) and
-one bound to another table; it does not stop for them. The `custom-api` flag gates what the `/genpage` agents
-author, not this.
+one bound to another table; it does not stop for them.
 
 An App Spec must not declare `EntityReference`, `Entity` or `EntityCollection`. A downloaded list
 holding an unsupported declared kind is left out whole and reported by place and property, never

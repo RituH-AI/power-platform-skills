@@ -1,11 +1,12 @@
 'use strict';
 // The documents that teach the agents the two built-in Dataverse operations (WhoAmI, RetrieveVersion) say what the code does — and keep saying it.
 //
-// The agents act on these words, not on the code: the builder must probe two independent gates (custom-api OFF no longer ends its run or writes []
-// over a page's kept bindings), offer only the listing's catalogue and only on an affirmative selection, project the four-key row, and write the
-// optional plan section only for a selection of this run; the planners signal and never probe; the orchestrator re-probes before an add/replace
-// and halts rather than clearing; the page builder emits a button-only call; download and rebuild relay the not-checked words. The reference
-// quotes the fixed sentences the code prints, so a change on either side fails here.
+// The agents act on these words, not on the code: the builder must probe the one gate left, `dataverse-operations` (Custom API support has no
+// flag, and the gate being off never ends its run or writes [] over a page's kept bindings), offer only the listing's catalogue and only on an
+// affirmative selection, project the four-key row, and write the optional plan section only for a selection of this run; the planners signal and
+// never probe; the orchestrator re-probes before an add/replace and halts rather than clearing; the page builder emits a button-only call;
+// download and rebuild relay the not-checked words. The reference quotes the fixed sentences the code prints, so a change on either side fails
+// here.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -44,10 +45,14 @@ test('the reference says why nothing beyond the pair is offered, and that the of
   has(reference, /2\.17, 2\.18 and 2\.19 do not offer these operations/);
 });
 
-test('the builder probes two independent gates — custom-api OFF no longer ends the run or writes [] over kept bindings — and owns the offer, the selection and the one actions.json', () => {
+// Custom API support has no feature flag any more, so the builder probes one gate: `dataverse-operations`, which decides the built-in branch only.
+test('the builder probes the dataverse-operations gate alone — Custom API support has no flag, and the gate being off never ends the run or writes [] over kept bindings — and owns the offer, the selection and the one actions.json', () => {
   const builder = squash(read('agents', 'genpage-customapi-builder.md'));
-  has(builder, /feature-flags\.js" custom-api node "\$\{PLUGIN_ROOT\}\/scripts\/lib\/feature-flags\.js" dataverse-operations/);
-  has(builder, /The two are independent: one being off never stops the other branch, never ends this run early, and never writes `\[\]` over bindings a page keeps\./);
+  has(builder, /## Step 1 — The `dataverse-operations` gate \(you own it; run it FIRST, always\)/);
+  has(builder, /```powershell node "\$\{PLUGIN_ROOT\}\/scripts\/lib\/feature-flags\.js" dataverse-operations ```/);
+  assert.ok(!/feature-flags\.js" custom-api/.test(builder), 'no custom-api probe is left');
+  has(builder, /It decides the built-in branch \(Step 2b\) only: being off never stops Custom API discovery, never ends this run early, and never writes `\[\]` over bindings a page keeps\./);
+  has(builder, /Custom API support has no feature flag: discovery, authoring and upload are always available, so run Step 2 whenever the intent needs a Custom API\./);
   assert.ok(!/`actions\.json` containing `\[\]`\. Return `custom-api disabled/.test(builder), 'the old early return is gone');
   has(builder, /list-dataverse-operations\.js/);
   has(builder, /Selection is consent; a mention is not\./);
@@ -108,12 +113,16 @@ test('the page builder emits a button-only call from the reference, only for the
   assert.ok(squash(read('references', 'app-spec-schema.md')).includes('`pageBindings.neededInTarget.dataverseOperations`'));
 });
 
-test('AGENTS.md lists the third flag OFF, its owner, plan section, gated script and deploy phase', () => {
+test('AGENTS.md lists the flags left — dataverse-operations OFF with its owner, plan section, gated script and deploy phase — and says Custom API support has none', () => {
   const agents = squash(read('AGENTS.md'));
-  has(agents, /The remaining flags are `custom-api` \(\*\*ON\*\*\), `custom-telemetry` \(\*\*OFF\*\*\) and `dataverse-operations` \(\*\*OFF\*\*\)\./);
-  has(agents, /\| \| `custom-api` \| `custom-telemetry` \| `dataverse-operations` \|/);
-  has(agents, /\| \*\*Gated scripts\*\* \| `list-custom-apis\.js` \| none \| `list-dataverse-operations\.js` \|/);
-  has(agents, /\| \*\*Deploy phase\*\* \| SKILL Phase 4\.6 \| SKILL Phase 4\.7 \(probe only\) \| SKILL Phase 4\.6b/);
+  has(agents, /The remaining flags are `custom-telemetry` \(\*\*OFF\*\*\) and `dataverse-operations` \(\*\*OFF\*\*\)\./);
+  has(agents, /neither does Custom API support: `custom-api` shipped ON in 2\.18\.0 and 2\.19\.0 with its platform dependencies live in every region, so it was removed — Custom API discovery, authoring and upload are always available, and `GENPAGE_ENABLE_CUSTOM_API` is ignored\./);
+  has(agents, /\| \| `custom-telemetry` \| `dataverse-operations` \|/);
+  assert.ok(!/\| `custom-api` \|/.test(agents), 'the flag table has no custom-api column');
+  has(agents, /\| \*\*Gated scripts\*\* \| none \| `list-dataverse-operations\.js` \|/);
+  has(agents, /\| \*\*Deploy phase\*\* \| SKILL Phase 4\.7 \(probe only\) \| SKILL Phase 4\.6b/);
+  has(agents, /Custom API support, with no flag, keeps the rest of that pattern: `genpage-customapi-builder` is its one owner/);
+  has(agents, /Connector and Custom API scripts have no feature-flag backstop because both are always on\./);
   has(agents, /list-dataverse-operations\.js ← /);
   has(agents, /dataverse-operations\.js ← The reviewed built-in operation catalogue/);
 });
@@ -144,31 +153,32 @@ test('removing every Custom API keeps the built-in rows — `[]` only clears a p
   assert.ok(!/write `\[\]` and pass it to clear all `actionBindings`\./.test(skill), 'Phase 6: the unqualified [] clear is gone');
   has(skill, /removing every Custom API keeps them/);
   const builder = section(read('agents', 'genpage-customapi-builder.md'), '## Step 4');
-  has(builder, /\*\*Remove every Custom API:\*\* with `custom-api` enabled, drop each Custom API row and keep every built-in row byte for byte/);
+  has(builder, /\*\*Remove every Custom API:\*\* drop each Custom API row and keep every built-in row byte for byte/);
   has(builder, /`actions\.json` is `\[\]` only when no row of either kind remains/);
   has(squash(read('agents', 'genpage-edit-planner.md')), /Clearing the Custom APIs of a page that also binds a built-in operation removes each Custom API row and keeps the built-in calls and bindings/);
   has(squash(read('references', 'dataverse-operations.md')), /Removing every Custom API is a remove of each Custom API row: the built-in rows stay, byte for byte/);
 });
 
-// A create that binds only built-in operations, followed through the create flow's own words with `custom-api` either way: the Custom API gate
-// governs Custom API rows only, both gates come first, then one decision writes and passes the whole array — so the built-in rows are bound.
-test('a built-in-only create passes --actions with custom-api ON or OFF: Phase 4.6 governs Custom API rows only, and one decision after both gates writes and passes the array', () => {
+// A create that binds only built-in operations, followed through the create flow's own words: Phase 4.6 governs the Custom API rows only and
+// probes no flag (Custom API support has none), Phase 4.6b's gate comes next, then one decision writes and passes the whole array — so the
+// built-in rows are bound.
+test('a built-in-only create passes --actions: Phase 4.6 governs Custom API rows only and probes no flag, and one decision after Phase 4.6b writes and passes the array', () => {
   const skill = read('skills', 'genpage', 'SKILL.md');
   const customGate = section(skill, '### Phase 4.6:', '### Phase 4.6b:');
-  // custom-api OFF: the sentinel continues, adding no Custom API row — not a ban on the whole actions file.
-  assert.ok(!/Do not create or pass `actions\.json`/.test(customGate), 'Phase 4.6 OFF: no ban on the whole actions file');
-  assert.ok(!/never add `--actions` on upload/.test(customGate), 'Phase 4.6 OFF: no ban on --actions');
-  has(customGate, /\*\*If it prints `disabled`:\*\* Custom API support is OFF\. Add no Custom API row/);
-  has(customGate, /only a body of exactly `No custom API bindings\.` continues, with no Custom API rows/);
-  // custom-api ON: the sentinel continues with no Custom API rows — not "no actions".
-  assert.ok(!/continue with no actions/.test(customGate), 'Phase 4.6 ON: not "no actions"');
+  // The sentinel continues, adding no Custom API row — not a ban on the whole actions file.
+  assert.ok(!/Do not create or pass `actions\.json`/.test(customGate), 'Phase 4.6: no ban on the whole actions file');
+  assert.ok(!/never add `--actions` on upload/.test(customGate), 'Phase 4.6: no ban on --actions');
+  has(customGate, /Custom API support has no feature flag, so there is nothing to probe here\./);
+  assert.ok(!/feature-flags\.js|If it prints `disabled`/.test(customGate), 'Phase 4.6: no probe and no disabled branch');
+  // The sentinel continues with no Custom API rows — not "no actions".
+  assert.ok(!/continue with no actions/.test(customGate), 'Phase 4.6: not "no actions"');
   has(customGate, /continue with no Custom API rows only when its body is exactly `No custom API bindings\.`/);
   has(customGate, /This phase governs the Custom API rows only/);
-  // Both gates, then one decision.
+  // Phase 4.6b's gate, then one decision.
   const decision = section(skill, '### Phase 4.6c:', '### Phase 4.7:');
   has(decision, /Decide once, after Phase 4\.6 and Phase 4\.6b/);
-  has(decision, /the create passes `--actions '<working-dir>\/actions\.json'` whatever `custom-api` printed/);
-  has(decision, /a page that binds only built-in operations is created with them bound, with `custom-api` enabled or disabled/);
+  has(decision, /Then the create passes `--actions '<working-dir>\/actions\.json'`: a page that binds only built-in operations is created with them bound\./);
+  assert.ok(!/custom-api/.test(decision), 'the decision waits for no custom-api flag');
   has(decision, /\*\*Empty:\*\* the create passes no `--actions`/);
   // The upload follows that decision, not Phase 4.6 alone.
   const deploy = section(skill, '### Phase 6: Deploy', '### Phase 6.5:');
@@ -177,6 +187,7 @@ test('a built-in-only create passes --actions with custom-api ON or OFF: Phase 4
   has(deploy, /the `--actions` line when Phase 4\.6c decided an empty array/);
   has(deploy, /pass `actions\.json` with `--actions` when Phase 4\.6c decided so/);
   has(deploy, /The same rule applies to `--actions` for the page's `actionBindings` — Custom API and built-in rows alike/);
+  assert.ok(!/whatever the `custom-api` flag says/.test(deploy), 'Phase 6: no custom-api flag is left to ignore');
 });
 
 // An edit runs its own eight phases; the create flow's Phase 4.6b is never visited. So the edit flow itself must take the edit planner's signal,
@@ -313,30 +324,36 @@ test('a create whose built-in offer adds nothing — the gate off, or the offer 
   has(section(read('skills', 'genpage', 'edit-flow.md'), '## Edit Phase 4:', '## Edit Phase 5:'), /re-invoke the planner with the built-in operation intent `none — not added this run` and no contract/);
 });
 
-// While `custom-api` is OFF the builder removes no Custom API row (it keeps them, as it keeps every Custom API binding then). Every recipe that
-// sends a removal through it must say what it will get back — the rows kept, the removal reported as not performed, nothing to upload when the
-// array is unchanged — and a removal is never turned into a clear to get around the flag. With the flag ON the rows go.
-test('with custom-api OFF a Custom API removal removes nothing — the builder keeps the rows and reports it, and every recipe says so; with it ON the rows go', () => {
+// Custom API support has no feature flag any more, so nothing keeps a Custom API row back: a removal always removes. The builder drops the named
+// rows, every recipe uploads the array it wrote, and no document a run follows still teaches the OFF branch — a removal "not performed
+// (custom-api disabled)", an upload that omits --actions because the flag kept the rows, or a plan that waits for the flag. (A file name such as
+// `custom-api-bindings.md` or `custom-api.md` is not the flag.)
+const FLAG_BRANCH = /`custom-api`|\bcustom-api (?:OFF|ON|off|on|disabled|enabled|flag|gate|feature)\b|removal not performed|waits for the flag|GENPAGE_ENABLE_CUSTOM_API/;
+test('a Custom API removal always removes — no flag keeps a row back: the builder drops the named rows, every recipe uploads what it wrote, and no recipe keeps an OFF branch', () => {
   const builder = read('agents', 'genpage-customapi-builder.md');
-  const off = section(builder, '**If `custom-api` prints `disabled`', 'Only when it prints `enabled`');
-  has(off, /A Custom API the intent asks to remove stays too — its table row and its `actions\.json` row — because the removal waits until the flag is on/);
-  has(off, /write `Custom API removal not performed \(custom-api disabled\): <names>` \(comma-separated\) into `workflow-log\.md` and return it/);
-  has(off, /never write `No custom API bindings\.` or `\[\]` in their place/);
   const reconcile = section(builder, '## Step 4', '## Step 5');
-  has(reconcile, /\*\*Remove:\*\* drop the named binding\(s\) — a Custom API row only while `custom-api` is enabled; with it disabled the row stays and the removal is reported as not performed \(Step 1\)/);
-  has(reconcile, /With it disabled, keep every row — the Custom API table and rows too — and report the removal as not performed \(Step 1\); never turn it into a clear/);
-  has(section(builder, '## Step 5'), /the Custom API removals not performed because `custom-api` is disabled \(or "none"\)/);
+  has(reconcile, /- \*\*Remove:\*\* drop the named binding\(s\)\. - \*\*Remove every Custom API:\*\* drop each Custom API row and keep every built-in row byte for byte/);
+  has(section(builder, '## Step 5'), /Return a concise summary: mode, the `dataverse-operations` gate result, the `name`s of the Custom API bindings and of the built-in operations written \(or "none"\), and whether `dataverse-operations\.md` was written this run/);
   const edit = read('skills', 'genpage', 'edit-flow.md');
   const planning = section(edit, '## Edit Phase 3:', '## Edit Phase 4:');
-  has(planning, /With `custom-api` OFF the builder removes no Custom API row: it keeps them — table and rows — and reports `Custom API removal not performed \(custom-api disabled\): <names>`\. Relay that to the maker, keep those calls in the page/);
-  has(planning, /With `custom-api` OFF it keeps every row and reports the removal as not performed: relay that, and keep the Custom API table, rows and calls — never `No custom API bindings\.` or `\[\]` in their place, and never a clear to get around the flag/);
-  has(planning, /A clear is the maker's own request for an empty array, so no flag decides it/);
+  has(planning, /The builder discovers and returns the updated set\./);
+  has(planning, /It drops those rows and nothing else, and writes the remaining rows to `actions\.json` and `No custom API bindings\.` to `custom-api-bindings\.md`; pass `--actions` on upload\./);
+  has(planning, /A clear is the maker's own request for an empty array: on a page with no built-in row that is what removing every Custom API means, as before\./);
   const deploy = section(edit, '## Edit Phase 6:', '## Edit Phase 7:');
-  has(deploy, /Include it only when that array differs from the page's current `actionBindings`: with `custom-api` OFF the builder removes no Custom API row, and an array it left unchanged is not uploaded — omit `--actions`/);
-  has(deploy, /with it OFF the builder kept every row, so omit `--actions` and relay the removal it did not perform/);
-  has(squash(read('references', 'dataverse-operations.md')), /With `custom-api` OFF no Custom API row is removed either: the builder keeps them, reports `Custom API removal not performed \(custom-api disabled\): <names>`, and the page's array stays as it is \(no `--actions`\)/);
-  has(squash(read('agents', 'genpage-edit-planner.md')), /With `custom-api` OFF the builder removes no Custom API row and reports the removal as not performed: keep those calls — they are still bound — and say in the plan that the removal waits for the flag/);
-  has(section(read('skills', 'genpage', 'SKILL.md'), '### Phase 6: Deploy', '**Deploy through `scripts/genpage-upload.js`.**'), /With `custom-api` OFF a Custom API removal removes nothing: the builder keeps the rows and says so, `--actions` is omitted while the array is unchanged, and a removal is never turned into a clear to get around the flag/);
-  // Planning describes the builder's OFF output as it is: no Custom API row, and the built-in rows a maker selected.
-  has(section(read('skills', 'genpage', 'SKILL.md'), '#### 1b.', '#### 1c.'), /writes `No custom API bindings\.` and no Custom API row when the gate is off or the page needs no Custom API \(`actions\.json` is then `\[\]`, unless built-in operation rows were selected — 1c\)/);
+  has(deploy, /Include `--actions '<working-dir>\/actions\.json'` in the upload — a full replace that also deletes any binding left out of the file\./);
+  has(deploy, /On a page that binds one, upload the `actions\.json` the builder wrote \(the built-in rows\) with `--actions` — never `\[\]` while a built-in row remains\./);
+  has(squash(read('references', 'dataverse-operations.md')), /Removing every Custom API is a remove of each Custom API row: the built-in rows stay, byte for byte, and the file is never `\[\]` while one remains — a removal is never turned into a clear\./);
+  // Planning describes the builder's output as it is: no Custom API row when the page needs none, and the built-in rows a maker selected.
+  has(section(read('skills', 'genpage', 'SKILL.md'), '#### 1b.', '#### 1c.'), /The builder remains the single owner of Custom API discovery, which has no feature flag: it writes `No custom API bindings\.` and no Custom API row when the page needs no Custom API \(`actions\.json` is then `\[\]`, unless built-in operation rows were selected — 1c\)/);
+  for (const parts of [
+    ['agents', 'genpage-customapi-builder.md'], ['agents', 'genpage-planner.md'], ['agents', 'genpage-edit-planner.md'], ['agents', 'genpage-page-builder.md'],
+    ['skills', 'genpage', 'SKILL.md'], ['skills', 'genpage', 'edit-flow.md'], ['references', 'dataverse-operations.md'], ['references', 'app-spec-schema.md'],
+  ]) {
+    const text = squash(read(...parts));
+    const match = text.match(FLAG_BRANCH);
+    assert.equal(match, null, `${parts.join('/')} still says: ${match && text.slice(Math.max(0, match.index - 80), match.index + 80)}`);
+  }
+  // Where the flag was announced, the documents now say it is gone and the variable is ignored.
+  has(squash(read('references', 'custom-api.md')), /\*\*Custom API support has no feature flag\.\*\* Discovery, authoring and upload are always available; the `custom-api` flag that once gated them was removed, and `GENPAGE_ENABLE_CUSTOM_API` is ignored\./);
+  has(squash(read('README.md')), /Custom API support has no feature flag either: calling a supported public Dataverse Custom API Action or Function from a generated page \(`executeAction` \/ `executeFunction` \/ `listBoundActions`\) is always available\. `GENPAGE_ENABLE_CUSTOM_API` is ignored — `0` no longer turns Custom API discovery off, and there is nothing to turn on\./);
 });

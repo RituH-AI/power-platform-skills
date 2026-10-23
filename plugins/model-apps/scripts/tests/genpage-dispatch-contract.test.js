@@ -229,32 +229,34 @@ test('single-page inline generation treats missing or malformed Custom API Bindi
 // Only the exact sentinel means "none" — a missing, empty or malformed section is a broken plan.
 test('the Custom API phase and the page builder never read a missing or malformed section as none', () => {
   const skill = readDoc(path.join(PLUGIN, 'skills', 'genpage', 'SKILL.md'));
-  const phase = skill.slice(skill.indexOf("**If it prints `enabled`:** read the plan's `## Custom API Bindings`"));
-  assert.ok(phase.length > 0, 'the Custom API phase is where it was');
-  assert.match(phase.slice(0, 700), /only when its body is exactly `No custom API bindings\.`/);
-  assert.match(phase.slice(0, 700), /missing, empty, or malformed, \*\*halt\*\*/);
+  const start = skill.indexOf('### Phase 4.6: Custom API Bindings');
+  assert.ok(start > -1 && skill.indexOf('### Phase 4.6b:') > start, 'the Custom API phase is where it was');
+  const phase = skill.slice(start, skill.indexOf('### Phase 4.6b:'));
+  assert.match(phase, /only\s+when its body is exactly `No custom API bindings\.`/);
+  assert.match(phase, /missing, empty, or malformed, \*\*halt\*\*/);
   const builder = readDoc(path.join(PLUGIN, 'agents', 'genpage-page-builder.md'));
   assert.match(builder, /That sentinel is the only way a plan says\s+"none"/);
   assert.match(builder, /\*\*stop and report it instead of writing the page\*\*/);
   assert.doesNotMatch(builder, /is missing entirely, or contains no binding row, the page has \*\*no Custom APIs\*\*/);
 });
 
-// A plan made while `custom-api` was ON still carries its binding table after the flag is turned OFF.
-// Page generation takes that table as permission to emit executeAction/executeFunction calls, while the
-// OFF branch drops actions.json and --actions — so skipping the phase "regardless of the plan" deployed
-// pages calling Custom APIs that were never bound. OFF with a real table must halt before generation.
-test('a disabled Custom API probe halts on a plan that still carries a binding table', () => {
+// Custom API support has no feature flag any more. The phase once probed `custom-api` and, with it OFF, halted on a plan that still carried a
+// binding table (a plan made while it was ON). With nothing to probe there is no OFF branch: the plan's table is always what the page binds,
+// and only a missing, empty or malformed section halts. Inline generation reads the Custom API guidance whenever the plan has a table — it
+// once did so only under an enabled probe.
+test('the Custom API phase probes no flag: the plan\'s table is read whatever was set, and only a broken section halts', () => {
   const skill = readDoc(path.join(PLUGIN, 'skills', 'genpage', 'SKILL.md'));
-  const start = skill.indexOf("**If it prints `disabled`:** Custom API support is OFF.");
-  assert.ok(start > -1, 'the disabled branch of the Custom API phase is where it was');
-  const off = skill.slice(start, skill.indexOf("**If it prints `enabled`:** read the plan's `## Custom API Bindings`"));
-  assert.match(off, /actual binding table[\s\S]{0,200}\*\*halt before page generation\*\*/, 'a real table under a disabled probe halts');
-  assert.match(off, /only a body of exactly `No custom API bindings\.` continues/, 'only the sentinel lets a disabled run go on');
-  assert.match(off, /missing, empty, or malformed section halts too/, 'a broken section halts under a disabled probe as well');
-  assert.doesNotMatch(off, /regardless of what the\s+plan's/i, 'the disabled branch must not ignore the plan');
-  assert.doesNotMatch(off, /Any other section body/i, 'no body but the sentinel means "none"');
+  const start = skill.indexOf('### Phase 4.6: Custom API Bindings');
+  assert.ok(start > -1 && skill.indexOf('### Phase 4.6b:') > start, 'the Custom API phase is where it was');
+  const phase = skill.slice(start, skill.indexOf('### Phase 4.6b:'));
+  assert.match(phase, /Custom API support has no feature flag, so there is nothing to probe here\./);
+  assert.doesNotMatch(phase, /feature-flags\.js|If it prints `(?:enabled|disabled)`|\bcustom-api\b(?!\.md)/, 'no probe and no disabled branch is left');
+  assert.match(phase, /actual binding table/, 'a real table is what the phase reads');
+  assert.match(phase, /missing, empty, or malformed, \*\*halt\*\* before page generation/);
   const fastPath = skill.split(/#### 5b\. Single-page fast path/)[1].split(/#### 5c\. Multi-page/)[0];
-  assert.match(fastPath, /3b\. Only when the Phase 4\.6 probe printed `enabled` \*\*and\*\*/, 'inline generation reads Custom API guidance only under an enabled probe');
+  assert.match(fastPath, /3b\. Only when the plan's `## Custom API Bindings` section contains an \*\*actual\s+binding table\*\*/,
+    'inline generation reads Custom API guidance whenever the plan has a table');
+  assert.doesNotMatch(fastPath, /Phase 4\.6 probe/, 'inline generation waits for no Custom API probe');
 });
 
 // The manifest generator exits 2 when an existing package.json lacks a package a requested feature needs

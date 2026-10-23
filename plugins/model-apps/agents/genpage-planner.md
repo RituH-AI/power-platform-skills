@@ -398,8 +398,8 @@ Two cases:
    the builder against exactly those. Return this only after your auth/environment and entity
    detection steps have run, so all three values are real.
 
-`genpage-customapi-builder` remains the single owner of the `custom-api` feature gate, Custom
-API discovery, and the binding contract. When the orchestrator forwards results it provides:
+`genpage-customapi-builder` remains the single owner of Custom API discovery and the binding
+contract. When the orchestrator forwards results it provides:
 
 - `custom-api-bindings.md` — the exact body for the plan's `## Custom API Bindings` section
   (either `No custom API bindings.` or the binding table).

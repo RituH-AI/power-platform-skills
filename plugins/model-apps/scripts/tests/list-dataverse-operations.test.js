@@ -77,7 +77,8 @@ const CATALOGUE_LINE = 'The built-in operation catalogue could not be read. No b
 const scratch = makeTempDir('dv-ops-list-');
 let runs = 0;
 
-// The environment of a run: the test's own, without the two gates' overrides (so the committed defaults apply unless a case sets one).
+// The environment of a run: the test's own, without the gate's override or the retired custom-api variable (so the committed default applies
+// unless a case sets one).
 function baseEnv(env) {
   const out = { ...process.env, POWER_PLATFORM_SKILLS_TELEMETRY_MODEL_APPS_OPTOUT: '1' };
   delete out.GENPAGE_ENABLE_DATAVERSE_OPERATIONS;
@@ -162,17 +163,14 @@ test('a catalogue that cannot be read, or is not exactly the reviewed pair, offe
   }
 });
 
-test('the two gates are independent: custom-api OFF leaves the listing as it is, and the new gate ON does not open Custom API discovery', () => {
-  const ran = run([], { env: { ...ON, GENPAGE_ENABLE_CUSTOM_API: '0' } });
-  assert.equal(ran.status, 0, ran.stderr);
-  assert.equal(ran.stdout, `${JSON.stringify(EXPECTED)}\n`);
-  const discovery = spawnSync(process.execPath, [path.join(SCRIPTS, 'list-custom-apis.js'), 'https://contoso.crm.dynamics.com'], {
-    encoding: 'utf8',
-    env: baseEnv({ GENPAGE_ENABLE_CUSTOM_API: '0', GENPAGE_ENABLE_DATAVERSE_OPERATIONS: '1' }),
-  });
-  assert.equal(discovery.status, 3, discovery.stderr);
-  assert.equal(discovery.stdout, '');
-  assert.match(discovery.stderr, /feature flag "custom-api" is OFF/);
+// Custom API support has no flag any more, and the variable of the retired custom-api flag is no switch for this listing either way: it lists
+// with the gate ON whatever that variable says, and stays closed with the gate OFF (the case above sets it to 1).
+test('the retired custom-api variable leaves the listing as it is', () => {
+  for (const value of ['0', '1']) {
+    const ran = run([], { env: { ...ON, GENPAGE_ENABLE_CUSTOM_API: value } });
+    assert.equal(ran.status, 0, ran.stderr);
+    assert.equal(ran.stdout, `${JSON.stringify(EXPECTED)}\n`);
+  }
 });
 
 test('over the kind of pipe Linux and macOS give a script, every exit makes its streams blocking before its first write, and the text arrives whole', () => {

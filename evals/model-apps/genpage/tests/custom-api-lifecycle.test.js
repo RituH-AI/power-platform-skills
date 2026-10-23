@@ -7,6 +7,7 @@ const { loadFixtures } = require('../lib/fixture-loader.js');
 const { PHASE_EXPECTATIONS, WORKFLOW_ASSERTIONS } = require('../lib/assertions-layer-1.js');
 const { PHASE5_EXPECTATIONS } = require('../lib/assertions-layer-2.js');
 const { actionCalls, receiverIsDataApi } = require('../lib/source-evidence.js');
+const { refusalProblems } = require('../lib/workflow-evidence.js');
 
 const RULE = 'Phase 5: Custom API discovery, gate, bare bindings, runtime calls and update preservation or explicit clear agree';
 const bindings = [
@@ -98,15 +99,20 @@ function score(fixture, layer = 1) {
   return check({ fixture, files: fixture.files, eval: { id: 24 } });
 }
 
-test('custom API gate and bindings match generated runtime calls', () => {
+test('custom API bindings match generated runtime calls, and a recorded custom-api probe decides nothing', () => {
   const good = apiFixture();
   for (const layer of [1, 2]) assert.equal(score(good, layer).status, 'pass');
+  // Custom API support has no feature flag: whatever an older run's custom-api probe printed — or no probe at all — the run grades the same.
   for (const mutate of [
     (fixture) => { event(fixture, 'gate-create').result = 'disabled'; },
-    // The create's re-probe: an unreadable gate stops new Custom API authoring. (A verified preserve stage's calls after such a gate cannot be
-    // attributed to it, so the rules leave that run unscored, never passed — custom-api-contract.js customApiGateVerdict;
-    // action-binding-union.test.js pins that.)
     (fixture) => { event(fixture, 'gate-generate').result = 'unreadable'; },
+    (fixture) => { fixture.events = fixture.events.filter((call) => !/\bfeature-flags\.js\b[^\n]*\bcustom-api\b/.test(call.command)); },
+  ]) {
+    const probed = apiFixture();
+    mutate(probed);
+    for (const layer of [1, 2]) assert.equal(score(probed, layer).status, 'pass', `layer ${layer}: ${score(probed, layer).reason}`);
+  }
+  for (const mutate of [
     (fixture) => { event(fixture, 'discovery').result.ok = false; },
     (fixture) => { event(fixture, 'discovery').result.customApis[0].parameterKinds.Amount = 'Boolean'; },
     (fixture) => { fixture.artifacts['actions.json'] = JSON.stringify({ actionBindings: bindings }); },
@@ -242,7 +248,8 @@ test('lookup inputs must use the discovered table and an existing record rather 
   }
 });
 
-test('disabled or unreadable Custom API gates refuse before generation, not as a no-bindings fallback', () => {
+// The `custom-api` gate was removed with its flag, so a refusal can no longer stop at it: a fixture that claims it names no supported stage.
+test('no refusal stops at a custom-api gate any more: a fixture that declares one names an unsupported refusal stage', () => {
   for (const result of ['disabled', 'unknown', null]) {
     const stopped = apiFixture();
     stopped.events = [{ ...stopped.events[0], result }];
@@ -250,28 +257,32 @@ test('disabled or unreadable Custom API gates refuse before generation, not as a
     stopped.manifest.expectedOutcome = 'refused';
     stopped.manifest.refusal = { stage: 'custom-api' };
     stopped.workflowLog = 'Halted before generation: turn the feature back on or re-plan; the gate is disabled or unreadable.';
-    assert.equal(score(stopped).status, 'pass', String(result));
-    stopped.events.push({ command: 'Write page.tsx', artifact: 'stages/with-api.tsx' });
-    assert.equal(score(stopped).status, 'fail');
+    assert.deepStrictEqual(refusalProblems(stopped), ['unsupported refusal stage: custom-api'], String(result));
   }
 });
 
-test('Custom API generation re-probes after discovery rather than borrowing the planning gate', () => {
+test('a Custom API create needs no custom-api probe after discovery — or before it', () => {
   const good = apiFixture();
   assert.equal(score(good).status, 'pass');
   good.events = good.events.filter((call) => call.id !== 'gate-generate');
-  assert.equal(score(good).status, 'fail');
+  assert.equal(score(good).status, 'pass', 'no re-probe after discovery');
+  good.events = good.events.filter((call) => !/\bfeature-flags\.js\b[^\n]*\bcustom-api\b/.test(call.command));
+  for (const layer of [1, 2]) assert.equal(score(good, layer).status, 'pass', `no probe at all, layer ${layer}`);
 });
 
-test('a populated plan cannot continue the audit disabled-gate probe', () => {
+// A captured run recorded its custom-api probe in the log. The probe is history now: every registered workflow check grades the run the same
+// with that probe printing enabled, printing disabled, or absent — none requires it and none refuses it.
+test('a captured run grades the same in every workflow check whether its recorded custom-api probe printed enabled or disabled, or was never run', () => {
   const captured = loadFixtures(path.join(__dirname, '..', 'fixtures')).find((fixture) => fixture.id === 17);
   const plan = captured.genpagePlan.replace('No custom API bindings.', apiFixture().genpagePlan.split('## Custom API Bindings\n')[1].trim());
-  const text = [...WORKFLOW_ASSERTIONS.keys()].find((key) => key.startsWith('Phase 4.6: A populated Custom API plan'));
-  const check = WORKFLOW_ASSERTIONS.get(text);
-  const disabled = { ...captured, genpagePlan: plan, workflowLog: 'node feature-flags.js custom-api -> disabled\n' + captured.workflowLog };
-  assert.equal(check({ fixture: disabled }).status, 'fail');
-  const enabled = { ...disabled, workflowLog: 'node feature-flags.js custom-api -> enabled\n' + captured.workflowLog };
-  assert.equal(check({ fixture: enabled }).status, 'pass');
+  const run = (probe) => ({ ...captured, genpagePlan: plan, workflowLog: (probe ? `node feature-flags.js custom-api -> ${probe}\n` : '') + captured.workflowLog });
+  assert.ok(![...WORKFLOW_ASSERTIONS.keys()].some((key) => key.startsWith('Phase 4.6: A populated Custom API plan')), 'the gate rule is not registered');
+  for (const [text, check] of WORKFLOW_ASSERTIONS) {
+    const grade = (probe) => { const result = check({ fixture: run(probe), eval: { id: 17 } }); return `${result.status}: ${result.reason || ''}`; };
+    const enabled = grade('enabled');
+    assert.equal(grade('disabled'), enabled, `${text}: a disabled probe`);
+    assert.equal(grade(null), enabled, `${text}: no probe`);
+  }
 });
 
 function selectedRecordLookupFixture(memberType = 'string') {
@@ -488,7 +499,6 @@ test('pre-existing binding preservation never authorizes dropping changing or un
       fixture.artifacts['stages/edited.tsx'] = nextSource;
       fixture.files[0].content = nextSource;
     }],
-    ['disabled gate', (fixture) => { event(fixture, 'gate-generate').result = 'disabled'; }],
     ['changed method on the existing operation', (fixture) => {
       const nextSource = fixture.artifacts['stages/edited.tsx'].replace('await api.executeAction({', 'await api.executeFunction({');
       fixture.artifacts['stages/edited.tsx'] = nextSource;

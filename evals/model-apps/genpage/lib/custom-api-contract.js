@@ -3,7 +3,7 @@
 const { isDeepStrictEqual } = require('node:util');
 const { PARAMETER_KIND_BY_TYPE } = require('../../../../plugins/model-apps/scripts/list-custom-apis.js');
 const { pageStructureProblems } = require('../../../../plugins/model-apps/scripts/lib/page-structure.js');
-const { workflowCalls, isGeneration, isUpload, isMutation, resultObject, unassociatedCallProblems } = require('./workflow-evidence.js');
+const { workflowCalls, isUpload, resultObject, unassociatedCallProblems } = require('./workflow-evidence.js');
 const { artifactText, artifactJson, commandInfo, fileName, isGuid, pathKey, gradeEvidence } = require('./evidence-utils.js');
 const { planSection, parseMarkdownRows } = require('./plan-evidence.js');
 const { actionCalls, literalString, objectFields, receiverIsDataApi, stringRecordMemberIsInput, escapeRe } = require('./source-evidence.js');
@@ -18,12 +18,6 @@ const {
 } = require('./action-binding-union.js');
 
 const KINDS = new Set(Object.values(PARAMETER_KIND_BY_TYPE));
-const isGate = (command) => /\bfeature-flags\.js\b[^\n]*\bcustom-api\b/.test(command);
-const gateValue = (call) => {
-  const raw = typeof call.result === 'string' ? call.result.trim() : '';
-  if (raw === 'enabled' || raw === 'disabled') return raw;
-  return call.historical ? /(?:\u2192|->|Result:)\s*(enabled|disabled)\b/.exec(call.text || '')?.[1] || null : null;
-};
 
 function planBindings(fixture) {
   const body = planSection(fixture.genpagePlan, 'Custom API Bindings');
@@ -136,143 +130,9 @@ function beforeConfigEvidence(fixture, stages, calls) {
   return { beforeByStage, verifiedBefore, problems };
 }
 
-// The custom-api gate decides new Custom API authoring: a create whose plan has Custom API rows or whose --actions file holds one, and a stage
-// that adds or replaces a Custom API row. A lifecycle stage whose before-config is verified (beforeConfigEvidence) and whose change adds or
-// replaces none — an unrelated edit, a removal (which the builder defers while the flag is OFF), a clear, or a built-in change — authors no
-// Custom API row: it keeps the rows the page already has. This returns the calls such a stage COVERS: the generations and uploads after the
-// previous stage's upload, up to and including its own. Covering is not attribution — a call inside that span may be the stage's own or an
-// unrelated one, and the grader cannot tell them apart — so a covered call is never passed for the gate (customApiGateVerdict), which needs
-// this only when the plan has Custom API rows. Anything unreadable covers nothing.
-function keepingStageCoverage(fixture, calls) {
-  const stages = fixture.manifest?.customApi?.stages;
-  const covered = new Set();
-  if (!Array.isArray(stages) || !stages.length) return covered;
-  let verified;
-  try { verified = beforeConfigEvidence(fixture, stages, calls).verifiedBefore; } catch { return covered; }
-  let previous = -1;
-  for (const stage of stages) {
-    const upload = calls.findIndex((call) => call.id === stage.upload && isUpload(call.command));
-    if (upload === -1) continue;
-    const authorsCustomApi = !stage.beforeConfig || (stage.change?.add || []).some((row) => !isBuiltInBinding(row));
-    if (!authorsCustomApi && verified.has(stage)) {
-      for (let index = previous + 1; index <= upload; index += 1) {
-        if (isGeneration(calls[index].command) || isUpload(calls[index].command)) covered.add(index);
-      }
-    }
-    previous = upload;
-  }
-  return covered;
-}
-
-const GATE_HALT = 'disabled or unreadable Custom API gate must halt before generation or upload';
-// The one reason every rule that grades the gate gives when it cannot score a run (gradeWithGate).
-const CUSTOM_API_GATE_UNSCORED = 'custom-api OFF: a preserving stage\'s generation or upload cannot be attributed to that stage, so a page kept while the gate is OFF is not graded';
-
-// Whether a recorded bindings list holds a Custom API row: anything but a reviewed built-in (WhoAmI, RetrieveVersion — isBuiltInBinding, which
-// knows a legacy built-in entry by its name too). A list that cannot be read — a missing or unparseable file, or anything but an array — counts
-// as holding one: no evidence, no pass.
-function holdsCustomApiRow(read) {
-  let list;
-  try { list = read(); } catch { return true; }
-  return !Array.isArray(list) || list.some((entry) => !isBuiltInBinding(entry));
-}
-// A recorded upload's --actions file — the list the upload gives the page; an upload with no --actions file binds nothing.
-function actionsHoldCustomApi(fixture, call) {
-  const file = commandInfo(call).flags.actions;
-  return file !== undefined && holdsCustomApiRow(() => artifactJson(fixture, file));
-}
-// A stage config's bindings, read as beforeConfigEvidence reads them: a config with no actionBindings holds none.
-function configBindings(fixture, file) {
-  const config = artifactJson(fixture, file);
-  return config.actionBindings === undefined ? [] : config.actionBindings;
-}
-
-// Whether the recorded lifecycle carries a Custom API row, whatever the plan's Custom API table says: in a recorded upload's --actions file, or in
-// a lifecycle stage's before- or after-config (manifest.customApi.stages). Only an --actions file writes a page's bindings, and the configs show the
-// rows a page holds, so these are the places a recorded run can carry one. Anything unreadable — a file, a stage with no after-config, stages
-// that are not a list, evidence that cannot be scanned — counts as carrying one.
-function carriesCustomApi(fixture, calls) {
-  try {
-    if ((calls || workflowCalls(fixture)).some((call) => isUpload(call.command) && actionsHoldCustomApi(fixture, call))) return true;
-    const stages = fixture.manifest?.customApi?.stages;
-    if (stages === undefined) return false;
-    if (!Array.isArray(stages)) return true;
-    return stages.some((stage) => !stage || typeof stage !== 'object'
-      || (stage.beforeConfig !== undefined && holdsCustomApiRow(() => configBindings(fixture, stage.beforeConfig)))
-      || holdsCustomApiRow(() => configBindings(fixture, stage.afterConfig)));
-  } catch {
-    return true;
-  }
-}
-
-// The gate's verdict on a run: its problems, and how many calls it could not attribute. The gate grades a workflow that bears Custom API rows —
-// its plan's Custom API table has rows, or its recorded lifecycle carries one (carriesCustomApi): an empty table is no permission. In such a
-// workflow a generation or upload made while the latest gate is not enabled — disabled, unreadable or never probed — is never passed:
-//   - a create (an upload without --page-id) whose --actions file holds a Custom API row, or cannot be read, is a problem whatever the plan says;
-//   - with Custom API rows in the plan, every other create is a problem too (a create can never keep a page's rows), and so is a call no verified
-//     keeping stage covers (keepingStageCoverage): new authoring as far as the evidence shows;
-//   - any other call is UNATTRIBUTED: it may be a keeping stage's own, or not, and the grader cannot prove which — neither a pass nor a problem.
-//     Under an empty plan table that is every call but such a create, with no keeping stage required: a run that planned no Custom API declares
-//     none. A workflow whose only rows are the built-ins (WhoAmI, RetrieveVersion) is outside the gate, which decides only Custom API authoring.
-// Why unscored rather than attributed: two ways to tie such a call to its stage have failed. Refusing every call after an OFF gate graded a
-// correct kept page (an unrelated edit, or a removal the builder defers) as forbidden authoring; exempting every call the stage covers let an
-// unrelated create beside it borrow the stage's proof. Matching calls to a stage by page id, source or time would be a third guess of the same
-// kind, so the rules that grade the gate leave such a run unscored instead (gradeWithGate). Everything else the gate checks is unchanged.
-function customApiGateVerdict(fixture) {
-  const bindings = planBindings(fixture);
-  const calls = workflowCalls(fixture);
-  const problems = unassociatedCallProblems(fixture);
-  const inScope = bindings.length > 0 || carriesCustomApi(fixture, calls);
-  const covered = keepingStageCoverage(fixture, calls);
-  let unattributed = 0;
-  let latest = null;
-  let gateIndex = -1;
-  let discoveryIndex = -1;
-  for (const [index, call] of calls.entries()) {
-    if (isGate(call.command)) {
-      latest = gateValue(call);
-      gateIndex = index;
-    } else if (/\blist-custom-apis\.js\b/.test(call.command)) {
-      if (latest !== 'enabled') problems.push('Custom API discovery ran before an enabled feature gate');
-      discoveryIndex = index;
-    } else if (inScope && (isGeneration(call.command) || isUpload(call.command))) {
-      if (latest !== 'enabled') {
-        const creates = isUpload(call.command) && !commandInfo(call).flags['page-id'];
-        if (creates && actionsHoldCustomApi(fixture, call)) problems.push(GATE_HALT);
-        else if (bindings.length && (creates || !covered.has(index))) problems.push(GATE_HALT);
-        else unattributed += 1;
-      } else if (bindings.length && gateIndex <= discoveryIndex) problems.push('Custom API generation must re-probe the feature gate after planning discovery');
-    }
-  }
-  if (bindings.length && !calls.some((call) => isGate(call.command))) problems.push('Custom API table has no applicable feature gate');
-  if (fixture.manifest?.expectedOutcome === 'refused') {
-    if (latest === 'enabled' || !bindings.length || (fixture.files || []).length || calls.some((call) => isGeneration(call.command) || isMutation(call))) {
-      problems.push('Custom API refusal must have a blocked gate and zero generation or mutations');
-    }
-    if (!/\bhalt(?:ed)?\b|\bneeds_input\b/i.test(fixture.workflowLog || '')) problems.push('Custom API gate refusal did not surface a halt');
-  }
-  return { problems, unattributed };
-}
-
-// The gate's problems alone, for the callers that grade only problems: customApiProblems, and an expected refusal (workflow-evidence.js
-// refusalProblems), where any generation or upload is itself a refusal problem, so an unattributed call can never leave it unscored.
-function customApiGateProblems(fixture) {
-  return customApiGateVerdict(fixture).problems;
-}
-
-// A rule that grades the gate, in the framework's { status, reason } (evidence-utils.js gradeEvidence): any problem fails it, exactly as before;
-// with none, a call the gate could not attribute leaves it unscored — `skip`, counted apart from passes by the runners — rather than passed.
-// This wraps the existing problem lists instead of changing their shape, so every other caller of them is untouched.
-function gradeWithGate(check, fixture) {
-  const graded = gradeEvidence(check, fixture);
-  if (graded.status !== 'pass') return graded;
-  let unattributed;
-  try { ({ unattributed } = customApiGateVerdict(fixture)); } catch (error) { return { status: 'fail', reason: error.message }; }
-  return unattributed ? { status: 'skip', reason: CUSTOM_API_GATE_UNSCORED } : graded;
-}
-// The Phase 4.6 workflow rule, and the Phase 5 rule of both layers.
-const gradeCustomApiGate = (fixture) => gradeWithGate(customApiGateProblems, fixture);
-const gradeCustomApi = (fixture) => gradeWithGate(customApiProblems, fixture);
+// The Phase 5 rule of both layers. Custom API support has no feature flag any more, so nothing here reads a `custom-api` probe: a recorded
+// one (an older run made it) is neither required nor refused.
+const gradeCustomApi = (fixture) => gradeEvidence(customApiProblems, fixture);
 
 function parameterMatches(value, kind, prefix) {
   const literal = literalString(value);
@@ -401,21 +261,9 @@ function runtimeProblems(code, bindings, declaredOutputs, lookupMetadata, author
   return problems;
 }
 
-// The builder's own account of a removal it did not perform while `custom-api` was OFF (genpage-customapi-builder.md, Step 1), one line of the
-// workflow log:
-//   Custom API removal not performed (custom-api disabled): cnt_ApproveOrder, cnt_RejectOrder
-// It must name exactly the Custom APIs this removal left in place — a report that names fewer, or more, does not say what happened.
-function deferredRemovalProblems(workflowLog, deferred, label) {
-  const want = [...deferred].sort().join(',');
-  const reported = String(workflowLog || '').split(/\r?\n/).some((line) => {
-    const report = /Custom API removal not performed \(custom-api disabled\):\s*(.+?)\s*$/.exec(line);
-    return Boolean(report) && report[1].split(/\s*,\s*/).filter(Boolean).sort().join(',') === want;
-  });
-  return reported ? [] : [`${label}: custom-api was off, so ${deferred.join(', ')} stayed — the log must say so: Custom API removal not performed (custom-api disabled): ${deferred.join(', ')}`];
-}
-
 function customApiProblems(fixture) {
-  const problems = customApiGateProblems(fixture);
+  // A logged command with no recorded result is no evidence at all (workflow-evidence.js).
+  const problems = unassociatedCallProblems(fixture);
   if (fixture.manifest?.expectedOutcome === 'refused') return problems;
   const contract = fixture.manifest?.customApi;
   if (!contract?.stages?.length) return [...problems, 'Custom API lifecycle has no source/config stages'];
@@ -464,16 +312,7 @@ function customApiProblems(fixture) {
     if (previousId && (flags['page-id'] !== previousId || result.pageId !== previousId)) problems.push(`${stage.id}: update changes the API page's identity`);
     previousId = result?.pageId;
     const before = stage.beforeConfig ? beforeByStage.get(stage) : declared;
-    // With the custom-api gate OFF at this upload the builder removes no Custom API row (genpage-customapi-builder.md, Step 1): a removal of a
-    // Custom API name waits for the flag — the row stays, and the log says which removals were not performed. A built-in row named in the same
-    // removal still goes (no flag decides a built-in removal), and a clear — the maker's own request for an empty array — is never deferred.
-    let gate = null;
-    for (let index = uploadIndex - 1; index >= 0 && gate === null; index -= 1) if (isGate(calls[index].command)) gate = gateValue(calls[index]) || 'unreadable';
-    const deferred = stage.beforeConfig && gate !== 'enabled' ? (stage.change?.remove || []).filter((name) => !isBuiltInBinding({ name })) : [];
-    const change = deferred.length ? { ...stage.change, remove: stage.change.remove.filter((name) => !deferred.includes(name)) } : stage.change;
-    const desired = stage.beforeConfig ? desiredBindings(before, change, 'name') : declared;
-    const unchanged = deferred.length > 0 && sameBindings(desired, before, 'name');
-    if (deferred.length) problems.push(...deferredRemovalProblems(fixture.workflowLog, deferred, stage.id));
+    const desired = stage.beforeConfig ? desiredBindings(before, stage.change, 'name') : declared;
     if (stage.beforeConfig && stage.change?.clear === true) {
       problems.push(...clearConfirmationProblems({
         workflowLog: fixture.workflowLog, uploads: calls.filter((entry) => isUpload(entry.command)), call, previousUpload: stageUpload,
@@ -481,8 +320,7 @@ function customApiProblems(fixture) {
       }));
     }
     if (stage.beforeConfig && stage.change === undefined && flags.actions) problems.push(`${stage.id}: unchanged APIs must omit --actions`);
-    if (unchanged && flags.actions) problems.push(`${stage.id}: a removal the custom-api flag deferred changes nothing — omit --actions`);
-    if (!stage.beforeConfig || (stage.change !== undefined && !unchanged)) {
+    if (!stage.beforeConfig || stage.change !== undefined) {
       if (!flags.actions || pathKey(flags.actions) !== pathKey(stage.actions) || !sameBindings(artifactJson(fixture, flags.actions), desired, 'name')) {
         problems.push(`${stage.id}: actions file must be the full desired bare array, including explicit [] to clear`);
       } else if (authoring.includes(stage.upload)) {
@@ -515,6 +353,4 @@ function customApiProblems(fixture) {
   return problems;
 }
 
-module.exports = {
-  customApiProblems, customApiGateProblems, customApiGateVerdict, gradeCustomApi, gradeCustomApiGate, carriesCustomApi, CUSTOM_API_GATE_UNSCORED,
-};
+module.exports = { customApiProblems, gradeCustomApi };

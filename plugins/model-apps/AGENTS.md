@@ -1811,8 +1811,8 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   `note` — in the order the spec lists its pages, names sorted by `compareText`; the block is absent when no page
   holds one and nothing was left out. The connection reference and the connection behind it (a user's sign-in, which
   stays where it was made), the Custom API (a solution component) and the resources a connector binding points at
-  are not App Spec items; the `NOTE:` names the scripts that make each one there. The `custom-api` feature flag
-  gates what the `/genpage` agents author, not this: a download and a rebuild carry the bindings a page already
+  are not App Spec items; the `NOTE:` names the scripts that make each one there. The `dataverse-operations` feature
+  flag gates what the `/genpage` agents author, not this: a download and a rebuild carry the bindings a page already
   holds. `page-binding-contract.test.js` pins the allowlist, the projection and the merge,
   `page-binding-targets.test.js` the reads and the judgement of the environment, `page-bindings.test.js` the
   download, the validator, the build's write sites and its check of the environment, and
@@ -2697,7 +2697,7 @@ The canonical layout of the plugin (architecture **diagrams** live in
 AGENTS.md                      ← Plugin guidance for AI agents (this file)
 README.md                      ← User-facing intro and prereqs
 CHANGELOG.md                   ← Keep-a-Changelog
-feature-flags.json             ← Feature flags (custom-api, custom-telemetry)
+feature-flags.json             ← Feature flags (custom-telemetry, dataverse-operations)
 .claude-plugin/plugin.json     ← Legacy plugin metadata mirror
 docs/
   architecture.md              ← Wiring/flow diagrams for BOTH skills (/genpage + /app-builder)
@@ -2709,7 +2709,7 @@ agents/                        ← Agent definitions (invoked by skills via Task
   genpage-entity-builder.md    ← DV entity creation via plugin's Web API scripts (create flow)
   genpage-page-builder.md      ← Writes one .tsx file; runs in parallel for multi-page (create flow)
   genpage-edit-planner.md      ← Reads download artifacts, plans edits, writes edit plan (edit flow)
-  genpage-customapi-builder.md ← Single owner of the custom-api and dataverse-operations gates; discovers bound Custom APIs, offers the two built-in operations, writes ## Custom API Bindings (+ dataverse-operations.md) + actions.json (create & edit flows)
+  genpage-customapi-builder.md ← Single owner of Custom API discovery and the dataverse-operations gate; discovers bound Custom APIs, offers the two built-in operations, writes ## Custom API Bindings (+ dataverse-operations.md) + actions.json (create & edit flows)
 references/                    ← Shared reference docs
   rules.md                     ← Full code-gen rules, DataAPI types, layout patterns, common errors
   custom-api.md                ← Dataverse Custom API (Action/Function) invocation contract (loaded when the plan has ## Custom API Bindings)
@@ -2739,7 +2739,7 @@ scripts/
   list-connections.js          ← Connector discovery: the maker's connections + Dataverse connection references. The connections come from the SDK first (`listConnections`, with the Power Apps service token); `pac connection list --environment <origin>` runs only where the SDK refuses the route — and at once, with no SDK and no token read, for an environment outside the Public cloud, which the SDK has no route for (see "Connections, connector metadata and deployment settings") — and the output says which answered (`connectionsSource`, `connectionsFallback`)
   connector.js                 ← /genpage connector builder: a connector's operations, one operation's parameters and response, a tabular connector's table columns — `operations` and `schema --operation` from the SDK first (an environment outside the Public cloud goes to `pac` at once), `schema --dataset --table` and every SDK refusal through `pac model genpage`; one pure-ASCII JSON line with `source`
   create-connection-reference.js ← Creates Dataverse connectionreference rows for connector bindings
-  list-custom-apis.js          ← Discovers supported public Custom APIs (Global + entity-bound), primitive kinds + separate lookup inputs (custom-api gated)
+  list-custom-apis.js          ← Discovers supported public Custom APIs (Global + entity-bound), primitive kinds + separate lookup inputs (no feature gate)
   list-dataverse-operations.js ← Offers the reviewed built-in operation catalogue (WhoAmI, RetrieveVersion) as one JSON line; no arguments, no environment, no token, no request (dataverse-operations gated, exit 3 when OFF)
   list-languages.js            ← /genpage planner: the environment's base language and each provisioned language (LCID, culture code, right-to-left) — the SDK's `getEnvironmentLanguages()` over the az-token client, three reads and no write, printed as one pure-ASCII JSON line. The only source: no `pac model list-languages` stands behind it, because every /genpage page operation needs the Azure CLI
   apps.js                      ← the replacement for `pac model list` and `pac model create` that /genpage and /app-builder run (`pac-replaced-docs.test.js` pins that their text names this script, not the `pac` commands): the environment's model-driven apps and a new app that opens on generative pages, through the bundled SDK. `list` prints each app's id, name, unique name, description and two facts, apart: `published` (it has a row in the published layer: users can open it) and `unpublishedChanges` (it has a saved row that is not published) — drafts included; `pac`'s "(Saved - Not Published)" is neither of them (see the spec section) and never part of the name. `create --name --solution --page-id <guid> [--page-id …] [--unique-name] [--description] [--publish]` makes the app with one area "Main", one group "Pages" and a sub-area per page, titled with the page's stored name; the app, its sitemap and its pages join the solution (`inSolution`: `app`, `sitemap`, `pages`; the add of an app brings its sitemap but never the pages its navigation opens, so each page is added on its own as the page table's component type, read from the environment before the first write — `lib/page-solution.js`, AB#6443257; a system solution such as `Default` holds them already: `systemSolution: true`, and nothing is read for it); it is published only with `--publish`. The default public view of each table the pages read (the tables come from each page's own configuration, the views from the page backend: the definition `placeInApp` pins with) joins the app's components in the create itself — `components.views` of the app the SDK creates, written by the same AddAppComponents that adds the sitemap — as `pac model genpage upload --app-id` pinned them; the output says what was pinned (`dataSources`, `pinnedViews`), a table with no default public view or a page held as raw files is named in `warnings`, and a page that cannot be read refuses the create before the first write. Every check — no page id, a page that does not exist, a solution that does not exist or is managed, a taken unique name, an unreadable base language — is a refusal printed as `{ ok: false, code, error, written: false }` before the first write; a failure after the push began reads the platform back and prints what is actually left of this create (its rows are recognised by their ids, and a row that holds the unique name under another id is named apart)
@@ -2928,7 +2928,7 @@ Agents are invoked by skills via the `Task` tool — they are not user-invocable
 | `genpage-page-builder` | `genpage` (create flow) **and** `app-builder` (Phase 1.5) | Generates one complete `.tsx` page from a plan document and schema; runs in parallel with other builders for multi-page requests. `/app-builder` projects its App Spec into that plan format via `scripts/write-page-plan.js` and dispatches this same agent |
 | `genpage-edit-planner` | `genpage` (edit flow) | Reads downloaded artifacts as data, gathers changes, presents an edit plan and writes the same approved change list. The plan references prompt.txt without embedding it; the orchestrator applies only verified Requested Changes. |
 | `genpage-connector-builder` | `genpage` orchestrator (create **and** edit flows) | Performs connector discovery (connections, connection references, datasets, tables, operations, schema), creates Dataverse connection references, and writes the `## Connector Bindings` contract + `connectors.json`. The orchestrator forwards its output into the planner or edit-planner prompt. |
-| `genpage-customapi-builder` | `genpage` orchestrator (create **and** edit flows) | **Single owner of the custom-api feature gate.** Discovers supported public Dataverse Custom APIs (Global + entity-bound Actions/Functions), primitive declared kinds and separate lookup inputs via `list-custom-apis.js`, and writes the `## Custom API Bindings` contract + primitive-only `actions.json`. Also owns the default-off `dataverse-operations` gate: offers the two reviewed built-in Functions (`list-dataverse-operations.js`), writes a selected one's four-key row into the same `actions.json` and `dataverse-operations.md` for the optional `## Dataverse Operations` section. The orchestrator forwards its output into the planner or edit-planner prompt. |
+| `genpage-customapi-builder` | `genpage` orchestrator (create **and** edit flows) | **Single owner of Custom API discovery.** Discovers supported public Dataverse Custom APIs (Global + entity-bound Actions/Functions), primitive declared kinds and separate lookup inputs via `list-custom-apis.js`, and writes the `## Custom API Bindings` contract + primitive-only `actions.json`. Also owns the default-off `dataverse-operations` gate: offers the two reviewed built-in Functions (`list-dataverse-operations.js`), writes a selected one's four-key row into the same `actions.json` and `dataverse-operations.md` for the optional `## Dataverse Operations` section. The orchestrator forwards its output into the planner or edit-planner prompt. |
 
 ## Key Concepts
 
@@ -2988,8 +2988,7 @@ What the skills ran through `pac model genpage` — the listing, the download, t
 ## Feature Flags
 
 Unreleased functionality can ship behind committed, **default-OFF** feature flags while
-dependencies roll out. **Supported public Custom API discovery now ships ON**, with the gate
-retained as an explicit opt-out. OFF stops new discovery/authoring; unrelated edits preserve
+dependencies roll out. OFF stops new discovery/authoring; unrelated edits preserve
 existing page bindings, not silently clear them. The mechanism lives in `scripts/lib/feature-flags.js` with the committed
 values in `feature-flags.json` at the plugin root.
 
@@ -2998,17 +2997,20 @@ Flipping is reversible in one line if the rollout turns out to be incomplete in 
 deleting the gate in the same change that enables the feature leaves no way back except a
 revert. Once a release has shipped with the flag on and no rollback was needed, remove it —
 a permanently-on gate is dead weight that still has to be probed, branched on and reasoned
-about at every call site.
+about at every call site. When a flag is removed, nothing may ask for it any more: an unknown
+flag reads as disabled, so a probe left behind would turn the feature off.
 
-Connector authoring no longer has a feature flag (the feature itself is in public preview). The
-remaining flags are `custom-api` (**ON**), `custom-telemetry` (**OFF**) and
-`dataverse-operations` (**OFF**).
+Connector authoring no longer has a feature flag (the feature itself is in public preview), and
+neither does Custom API support: `custom-api` shipped ON in 2.18.0 and 2.19.0 with its platform
+dependencies live in every region, so it was removed — Custom API discovery, authoring and upload
+are always available, and `GENPAGE_ENABLE_CUSTOM_API` is ignored. The remaining flags are
+`custom-telemetry` (**OFF**) and `dataverse-operations` (**OFF**).
 
-- **Source of truth:** `feature-flags.json` (e.g. `{ "custom-api": true }`). Flip a
+- **Source of truth:** `feature-flags.json` (e.g. `{ "dataverse-operations": false }`). Flip a
   flag to `true` in a one-line PR once its dependencies are GA in PROD, then remove
   it in a follow-up that deletes its gates.
 - **Precedence (highest first):** env var `GENPAGE_ENABLE_<FLAG>` (e.g.
-  `GENPAGE_ENABLE_CUSTOM_API=0` to opt out for a single run) → committed
+  `GENPAGE_ENABLE_DATAVERSE_OPERATIONS=1` to opt in for a single run) → committed
   `feature-flags.json` → default `false`
   (fail-closed). This mirrors the telemetry opt-out env-over-config convention.
 - **LLM gate:** skill/agent markdown probes a flag with
@@ -3019,12 +3021,10 @@ remaining flags are `custom-api` (**ON**), `custom-telemetry` (**OFF**) and
   Flags are catalogued with that metadata in the `FLAGS` map in `feature-flags.js`
   (the committed `feature-flags.json` carries only the on/off value). Unknown flags
   are disabled even when a matching env var is set.
-- **Script backstop:** Custom API entrypoints call the shared
-  `exitIfCustomApiDisabled()` helper (DRY — no inlined gate) and fail closed with
-  exit 3 when OFF: `list-custom-apis.js`. `list-dataverse-operations.js` calls
-  `exitIfDataverseOperationsDisabled()` the same way (its stderr line is constant and is made
-  blocking before the exit). Connector scripts have no feature-flag
-  backstop because connector authoring is always on.
+- **Script backstop:** `list-dataverse-operations.js` calls the shared
+  `exitIfDataverseOperationsDisabled()` helper (DRY — no inlined gate) and fails closed with exit 3
+  when OFF (its stderr line is constant and is made blocking before the exit). Connector and
+  Custom API scripts have no feature-flag backstop because both are always on.
 - **Validation:** `KNOWN_FLAGS` + `validateFlags()` warn on unknown keys / non-boolean
   values in the committed file (so a typo can't silently do nothing, or — after a flip
   to `true` — accidentally enable the wrong thing).
@@ -3037,22 +3037,30 @@ only the per-feature specifics are tabled below:
    never gate inline.
 2. **Scripts** — each entry-point script calls the shared `exitIf<Feature>Disabled()` helper (DRY —
    never an inlined gate) and fails closed with exit 3 when OFF.
-3. **Deploy** — the SKILL phase **re-probes** the flag. A populated Custom API table under an
-   OFF probe halts before generation; a missing/malformed section halts too. Only the exact
-   `No custom API bindings.` sentinel means none, never a fallback that clears existing bindings.
+3. **Deploy** — the SKILL phase **re-probes** the flag. A populated plan section under an OFF
+   probe halts before generation; a missing/malformed section halts too. Only the feature's exact
+   sentinel means none, never a fallback that clears existing bindings.
 4. **ALM** — solution packaging honours the flag (or documents why it needs no gate).
 5. **Codegen** — `genpage-page-builder` emits feature code **only** when the plan carries an actual
    binding table, never on an absent/sentinel section.
 
-| | `custom-api` | `custom-telemetry` | `dataverse-operations` |
-|---|---|---|---|
-| **Committed default** | ON (`GENPAGE_ENABLE_CUSTOM_API=0` opts out) | OFF | OFF (`GENPAGE_ENABLE_DATAVERSE_OPERATIONS=1` opts in) |
-| **Owner agent** | `genpage-customapi-builder` | none — codegen-only | `genpage-customapi-builder` (the same one writer of `actions.json`) |
-| **Plan section** | `## Custom API Bindings` | none — driven by the maker request, not the plan | `## Dataverse Operations` — OPTIONAL; absent means no new built-in operation |
-| **Gated scripts** | `list-custom-apis.js` | none | `list-dataverse-operations.js` |
-| **Deploy phase** | SKILL Phase 4.6 | SKILL Phase 4.7 (probe only) | SKILL Phase 4.6b — only for an add/replace; a preserve never consults it (an edit re-probes in edit-flow.md, Edit Phase 4); SKILL Phase 4.6c then decides once, from both partitions, whether a create passes `--actions` |
-| **ALM** | none needed — `config.json`'s `actionBindings` travels inside the page's `uxagentprojectfile` rows automatically (the Custom APIs themselves are a separate deployment prerequisite, bound by name) | none — telemetry rides the host runtime, nothing is packaged | none — the built-in operations are the platform's own; nothing to deploy |
-| **Emits** | `executeAction` / `executeFunction` / `listBoundActions` | `props.appInsights` calls (`trackEvent` / `trackMetric` / `trackTrace` / `trackException` / `trackDependency` / `startTrack` / `stopTrack`) | `executeFunction({ name: 'WhoAmI' \| 'RetrieveVersion' })` from a button only |
+| | `custom-telemetry` | `dataverse-operations` |
+|---|---|---|
+| **Committed default** | OFF | OFF (`GENPAGE_ENABLE_DATAVERSE_OPERATIONS=1` opts in) |
+| **Owner agent** | none — codegen-only | `genpage-customapi-builder` (the same one writer of `actions.json`) |
+| **Plan section** | none — driven by the maker request, not the plan | `## Dataverse Operations` — OPTIONAL; absent means no new built-in operation |
+| **Gated scripts** | none | `list-dataverse-operations.js` |
+| **Deploy phase** | SKILL Phase 4.7 (probe only) | SKILL Phase 4.6b — only for an add/replace; a preserve never consults it (an edit re-probes in edit-flow.md, Edit Phase 4); SKILL Phase 4.6c then decides once, from both partitions, whether a create passes `--actions` |
+| **ALM** | none — telemetry rides the host runtime, nothing is packaged | none — the built-in operations are the platform's own; nothing to deploy |
+| **Emits** | `props.appInsights` calls (`trackEvent` / `trackMetric` / `trackTrace` / `trackException` / `trackDependency` / `startTrack` / `stopTrack`) | `executeFunction({ name: 'WhoAmI' \| 'RetrieveVersion' })` from a button only |
+
+Custom API support, with no flag, keeps the rest of that pattern: `genpage-customapi-builder` is
+its one owner (discovery through `list-custom-apis.js`, the `## Custom API Bindings` section and
+`actions.json`), SKILL Phase 4.6 checks the plan section before generation (only the exact
+`No custom API bindings.` sentinel means none), `config.json`'s `actionBindings` travels inside the
+page's `uxagentprojectfile` rows for ALM (the Custom APIs themselves are a separate deployment
+prerequisite, bound by name), and the page builder emits `executeAction` / `executeFunction` /
+`listBoundActions` only for an actual binding table.
 
 At Phase 4.7 the `/genpage` orchestrator probes and passes the verbatim result as
 `Telemetry: enabled|disabled` in every page-builder dispatch — **that dispatch value wins over
@@ -3069,9 +3077,10 @@ asked to measure or track something. `enabled` is permission, not instruction.
 
 Feature dependencies remain separate from their committed defaults:
 
-- **`custom-api` (ON)** — the AIBuilder CoderAgent action prompt, the shared `pai-gen-ux-action-runtime`
+- **Custom API support (no flag)** — the AIBuilder CoderAgent action prompt, the shared `pai-gen-ux-action-runtime`
   plus the UCI and Controls host runtimes, the page `actionBindings` the plugin writes into `config.json`
-  (through the SDK: `genpage-upload.js --actions`, and the build), and the `GenUxPluginActionAllowList` ECS setting.
+  (through the SDK: `genpage-upload.js --actions`, and the build), and the `GenUxPluginActionAllowList` ECS setting —
+  live in every region, which is why the `custom-api` flag was removed.
   Note the maker-facing name is "Custom API" while the shipped wire contract stays
   `actionBindings` / `executeAction` (see `references/custom-api.md`).
 - **`custom-telemetry` (OFF)** — the page telemetry facade in the UCI host runtime, the GenUX
@@ -3081,10 +3090,9 @@ Feature dependencies remain separate from their committed defaults:
   `actionBindings` the plugin writes into `config.json`, and the `GenUxPluginActionAllowList`
   ECS setting. Its offer is a fixed, reviewed catalogue of exactly `WhoAmI` and
   `RetrieveVersion` (`scripts/lib/dataverse-operations.js`), not a check of the environment:
-  availability, player support and the user's privileges are reported as not checked. It is
-  independent of `custom-api` in both directions (either can be on while the other is off),
-  gates offering and authoring only, and never strips or repairs a binding a page holds;
-  download and rebuild recognise the two exact names whatever it says (see
+  availability, player support and the user's privileges are reported as not checked. It never
+  decides Custom API discovery, gates offering and authoring only, and never strips or repairs a
+  binding a page holds; download and rebuild recognise the two exact names whatever it says (see
   `references/dataverse-operations.md`).
 
 Custom API discovery selects public Global APIs and the page's entity-bound APIs in one inline

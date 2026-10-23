@@ -22,7 +22,7 @@ const { navigationProblems, navTargets } = require('./navigation-contract.js');
 const { workerProblems } = require('./worker-contract.js');
 const { uploadProblems, uploadPreservationProblems } = require('./upload-contract.js');
 const { planSection, findMarkdownTable, parseMarkdownRows, planModeEvents, PROVENANCE_PREPARE } = require('./plan-evidence.js');
-const { gradeCustomApi, gradeCustomApiGate, carriesCustomApi } = require('./custom-api-contract.js');
+const { gradeCustomApi } = require('./custom-api-contract.js');
 const { plannedBuiltIns } = require('./action-binding-union.js');
 const { packagingProblems, isPackaging } = require('./packaging-contract.js');
 const { preservationProblems } = require('./preservation-contract.js');
@@ -762,18 +762,6 @@ WORKFLOW_ASSERTIONS.set(PACKAGING_ASSERTION, ({ fixture }) => {
   }
   return gradeEvidence(packagingProblems, fixture);
 });
-
-WORKFLOW_ASSERTIONS.set(
-  'Phase 4.6: A populated Custom API plan never discovers, generates or uploads after a disabled or unreadable feature gate',
-  ({ fixture }) => {
-    const body = planSection(fixture.genpagePlan, 'Custom API Bindings');
-    // Out of scope only when nothing in the workflow bears a Custom API row: no lifecycle, no row in the plan's table, and none in a recorded
-    // upload's --actions file — an empty table is no permission (custom-api-contract.js carriesCustomApi).
-    if (!fixture.manifest?.customApi && (!body || body === 'No custom API bindings.') && !carriesCustomApi(fixture)) return skip('no Custom API lifecycle in this workflow');
-    // A page kept while the gate is OFF is unscored here (skip), never passed — custom-api-contract.js customApiGateVerdict.
-    return gradeCustomApiGate(fixture);
-  }
-);
 
 PHASE_EXPECTATIONS.set(
   'Phase 5: Custom API discovery, gate, bare bindings, runtime calls and update preservation or explicit clear agree',

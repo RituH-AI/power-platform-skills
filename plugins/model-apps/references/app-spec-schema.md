@@ -1775,8 +1775,8 @@ custom control), but the spec validator emits a warning.
 
   `/app-builder` never authors these lists — it writes no connector or Custom API code — so they come from a page
   a download read. A page you reset to `source.kind: "intent"` to regenerate it is generated without connector
-  code: delete its bindings from the spec too, or it keeps bindings its code no longer uses. The `custom-api`
-  and `dataverse-operations` feature flags gate what the `/genpage` agents author, not the download or the rebuild
+  code: delete its bindings from the spec too, or it keeps bindings its code no longer uses. The
+  `dataverse-operations` feature flag gates what the `/genpage` agents author, not the download or the rebuild
   of bindings a page already holds.
 - **Safety HALTs (pages phase).** The build halts on identity/safety violations rather than
   proceeding with potentially wrong state:

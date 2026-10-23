@@ -34,14 +34,15 @@ Actions and classic process actions mutate business data and need confirmation a
 rules; set-bound operations have no invocation shape in the page runtime. Each is separate work,
 so this catalogue refuses them all (`not_in_catalogue`) and never probes them.
 
-## The flag and Custom API discovery are independent
+## The flag and Custom API discovery
 
-| `custom-api` | `dataverse-operations` | What is offered |
-|---|---|---|
-| on (shipped default) | off (shipped default) | Custom APIs only |
-| off | off | nothing new; existing bindings stay |
-| off | on | the two built-ins only — `list-custom-apis.js` is not run |
-| on | on | both, as two labelled sources; only affirmative selections are written |
+Custom API support has no flag: Custom API discovery, authoring and upload are always available.
+The `dataverse-operations` flag decides the built-in offer only, and never Custom API discovery:
+
+| `dataverse-operations` | What is offered |
+|---|---|
+| off (shipped default) | Custom APIs only |
+| on | both, as two labelled sources; only affirmative selections are written |
 
 ## Listing: `list-dataverse-operations.js`
 
@@ -143,10 +144,8 @@ changed, and never as a partial file.
 | none, on an edit whose page already binds one | n/a | not passed | halt: no preserve evidence is no permission to delete the call |
 
 Removing every Custom API is a remove of each Custom API row: the built-in rows stay, byte for
-byte, and the file is never `[]` while one remains. With `custom-api` OFF no Custom API row is
-removed either: the builder keeps them, reports `Custom API removal not performed (custom-api
-disabled): <names>`, and the page's array stays as it is (no `--actions`) — a removal is never
-turned into a clear to get around the flag. Only the maker's clear choice empties the array: asked
+byte, and the file is never `[]` while one remains — a removal is never turned into a clear. Only
+the maker's clear choice empties the array: asked
 with two options before any binding is reconciled and before the plan is approved — so before the
 source is edited — and recorded then and again right before each upload it covers as `Clear
 choice: Clear every action binding of page <page-id>, removing <names>`. On `Keep <names>` the

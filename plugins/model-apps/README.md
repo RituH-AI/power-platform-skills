@@ -41,19 +41,23 @@ no timeout setting, for pages.
 ## Feature flags (defaults and overrides)
 
 Some capabilities ship **OFF by default** while their cross-repo dependencies roll
-out to production. **Supported public Custom API discovery is ON by default**; custom
-telemetry and built-in Dataverse operation authoring remain OFF. An explicit Custom API opt-out stops new discovery/authoring without
-clearing existing bindings during unrelated edits. Flags are catalogued (with lifecycle
-status) in `scripts/lib/feature-flags.js`; their on/off value lives in
-`feature-flags.json` at the plugin root.
+out to production: custom telemetry and built-in Dataverse operation authoring are OFF.
+Flags are catalogued (with lifecycle status) in `scripts/lib/feature-flags.js`; their on/off
+value lives in `feature-flags.json` at the plugin root.
 
 | Flag | Status | Default | Enables | Depends on |
 |---|---|---|---|---|
-| `custom-api` | in-progress | ON | Calling a supported public Dataverse Custom API Action or Function from a generated page (`executeAction` / `executeFunction` / `listBoundActions`) | the action prompt and host runtimes, revision-bound `actionBindings`, environment governance and the signed-in user's privileges |
 | `custom-telemetry` | in-progress | OFF | A generated page reporting its own events, metrics, traces and exceptions to your Application Insights resource via `props.appInsights` | the page telemetry facade in the UCI host runtime, the GenUX authoring control, the AIBuilder telemetry prompt, and the `GenUxEnableCustomTelemetry` setting — all live in PROD |
 | `dataverse-operations` | experimental | OFF | Offering two reviewed built-in Dataverse Functions, WhoAmI and RetrieveVersion, as explicitly selected, button-only page calls (`executeFunction`); `scripts/list-dataverse-operations.js` lists them without contacting the environment | a host runtime that implements `executeFunction`, the page `actionBindings` the plugin writes, and the `GenUxPluginActionAllowList` setting; the environment, the page player and the signed-in user's permissions are not checked — see [the built-in operations reference](references/dataverse-operations.md) |
 
 Connector authoring is in **public preview** and no longer has a feature flag. Connector discovery, binding, deploy, and ALM packaging are always available when the required PAC and host capabilities are present.
+
+Custom API support has no feature flag either: calling a supported public Dataverse Custom API
+Action or Function from a generated page (`executeAction` / `executeFunction` /
+`listBoundActions`) is always available. `GENPAGE_ENABLE_CUSTOM_API` is ignored — `0` no longer
+turns Custom API discovery off, and there is nothing to turn on. The host runtimes,
+revision-bound `actionBindings`, environment governance and the signed-in user's privileges
+still apply.
 
 **See the current state** (status, whether each flag is on, and why):
 
@@ -61,33 +65,32 @@ Connector authoring is in **public preview** and no longer has a feature flag. C
 node scripts/lib/feature-flags.js --list
 ```
 
-**Disable Custom API discovery for a single run** via an environment variable (highest precedence):
+**Turn a flag on for a single run** via an environment variable (highest precedence):
 
 ```powershell
 # Windows (PowerShell)
-$env:GENPAGE_ENABLE_CUSTOM_API = "0"
+$env:GENPAGE_ENABLE_DATAVERSE_OPERATIONS = "1"
 ```
 
 ```bash
 # macOS / Linux (bash)
-export GENPAGE_ENABLE_CUSTOM_API=0
+export GENPAGE_ENABLE_DATAVERSE_OPERATIONS=1
 ```
 
-**Disable it persistently** by changing its committed value in `feature-flags.json`:
+**Turn it on persistently** by changing its committed value in `feature-flags.json`:
 
 ```json
-{ "custom-api": false }
+{ "dataverse-operations": true }
 ```
 
 Precedence is **env var → `feature-flags.json` → default OFF** for missing/unset
-configuration (fail-closed); it does not override Custom API's committed ON default.
-Use `GENPAGE_ENABLE_CUSTOM_API=1` to explicitly enable a run. Host capabilities and server
-governance still apply; enabling discovery grants no new privileges.
+configuration (fail-closed). Host capabilities and server governance still apply; turning a
+flag on grants no new privileges.
 The env var name is always `GENPAGE_ENABLE_` plus the flag name in upper case, with
-`-` turned into `_` (`custom-api` → `GENPAGE_ENABLE_CUSTOM_API`), and unknown flags stay disabled even if
-a matching env var is set.
+`-` turned into `_` (`dataverse-operations` → `GENPAGE_ENABLE_DATAVERSE_OPERATIONS`), and unknown
+flags stay disabled even if a matching env var is set.
 
-Discovery omits private APIs and APIs with Entity/EntityCollection inputs or outputs.
+Custom API discovery omits private APIs and APIs with Entity/EntityCollection inputs or outputs.
 Lookup input names stay available to the author separately from the primitive-only wire
 `parameterKinds`; see [the Custom API contract](references/custom-api.md).
 

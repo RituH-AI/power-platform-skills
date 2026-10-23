@@ -9,10 +9,7 @@ const assert = require('node:assert/strict');
 const { PHASE_EXPECTATIONS, WORKFLOW_ASSERTIONS } = require('../lib/assertions-layer-1.js');
 const { PHASE5_EXPECTATIONS } = require('../lib/assertions-layer-2.js');
 const union = require('../lib/action-binding-union.js');
-const { customApiProblems, customApiGateVerdict, CUSTOM_API_GATE_UNSCORED } = require('../lib/custom-api-contract.js');
-const { TapReporter } = require('../lib/reporter.js');
-const layer1 = require('../run-layer-1.js');
-const layer2 = require('../run-layer-2.js');
+const { customApiProblems } = require('../lib/custom-api-contract.js');
 const { getDataverseOperationCatalogue } = require('../../../../plugins/model-apps/scripts/lib/dataverse-operations.js');
 
 const RULE = 'Phase 5: Custom API discovery, gate, bare bindings, runtime calls and update preservation or explicit clear agree';
@@ -258,7 +255,7 @@ test('union helpers: partition by exact name, one union with no duplicate, and t
   assert.deepStrictEqual(union.BUILT_IN_OUTPUTS, { WhoAmI: ['BusinessUnitId', 'UserId', 'OrganizationId'], RetrieveVersion: ['Version'] });
 });
 
-// ── The two gates at the authoring consumer, and a removal ─────────────────────────────────────────────────────────────────────────
+// ── The built-in gate at the authoring consumer, and a removal ─────────────────────────────────────────────────────────────────────
 // The page sources of one partition alone, cut from the mixed page: the Custom API helper and its render call, or the WhoAmI helper and its button.
 const APPROVE_HELPER = SOURCE.slice(SOURCE.indexOf('async function approveOrder('), SOURCE.indexOf('function ownString('));
 const CUSTOM_ONLY = SOURCE.replace(SOURCE.slice(SOURCE.indexOf('function ownString('), SOURCE.indexOf('const GeneratedComponent')), '')
@@ -268,8 +265,10 @@ const BUILT_IN_ONLY = SOURCE.replace(APPROVE_HELPER, '').replace("  void approve
 const SENTINEL_PLAN = PLAN.replace(/## Custom API Bindings[\s\S]*?\n\n## Dataverse Operations/, '## Custom API Bindings\nNo custom API bindings.\n\n## Dataverse Operations');
 const CUSTOM_PLAN = PLAN.replace(/\n## Dataverse Operations[\s\S]*$/, '\n');
 
-// A one-stage create with the rows, the plan and the page given, and the two gates as given; `listing` adds the catalogue listing after the built-in gate.
-function createFixture({ rows, plan, source, customApi, builtIns, listing: listed = builtIns === 'enabled' }) {
+// A one-stage create with the rows, the plan and the page given. `customApi` is what an older run's recorded `custom-api` probe printed, or null
+// for a run that never probed it — as no run does now; it decides nothing. Custom API discovery is recorded when `discovery` (by default, whenever a
+// row is a Custom API). `builtIns` is the dataverse-operations gate, and `listing` adds the catalogue listing after it.
+function createFixture({ rows, plan, source, customApi = null, builtIns, listing: listed = builtIns === 'enabled', discovery = rows.some((row) => !union.isBuiltInBinding(row)) }) {
   const fixture = mixedFixture();
   fixture.genpagePlan = plan;
   fixture.files[0].content = source;
@@ -277,29 +276,30 @@ function createFixture({ rows, plan, source, customApi, builtIns, listing: liste
   setActions(fixture, rows);
   setConfigs(fixture, rows);
   fixture.manifest.customApi.stages = fixture.manifest.customApi.stages.slice(0, 1);
-  const keep = new Set(['gate-create', 'builtin-gate', 'gate-generate', 'builtin-regate', 'write-create', 'create',
-    ...(customApi === 'enabled' ? ['discovery'] : []), ...(listed ? ['listing'] : [])]);
+  const keep = new Set(['builtin-gate', 'builtin-regate', 'write-create', 'create',
+    ...(customApi === null ? [] : ['gate-create', 'gate-generate']), ...(discovery ? ['discovery'] : []), ...(listed ? ['listing'] : [])]);
   fixture.events = fixture.events.filter((call) => keep.has(call.id));
-  for (const id of ['gate-create', 'gate-generate']) event(fixture, id).result = customApi;
+  if (customApi !== null) for (const id of ['gate-create', 'gate-generate']) event(fixture, id).result = customApi;
   for (const id of ['builtin-gate', 'builtin-regate']) event(fixture, id).result = builtIns;
   return fixture;
 }
 
-test('the two gates are independent at the authoring consumer: either one OFF stops only its own partition', () => {
-  const verdict = (fixture) => score(fixture);
-  // custom-api OFF, built-ins ON: a built-in-only page is authored.
-  assert.equal(verdict(createFixture({ rows: [WHO_AM_I], plan: SENTINEL_PLAN, source: BUILT_IN_ONLY, customApi: 'disabled', builtIns: 'enabled' })).status, 'pass');
-  // custom-api ON, built-ins OFF: a Custom-API-only page is authored, and no built-in row may be.
-  assert.equal(verdict(createFixture({ rows: [API], plan: CUSTOM_PLAN, source: CUSTOM_ONLY, customApi: 'enabled', builtIns: 'disabled' })).status, 'pass');
-  assert.equal(verdict(createFixture({ rows: [API, WHO_AM_I], plan: PLAN, source: SOURCE, customApi: 'enabled', builtIns: 'disabled', listing: true })).status, 'fail', 'a built-in row authored while its gate is off');
-  // Both OFF: neither partition is authored.
-  assert.equal(verdict(createFixture({ rows: [WHO_AM_I], plan: SENTINEL_PLAN, source: BUILT_IN_ONLY, customApi: 'disabled', builtIns: 'disabled', listing: true })).status, 'fail');
-  // Both ON is the mixed page.
-  assert.equal(verdict(mixedFixture()).status, 'pass');
+test('only the dataverse-operations gate decides authoring at the consumer: a built-in row needs it ON, and a recorded custom-api probe — enabled, disabled or none — decides nothing', () => {
+  for (const customApi of ['enabled', 'disabled', null]) {
+    const label = `custom-api probe ${customApi === null ? 'never run' : customApi}`;
+    // Built-ins ON: a built-in-only page is authored.
+    assert.equal(score(createFixture({ rows: [WHO_AM_I], plan: SENTINEL_PLAN, source: BUILT_IN_ONLY, customApi, builtIns: 'enabled' })).status, 'pass', label);
+    // Built-ins OFF: a Custom-API-only page is authored, and no built-in row may be.
+    assert.equal(score(createFixture({ rows: [API], plan: CUSTOM_PLAN, source: CUSTOM_ONLY, customApi, builtIns: 'disabled' })).status, 'pass', label);
+    assert.equal(score(createFixture({ rows: [API, WHO_AM_I], plan: PLAN, source: SOURCE, customApi, builtIns: 'disabled', listing: true })).status, 'fail', `${label}: a built-in row authored while its gate is off`);
+    assert.equal(score(createFixture({ rows: [WHO_AM_I], plan: SENTINEL_PLAN, source: BUILT_IN_ONLY, customApi, builtIns: 'disabled', listing: true })).status, 'fail', label);
+  }
+  // Both partitions with the built-in gate ON is the mixed page.
+  assert.equal(score(mixedFixture()).status, 'pass');
 });
 
-test('a built-in-only create binds its rows with --actions whatever custom-api says, and one that omits --actions fails in both layers', () => {
-  for (const customApi of ['enabled', 'disabled']) {
+test('a built-in-only create binds its rows with --actions whatever a recorded custom-api probe printed, and one that omits --actions fails in both layers', () => {
+  for (const customApi of ['enabled', 'disabled', null]) {
     for (const layer of [1, 2]) {
       const bound = score(createFixture({ rows: [WHO_AM_I], plan: SENTINEL_PLAN, source: BUILT_IN_ONLY, customApi, builtIns: 'enabled' }), layer);
       assert.equal(bound.status, 'pass', `custom-api ${customApi}, layer ${layer}: ${bound.reason}`);
@@ -468,14 +468,13 @@ test('the clear choice must stand when the edit plan is approved — asked befor
   for (const layer of [1, 2]) assert.equal(score(notAgain, layer).status, 'fail', `not recorded again, layer ${layer}`);
 });
 
-// ── A Custom API removal while custom-api is OFF ─────────────────────────────────────────────────────────────────────────────────────
-// An edit of a downloaded page that binds the Custom API and WhoAmI; `remove` is what the maker asked to remove. With custom-api ON the builder drops
-// the Custom API row. With it OFF it removes no Custom API row (genpage-customapi-builder.md, Step 1): the row stays, the log says
-// `Custom API removal not performed (custom-api disabled): cnt_ApproveOrder`, and an array left unchanged is not uploaded (no --actions). A
-// built-in row named in the same removal still goes — no flag decides a built-in removal.
+// ── A Custom API removal, and a recorded custom-api probe ──────────────────────────────────────────────────────────────────────────
+// An edit of a downloaded page that binds the Custom API and WhoAmI; `remove` is what the maker asked to remove. Custom API support has no feature
+// flag, so the builder drops each named Custom API row and keeps every other row. `probe` is what an older run's recorded `custom-api` probe
+// printed (none when null, as no run probes it now): it decides nothing — the run is graded the same whatever it says.
 const APP = '88888888-8888-4888-8888-888888888888';
-const DEFERRED = 'Custom API removal not performed (custom-api disabled): cnt_ApproveOrder';
-function removalEdit({ gate, remove = ['cnt_ApproveOrder'], change = { remove }, rows, source, actions = true, log = '' }) {
+const CUSTOM_API_PROBE = /\bfeature-flags\.js\b[^\n]*\bcustom-api\b/;
+function removalEdit({ probe = null, remove = ['cnt_ApproveOrder'], change = { remove }, rows, source, actions = true, log = '' }) {
   const before = [API, WHO_AM_I];
   const identity = JSON.stringify({ pageId: PAGE, appId: APP });
   const env = 'https://contoso.crm.dynamics.com';
@@ -498,278 +497,61 @@ function removalEdit({ gate, remove = ['cnt_ApproveOrder'], change = { remove },
     },
     events: [
       { id: 'download', command: `node genpage.js download --env ${env} --page-id ${PAGE} --app-id ${APP} --output-directory before`, result: { ok: true, pages: [{ pageId: PAGE }] } },
-      { id: 'custom-api-gate', command: 'node feature-flags.js custom-api', result: gate },
+      ...(probe === null ? [] : [{ id: 'custom-api-gate', command: 'node feature-flags.js custom-api', result: probe }]),
       { id: 'builtin-gate', command: 'node feature-flags.js dataverse-operations', result: 'disabled' },
       { id: 'write', command: 'Write page.tsx', artifact: 'stages/page.tsx' },
       { id: 'edit', command: `node genpage-upload.js --env ${env} --page-id ${PAGE} --app-id ${APP} --code-file page.tsx${actions ? ' --actions actions.json' : ''}`, result: { ok: true, pageId: PAGE, appId: APP } },
     ],
   };
 }
-
-test('removing every Custom API of a mixed page: with custom-api ON the row goes; with it OFF it stays, the log says so, and nothing is uploaded for it — in both layers', () => {
-  const both = (fixture, status, label) => {
-    for (const layer of [1, 2]) {
-      const result = score(fixture, layer);
-      assert.equal(result.status, status, `${label}, layer ${layer}: ${result.reason}`);
-    }
-  };
-  // ON: the Custom API row goes and the built-in row stays; keeping it is not the removal the maker asked for.
-  both(removalEdit({ gate: 'enabled', rows: [WHO_AM_I], source: BUILT_IN_ONLY }), 'pass', 'ON, the row removed');
-  both(removalEdit({ gate: 'enabled', rows: [API, WHO_AM_I], source: SOURCE, actions: false }), 'fail', 'ON, the row kept');
-  // OFF: the row stays, the removal is reported, and the unchanged array is not uploaded — no problem. The page it keeps holds a Custom API row, so
-  // the gate cannot grade the calls that keep it: unscored, never passed (the gate's scope, below).
-  const kept = (fixture, label) => {
-    assert.deepStrictEqual(customApiProblems(fixture), [], label);
-    both(fixture, 'skip', label);
-  };
-  kept(removalEdit({ gate: 'disabled', rows: [API, WHO_AM_I], source: SOURCE, actions: false, log: DEFERRED }), 'OFF, the row kept and reported');
-  // An unreadable gate is not ON: the builder fails closed, so the row stays as it does with the flag OFF.
-  kept(removalEdit({ gate: 'maybe', rows: [API, WHO_AM_I], source: SOURCE, actions: false, log: DEFERRED }), 'an unreadable gate, the row kept and reported');
-  // A built-in row named in the same removal still goes; the Custom API row stays and is reported.
-  kept(removalEdit({ gate: 'disabled', remove: ['cnt_ApproveOrder', 'WhoAmI'], rows: [API], source: CUSTOM_ONLY, log: DEFERRED }), 'OFF, WhoAmI removed beside the deferred Custom API');
-  for (const [label, fixture, problem] of [
-    ['OFF, the row deleted anyway', removalEdit({ gate: 'disabled', rows: [WHO_AM_I], source: BUILT_IN_ONLY, log: DEFERRED }), /^edit: API config read-back loses preservation or explicit-clear intent/],
-    ['OFF, turned into a clear', removalEdit({ gate: 'disabled', rows: [], source: NO_CALLS, log: DEFERRED }), /^edit: API config read-back loses preservation or explicit-clear intent/],
-    ['OFF, kept but not reported', removalEdit({ gate: 'disabled', rows: [API, WHO_AM_I], source: SOURCE, actions: false }), /^edit: custom-api was off, so cnt_ApproveOrder stayed — the log must say so/],
-    ['OFF, a report naming another Custom API', removalEdit({ gate: 'disabled', rows: [API, WHO_AM_I], source: SOURCE, actions: false, log: 'Custom API removal not performed (custom-api disabled): cnt_Other' }), /^edit: custom-api was off, so cnt_ApproveOrder stayed — the log must say so/],
-    ['OFF, the unchanged array uploaded', removalEdit({ gate: 'disabled', rows: [API, WHO_AM_I], source: SOURCE, log: DEFERRED }), /^edit: a removal the custom-api flag deferred changes nothing — omit --actions/],
-  ]) {
-    const found = customApiProblems(fixture);
-    assert.ok(found.some((entry) => problem.test(entry)), `${label}: ${JSON.stringify(found)}`);
-    both(fixture, 'fail', label);
+const both = (fixture, status, label) => {
+  for (const layer of [1, 2]) {
+    const result = score(fixture, layer);
+    assert.equal(result.status, status, `${label}, layer ${layer}: ${result.reason}`);
   }
-});
-
-// ── The custom-api gate and a page kept while it is OFF ──────────────────────────────────────────────────────────────────────────────
-// The custom-api gate decides new Custom API authoring: a create whose plan has Custom API rows, and a stage that adds or replaces one. A stage
-// whose before-config is verified as the page it updates, and that only keeps the Custom API rows that page already has — an unrelated edit, a
-// removal the flag defers, a clear — authors none. But the grader cannot tell which generation or upload after an OFF gate belongs to that stage:
-// refusing them all graded a correct kept page as forbidden authoring, and exempting every call around the stage let an unrelated create borrow
-// its proof. So a page kept while the gate is OFF is not graded against the gate: the three rules that grade it SKIP with one reason, never pass.
-// With Custom API rows in the plan, a create — an upload with no --page-id — can never keep a page's rows, and a call no verified keeping stage
-// covers is not one either: both still fail. The plan's Custom API table is left as it truly is in every case; an empty one is the gate's scope,
-// further below.
-const GATE_RULE = 'Phase 4.6: A populated Custom API plan never discovers, generates or uploads after a disabled or unreadable feature gate';
-const HALT = 'disabled or unreadable Custom API gate must halt before generation or upload';
-const NEW_API = { name: 'cnt_RejectOrder', isFunction: false, displayName: 'Reject Order', parameterKinds: { Reason: 'String' } };
-// Every rule that grades the custom-api gate: the Phase 5 rule in both layers and the Phase 4.6 workflow rule.
-const gateVerdicts = (fixture) => [score(fixture, 1), score(fixture, 2), WORKFLOW_ASSERTIONS.get(GATE_RULE)({ fixture, files: fixture.files, eval: { id: 24 } })];
-// The OFF removal of every Custom API, its row kept and reported, with the plan's Custom API table as it truly is (not the no-bindings sentence).
-const retainedRemoval = () => {
-  const fixture = removalEdit({ gate: 'disabled', rows: [API, WHO_AM_I], source: SOURCE, actions: false, log: DEFERRED });
-  fixture.genpagePlan = CUSTOM_PLAN;
-  return fixture;
 };
-// The mixed page's lifecycle with the gate before its preserve stage OFF and `calls` recorded right after that gate (inside the preserve stage's
-// span) or at the very end (after it).
-function offPreserveWith(calls, position = 'inside') {
-  const fixture = mixedFixture();
-  event(fixture, 'gate-preserve').result = 'disabled';
-  const at = position === 'inside' ? fixture.events.indexOf(event(fixture, 'gate-preserve')) + 1 : fixture.events.length;
-  fixture.events.splice(at, 0, ...calls);
-  return fixture;
-}
-// Another file's page created while the flag is OFF.
-function otherPageCreate(position) {
-  const fixture = offPreserveWith([
-    { id: 'write-other', command: 'Write other.tsx', artifact: 'stages/other.tsx' },
-    { id: 'create-other', command: 'node genpage-upload.js --code-file other.tsx --actions actions.json', result: { ok: true, pageId: OTHER_PAGE } },
-  ], position);
-  fixture.files.push({ name: 'other.tsx', content: SOURCE });
-  fixture.artifacts['stages/other.tsx'] = SOURCE;
-  return fixture;
-}
 
-test('a page kept while custom-api is OFF is unscored, never passed: its calls cannot be attributed to the verified keeping stage', () => {
-  // The same OFF removal after the ordinary create and preserve stages, the plan's table left intact.
-  const afterLifecycle = withUpdate(mixedFixture(), 'deferred-remove', { remove: [API.name] }, [API, WHO_AM_I], SOURCE);
-  event(afterLifecycle, 'gate-deferred-remove').result = 'disabled';
-  event(afterLifecycle, 'deferred-remove').command = event(afterLifecycle, 'deferred-remove').command.replace(' --actions deferred-remove-actions.json', '');
-  afterLifecycle.workflowLog += `\n${DEFERRED}`;
-  // An unrelated edit of the created page while the flag is OFF, or unreadable: the preserve stage keeps both rows.
-  const preserveUnreadable = mixedFixture();
-  event(preserveUnreadable, 'gate-preserve').result = 'unreadable';
-  // An update of ANOTHER page inside the preserve stage's span: it names a page, so it is no create, and the grader cannot tell it from the stage's
-  // own upload — unscored like the rest, never passed.
-  const otherPageUpdate = offPreserveWith([
-    { id: 'update-other', command: `node genpage-upload.js --page-id ${OTHER_PAGE} --code-file page.tsx`, result: { ok: true, pageId: OTHER_PAGE } },
-  ]);
-  for (const [label, fixture] of [
-    ['the OFF removal with the retained Custom API table', retainedRemoval()],
-    ['the OFF removal after a normal create and preserve lifecycle', afterLifecycle],
-    ['an unrelated edit while custom-api is OFF', offPreserveWith([])],
-    ['an unrelated edit while the custom-api gate is unreadable', preserveUnreadable],
-    ['an update of another page inside the preserve stage\'s span', otherPageUpdate],
-  ]) {
-    assert.deepStrictEqual(customApiProblems(fixture), [], `${label}: no problem — the gate's calls are only unattributed`);
-    for (const [index, result] of gateVerdicts(fixture).entries()) {
-      assert.deepStrictEqual(result, { status: 'skip', reason: CUSTOM_API_GATE_UNSCORED }, `${label}, rule ${index + 1}: ${JSON.stringify(result)}`);
-    }
-  }
-  // The ON removal stays the control: the row goes, and the rules pass.
-  const on = removalEdit({ gate: 'enabled', rows: [WHO_AM_I], source: BUILT_IN_ONLY });
-  on.genpagePlan = CUSTOM_PLAN;
-  for (const [index, result] of gateVerdicts(on).entries()) assert.equal(result.status, 'pass', `ON removal, rule ${index + 1}: ${result.reason}`);
-});
-
-test('new authoring while custom-api is OFF still fails in all three rules: a create — wherever it sits, the same source or another — an addition, a replacement, an unproven before-config', () => {
-  const unverified = retainedRemoval();
-  unverified.manifest.uploads = [];
-  const withPlan = (fixture, plan) => Object.assign(fixture, { genpagePlan: plan });
-  const API_ROW = '| cnt_ApproveOrder | Action | salesorder | Approve Order | Comment: String, Amount: Decimal |';
-  for (const [label, fixture] of [
-    ['a create with Custom API rows', createFixture({ rows: [API], plan: CUSTOM_PLAN, source: CUSTOM_ONLY, customApi: 'disabled', builtIns: 'disabled' })],
-    ['an addition', withPlan(removalEdit({ gate: 'disabled', change: { add: [NEW_API] }, rows: [API, WHO_AM_I, NEW_API], source: SOURCE }),
-      CUSTOM_PLAN.replace(API_ROW, `${API_ROW}\n| cnt_RejectOrder | Action | (Global) | Reject Order | Reason: String |`))],
-    ['a replacement', withPlan(removalEdit({ gate: 'disabled', change: { add: [{ ...API, displayName: 'Approve order (v2)' }] }, rows: [{ ...API, displayName: 'Approve order (v2)' }, WHO_AM_I], source: SOURCE }),
-      CUSTOM_PLAN.replace(API_ROW, API_ROW.replace('Approve Order', 'Approve order (v2)')))],
-    ['a removal from an unproven before-config', unverified],
-    // A create cannot borrow the proof of the preserving stage it sits beside.
-    ['another page created inside the preserve stage\'s span', otherPageCreate('inside')],
-    ['another page created after the preserve stage', otherPageCreate('after')],
-    ['the same source created again, unlisted, before the preserving upload', offPreserveWith([
-      { id: 'unintended-create', command: 'node genpage-upload.js --code-file page.tsx --actions actions.json', result: { ok: true, pageId: OTHER_PAGE } },
-    ])],
-  ]) {
-    const found = customApiProblems(fixture);
-    assert.ok(found.includes(HALT), `${label}: ${JSON.stringify(found)}`);
-    for (const [index, result] of gateVerdicts(fixture).entries()) assert.equal(result.status, 'fail', `${label}, rule ${index + 1}: ${JSON.stringify(result)}`);
+test('removing every Custom API of a mixed page removes its row and keeps WhoAmI whatever a recorded custom-api probe printed — the row kept is no removal', () => {
+  for (const probe of [null, 'enabled', 'disabled', 'maybe']) {
+    const label = `custom-api probe ${probe === null ? 'never run' : probe}`;
+    both(removalEdit({ probe, rows: [WHO_AM_I], source: BUILT_IN_ONLY }), 'pass', `${label}: the row removed, WhoAmI kept`);
+    // WhoAmI named in the same removal goes too: every named row goes.
+    both(removalEdit({ probe, remove: ['cnt_ApproveOrder', 'WhoAmI'], rows: [], source: NO_CALLS }), 'pass', `${label}: both named rows removed`);
+    // What the builder once did while custom-api was OFF — keep the row, report the removal as not performed, upload nothing — leaves the
+    // maker's removal undone, and its report excuses nothing.
+    const kept = removalEdit({ probe, rows: [API, WHO_AM_I], source: SOURCE, actions: false, log: 'Custom API removal not performed (custom-api disabled): cnt_ApproveOrder' });
+    const found = customApiProblems(kept);
+    assert.ok(found.some((entry) => /^edit: actions file must be the full desired bare array/.test(entry)), `${label}, the row kept: ${JSON.stringify(found)}`);
+    both(kept, 'fail', `${label}: the row kept`);
+    // Turning the removal into a clear still deletes WhoAmI, which the maker did not name.
+    both(removalEdit({ probe, rows: [], source: NO_CALLS }), 'fail', `${label}: turned into a clear`);
   }
 });
 
-// ── The gate's scope: the plan table, or a Custom API row the recorded lifecycle carries ─────────────────────────────────────────────
-// A plan that says `No custom API bindings.` is no permission. A workflow is in the gate's scope when its plan has Custom API rows, or when its
-// recorded lifecycle carries one — in an upload's --actions file, or in a stage's before- or after-config (a file that cannot be read counts as
-// carrying one). While the gate is not enabled — OFF, unreadable or never probed — a create whose --actions file holds a Custom API row, or cannot
-// be read, fails whatever the plan says. Under an empty table every other generation or upload of such a workflow is unscored, with no keeping
-// stage required: a run that planned no Custom API declares none. A workflow whose only rows are WhoAmI and RetrieveVersion is outside the scope.
-test('an empty Custom API table is no permission: while custom-api is OFF, a create whose actions file holds a Custom API row — or cannot be read — fails in all three rules, as with the table present', () => {
-  // The OFF removal of the page's Custom API (its row kept and reported), with a create recorded after the OFF gate.
-  const withCreate = (actions, plan) => {
-    const fixture = removalEdit({ gate: 'disabled', rows: [API, WHO_AM_I], source: SOURCE, actions: false, log: DEFERRED });
-    fixture.events.splice(fixture.events.indexOf(event(fixture, 'write')), 0,
-      { id: 'off-create', command: `node genpage-upload.js --code-file page.tsx --actions ${actions}`, result: { ok: true, pageId: OTHER_PAGE } });
-    if (plan) fixture.genpagePlan = plan;
+// The `custom-api` flag was removed (Custom API support is always available), and with it every rule that graded its gate. Older runs recorded
+// the probe, so a probe is neither required nor refused: a run graded with no probe, or with one that printed `disabled` or something unreadable,
+// gets the grade it gets with an `enabled` probe — the discovery, binding, runtime and preservation checks decide it.
+test('no rule grades a custom-api gate: a run with no probe, or with one that printed disabled or something unreadable, grades as one that printed enabled', () => {
+  assert.ok(![...WORKFLOW_ASSERTIONS.keys()].some((key) => /after a disabled or unreadable feature gate/.test(key)), 'the Phase 4.6 gate rule is not registered');
+  const variant = (mutate) => {
+    const fixture = mixedFixture();
+    mutate(fixture.events.filter((call) => CUSTOM_API_PROBE.test(call.command)), fixture);
     return fixture;
   };
   for (const [label, fixture] of [
-    ['under the no-bindings sentence', withCreate('actions.json')],
-    ['with the Custom API table present', withCreate('actions.json', CUSTOM_PLAN)],
-    ['an actions file that cannot be read', withCreate('missing-actions.json')],
-  ]) {
-    assert.ok(customApiGateVerdict(fixture).problems.includes(HALT), `${label}: ${JSON.stringify(customApiGateVerdict(fixture))}`);
-    assert.ok(customApiProblems(fixture).includes(HALT), label);
-    for (const [index, result] of gateVerdicts(fixture).entries()) assert.equal(result.status, 'fail', `${label}, rule ${index + 1}: ${JSON.stringify(result)}`);
-  }
-});
-
-test('under an empty Custom API table, a page that keeps a Custom API row while custom-api is OFF, unreadable or never probed is unscored, never passed', () => {
-  const sentinelRemoval = (gate) => removalEdit({ gate, rows: [API, WHO_AM_I], source: SOURCE, actions: false, log: DEFERRED });
-  const neverProbed = sentinelRemoval('disabled');
-  neverProbed.events = neverProbed.events.filter((call) => call.id !== 'custom-api-gate');
-  for (const [label, fixture] of [
-    ['the OFF removal, its row kept and reported', sentinelRemoval('disabled')],
-    ['the same removal with the gate unreadable', sentinelRemoval('maybe')],
-    ['the same removal with the gate never probed', neverProbed],
+    ['an enabled probe (the control)', mixedFixture()],
+    ['no probe at all', variant((probes, fixture) => { fixture.events = fixture.events.filter((call) => !probes.includes(call)); })],
+    ['every probe printed disabled', variant((probes) => { for (const call of probes) call.result = 'disabled'; })],
+    ['every probe unreadable', variant((probes) => { for (const call of probes) call.result = 'maybe'; })],
+    ['discovery after a disabled probe', variant((probes, fixture) => { event(fixture, 'gate-create').result = 'disabled'; })],
   ]) {
     assert.deepStrictEqual(customApiProblems(fixture), [], label);
-    assert.ok(customApiGateVerdict(fixture).unattributed > 0, label);
-    for (const [index, result] of gateVerdicts(fixture).entries()) {
-      assert.deepStrictEqual(result, { status: 'skip', reason: CUSTOM_API_GATE_UNSCORED }, `${label}, rule ${index + 1}: ${JSON.stringify(result)}`);
-    }
+    both(fixture, 'pass', label);
   }
-  // With custom-api ON the same removal is graded: the row goes, and the rules pass.
-  for (const [index, result] of gateVerdicts(removalEdit({ gate: 'enabled', rows: [WHO_AM_I], source: BUILT_IN_ONLY })).entries()) {
-    assert.equal(result.status, 'pass', `ON removal, rule ${index + 1}: ${result.reason}`);
-  }
-});
-
-test('the gate\'s scope comes from the plan table or a Custom API row in an actions file or a stage config, unreadable ones included; WhoAmI and RetrieveVersion alone stay outside it', () => {
-  // One write and one upload under the no-bindings sentence, after the custom-api gate given (none when null) and, with `discovery`, a Custom
-  // API discovery: `upload` is the upload's flags, `artifacts` its files, and `stage` the fields of its one lifecycle stage (no stage when absent).
-  const scoped = ({ gate = 'disabled', discovery = false, upload, artifacts = {}, stage }) => ({
-    contractVersion: 2,
-    files: [{ name: 'page.tsx', content: NO_CALLS }],
-    artifacts: { 'stages/page.tsx': NO_CALLS, ...artifacts },
-    genpagePlan: '## Custom API Bindings\nNo custom API bindings.\n',
-    workflowLog: '',
-    manifest: stage ? { customApi: { outputs: {}, stages: [{ id: 'edit', target: 'page.tsx', source: 'stages/page.tsx', upload: 'upload', ...stage }] } } : {},
-    events: [
-      ...(gate === null ? [] : [{ id: 'gate', command: 'node feature-flags.js custom-api', result: gate }]),
-      ...(discovery ? [{ id: 'discovery', command: 'node list-custom-apis.js https://contoso.crm.dynamics.com', result: { ok: true, customApis: [] } }] : []),
-      { id: 'write', command: 'Write page.tsx', artifact: 'stages/page.tsx' },
-      { id: 'upload', command: `node genpage-upload.js ${upload}`, result: { ok: true, pageId: PAGE } },
-    ],
-  });
-  const UPDATE = `--page-id ${PAGE} --code-file page.tsx`;
-  const CREATE = '--code-file page.tsx';
-  const rows = (list) => JSON.stringify(list);
-  const config = (list) => JSON.stringify({ actionBindings: list });
-  // An update that keeps the page's bindings (no --actions), with the stage's before- and after-config holding `before` and `after`.
-  const keeping = (before, after, gate) => scoped({ gate, upload: UPDATE, artifacts: { 'before.json': config(before), 'after.json': config(after) }, stage: { beforeConfig: 'before.json', afterConfig: 'after.json' } });
-  const LEGACY = { name: 'WhoAmI', displayName: 'Legacy identity' };
-  // [label, fixture, gate problems, unattributed calls]: no problem and nothing unattributed passes the gate rule, a problem fails it, and no
-  // problem with an unattributed call leaves it unscored.
-  for (const [label, fixture, problems, unattributed] of [
-    // Outside the scope: the gate rule passes as before.
-    ['only built-ins in the actions file and the configs', scoped({ upload: `${UPDATE} --actions a.json`, artifacts: { 'a.json': rows([WHO_AM_I, RETRIEVE_VERSION]), 'before.json': config([WHO_AM_I]), 'after.json': config([WHO_AM_I, RETRIEVE_VERSION]) }, stage: { beforeConfig: 'before.json', afterConfig: 'after.json' } }), [], 0],
-    ['a legacy built-in entry kept', keeping([LEGACY], [LEGACY]), [], 0],
-    ['a create that binds only WhoAmI', scoped({ upload: `${CREATE} --actions a.json`, artifacts: { 'a.json': rows([WHO_AM_I]), 'after.json': config([WHO_AM_I]) }, stage: { afterConfig: 'after.json' } }), [], 0],
-    ['custom-api never probed, no Custom API row', keeping([WHO_AM_I], [WHO_AM_I], null), [], 0],
-    // In the scope through one source each: the write and the update are unscored, with no keeping stage required.
-    ['an update whose actions file holds a Custom API row', scoped({ upload: `${UPDATE} --actions a.json`, artifacts: { 'a.json': rows([API, WHO_AM_I]) } }), [], 2],
-    ['an update whose actions file cannot be read', scoped({ upload: `${UPDATE} --actions missing.json` }), [], 2],
-    ['an update whose actions file is not a list', scoped({ upload: `${UPDATE} --actions a.json`, artifacts: { 'a.json': JSON.stringify(WHO_AM_I) } }), [], 2],
-    ['a before-config that holds a Custom API row', keeping([API], [WHO_AM_I]), [], 2],
-    ['an after-config that holds a Custom API row', keeping([WHO_AM_I], [API]), [], 2],
-    ['a stage config that cannot be read', scoped({ upload: UPDATE, artifacts: { 'after.json': config([]) }, stage: { beforeConfig: 'before.json', afterConfig: 'after.json' } }), [], 2],
-    ['a stage with no after-config', scoped({ upload: UPDATE, stage: {} }), [], 2],
-    ['the gate unreadable', keeping([API], [API], 'maybe'), [], 2],
-    ['the gate never probed', keeping([API], [API], null), [], 2],
-    // A create while the gate is not enabled fails when its own actions file holds a Custom API row or cannot be read — not otherwise.
-    ['a create whose actions file holds a Custom API row', scoped({ upload: `${CREATE} --actions a.json`, artifacts: { 'a.json': rows([API]) } }), [HALT], 1],
-    ['a create whose actions file cannot be read', scoped({ upload: `${CREATE} --actions missing.json` }), [HALT], 1],
-    ['a create with the gate never probed', scoped({ gate: null, upload: `${CREATE} --actions a.json`, artifacts: { 'a.json': rows([WHO_AM_I, API]) } }), [HALT], 1],
-    ['a create with no actions file beside a Custom API row', scoped({ upload: CREATE, artifacts: { 'after.json': config([API]) }, stage: { afterConfig: 'after.json' } }), [], 2],
-    ['a create that binds only WhoAmI beside a Custom API row', scoped({ upload: `${CREATE} --actions a.json`, artifacts: { 'a.json': rows([WHO_AM_I]), 'after.json': config([API]) }, stage: { afterConfig: 'after.json' } }), [], 2],
-    // With custom-api ON nothing is unscored, and the re-probe after planning discovery is still asked only of a plan with Custom API rows.
-    ['custom-api ON', scoped({ gate: 'enabled', upload: `${CREATE} --actions a.json`, artifacts: { 'a.json': rows([API]) } }), [], 0],
-    ['custom-api ON, a discovery that planned no Custom API, no re-probe', scoped({ gate: 'enabled', discovery: true, upload: UPDATE, artifacts: { 'before.json': config([API]), 'after.json': config([API]) }, stage: { beforeConfig: 'before.json', afterConfig: 'after.json' } }), [], 0],
-  ]) {
-    assert.deepStrictEqual(customApiGateVerdict(fixture), { problems, unattributed }, label);
-    const result = WORKFLOW_ASSERTIONS.get(GATE_RULE)({ fixture, files: fixture.files, eval: { id: 24 } });
-    assert.equal(result.status, problems.length ? 'fail' : unattributed ? 'skip' : 'pass', `${label}: ${JSON.stringify(result)}`);
-  }
-  // A workflow with no Custom API lifecycle is outside the Phase 4.6 rule only while nothing it records carries a Custom API row.
-  const none = scoped({ upload: `${UPDATE} --actions a.json`, artifacts: { 'a.json': rows([WHO_AM_I]) } });
-  assert.deepStrictEqual(WORKFLOW_ASSERTIONS.get(GATE_RULE)({ fixture: none, files: none.files, eval: { id: 1 } }), { status: 'skip', reason: 'no Custom API lifecycle in this workflow' });
-  const recorded = scoped({ upload: `${CREATE} --actions a.json`, artifacts: { 'a.json': rows([API]) } });
-  assert.deepStrictEqual(WORKFLOW_ASSERTIONS.get(GATE_RULE)({ fixture: recorded, files: recorded.files, eval: { id: 1 } }), { status: 'fail', reason: HALT });
-  // The two gates stay independent: a built-in-only create with custom-api OFF passes all three rules.
-  const builtInOnly = createFixture({ rows: [WHO_AM_I], plan: SENTINEL_PLAN, source: BUILT_IN_ONLY, customApi: 'disabled', builtIns: 'enabled' });
-  for (const [index, result] of gateVerdicts(builtInOnly).entries()) assert.equal(result.status, 'pass', `built-in-only create, rule ${index + 1}: ${result.reason}`);
-});
-
-// What a runner prints for such a page: the runners' own grading, through the reporter they share. A fixture with nothing graded is unscored —
-// its line carries `# SKIP`, and it is counted apart from the passed fixtures — while the ON removal beside it is graded and passes.
-test('the runners report a page kept while custom-api is OFF as an unscored fixture, never a passed one', () => {
-  const data = { common_workflow_assertions: [GATE_RULE], common_code_assertions: [] };
-  const ev = { id: 24, expectations: [RULE] };
-  const on = removalEdit({ gate: 'enabled', rows: [WHO_AM_I], source: BUILT_IN_ONLY });
-  on.genpagePlan = CUSTOM_PLAN;
-  let text = '';
-  const reporter = new TapReporter({ write: (chunk) => { text += chunk; } });
-  reporter.start(2);
-  for (const [name, fixture] of [['kept-while-off', retainedRemoval()], ['removed-while-on', on]]) {
-    reporter.startFixture(name);
-    for (const { text: assertion, result } of [...layer1.gradeFixture(fixture, ev, data), ...layer2.gradeFixture(fixture, ev, data)]) reporter.assertion(assertion, result);
-    reporter.endFixture();
-  }
-  reporter.end();
-  const lines = text.split('\n');
-  assert.ok(lines.includes('ok 1 - kept-while-off # SKIP no expectation graded'), text);
-  assert.ok(lines.includes('ok 2 - removed-while-on'), text);
-  assert.deepStrictEqual(lines.filter((line) => /^# (?:pass|fail|skip|fixtures|unscored)/.test(line)),
-    ['# pass  3', '# fail  0', '# skip  3', '# fixtures 2 (pass 1, fail 0)', '# unscored fixtures 1']);
-  assert.equal(reporter.exitCode, 0);
+  // What the gate rules once refused is graded on its own evidence now: a create with Custom API rows after a disabled probe passes when its
+  // discovery, bindings and calls agree, and fails when they do not.
+  const created = createFixture({ rows: [API], plan: CUSTOM_PLAN, source: CUSTOM_ONLY, customApi: 'disabled', builtIns: 'disabled' });
+  both(created, 'pass', 'a create after a disabled probe');
+  const undiscovered = createFixture({ rows: [API], plan: CUSTOM_PLAN, source: CUSTOM_ONLY, customApi: 'disabled', builtIns: 'disabled', discovery: false });
+  both(undiscovered, 'fail', 'a create with no discovery');
 });

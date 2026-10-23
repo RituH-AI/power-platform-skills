@@ -19,7 +19,6 @@
     "Prefix discipline — solution alignment: If the env has a dominant non-system custom prefix (>=50% of custom tables AND >=3 such tables), the planner surfaces this in the solution question and ordered the option whose publisher prefix matches the dominant prefix FIRST as the recommended choice. If the user picks a different-prefix solution, the planner logged a one-line warning before proceeding.",
     "Phase 2a: Every applicable auth result is associated with its command; only the latest successful gate authorizes mutations, and final failures halt with bounded retry and advice",
     "Phase 1: Failed connector discovery returns needs_input and never creates a connection or reference",
-    "Phase 4.6: A populated Custom API plan never discovers, generates or uploads after a disabled or unreadable feature gate",
     "Phase 6.7: Packaging uses every deployed page id, the approved solution and discovered component types; invalid identities refuse before writes and results agree with read-back"
   ],
   "common_code_assertions": [
@@ -552,8 +551,8 @@
     {
       "id": 24,
       "tier": "full",
-      "prompt": "Discover the bound Approve Order Action and global Summary Function, gate generation on Custom API support, use the exact binding names and parameter kinds, then preserve and explicitly clear bindings on separate updates.",
-      "data": { "fixture_kind": "synthetic", "custom_api_feature": "enabled", "declared_outputs": { "cnt_ApproveOrder": ["NewStatus"], "cnt_GetOrderSummary": ["Total"] } },
+      "prompt": "Discover the bound Approve Order Action and global Summary Function, use the exact binding names and parameter kinds, then preserve and explicitly clear bindings on separate updates.",
+      "data": { "fixture_kind": "synthetic", "declared_outputs": { "cnt_ApproveOrder": ["NewStatus"], "cnt_GetOrderSummary": ["Total"] } },
       "expectations": [
         "Phase 5: Custom API discovery, gate, bare bindings, runtime calls and update preservation or explicit clear agree"
       ]

@@ -188,14 +188,12 @@ at a time (you are headless — see the interaction contract below):
 
 > **Custom API changes** (Dataverse Action/Function / plug-in logic):
 > Do **not** run Custom API discovery here — the orchestrator delegates that to the
-> `genpage-customapi-builder` agent (which owns the `custom-api` feature gate).
+> `genpage-customapi-builder` agent (which owns Custom API discovery).
 >
 > - **Preserving or clearing** existing Custom API bindings needs no discovery: capture it
 >   in the plan's `### Custom API Changes` and continue. Clearing the Custom APIs of a page that
 >   also binds a built-in operation removes each Custom API row and keeps the built-in calls and
->   bindings; clearing those too is the **clear all** below. With `custom-api` OFF the builder
->   removes no Custom API row and reports the removal as not performed: keep those calls — they
->   are still bound — and say in the plan that the removal waits for the flag.
+>   bindings; clearing those too is the **clear all** below.
 > - **Adding or replacing** a Custom API call that the orchestrator did not already discover
 >   — i.e. the need surfaced in *your* clarification, so your prompt carries the "preserve"
 >   action and `none — omit --actions` — you must **stop and return**

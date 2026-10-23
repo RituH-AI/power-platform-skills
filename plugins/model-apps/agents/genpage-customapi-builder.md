@@ -1,12 +1,11 @@
 ---
 name: genpage-customapi-builder
 description: >-
-  Owns ALL GenPage Dataverse Custom API (plug-in) work: it is the single owner of the
-  custom-api feature-flag gate, discovers the Custom APIs a page can bind to (Global and
-  entity-bound Actions/Functions) plus their declared request-parameter kinds, and produces
-  the ## Custom API Bindings contract. It also owns the dataverse-operations gate and the
-  offer of the two reviewed built-in Dataverse Functions (WhoAmI, RetrieveVersion), and is
-  the one writer of actions.json. Invoked only by the top-level genpage orchestrator from
+  Owns ALL GenPage Dataverse Custom API (plug-in) work: it discovers the Custom APIs a page
+  can bind to (Global and entity-bound Actions/Functions) plus their declared request-parameter
+  kinds, and produces the ## Custom API Bindings contract. It also owns the dataverse-operations
+  gate and the offer of the two reviewed built-in Dataverse Functions (WhoAmI, RetrieveVersion),
+  and is the one writer of actions.json. Invoked only by the top-level genpage orchestrator from
   BOTH the create and edit flows; never invoked by planners or directly by users.
   Works only on generative pages in a Power Apps model-driven app. Never use it for
   a generic React or web app, or when the user rules out Power Platform, Dataverse,
@@ -59,8 +58,8 @@ server-side plug-in logic a maker authored in the environment; each is either an
 (POST; called with `dataApi.executeAction`) or a **Function** (GET; called with
 `dataApi.executeFunction`). Preserve that method fidelity, but require known read semantics
 before invoking a Function automatically on mount or a filter change: GET alone does not prove
-an operation is harmless. You are the **single owner** of Custom API discovery and the
-feature gate. Planners must not invoke you directly; they have no `Task` tool, and nested
+an operation is harmless. You are the **single owner** of Custom API discovery and of the
+`dataverse-operations` gate. Planners must not invoke you directly; they have no `Task` tool, and nested
 `Task` calls cannot safely host your user-facing Custom API selection prompts. The top-level
 `/genpage` orchestrator dispatches you from BOTH flows so the gate and the discovery logic
 live in exactly one place.
@@ -123,42 +122,21 @@ Write both of these into the working directory (and the third when it applies), 
 
 Log every command you run (with its purpose) into the working directory's `workflow-log.md`.
 
-## Step 1 — Feature gates (you own both; run them FIRST, always)
+## Step 1 — The `dataverse-operations` gate (you own it; run it FIRST, always)
 
-Probe each flag before ANY discovery or offer, for both create and edit. The two are
-independent: one being off never stops the other branch, never ends this run early, and never
+Probe it before ANY discovery or offer, for both create and edit. It decides the built-in branch
+(Step 2b) only: being off never stops Custom API discovery, never ends this run early, and never
 writes `[]` over bindings a page keeps.
 
 ```powershell
-node "${PLUGIN_ROOT}/scripts/lib/feature-flags.js" custom-api
 node "${PLUGIN_ROOT}/scripts/lib/feature-flags.js" dataverse-operations
 ```
 
-Record both results in `workflow-log.md` (e.g. `feature-flags.js custom-api → disabled`).
+Record the result in `workflow-log.md` (e.g. `feature-flags.js dataverse-operations → disabled`).
 
-Custom API discovery is **enabled by default**. `GENPAGE_ENABLE_CUSTOM_API=0` explicitly
-disables it; a missing/unreadable feature config still fails closed.
-
-**If `custom-api` prints `disabled` (exit 1)** — Custom API support is disabled for this run:
-
-- Do **not** run `list-custom-apis.js` or any other Custom API discovery.
-- **create:** the Custom API partition is empty: `custom-api-bindings.md` is exactly
-  `No custom API bindings.`.
-- **edit:** the feature is OFF, so you must **not add or discover** new Custom API bindings.
-  **Preserve** the existing Custom API bindings passed to you, unchanged, and reproduce them in
-  `custom-api-bindings.md`. A Custom API the intent asks to remove stays too — its table row and
-  its `actions.json` row — because the removal waits until the flag is on: write
-  `Custom API removal not performed (custom-api disabled): <names>` (comma-separated) into
-  `workflow-log.md` and return it, and never write `No custom API bindings.` or `[]` in their
-  place. A built-in row named in the same removal still goes (Step 4).
-- Then go on to the built-in branch (Step 2b) — it has its own gate. When neither branch
-  changes anything, return `custom-api disabled — existing bindings preserved, none added`
-  (edit) or `custom-api disabled — no bindings` (create).
-
-Only when it prints `enabled` (exit 0) do you run Step 2 for a Custom API need. The committed flag remains
-in `plugins/model-apps/feature-flags.json` as a reversible default; an explicit
-`GENPAGE_ENABLE_CUSTOM_API=1` can enable a single run. Runtime capabilities, environment
-governance and the signed-in user's privileges are still required.
+Custom API support has no feature flag: discovery, authoring and upload are always available, so
+run Step 2 whenever the intent needs a Custom API. Runtime capabilities, environment governance
+and the signed-in user's privileges are still required.
 
 **`dataverse-operations`** ships OFF. While it prints `disabled`, offer no built-in operation,
 do not run `list-dataverse-operations.js`, and add no built-in row; built-in rows a page already
@@ -167,7 +145,7 @@ RetrieveVersion, relay the script's gate line and add exactly: `This does not me
 environment lacks these operations, and the remedy is not a Custom API wrapper. No new built-in
 binding was added.` — for those two names only.
 
-## Step 2 — Discovery (enabled only)
+## Step 2 — Discovery
 
 Enumerate supported **public** Custom APIs — Global APIs plus those bound to the
 page's table(s). Private APIs, collection-bound APIs, and APIs with Entity/EntityCollection
@@ -271,14 +249,11 @@ Start from the **existing bindings** you were given and apply the edit intent:
 - **Add:** run Steps 2–3 for the new operation and append the binding.
 - **Replace:** discover the supported replacement (Steps 2–3) and swap it in by `name`.
   If discovery fails or finds no supported replacement, report it; do not silently drop the old binding.
-- **Remove:** drop the named binding(s) — a Custom API row only while `custom-api` is enabled;
-  with it disabled the row stays and the removal is reported as not performed (Step 1).
-- **Remove every Custom API:** with `custom-api` enabled, drop each Custom API row and keep every
-  built-in row byte for byte (`WhoAmI`, `RetrieveVersion`, exact names): `custom-api-bindings.md`
-  is then `No custom API bindings.` and `actions.json` holds the built-in rows. With it disabled,
-  keep every row — the Custom API table and rows too — and report the removal as not performed
-  (Step 1); never turn it into a clear. "Clear the Custom APIs" is
-  this removal; only the maker's clear choice, asked before any binding is reconciled
+- **Remove:** drop the named binding(s).
+- **Remove every Custom API:** drop each Custom API row and keep every built-in row byte for
+  byte (`WhoAmI`, `RetrieveVersion`, exact names): `custom-api-bindings.md` is then
+  `No custom API bindings.` and `actions.json` holds the built-in rows. "Clear the Custom APIs" is
+  this removal, never a clear; only the maker's clear choice, asked before any binding is reconciled
   (edit-flow.md, Edit Phase 3) and recorded again right before each upload it authorizes,
   permits `[]`.
 - Use ONLY names, kinds, bound entities, and parameter kinds you discovered this run or that
@@ -301,7 +276,7 @@ from one of them: the Custom API rows first, in their existing order, then the n
 rows in catalogue order (WhoAmI, then RetrieveVersion). Each new built-in row must be exactly the
 four-key projection of the listed operation; if any is not, or a name appears twice
 (`duplicate_operation`), write **nothing** and return the refusal — the page stays as it is.
-Do not create `actions.json` before the gate probe of the branch that contributes to it.
+Do not create `actions.json` before the `dataverse-operations` probe (Step 1).
 
 Write the final binding set to the output files (see "Outputs"):
 
@@ -366,7 +341,6 @@ Write the final binding set to the output files (see "Outputs"):
   that outcome, never a contract, so the planner completes its plan without the call instead of
   asking for this offer again. Built-in rows never go into `custom-api-bindings.md`.
 
-Return a concise summary: mode, both gate results, the `name`s of the Custom API bindings
-and of the built-in operations written (or "none"), whether `dataverse-operations.md` was
-written this run (or `none — not added this run` and why), and the Custom API removals not
-performed because `custom-api` is disabled (or "none").
+Return a concise summary: mode, the `dataverse-operations` gate result, the `name`s of the
+Custom API bindings and of the built-in operations written (or "none"), and whether
+`dataverse-operations.md` was written this run (or `none — not added this run` and why).

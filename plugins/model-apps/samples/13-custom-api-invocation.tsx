@@ -14,7 +14,7 @@ import {
 } from '@fluentui/react-components';
 
 // Sample: Dataverse Custom API (plug-in) invocation from a form-embedded page.
-// Demonstrates (see references/custom-api.md — gated behind the `custom-api` feature flag):
+// Demonstrates (see references/custom-api.md):
 //   - Presence-checking optional dataApi methods before wiring a trigger (cast to an
 //     optional action-method shape; the methods are absent on older runtimes)
 //   - A read-only FUNCTION on mount (executeFunction) — no double-submit guard needed

@@ -1,6 +1,5 @@
 {
-  "_comment": "Feature flags for the /genpage skill. Custom API discovery is enabled by default; custom telemetry and built-in Dataverse operation authoring remain off. Environment overrides take precedence and unknown or missing flags fail closed.",
-  "custom-api": true,
+  "_comment": "Feature flags for the /genpage skill. Custom telemetry and built-in Dataverse operation authoring are off. Custom API support has no flag: it is always available. Environment overrides take precedence and unknown or missing flags fail closed.",
   "custom-telemetry": false,
   "dataverse-operations": false
 }
