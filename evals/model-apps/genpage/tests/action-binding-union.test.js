@@ -9,6 +9,7 @@ const assert = require('node:assert/strict');
 const { PHASE_EXPECTATIONS } = require('../lib/assertions-layer-1.js');
 const { PHASE5_EXPECTATIONS } = require('../lib/assertions-layer-2.js');
 const union = require('../lib/action-binding-union.js');
+const { customApiProblems } = require('../lib/custom-api-contract.js');
 const { getDataverseOperationCatalogue } = require('../../../../plugins/model-apps/scripts/lib/dataverse-operations.js');
 
 const RULE = 'Phase 5: Custom API discovery, gate, bare bindings, runtime calls and update preservation or explicit clear agree';
@@ -314,4 +315,60 @@ test('a removal drops only the named entries and needs no built-in gate: WhoAmI 
   assert.equal(score(removal(['cnt_ApproveOrder'], [WHO_AM_I], BUILT_IN_ONLY)).status, 'pass');
   const both = removal(['WhoAmI'], [], CUSTOM_ONLY);
   assert.equal(score(both).status, 'fail', 'removing WhoAmI must not drop the Custom API too');
+});
+
+// ── Removing every Custom API, and clearing every binding ───────────────────────────────────────────────────────────────────────────
+// A later update of the mixed page: `change` is the maker's intent as the scenario records it, `rows` the actions file uploaded.
+const NO_CALLS = "import * as React from 'react';\nconst GeneratedComponent = () => <div>No server calls.</div>;\nexport default GeneratedComponent;\n";
+function withUpdate(fixture, id, change, rows, source) {
+  fixture.artifacts[`${id}-actions.json`] = JSON.stringify(rows);
+  fixture.artifacts[`${id}/config.json`] = JSON.stringify({ actionBindings: rows });
+  fixture.artifacts[`stages/${id}.tsx`] = source;
+  fixture.files[0].content = source;
+  fixture.manifest.customApi.stages.push({ id, target: 'page.tsx', source: `stages/${id}.tsx`, actions: `${id}-actions.json`, beforeConfig: 'preserved/config.json', afterConfig: `${id}/config.json`, upload: id, change });
+  fixture.events.push(
+    { id: `gate-${id}`, command: 'node feature-flags.js custom-api', result: 'enabled' },
+    { id: `write-${id}`, command: 'Write page.tsx', artifact: `stages/${id}.tsx` },
+    { id, command: `node genpage-upload.js --page-id ${PAGE} --code-file page.tsx --actions ${id}-actions.json`, result: { ok: true, pageId: PAGE } },
+  );
+  return fixture;
+}
+
+test('removing every Custom API of a mixed page keeps WhoAmI — an empty actions file in its place fails in both layers', () => {
+  for (const layer of [1, 2]) {
+    const kept = score(withUpdate(mixedFixture(), 'remove-apis', { remove: ['cnt_ApproveOrder'] }, [WHO_AM_I], BUILT_IN_ONLY), layer);
+    assert.equal(kept.status, 'pass', `layer ${layer}: ${kept.reason}`);
+    const emptied = score(withUpdate(mixedFixture(), 'remove-apis', { remove: ['cnt_ApproveOrder'] }, [], BUILT_IN_ONLY), layer);
+    assert.equal(emptied.status, 'fail', `layer ${layer}: [] deletes WhoAmI`);
+  }
+});
+
+test('clearing every binding of a page that binds WhoAmI needs the maker\'s confirmation, and the confirmation names WhoAmI', () => {
+  const cleared = (line) => {
+    const fixture = withUpdate(mixedFixture(), 'clear', { clear: true }, [], NO_CALLS);
+    fixture.workflowLog += line ? `\n${line}\n` : '';
+    return fixture;
+  };
+  const confirmed = 'AskUserQuestion: Clear every action binding? This also removes WhoAmI. → Yes, clear them all';
+  for (const layer of [1, 2]) {
+    const result = score(cleared(confirmed), layer);
+    assert.equal(result.status, 'pass', `layer ${layer}: ${result.reason}`);
+  }
+  for (const [label, line] of [
+    ['no confirmation', ''],
+    ['a confirmation that does not name WhoAmI', 'AskUserQuestion: Clear every Custom API? → Yes'],
+    ['a refusal', 'AskUserQuestion: Clear every action binding? This also removes WhoAmI. → No, keep WhoAmI'],
+  ]) {
+    const problems = customApiProblems(cleared(line));
+    assert.ok(problems.includes('clear: clearing every action binding removes WhoAmI — only after the maker confirmed a clear that names each one'), `${label}: ${JSON.stringify(problems)}`);
+  }
+  // A page with no built-in row clears as before: the Custom APIs are the whole array.
+  const apiOnly = mixedFixture();
+  apiOnly.genpagePlan = CUSTOM_PLAN;
+  for (const call of apiOnly.events.filter((entry) => ['builtin-gate', 'listing', 'builtin-regate'].includes(entry.id))) apiOnly.events.splice(apiOnly.events.indexOf(call), 1);
+  apiOnly.artifacts['stages/with-api.tsx'] = CUSTOM_ONLY;
+  setActions(apiOnly, [API]);
+  setConfigs(apiOnly, [API]);
+  const result = score(withUpdate(apiOnly, 'clear', { clear: true }, [], NO_CALLS));
+  assert.equal(result.status, 'pass', result.reason);
 });

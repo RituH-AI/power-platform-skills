@@ -164,6 +164,20 @@ function builtInGateProblems(calls, authoring) {
   return problems;
 }
 
+// A clear (`change: { clear: true }`, an upload of `[]`) empties the WHOLE array. On a page whose before-config holds a built-in row, removing the
+// Custom APIs is not that — it keeps the built-in rows — so a clear needs the maker's confirmation that names each built-in it removes: a
+// workflow-log line `AskUserQuestion: <question> → <answer>` whose question names every one of them and whose answer accepts.
+function clearConfirmationProblems(workflowLog, before, label) {
+  const removed = partitionBindings(before).builtIns.map((entry) => entry.name);
+  if (!removed.length) return [];
+  const confirmed = String(workflowLog || '').split(/\r?\n/).some((line) => {
+    const exchange = /\bAskUserQuestion:\s*(.*?)\s*(?:→|->)\s*(.*)$/.exec(line);
+    return Boolean(exchange) && removed.every((name) => new RegExp(`(?<![\\w$])${escapeRe(name)}(?![\\w$])`).test(exchange[1]))
+      && /^(?:yes\b|confirm|clear\b)/i.test(exchange[2].trim());
+  });
+  return confirmed ? [] : [`${label}: clearing every action binding removes ${removed.join(', ')} — only after the maker confirmed a clear that names each one`];
+}
+
 // ── The generated call of a NEWLY authored built-in operation (references/dataverse-operations.md, "Generated call") ─────────────────────────────
 // The page source is read, never run (source-evidence.js). A call is held to what the reference requires of it, beside the order every action call
 // keeps (custom-api-contract.js runtimeProblems: presence check on the page's dataApi, failure returned before `res.outputs` is read, sanitized
@@ -537,5 +551,5 @@ function builtInRuntimeProblems(code, names) {
 module.exports = {
   SECTION, SENTINEL, VERIFICATION_LINE, BUILT_IN_OUTPUTS,
   isBuiltInBinding, partitionBindings, plannedBuiltIns, unionBindings, listedBuiltIns, unionOrderProblems, builtInGateProblems,
-  builtInRuntimeProblems,
+  clearConfirmationProblems, builtInRuntimeProblems,
 };

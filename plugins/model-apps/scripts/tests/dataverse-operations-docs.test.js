@@ -117,3 +117,35 @@ test('AGENTS.md lists the third flag OFF, its owner, plan section, gated script 
   has(agents, /list-dataverse-operations\.js ← /);
   has(agents, /dataverse-operations\.js ← The reviewed built-in operation catalogue/);
 });
+
+// The text between one heading and the next, so a recipe is looked for in the phase that runs it.
+const section = (text, from, to) => {
+  const start = text.indexOf(from);
+  assert.ok(start !== -1, `the document has ${from}`);
+  const end = to ? text.indexOf(to, start + from.length) : text.length;
+  assert.ok(end !== -1, `the document has ${to} after ${from}`);
+  return squash(text.slice(start, end));
+};
+
+test('removing every Custom API keeps the built-in rows — `[]` only clears a page with none, or after a confirmation that names each built-in — in the edit planning and deploy recipes, Phase 6 and the builder', () => {
+  const edit = read('skills', 'genpage', 'edit-flow.md');
+  const planning = section(edit, '## Edit Phase 3:', '## Edit Phase 4:');
+  const deploy = section(edit, '## Edit Phase 6:', '## Edit Phase 7:');
+  for (const [phase, text] of [['planning', planning], ['deploy', deploy]]) {
+    // The old recipes wrote `[]` for a Custom-API-only intent, which deletes the built-in rows of a mixed page.
+    assert.ok(!/\*\*Clear all Custom APIs:\*\* write `\[\]`/.test(text), `${phase}: no [] recipe for clearing the Custom APIs`);
+    assert.ok(!/\*\*Remove every Custom API:\*\* write `\[\]`/.test(text), `${phase}: no [] recipe for removing every Custom API`);
+    has(text, /\*\*Remove every Custom API:\*\*[^*]*every built-in operation row \(`WhoAmI`, `RetrieveVersion`\) stays, byte for byte/);
+    has(text, /\*\*Clear every action binding:\*\*[^*]*only when the page holds no built-in operation row, or after the maker confirmed a clear that names each one it removes/);
+  }
+  has(planning, /On a page that binds one, invoke the builder the same way, with the remove intent naming every Custom API row/);
+  has(deploy, /never `\[\]` while a built-in row remains/);
+  const skill = section(read('skills', 'genpage', 'SKILL.md'), '### Phase 6: Deploy', '**Deploy through `scripts/genpage-upload.js`.**');
+  assert.ok(!/write `\[\]` and pass it to clear all `actionBindings`\./.test(skill), 'Phase 6: the unqualified [] clear is gone');
+  has(skill, /removing every Custom API keeps them/);
+  const builder = section(read('agents', 'genpage-customapi-builder.md'), '## Step 4');
+  has(builder, /\*\*Remove every Custom API:\*\* drop each Custom API row and keep every built-in row byte for byte/);
+  has(builder, /`actions\.json` is `\[\]` only when no row of either kind remains/);
+  has(squash(read('agents', 'genpage-edit-planner.md')), /Clearing the Custom APIs of a page that also binds a built-in operation removes each Custom API row and keeps the built-in calls and bindings/);
+  has(squash(read('references', 'dataverse-operations.md')), /Removing every Custom API is a remove of each Custom API row: the built-in rows stay, byte for byte/);
+});

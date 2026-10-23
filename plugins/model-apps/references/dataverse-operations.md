@@ -142,6 +142,10 @@ changed, and never as a partial file.
 | none, on create | n/a | omitted unless Custom APIs changed | no built-in call |
 | none, on an edit whose page already binds one | n/a | not passed | halt: no preserve evidence is no permission to delete the call |
 
+Removing every Custom API is a remove of each Custom API row: the built-in rows stay, byte for
+byte, and the file is never `[]` while one remains. Only a clear the maker confirmed, naming each
+built-in operation it removes, empties the array.
+
 A gate flipped OFF between planning and generation of an add/replace halts: no `actions.json`
 is written, no `--actions` is passed, and `[]` is never written in its place (`[]` is only an
 explicit clear-all). A preserved entry is never upgraded: an omitted `isFunction`, another

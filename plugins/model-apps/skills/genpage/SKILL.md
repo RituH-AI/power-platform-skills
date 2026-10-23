@@ -980,7 +980,10 @@ Connector deployment matrix:
 Custom API deployment follows the **identical matrix** as connectors, substituting
 `--actions '<working-dir>/actions.json'` for `--connectors`: pass it on create; on an edit only
 when bindings changed/added/removed (full replace); omit it on an unrelated edit (the page keeps
-its deployed `actionBindings`); write `[]` and pass it to clear all `actionBindings`.
+its deployed `actionBindings`); write `[]` and pass it to clear all `actionBindings` — on a page
+that also binds a built-in operation (`WhoAmI`, `RetrieveVersion`) only after the maker confirmed
+a clear that names each one, because removing every Custom API keeps them (edit-flow.md, Edit
+Phase 3).
 The same array carries the built-in operation rows (`WhoAmI`, `RetrieveVersion`), so the same
 rules hold for them: `--actions` is passed only when the whole desired set changed, a preserve
 omits it, a removal passes the array minus the named entries, and `[]` is passed only for a

@@ -14,7 +14,7 @@ const {
 // evaluator compares the WHOLE union — never the Custom API partition alone (action-binding-union.js).
 const {
   BUILT_IN_OUTPUTS, isBuiltInBinding, partitionBindings, plannedBuiltIns, unionBindings, listedBuiltIns, unionOrderProblems, builtInGateProblems,
-  builtInRuntimeProblems,
+  clearConfirmationProblems, builtInRuntimeProblems,
 } = require('./action-binding-union.js');
 
 const KINDS = new Set(Object.values(PARAMETER_KIND_BY_TYPE));
@@ -325,6 +325,7 @@ function customApiProblems(fixture) {
     previousId = result?.pageId;
     const before = stage.beforeConfig ? beforeByStage.get(stage) : declared;
     const desired = stage.beforeConfig ? desiredBindings(before, stage.change, 'name') : declared;
+    if (stage.beforeConfig && stage.change?.clear === true) problems.push(...clearConfirmationProblems(fixture.workflowLog, before, stage.id));
     if (stage.beforeConfig && stage.change === undefined && flags.actions) problems.push(`${stage.id}: unchanged APIs must omit --actions`);
     if (!stage.beforeConfig || stage.change !== undefined) {
       if (!flags.actions || pathKey(flags.actions) !== pathKey(stage.actions) || !sameBindings(artifactJson(fixture, flags.actions), desired, 'name')) {

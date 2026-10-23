@@ -268,6 +268,10 @@ Start from the **existing bindings** you were given and apply the edit intent:
 - **Replace:** discover the supported replacement (Steps 2–3) and swap it in by `name`.
   If discovery fails or finds no supported replacement, report it; do not silently drop the old binding.
 - **Remove:** drop the named binding(s).
+- **Remove every Custom API:** drop each Custom API row and keep every built-in row byte for byte
+  (`WhoAmI`, `RetrieveVersion`, exact names): `custom-api-bindings.md` is then
+  `No custom API bindings.` and `actions.json` holds the built-in rows. "Clear the Custom APIs" is
+  this removal; only a clear the maker confirmed, naming each built-in it removes, writes `[]`.
 - Use ONLY names, kinds, bound entities, and parameter kinds you discovered this run or that
   were in the existing bindings. Never fabricate.
 - New discovery eligibility is not retroactive cleanup: preserve unrelated existing bindings
@@ -330,8 +334,9 @@ Write the final binding set to the output files (see "Outputs"):
   `parameterKinds` and optional `boundEntityLogicalName` only. Do not copy the full discovery
   entry: `bindingType` and `lookupParameters` are not `actions.json` fields.
 
-- **When there are none:** `custom-api-bindings.md` contains exactly `No custom API bindings.`
-  and `actions.json` contains `[]`.
+- **When there are no Custom API bindings:** `custom-api-bindings.md` contains exactly
+  `No custom API bindings.`; `actions.json` holds the built-in rows the page keeps or this run
+  adds, and `actions.json` is `[]` only when no row of either kind remains.
 
 - **Built-in operations added or replaced this run:** also write `dataverse-operations.md`,
   whose entire body is the plan's `## Dataverse Operations` section — the verification line and
