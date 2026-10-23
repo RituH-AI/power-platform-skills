@@ -1917,8 +1917,8 @@ function indexSource(text, mask) {
   indexDeclarations(index);
   indexWrites(index);
   index.members = indexedMembers(index);
-  // A context-named const bound to a closed object literal, used only through member calls, is that
-  // literal, not the PCF context: const ctx = { device: { captureImage() {} } }; ctx.device.captureImage().
+  // A context-named local const bound to an inert object literal, used only to call its own functions, is
+  // that literal, not the PCF context: const ctx = { device: { captureImage() { return 1; } } }; ctx.device.captureImage().
   index.members = index.members.filter((member) => !localObjectMember(index, member));
   const methods = new Map(index.members.filter((member) => member.call && ['device', 'utils'].includes(member.namespace))
     .map((member) => [member.names.join('.'), member.names]));
@@ -2086,34 +2086,45 @@ function parenGroups(mask, opens = '([{', closes = ')]}') {
 
 function localObjectMember(index, member) {
   // The context is recognized by name (CONTEXT_NAME), so an unrelated object named ctx or context
-  // would read as the PCF context. Only a binding that provably holds a local object is set aside;
-  // a parameter, a field, a call result such as useContext(...) or anything else keeps the name rule,
+  // would read as the PCF context. A call is set aside only when it provably runs a function written
+  // in a local object literal that nothing else can reach or change:
+  //   function render() { const ctx = { device: { captureImage() { return 1; } } }; ctx.device.captureImage(); }
+  // A parameter, a field, a call result such as useContext(...) or anything else keeps the name rule,
   // because it may hold the real context. Proven when all of these hold:
-  //   - the root's binding has exactly one declaration, `const <root> = { … }`, ending the statement;
-  //   - the literal is closed: every entry is a static key with a nested closed literal, a string,
-  //     number, true, false or null, a function or arrow expression, or a method (no accessor,
-  //     spread, shorthand or computed key), so no value comes from outside it;
-  //   - every other use of the binding is a member call such as ctx.device.captureImage(), and no
-  //     write reaches it, so no outside value can be stored into it or read out of it.
+  //   - the context-named root itself holds the namespace (ctx.device, not props.context.device);
+  //   - its binding is local to a function or block (not the program, which other scripts share), with
+  //     exactly one declaration, `const <root> = { … }`, ending the statement;
+  //   - the literal is inert (inertLiteral): static keys, nested inert literals, plain literals and
+  //     functions whose body returns only such values, so a call through it runs no other code and
+  //     returns nothing from outside it;
+  //   - every other use of the binding calls one of those functions through its own keys, such as
+  //     ctx.device.captureImage(), and no write reaches the binding: the literal is never passed,
+  //     aliased, returned or changed, and no inherited method (ctx.__defineGetter__) is called on it;
+  //   - the file has no eval, with statement or unreadable identifier escape, which could reach the
+  //     binding without naming it in code.
   const { tokens } = index;
   const root = member.names[0];
-  if (root === 'this' || tokens[member.token]?.kind !== 'identifier') return false;
+  if (root === 'this' || !CONTEXT_NAME.test(root) || member.namespacePath !== `${root}.${member.namespace}`
+    || member.first !== member.token || tokens[member.token]?.kind !== 'identifier') return false;
+  index.dynamicNames ??= tokens.some((token) => token.name === 'eval' || (token.kind === 'unknown-identifier' && !token.name))
+    || index.controls.some((control) => control.kind === 'with');
+  if (index.dynamicNames) return false;
   const binding = bindingFor(tokens[member.token].scope, root);
   index.localObjects ||= new Map();
   const key = `${binding}:${root}`;
-  if (!index.localObjects.has(key)) index.localObjects.set(key, closedConstObject(index, binding, root));
+  if (!index.localObjects.has(key)) index.localObjects.set(key, inertConstObject(index, binding, root));
   return index.localObjects.get(key);
 }
 
-function closedConstObject(index, binding, root) {
+function inertConstObject(index, binding, root) {
   const { tokens, mask } = index;
+  if (['program', 'opaque'].includes(index.scopes[binding].kind)) return false;
   const declarations = index.scopes[binding].declarations.get(root) || [];
   if (declarations.length !== 1) return false;
   const keyword = tokenIndexAt(tokens, declarations[0]);
   const name = keyword + 1;
   const open = keyword + 3;
-  if (!tokenKeyword(tokens, keyword, 'const') || tokenKeyword(tokens, keyword - 1, 'export')
-    || tokens[name]?.kind !== 'identifier' || tokens[name].value !== root
+  if (!tokenKeyword(tokens, keyword, 'const') || tokens[name]?.kind !== 'identifier' || tokens[name].value !== root
     || tokens[name + 1]?.value !== '=' || tokens[open]?.value !== '{' || tokens[open].match < 0) return false;
   const close = tokens[open].match;
   const after = tokens[close + 1];
@@ -2121,7 +2132,8 @@ function closedConstObject(index, binding, root) {
   // not `as T`, a call or an index that would make the binding something else.
   if (after && ![';', ',', '}'].includes(after.value) && !(LINE_TERMINATOR.test(mask.slice(tokens[close].end, after.start))
     && after.kind === 'identifier' && !['as', 'satisfies', 'in', 'instanceof'].includes(after.value))) return false;
-  if (!closedObjectLiteral(index, open)) return false;
+  const members = inertLiteral(index, open);
+  if (!members) return false;
   index.rootUses ||= rootUses(index);
   for (const position of index.rootUses.writes.get(`${binding}:${root}`) || []) {
     if (position !== tokens[name].start) return false;
@@ -2130,6 +2142,11 @@ function closedConstObject(index, binding, root) {
     if (use === name) continue;
     const path = indexedPath(index, use);
     if (index.rootRoles.get(use) !== 'read' || !path.call || path.unknown || path.names.length < 2) return false;
+    // Every name on the way must be the literal's own: an object up to the last, a function at the end.
+    for (let length = 2; length <= path.names.length; length += 1) {
+      const kind = members.get(path.names.slice(1, length).join('.'));
+      if (kind !== (length === path.names.length ? 'function' : 'object')) return false;
+    }
   }
   return true;
 }
@@ -2158,46 +2175,88 @@ function rootUses(index) {
   return { reads, writes };
 }
 
-function closedObjectLiteral(index, open) {
-  const { tokens } = index;
+function inertLiteral(index, open) {
+  // The own members of an inert object literal, by dotted path ('device' → 'object',
+  // 'device.captureImage' → 'function'), or null. Inert means no code in it can run anything else,
+  // read anything from outside it or hand out a reference to it:
+  //   - every key is static (a name or a string), not __proto__ and not repeated; no accessor,
+  //     spread, shorthand, computed key or generator;
+  //   - every value is a nested inert literal, a string, number, true, false or null, an array of
+  //     those, or a method, function or arrow expression (async allowed) whose parameters are plain
+  //     names and whose body is empty, returns such a value, or (an arrow) is such a value. A body
+  //     that names anything at all, this or a parameter included, is refused.
+  // https://tc39.es/ecma262/#sec-object-initializer
+  const { tokens, text } = index;
+  const group = (at, value) => tokens[at]?.value === value && tokens[at].match > at ? tokens[at].match : -1;
   const literal = (at) => ['string', 'number'].includes(tokens[at]?.kind)
     || ['true', 'false', 'null'].some((word) => tokenKeyword(tokens, at, word));
-  const staticKey = (at) => ['identifier', 'string', 'number'].includes(tokens[at]?.kind);
-  const group = (at, value) => tokens[at]?.value === value && tokens[at].match > at ? tokens[at].match : -1;
-  // A function or arrow expression filling [from, to): its body runs only when called.
+  // A value filling exactly [from, to) that runs nothing and refers to nothing.
+  const inertValue = (from, to) => {
+    if (to - from === 1) return literal(from);
+    if (group(from, '(') === to - 1) return inertValue(from + 1, to - 1);
+    if (group(from, '{') === to - 1) return Boolean(inertLiteral(index, from));
+    if (group(from, '[') !== to - 1) return false;
+    return topLevelTokenRanges(tokens, from + 1, to - 1, ',').every(([a, b]) => a === b || inertValue(a, b));
+  };
+  const parameters = (at) => {
+    const close = group(at, '(');
+    if (close === -1 || close === at + 1) return close;
+    const names = topLevelTokenRanges(tokens, at + 1, close, ',');
+    return names.every(([a, b], i) => (a === b && i === names.length - 1 && i > 0)
+      || (b === a + 1 && tokens[a].kind === 'identifier' && !['this', 'arguments', 'eval'].includes(tokens[a].value)))
+      ? close : -1;
+  };
+  const inertBody = (at, to) => {
+    if (group(at, '{') !== to - 1) return false;
+    let end = to - 1;
+    if (tokens[end - 1]?.value === ';') end -= 1;
+    return end === at + 1 || (tokenKeyword(tokens, at + 1, 'return') && (end === at + 2 || inertValue(at + 2, end)));
+  };
+  // A function or arrow expression filling [from, to).
   const functionValue = (from, to) => {
     let at = tokenKeyword(tokens, from, 'async') ? from + 1 : from;
     if (tokenKeyword(tokens, at, 'function')) {
-      at += tokens[at + 1]?.value === '*' ? 2 : 1;
+      at += 1;
       if (tokens[at]?.kind === 'identifier') at += 1;
-      const params = group(at, '(');
-      return params !== -1 && group(params + 1, '{') === to - 1;
+      const close = parameters(at);
+      return close !== -1 && inertBody(close + 1, to);
     }
-    const params = tokens[at]?.kind === 'identifier' ? at : group(at, '(');
-    return params !== -1 && tokens[params + 1]?.value === '=>' && params + 2 < to;
+    const close = tokens[at]?.kind === 'identifier' && !['this', 'arguments', 'eval'].includes(tokens[at].value) ? at : parameters(at);
+    if (close === -1 || tokens[close + 1]?.value !== '=>' || close + 2 >= to) return false;
+    return tokens[close + 2].value === '{' && group(close + 2, '{') === to - 1 ? inertBody(close + 2, to) : inertValue(close + 2, to);
   };
-  const pending = [open];
+  const members = new Map();
+  const pending = [[open, '']];
   while (pending.length) {
-    const start = pending.pop();
+    const [start, prefix] = pending.pop();
+    const keys = new Set();
     for (const [from, to] of topLevelTokenRanges(tokens, start + 1, tokens[start].match, ',')) {
       if (from === to) continue;
       let at = from;
       if (tokenKeyword(tokens, at, 'async') && tokens[at + 1]?.value !== '(' && tokens[at + 1]?.value !== ':') at += 1;
-      if (tokens[at]?.value === '*') at += 1;
-      if (['get', 'set'].some((word) => tokenKeyword(tokens, at, word)) && staticKey(at + 1)) return false;
-      if (!staticKey(at)) return false;
-      const params = group(at + 1, '(');
-      if (params !== -1) {
-        if (group(params + 1, '{') !== to - 1) return false;
+      if (['get', 'set'].some((word) => tokenKeyword(tokens, at, word)) && tokens[at + 1]?.value !== '('
+        && tokens[at + 1]?.value !== ':') return null;
+      const key = tokens[at]?.kind === 'identifier' ? tokens[at].value
+        : tokens[at]?.kind === 'string' ? decodeStaticKey(text.slice(tokens[at].start, tokens[at].end)) : null;
+      if (!key || key === '__proto__' || keys.has(key)) return null;
+      keys.add(key);
+      const path = prefix ? `${prefix}.${key}` : key;
+      const close = parameters(at + 1);
+      if (close !== -1) {
+        if (!inertBody(close + 1, to)) return null;
+        members.set(path, 'function');
         continue;
       }
-      if (at !== from || tokens[at + 1]?.value !== ':') return false;
+      if (at !== from || tokens[at + 1]?.value !== ':' || at + 2 >= to) return null;
       const value = at + 2;
-      if (group(value, '{') === to - 1) pending.push(value);
-      else if (!(value === to - 1 && literal(value)) && !functionValue(value, to)) return false;
+      if (group(value, '{') === to - 1) {
+        members.set(path, 'object');
+        pending.push([value, path]);
+      } else if (functionValue(value, to)) members.set(path, 'function');
+      else if (!inertValue(value, to)) return null;
     }
   }
-  return true;
+  return members;
 }
 
 function tokenIndexAt(tokens, start) {

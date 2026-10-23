@@ -315,7 +315,7 @@ for (const [name, relative] of [
     assert.match(text, /parenthesized receivers/i);
     assert.match(text, /exact negation[^\n]*always leaves the block[^\n]*`return`, `throw`, `break` or `continue`/i);
     assert.match(text, /guard helper[^\n]*reported by design/i);
-    assert.match(text, /except a `const` bound to an object literal[^\n]*used only through member calls/i);
+    assert.match(text, /except a function- or block-local `const` bound to an object literal[^\n]*used only to call those functions[^\n]*fail closed/i);
     assert.match(text, /parenthesized receivers[^\n]*`\.bind`[^\n]*`Reflect\.apply`[^\n]*detected like direct calls/i);
     assert.match(text, /runtime verification on the target Power Pages site[^.\n]*required/i);
   });
@@ -643,36 +643,87 @@ test('Pages proof keeps refusing exits and else branches that do not cover the c
 
 test('Pages detection ignores a context-named local object literal that is provably not the PCF context', () => {
   for (const name of ['ctx', 'context', '_context', 'pcfContext']) {
-    const text = `function render() {\n  const ${name} = { device: { captureImage() { return 1; }, "pickFile": async () => [] }, utils: { lookupObjects: function () { return []; }, max: 3 } };\n  ${name}.device.captureImage(); ${name}.device.pickFile(); ${name}.utils.lookupObjects();\n}`;
+    const text = `function render() {\n  const ${name} = { device: { captureImage() { return 1; }, "pickFile": async () => [] }, utils: { lookupObjects: function (options) { return []; }, max: 3 } };\n  ${name}.device.captureImage(); ${name}.device.pickFile(); ${name}.utils.lookupObjects(options);\n}`;
     assert.deepEqual(codesFor(text, null), [], name);
     assert.deepEqual(codesFor(text, null, ['model']), [], name);
   }
-  // A call inside the literal's own methods is still read on its own.
-  assert.deepEqual(codesFor('const ctx = { device: { captureImage: () => context.device.captureImage() } }; ctx.device.captureImage();'),
-    ['PCF_PAGES_API']);
+  for (const text of [
+    '{ const ctx = { device: { captureImage: () => ({ id: "local", size: [1, 2] }) } }; ctx.device.captureImage(); }',
+    'function render() { const ctx = { device: { captureImage(a, b) { return null; } } }\n  ctx?.device?.captureImage?.(a); }',
+    'function render() { const ctx = { device: { captureImage: async function named() { return; } } }; new ctx.device.captureImage(); }',
+  ]) {
+    assert.deepEqual(codesFor(text, null), [], text);
+  }
+  // A literal whose function runs other code is not set aside; the call inside is read on its own too.
+  assert.deepEqual(codesFor('function render() { const ctx = { device: { captureImage: () => context.device.captureImage() } }; ctx.device.captureImage(); }'),
+    ['PCF_PAGES_API', 'PCF_PAGES_API']);
 });
 
 test('Pages detection keeps the error for context-named objects it cannot prove local', () => {
-  for (const text of [
+  const local = 'device: { captureImage() { return "local"; } }';
+  for (const body of [
+    // Not a local, inert const literal.
     'let ctx = { device: { captureImage() {} } }; ctx.device.captureImage();',
-    'const ctx = { device: context.device }; ctx.device.captureImage();',
+    'const ctx = { device: real.device }; ctx.device.captureImage();',
     'const ctx = { device }; ctx.device.captureImage();',
     'const ctx = { ...base }; ctx.device.captureImage();',
     'const ctx = { [key]: {} }; ctx.device.captureImage();',
     'const ctx = { get device() { return real; } }; ctx.device.captureImage();',
-    'const ctx = { device: { captureImage() {} } }; helper(ctx); ctx.device.captureImage();',
-    'const ctx = { device: { captureImage() {} } }; const d = ctx.device; ctx.device.captureImage();',
-    'const ctx = { device: { captureImage() {} } }; ctx.device.captureImage = real; ctx.device.captureImage();',
-    'const ctx = { device: { captureImage() {} } }; Object.assign(ctx.device, real); ctx.device.captureImage();',
-    'const ctx = { device: { captureImage() {} } }; (ctx).device.captureImage();',
-    'const ctx = { device: { captureImage() {} } }, other = 1; { const ctx = props.context; ctx.device.captureImage(); }',
+    'const ctx = { __proto__: { device: { captureImage() {} } } }; ctx.device.captureImage();',
+    'const ctx = { device: { captureImage() {} }, device: real }; ctx.device.captureImage();',
+    'const ctx = { device: { *captureImage() {} } }; ctx.device.captureImage();',
+    'const ctx = { device: { captureImage(): void {} } }; ctx.device.captureImage();',
+    'const ctx = { device: { captureImage(v = real) {} } }; ctx.device.captureImage();',
+    'const ctx = { device: { captureImage({ device }) {} } }; ctx.device.captureImage();',
+    'const ctx = { device: { captureImage: real.captureImage } }; ctx.device.captureImage();',
     'const ctx = { device: { captureImage() {} } } as unknown as Context; ctx.device.captureImage();',
-    'export const ctx = { device: { captureImage() {} } }; ctx.device.captureImage();',
     'const ctx = useContext(PcfContext); ctx.device.captureImage();',
+    // A function in the literal that runs, reads or returns anything else.
+    `const ctx = { ${local}, update(value) { this.device = value.device; } }; ctx.update(api); ctx.device.captureImage();`,
+    `const ctx = { ${local}, expose() { return this; } }; Object.assign(ctx.expose(), api); ctx.device.captureImage();`,
+    `let escaped; const ctx = { ${local}, leak() { escaped = this; } }; ctx.leak(); escaped.device = api.device; ctx.device.captureImage();`,
+    `const ctx = { ${local}, update(value) { this.device = value.device; } }; ctx.update?.(api); ctx.device.captureImage();`,
+    `const ctx = { ${local}, update() { ctx.device = api.device; } }; ctx.update(); ctx.device.captureImage();`,
+    `const ctx = { ${local}, update() { super.__defineGetter__("device", () => api.device); } }; ctx.update(); ctx.device.captureImage();`,
+    'const ctx = { device: { captureImage(c) { return c.device.captureImage(); } } }; ctx.device.captureImage(api);',
+    'const ctx = { device: { captureImage: (c) => c } }; ctx.device.captureImage(api.device).captureImage();',
+    'const ctx = { device: { captureImage() { return real; } } }; ctx.device.captureImage().captureImage();',
+    'const ctx = { device: { captureImage() { return arguments; } } }; ctx.device.captureImage();',
+    'const ctx = { device: { captureImage() { consume(); return 1; } } }; ctx.device.captureImage();',
+    // A use other than a call of the literal's own function.
+    'const ctx = {}; ctx.__defineGetter__("device", () => api.device); ctx.device.captureImage();',
+    `const ctx = { ${local} }; ctx.hasOwnProperty("device"); ctx.device.captureImage();`,
+    `const ctx = { ${local} }; ctx.device.captureImage.call(api.device);`,
+    `const ctx = { ${local} }; helper(ctx); ctx.device.captureImage();`,
+    `const ctx = { ${local} }; const d = ctx.device; ctx.device.captureImage();`,
+    `const ctx = { ${local} }; ctx.device.captureImage = real; ctx.device.captureImage();`,
+    `const ctx = { ${local} }; Object.assign(ctx.device, real); ctx.device.captureImage();`,
+    `const ctx = { ${local} }; delete ctx.device; ctx.device.captureImage();`,
+    `const ctx = { ${local} }; (ctx).device.captureImage();`,
+    `const ctx = { ${local} }; const alias = ctx; alias.device = api.device; ctx.device.captureImage();`,
+    `const ctx = { ${local} }; return [ctx, ctx.device.captureImage()];`,
+    // Something else could reach the binding: eval, a with statement, an inner declaration.
+    `const ctx = { ${local} }; eval("ctx.device = api.device"); ctx.device.captureImage();`,
+    `const ctx = { ${local} }, other = 1; { const ctx = real; ctx.device.captureImage(); }`,
+    `const ctx = { ${local} }; function inner(ctx) { ctx.device.captureImage(); }`,
+    `const ctx = { ${local} }; button.onclick = (ctx) => ctx.device.captureImage();`,
+  ]) {
+    assert.ok(codesFor(`function run(api, real, base, key, device, helper, consume, button, PcfContext) { ${body} }`, null).includes('PCF_PAGES_API'), body);
+  }
+  for (const text of [
+    // Only the context-named root itself is set aside, never a receiver under another root.
+    'function run(api) { const props = { context: null }; Object.assign(props, { context: api }); props.context.device.captureImage(); }',
+    'function run(api) { const state = { context: null }; const alias = state; alias.context = api; state.context.device.captureImage(); }',
+    'function run(api) { const props = { context: { device: { captureImage() {} } } }; props.context.device.captureImage(); }',
+    // A program-level const can be reached from other scripts; a with statement can rebind the name.
+    'const ctx = { device: { captureImage() {} } }; ctx.device.captureImage();',
+    'export const ctx = { device: { captureImage() {} } }; ctx.device.captureImage();',
+    'function run(api) { const ctx = { device: { captureImage() {} } }; with (api) { ctx.device.captureImage(); } }',
     'function render(ctx) { ctx.device.captureImage(); }',
     'class C { init(context) { this._context = context; } run() { this._context.device.captureImage(); } }',
   ]) {
     assert.ok(codesFor(text, null).includes('PCF_PAGES_API'), text);
+    assert.ok(codesFor(text, null, ['model']).includes('PCF_FEATURE_UNDECLARED'), text);
   }
 });
 
