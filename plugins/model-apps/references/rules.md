@@ -267,6 +267,33 @@ const [lat] = useState(toNumberOrDefault(pageInput?.data?.latitude, 0));
 const [lng] = useState(toNumberOrDefault(pageInput?.data?.longitude, 0));
 ```
 
+### What another page accepts (read it before you pass it data)
+
+The platform shows no list of the inputs a page takes. A page's inputs are the values its own source
+reads from its `pageInput` prop: `pageInput.entityName`, `pageInput.recordId`, and each key it reads
+from `pageInput.data`. Before a page navigates to a page that this plan does not build, and passes it
+`data`, find out what that page reads:
+
+1. **A page of an app that `/app-builder` built:** its App Spec declares the inputs as
+   `pages[].pageInput.data` (each key with its type). The producing page declares the same keys in
+   `navigatesTo[].data`. `download-model-app.js` writes both into the spec from the app's page manifest.
+2. **Any other page** (a `/genpage` page, or a page made in Maker): download it into a folder of its
+   own. Do not use the working directory, and record no base marker, because this is a read:
+
+   ```powershell
+   node "${PLUGIN_ROOT}/scripts/genpage.js" download --env '<envUrl>' --page-id '<target-page-id>' --output-directory '<working-dir>/targets'
+   ```
+
+   Then search `<working-dir>/targets/<target-page-id>/page.tsx` for `pageInput`. Each key read from
+   `pageInput.data` is an input: `pageInput?.data?.accountId`, `pageInput?.data?.["account-id"]`, or
+   a key read from a variable that holds `pageInput.data`. Note how the page converts each value (for
+   example `toNumberOrDefault(...)` or `=== "true"`), and send a value of that type. A read of
+   `pageInput.recordId` or `pageInput.entityName` is an input too.
+
+Pass only the keys the target reads, with the same names, in `data` of the `navigateTo` call. Values
+in `data` are primitives. The target ignores a key it does not read, so a guessed name fails
+silently. A page that reads no `pageInput` takes no input: navigate to it without `data`.
+
 ---
 
 ## Special Patterns
@@ -339,6 +366,8 @@ xrm.Navigation.navigateTo({ pageType: "generative", pageId: targetPageId, entity
 **CRITICAL — never use `pageType: "entityrecord"` or `pageType: "entitylist"` to navigate to another generative page.** Those open the standard OOB form/list, not the custom page. Always use `pageType: "generative"` with the target page's GUID.
 
 **Passing a record ID between pages:** Always put custom identifiers in `data`, not `recordId`. `recordId` is reserved for standard Dataverse record context (used by OOB forms/views); values placed there may not arrive reliably on the receiving genpage. Use `data: { accountId: selectedId }` and read it as `pageInput?.data?.accountId` on the target page. Never rely on `recordId` as the delivery channel for a custom ID.
+
+**Passing data to a page this plan does not build:** first read the keys that page accepts — see **Page Input > What another page accepts**. Never guess the names.
 
 **Receiving navigation state:** On any page reachable via `navigateTo` (e.g., a detail page, or an explorer page the user navigates back to), initialize shared UI state — dark mode toggle, active filters, selected view — from `pageInput.data` first. URL params are a valid secondary source (e.g., for bookmarked URLs or direct links), but `pageInput.data` takes priority because `navigateTo` does not populate URL params. Pattern:
 

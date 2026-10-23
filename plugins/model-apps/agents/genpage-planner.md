@@ -641,6 +641,14 @@ layouts, 2-wizard-multi-step.tsx for wizards, 12-dialog-form-overlay.tsx for any
 page with a modal/dialog — create/edit forms, confirm-delete, detail-in-a-dialog).
 Do NOT list reference docs as samples — only files under `samples/`.
 
+For a page that navigates to an existing page that this plan does not build (a page of the chosen
+app, by its page id), read what that page accepts before you plan the call. Follow
+`${PLUGIN_ROOT}/references/rules.md` → **Page Input > What another page accepts**: download the page
+into `<working-dir>/targets` with `genpage.js download` and read its `pageInput` reads. Then write
+in the page's **Interactions** the target's page id and the exact `data` keys it reads, each with
+the type it converts the value to. If it reads none, write that it takes no input. The page-builder
+uses those keys and never guesses them.
+
 ### CRITICAL — Pre-write validation pass
 
 Before calling `Write` to save `genpage-plan.md`, scan the in-memory document
