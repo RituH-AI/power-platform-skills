@@ -34,6 +34,7 @@ const {
 } = require('./app-spec.js');
 const { readColumnLabels, makeTableLabelReader, lookupKey, labelsByLcid } = require('./lookup-labels.js');
 const { topoOrderEntities, entityByLogical } = require('./_graph.js');
+const { ownValue } = require('./own-keys.js');
 // OData string-literal escaping for spec-controlled values interpolated into $filter (a solution
 // uniquename / publisher prefix with a `'` would otherwise break the query or inject a clause).
 const { odataLit } = require('./odata.js');
@@ -49,7 +50,7 @@ const { readOrgLanguageCode, readProvisionedLanguages } = require('./dataverse-a
 const { RETRY, retryPolicyFor, refusal, serviceFailure, serviceCodeOf } = require('./retry-policy.js');
 // What the run's throttle budget says when it refuses a wait (the words of the build's own halt for it), for the step guard in makeRunner.
 const { waitDoesNotFit } = require('./throttle-budget.js');
-const { readStatusOptions, alternateKeyMatches } = require('./table-schema-metadata.js');
+const { readStatusOptions, alternateKeyMatches, alternateKeyOverColumns, sameKeyColumnSet } = require('./table-schema-metadata.js');
 
 // App Spec column type -> SDK ColumnType. Lookup is omitted (side effect of a OneToMany
 // relationship); Customer is handled specially (createCustomerColumn).
@@ -917,32 +918,342 @@ function outcomeUnknown(err) {
 // and tells the budget; the service has asked the run to hold back, so the columns are NOT then created one by one — each would be one more request to a service that said to wait — and the phase stops
 // with the budget's halt. `stop`, when there is a budget, is the check that says so (the runner's `stopIfRefused`): it throws when the budget has refused, and does nothing otherwise, so a change
 // set that was refused by anything else, or whose sends ran out while the budget still had room, falls back exactly as it always did.
-async function createColumnsInOneRequest({ sdk, provision, table, tableSchemaName, columns, optionsFor, warn, sleep, stop }) {
+//
+// And one refusal is the lag of the table itself (`lagTable`, a table this attempt has just created — see "The lag of a table this attempt just
+// created" below): the change set refused with HTTP 400 and `0x80040216` or `0x80090457` in its first part is not taken for an ordinary refusal.
+// The table's columns are read, and what follows depends on what that read PROVES (recoverRefusedBatch): every column there is adopted; every
+// missing one proved absent sends the change set once more, or creates the missing ones one by one; a column the read cannot place is read again,
+// within the table's budget; and a budget spent with a column still missing stops the build — `terminal` — before any further column is sent.
+//
+// Answers { map, terminal?, fallback? }: `map` holds the columns confirmed, keyed by the column object, each with the id createColumn would have
+// answered; `terminal`, when there is one, is the failure the column loop stops with at the first column the map does not hold (it sends nothing
+// more); `fallback`, when there is one, is the lag's own one-by-one fallback (recoverRefusedBatch), whose creates the table's budget gates.
+async function createColumnsInOneRequest({ sdk, provision, table, tableSchemaName, columns, optionsFor, warn, sleep, stop, lagTable }) {
   try {
     // The options are built inside the try: a column the options cannot be built for fails the way it always did, in its own step
     // on the per-column path, instead of failing the phase from here.
     await sdk.createColumns(table.logicalName, columns.map(optionsFor));
   } catch (err) {
     if (typeof stop === 'function') stop();
-    if (outcomeUnknown(err)) {
-      // ONE read, and only an answer that shows EVERY column counts: the change set is atomic, so a table that has only some of them
-      // did not get them from it (a column the platform makes itself under the name of one the spec asks for is there either way).
-      const found = await confirmInlineColumns(provision, table, columns, { sleep, attempts: 1 });
-      if (found.size === columns.length) {
-        if (typeof warn === 'function') warn(`the answer to the request that creates the ${columns.length} ordinary column(s) of table ${tableSchemaName} was lost or could not be read (${briefReason(err)}), but the table has every one of them`);
-        return found;
+    const code = lagTable ? batchLagCodeOf(err) : null;
+    if (code) return recoverRefusedBatch({ sdk, provision, table, tableSchemaName, columns, optionsFor, warn, sleep, stop, lagTable, original: err, code });
+    return { map: await afterRefusedBatch(err, { provision, table, tableSchemaName, columns, warn, sleep }) };
+  }
+  return { map: await confirmInlineColumns(provision, table, columns, { warn, sleep }) };
+}
+
+// What follows a change set that was not created as sent, for every refusal but the lag of the table (above): the columns found when its answer was
+// lost and the table proves it committed, and otherwise none — the columns are then created one by one, with `warn` saying why.
+async function afterRefusedBatch(err, { provision, table, tableSchemaName, columns, warn, sleep }) {
+  if (outcomeUnknown(err)) {
+    // ONE read, and only an answer that shows EVERY column counts: the change set is atomic, so a table that has only some of them
+    // did not get them from it (a column the platform makes itself under the name of one the spec asks for is there either way).
+    const found = await confirmInlineColumns(provision, table, columns, { sleep, attempts: 1 });
+    if (found.size === columns.length) {
+      if (typeof warn === 'function') warn(`the answer to the request that creates the ${columns.length} ordinary column(s) of table ${tableSchemaName} was lost or could not be read (${briefReason(err)}), but the table has every one of them`);
+      return found;
+    }
+  }
+  if (typeof warn === 'function') {
+    // A ConnectionError carries `.statusCode`; any other error may wrap one as its `cause`.
+    const status = err && (err.statusCode || err.status || (err.cause && (err.cause.statusCode || err.cause.status)));
+    warn(status === 429
+      ? `table ${tableSchemaName} was throttled (${briefReason(err)}), so its ${columns.length} ordinary column(s) are created one by one instead of in one request`
+      : `could not create the ${columns.length} ordinary column(s) of table ${tableSchemaName} in one request (${briefReason(err)}) — creating them one by one`);
+  }
+  return new Map();
+}
+
+// ---- The lag of a table this attempt just created ---------------------------------------------------------------------------------------------------
+//
+// Right after a table is created, a column create or a status-reason insert for it is intermittently refused, and the same create succeeds on a
+// re-run. Measured live on an environment whose only language is Spanish, in three of four first builds, the same way in two releases:
+//   POST $batch (the columns of a new table)  HTTP 400, first change-set part  {"error":{"code":"0x80040216","message":"An unexpected error occurred."}}
+//   POST …/Attributes (one column)             HTTP 400                         {"error":{"code":"0x80040216","message":"An unexpected error occurred."}}
+//   POST /InsertStatusValue                    HTTP 400                         {"error":{"code":"0x80090457","message":"Component of type Entity with name  and id <id> does not exist."}}
+// Nothing retried them: a 400 is final to the HTTP client and to the build's own retry (lib/retry-policy.js), and neither code means "already
+// exists" (ALREADY_EXISTS_CODES). Both codes are generic, so neither is ever read as a success or as a condition to run the build again; a create
+// refused with one of them is sent again ONLY when all of these hold:
+//   - THIS attempt created the table (not a table that existed, not one found after a create whose answer was lost, not a later attempt);
+//   - the create is the column change set, one column's create, or a status reason's insert, for that table;
+//   - the answer is HTTP 400 with one of the two codes, read from the OData error of the answer (the change set's from its first part);
+//   - a read made after the refusal PROVES the thing absent: a list that holds the table's own stock entry — its primary name column, or the
+//     stock status reason 1 or 2 — and not the thing, every entry of which can be told apart (a column named with its id, an option with its
+//     value). A 404, a 400 `0x80090457`, an answer that is no list, one without the stock entry, or one with an entry that cannot be told apart
+//     — the thing itself named without its id, say — proves nothing and is read again; any other failure of the read stops the build with that
+//     failure; a column or a reason the read shows is ADOPTED, never sent again;
+//   - the table's budget still has room: 60 seconds of the time spent waiting for those reads, the waits between them and the check's own sends
+//     — the resends, and the one-by-one creates of the change set's columns that a read proved absent (time spent elsewhere is not counted) —
+//     at most 8 reads, at most 4 resends of one create or insert and 1 of the change set. A budget that runs out with the create still missing —
+//     proved absent or not — stops the build with the original refusal, before any further POST, and says the build may be run again.
+//     Why 60: the sends are charged, and measured live on that environment one resend took 7.9–47.2 s for a change set and 20.7–26.5 s for a
+//     File column. With 20 s, the two recoveries a first build met on one new table (its change set's and a File column's) spent 36.7 s, and
+//     the status reason queued for the same table — which the platform had in fact committed — was never read: the build stopped, and only its
+//     re-run went on. A minute holds two such recoveries and the read of a third; a lag that outlasts it still stops the build, as before.
+// The read of a status reason carries labels, and a label-bearing read ahead of a labelled create keeps only the base language of that create,
+// so a refused insert is not read in the table loop: it is queued, and read and sent again after every other labelled create of the phase
+// (drainLagStatuses). Nothing here deletes or updates anything, and no wait is a fire-and-forget: every read, wait and resend is awaited.
+const LAG_CODES = Object.freeze(new Set(['0x80040216', '0x80090457']));
+const LAG_VISIBILITY_CODE = '0x80090457';
+const LAG_ADMISSION_MS = 60000;
+const LAG_PROBES = 8;
+const LAG_SINGLE_RESENDS = 4;
+const LAG_DELAYS_MS = Object.freeze([1000, 2000, 4000, 8000]);
+const LAG_JITTER = 0.25;
+const LAG_SKIP = 'refused just after the table was created — retrying after the other schema creates';
+const LAG_REMEDY = ' — the refusal persisted after the bounded check. The table was created. Run the build again to reconcile what is already there; a refusal that is not lag will persist';
+// The refusals a budget ran out on: the halt the runner raises around one adds LAG_REMEDY (operatorRemedy). Kept here, beside the error and not in
+// its words, so that the error the step reports while it runs, and every rule that reads an error, see the SDK's error exactly as it was.
+const persistedLagRefusals = new WeakSet();
+const persisted = (err) => { if (err && typeof err === 'object') persistedLagRefusals.add(err); return err; };
+
+// The code of a single create's refusal when it is the lag of the table: HTTP 400 and one of LAG_CODES as the `error.code` of its answer
+// (serviceCodeOf reads it from the SDK's ConnectionError, whose `cause` is the body; a code only the message names is not the code). Else null.
+function lagCodeOf(err) {
+  const status = err && (err.statusCode || err.status);
+  if (status !== 400) return null;
+  const code = serviceCodeOf(err);
+  return code !== null && LAG_CODES.has(code) ? code : null;
+}
+
+// The same for a refused change set. The SDK's ConnectionError for a `$batch` carries the multipart answer as its `cause` (a string), e.g.
+//   --batchresponse_1\r\nContent-Type: multipart/mixed; boundary=changesetresponse_1\r\n\r\n--changesetresponse_1\r\nContent-Type: application/http\r\n
+//   Content-Transfer-Encoding: binary\r\nContent-ID: 1\r\n\r\nHTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n
+//   {"error":{"code":"0x80040216","message":"An unexpected error occurred."}}\r\n--changesetresponse_1--\r\n--batchresponse_1--
+// The change set's boundary is the one its part declares; its FIRST part is split off at that boundary, its MIME headers and then the headers of
+// the HTTP response inside it are skipped (each ends at a blank line), and the body left is parsed as JSON. Only the `error.code` of that JSON
+// counts: an answer that is not in this shape, a part that is not a response, or a body that does not parse is no lag refusal — and neither is
+// an error with no body at all (the SDK's word that a change set was rolled back). The message is never searched for a code.
+function batchLagCodeOf(err) {
+  if (!err || err.code !== 'CONNECTION_ERROR' || err.statusCode !== 400 || typeof err.cause !== 'string') return null;
+  const code = firstChangeSetErrorCode(err.cause);
+  return code !== null && LAG_CODES.has(code) ? code : null;
+}
+const afterBlankLine = (text) => {
+  const blank = /\r?\n\r?\n/.exec(text);
+  return blank ? text.slice(blank.index + blank[0].length) : null;
+};
+function firstChangeSetErrorCode(text) {
+  const declared = /^Content-Type:\s*multipart\/mixed;\s*boundary=("?)([^"\s;]+)\1\s*$/im.exec(text);
+  if (!declared) return null;
+  const parts = text.split(`--${declared[2]}`);
+  const first = parts.length > 2 ? parts[1] : null;
+  if (first === null || first.startsWith('--')) return null;
+  const response = afterBlankLine(first);
+  if (response === null || !/^HTTP\/1\.[01] \d{3}\b/.test(response)) return null;
+  const body = afterBlankLine(response);
+  if (body === null) return null;
+  try {
+    const parsed = JSON.parse(body.trim());
+    const code = parsed && parsed.error && parsed.error.code;
+    return typeof code === 'string' && code ? code.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+// The lag work of one provisionDataModel run: its clock, waits and jitter (seams for tests; the real ones otherwise), the budget of each table
+// (created when lag work for the table starts, and shared by its change set, its single creates and its queued status reasons), and the queue
+// of refused status reasons the phase's tail drains.
+function lagContext({ now, sleep, random, warn }) {
+  return {
+    now: typeof now === 'function' ? now : Date.now,
+    sleep: typeof sleep === 'function' ? sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    random: typeof random === 'function' ? random : Math.random,
+    warn: typeof warn === 'function' ? warn : () => undefined,
+    budgets: new Map(),
+    statuses: [],
+  };
+}
+
+// The lag window of a table this attempt created: what a read of it needs — its MetadataId (a read by id answers for this table and no other
+// that comes to hold its name), its schema name for the messages, and the logical name of the primary name column it was created with, the stock
+// entry whose presence makes a read's list complete enough to prove a column absent. No id, or no raw client to read with: no window, and every
+// create of the table is handled as it always was.
+function lagWindow(lag, provision, entity, createdTable) {
+  const tableId = createdTable && guidOf(createdTable.metadataId);
+  if (!lag || !tableId || !provision || !provision.dataverse || typeof provision.dataverse.get !== 'function') return null;
+  const logical = entity.schemaName.toLowerCase();
+  if (!lag.budgets.has(logical)) lag.budgets.set(logical, { spentMs: 0, probes: 0, warned: false });
+  return { lag, raw: provision.dataverse, logical, schemaName: entity.schemaName, tableId, primaryLogical: String(entity.primaryAttribute.schemaName).toLowerCase(), budget: lag.budgets.get(logical) };
+}
+
+const lagSpent = (budget) => budget.spentMs >= LAG_ADMISSION_MS || budget.probes >= LAG_PROBES;
+
+// Runs `fn` and charges the table's budget with the time it took, sampled around it: only what the lag work itself awaits is counted.
+async function charged(window, fn) {
+  const started = window.lag.now();
+  try {
+    return await fn();
+  } finally {
+    window.budget.spentMs += Math.max(0, window.lag.now() - started);
+  }
+}
+
+// Waits before the `index`-th read or resend of one create: 1 s, 2 s, 4 s, 8 s, 8 s …, plus up to a quarter more, and never past what is left of
+// the table's budget — a wait that would run past it is not taken, and the answer is false (the budget is spent). True when the wait was taken
+// and room is left after it.
+async function lagWait(window, index) {
+  const base = LAG_DELAYS_MS[Math.min(index, LAG_DELAYS_MS.length - 1)];
+  const delay = Math.round(base * (1 + LAG_JITTER * window.lag.random()));
+  if (delay >= LAG_ADMISSION_MS - window.budget.spentMs) return false;
+  await charged(window, () => window.lag.sleep(delay));
+  return !lagSpent(window.budget);
+}
+
+// Said once per table, when its lag work starts. It names what was refused and the code; no address and no id.
+function sayLagOnce(window, what, code) {
+  if (window.budget.warned) return;
+  window.budget.warned = true;
+  window.lag.warn(`creating ${what} was refused just after the table was created (HTTP 400 ${code}) — checking whether it exists before a bounded retry`);
+}
+
+// What a read made during lag work says, before it is asked about any one thing: { kind: 'list', items } for an answer that can prove something,
+// { kind: 'unknown' } for one that proves nothing (the table is not visible to the read yet — a 404, or a 400 `0x80090457` — or a 2xx that is not
+// the expected shape), or { kind: 'failed', error } for any other answer, which stops the build as that read's own failure, with its status and
+// code (statusError). A read that throws — a failure of the transport — is thrown as it is. Every read counts against the table's 8.
+async function lagRead(window, url, itemsOf, what) {
+  window.budget.probes += 1;
+  const res = await charged(window, () => window.raw.get(url));
+  if (res && res.status >= 200 && res.status < 300) {
+    const items = itemsOf(res.body);
+    return Array.isArray(items) ? { kind: 'list', items } : { kind: 'unknown' };
+  }
+  const answered = res && res.body && res.body.error;
+  if (res && (res.status === 404 || (res.status === 400 && answered && typeof answered.code === 'string' && answered.code.toLowerCase() === LAG_VISIBILITY_CODE))) return { kind: 'unknown' };
+  return { kind: 'failed', error: statusError(`could not read ${what} of table ${window.schemaName} to check whether a refused create landed`, res) };
+}
+
+// The table's columns, by its id: ids and logical names only — no labels, so the read may come before the phase's labelled creates.
+//   GET /EntityDefinitions(<id>)/Attributes?$select=MetadataId,LogicalName   →   { "value": [{ "MetadataId": "…", "LogicalName": "new_name" }, …] }
+// A `list` answer is turned into what it shows, row by row, and nothing in it is dropped unread: a row is USABLE when it names a column
+// (`LogicalName`, a non-empty string) and carries that column's id (`MetadataId`, a GUID), and only a usable row shows a column present.
+//   - `ids`: logical name → MetadataId, from usable rows;
+//   - `named`: every logical name a row names, usable or not — a column named without a usable id, or named twice with two ids, is in the list
+//     and cannot be adopted (`unclear`), so it is neither present nor absent;
+//   - `complete`: the list can prove a column ABSENT — it holds the table's primary name column, and every row in it is usable. A row that names
+//     no column, or names one without its id, could be the very column asked about, and a list that holds one proves no column absent.
+// Such a read is never permission to create: only `absent` is (columnState).
+async function readLagColumns(window) {
+  const read = await lagRead(window, `/EntityDefinitions(${window.tableId})/Attributes?$select=MetadataId,LogicalName`, (body) => body && body.value, 'the columns');
+  if (read.kind !== 'list') return read;
+  const ids = new Map();
+  const named = new Set();
+  const unclear = new Set();
+  let usable = true;
+  for (const a of read.items) {
+    const logical = a && typeof a.LogicalName === 'string' && a.LogicalName ? a.LogicalName.toLowerCase() : null;
+    const id = a && typeof a.MetadataId === 'string' && GUID_RE.test(a.MetadataId) ? a.MetadataId : null;
+    if (!logical) { usable = false; continue; }
+    named.add(logical);
+    if (!id || (ids.has(logical) && ids.get(logical).toLowerCase() !== id.toLowerCase())) { usable = false; unclear.add(logical); continue; }
+    ids.set(logical, id);
+  }
+  for (const logical of unclear) ids.delete(logical);
+  return { kind: 'list', ids, named, complete: usable && ids.has(window.primaryLogical) };
+}
+// One column against such a read: 'present' (a usable row names it, with its id), 'absent' (a complete list that does not name it at all), or
+// 'unknown' — which includes a column the list names without a usable id: it may well be there, and is read again rather than created again.
+function columnState(read, logical) {
+  if (read.kind !== 'list') return { state: 'unknown' };
+  if (read.ids.has(logical)) return { state: 'present', id: read.ids.get(logical) };
+  if (read.named.has(logical)) return { state: 'unknown' };
+  return { state: read.complete ? 'absent' : 'unknown' };
+}
+
+const adoptColumnWarning = (window, column, code) => `column ${window.schemaName}.${column.schemaName} was refused (HTTP 400 ${code}) and then found on the table, so it is reused`;
+
+// The change set of a table this attempt created, refused with the table's lag (createColumnsInOneRequest): read, and act on what the read proves.
+// Answers { map, terminal?, fallback? } as createColumnsInOneRequest does:
+//   - every column found: adopted — nothing is sent;
+//   - every missing column proved absent, none found and the change set not yet sent again: it is sent once more (after a wait); a refusal of that
+//     with the lag is read again, any other refusal is handled as every refused change set is (afterRefusedBatch), and a change set that commits is
+//     confirmed as every one is;
+//   - every missing column proved absent otherwise (some found, or the change set already sent again), with the budget not spent: `fallback` — the
+//     found ones are adopted, and the column loop creates the missing ones one by one, each create gated on and charged to the table's budget
+//     (`fallback.columns` are those columns, `fallback.original` the refusal the loop stops with once the budget is spent);
+//   - a missing column the read cannot place: read again, after a wait;
+//   - the budget spent while a column is still missing — proved absent or not — or a read that failed: `terminal`, with the found ones in `map`.
+async function recoverRefusedBatch({ sdk, provision, table, tableSchemaName, columns, optionsFor, warn, sleep, stop, lagTable: window, original, code }) {
+  sayLagOnce(window, `the ${columns.length} ordinary column(s) of table ${tableSchemaName} in one request`, code);
+  const confirmed = new Map();
+  let resent = false;
+  for (let waits = 0; ;) {
+    if (lagSpent(window.budget)) return { map: confirmed, terminal: persisted(original) };
+    let read;
+    try {
+      read = await readLagColumns(window);
+    } catch (e) {
+      return { map: confirmed, terminal: e };
+    }
+    if (read.kind === 'failed') return { map: confirmed, terminal: read.error };
+    let unknown = 0;
+    for (const c of columns) {
+      if (confirmed.has(c)) continue;
+      const logicalName = c.schemaName.toLowerCase();
+      const found = columnState(read, logicalName);
+      if (found.state === 'present') {
+        confirmed.set(c, { logicalName, metadataId: found.id });
+        if (typeof warn === 'function') warn(adoptColumnWarning(window, c, code));
+      } else if (found.state === 'unknown') unknown += 1;
+    }
+    if (confirmed.size === columns.length) return { map: confirmed };
+    if (lagSpent(window.budget)) return { map: confirmed, terminal: persisted(original) };
+    if (unknown === 0 && (confirmed.size > 0 || resent)) return { map: confirmed, fallback: { original, columns: new Set(columns.filter((c) => !confirmed.has(c))) } };
+    if (!(await lagWait(window, waits++))) return { map: confirmed, terminal: persisted(original) };
+    if (unknown > 0) continue;
+    // Every column proved absent and none found: the change set committed nothing (it is atomic), and is sent once more.
+    if (typeof stop === 'function') stop();
+    resent = true;
+    try {
+      await charged(window, () => sdk.createColumns(table.logicalName, columns.map(optionsFor)));
+    } catch (err) {
+      if (typeof stop === 'function') stop();
+      if (batchLagCodeOf(err)) continue;
+      return { map: await afterRefusedBatch(err, { provision, table, tableSchemaName, columns, warn, sleep }) };
+    }
+    return { map: await confirmInlineColumns(provision, table, columns, { warn, sleep }) };
+  }
+}
+
+// One column's create for a table this attempt created (`create` sends it): sent as always, and when its refusal is the table's lag, read, and acted
+// on as the read proves — a column found is adopted with the id the read gave it; one proved absent is sent again after a wait, up to 4 times; one
+// the read cannot place is read again. A resend refused with the lag is read again; refused otherwise, that failure is thrown as it is, and the step
+// handles it as any (an "already exists" answer is its skip). A budget that runs out with the column still missing throws the original refusal,
+// which the step's halt then says may be run again (persistedLagRefusals); a read that failed throws that failure. `charge`: the first send is
+// itself one of the check's sends — a column of the lag's own fallback (recoverRefusedBatch), which the caller sends only while the budget has
+// room — and the time it takes is charged to the table's budget like every resend's.
+async function createInLagWindow(create, { window, column, stop, warn, charge = false }) {
+  try {
+    return await (charge ? charged(window, create) : create());
+  } catch (err) {
+    const code = window ? lagCodeOf(err) : null;
+    if (!code) throw err;
+    sayLagOnce(window, `column ${window.schemaName}.${column.schemaName}`, code);
+    const logicalName = column.schemaName.toLowerCase();
+    let resends = 0;
+    for (let waits = 0; ;) {
+      if (lagSpent(window.budget)) throw persisted(err);
+      const read = await readLagColumns(window);
+      if (read.kind === 'failed') throw read.error;
+      const found = columnState(read, logicalName);
+      if (found.state === 'present') {
+        if (typeof warn === 'function') warn(adoptColumnWarning(window, column, code));
+        return { logicalName, metadataId: found.id };
+      }
+      if (lagSpent(window.budget)) throw persisted(err);
+      if (found.state === 'absent' && resends >= LAG_SINGLE_RESENDS) throw persisted(err);
+      if (!(await lagWait(window, waits++))) throw persisted(err);
+      if (found.state !== 'absent') continue;
+      if (typeof stop === 'function') stop();
+      resends += 1;
+      try {
+        return await charged(window, create);
+      } catch (again) {
+        if (!lagCodeOf(again)) throw again;
       }
     }
-    if (typeof warn === 'function') {
-      // A ConnectionError carries `.statusCode`; any other error may wrap one as its `cause`.
-      const status = err && (err.statusCode || err.status || (err.cause && (err.cause.statusCode || err.cause.status)));
-      warn(status === 429
-        ? `table ${tableSchemaName} was throttled (${briefReason(err)}), so its ${columns.length} ordinary column(s) are created one by one instead of in one request`
-        : `could not create the ${columns.length} ordinary column(s) of table ${tableSchemaName} in one request (${briefReason(err)}) — creating them one by one`);
-    }
-    return new Map();
   }
-  return confirmInlineColumns(provision, table, columns, { warn, sleep });
 }
 
 // Which of a new table's columns that went in the change set the table really has, with the MetadataId each createColumn answer
@@ -992,10 +1303,12 @@ const STATE_CODE = { Active: 0, Inactive: 1 };
 // The state and the value the build gives each of a table's declared status reasons, in the spec's order: the declared state (Active
 // unless it says Inactive; any other word has always read as Active) and the declared `value`, else 100000000 + the reason's place in the
 // list. The data-model phase inserts each at these, and verify (lib/status-reasons-keys.js) holds a deployed reason to the same two.
+// The state is the spec's own word, read as an own key of STATE_CODE: `constructor` or `toString` is another word, and reads as Active
+// too — never as the inherited function, which no request can carry.
 function statusReasonTargets(entity) {
   return ((entity && entity.statusReasons) || []).map((statusReason, index) => ({
     statusReason,
-    stateCode: STATE_CODE[statusReason.state] !== undefined ? STATE_CODE[statusReason.state] : 0,
+    stateCode: Object.hasOwn(STATE_CODE, statusReason.state) ? STATE_CODE[statusReason.state] : 0,
     value: typeof statusReason.value === 'number' ? statusReason.value : 100000000 + index,
   }));
 }
@@ -1067,7 +1380,7 @@ function causeChain(err, maxDepth = 6) {
 // and the rebuild halted, because only the English words below were read. The code is the same in every language. A code is listed only
 // for the create that answers it, and only where the platform's reference gives it an "already exists" meaning for what that create
 // makes — never a generic code such as 0x80040216 ("An unexpected error occurred."), and never a neighbouring condition: a key over the
-// same columns under another name (0x80060894, EntityKeyWithSelectedAttributesExists — the declared key is not there), a record that
+// same columns under another name (0x80060894, EntityKeyWithSelectedAttributesExists — the declared key may not be there), a record that
 // already holds a key's values (0x80060892). Two codes are broader than the thing created — the name or the navigation property they speak
 // of can be held by something else — and each is listed for one create only, where a read that follows the refusal decides: 0x80044363
 // (SchemaNameisNotUnique) for the table create, 0x80072551 (NavigationPropertyAlreadyExists) for the 1:N relationship create. A listed
@@ -1075,8 +1388,11 @@ function causeChain(err, maxDepth = 6) {
 // is skipped on it (a column's code can name a companion the platform makes beside the column, as its words can), and for a table or a
 // relationship it is only the cue to read what exists, which alone decides what is reused. The lists only ADD recognition:
 // isAlreadyExists keeps its 409 and English-word rules unchanged, and they still read an answer whatever code it carries, an unlisted one
-// included — an English 0x80060894 answer ("An entity key with the selected attributes already exists on entity.") is still a skip, as it
-// always was. Names and messages are the platform's reference:
+// included. The one answer that never reaches them is a key create's 0x80060894: its English words ("An entity key with the selected
+// attributes already exists on entity.") read as an already-exists answer, which made a build skip a key that was never created when the
+// platform's message was in English, and stop when it was in another language, so the key step decides that code by the table's keys before
+// anything reads its words (KEY_OVER_SAME_COLUMNS).
+// Names and messages are the platform's reference:
 // See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/web-service-error-codes
 // Lower case, because serviceCodeOf (lib/retry-policy.js) lower-cases what it reads: the platform writes a code in either case (the
 // reference spells 0x8004432B with a capital).
@@ -1139,7 +1455,8 @@ const NO_CODES = Object.freeze(new Set());
 // column WAS made) carries a code that is not the create's. The code only ADDS recognition: the 409 and English-word rules are
 // the ones this function always had, and they apply whatever code the answer carries — a code of another create, a generic code or
 // a code the message only quotes does not count by itself, and does not stop the words from counting either. Kept deliberately
-// narrow so a genuine failure (bad key attribute, etc.) still surfaces.
+// narrow so a genuine failure (bad key attribute, etc.) still surfaces. A key create's 0x80060894 never reaches it: the key step
+// decides that answer by the table's keys (KEY_OVER_SAME_COLUMNS), because its English words would read as an already-exists one.
 function isAlreadyExists(err, codes = NO_CODES) {
   if (!err) return false;
   const status = err.statusCode || err.status || (err.cause && (err.cause.statusCode || err.cause.status));
@@ -1436,13 +1753,19 @@ function makeRunner({ emit, total, throttle }) {
   const refusals = () => (budgeted ? throttle.declined().count : 0);
   const refusedBefore = refusals();
   const stopIfRefused = (phase) => { if (refusals() > refusedBefore) throw budgetStop(throttle, phase); };
-  const run = async (phase, label, fn, { recoverable = false, skipIf, settling = false } = {}) => {
+  // `again`: { n, replaces } takes up, later in its phase, a step that already has a number — a status reason its table's lag deferred to the end
+  // of the data-model phase (drainLagStatuses). Every step is one item of the plan whose length `total` is, so the step keeps the number it was
+  // deferred under, and its outcome names the outcome it replaces (`replaces`): a printer counts the step once, by the outcome it ended with.
+  // `skipIf` is handed the step's number, for a skip that defers the step.
+  const run = async (phase, label, fn, { recoverable = false, skipIf, settling = false, again } = {}) => {
     if (!settling) stopIfRefused(phase);
-    const myN = (n += 1);
+    const takenUp = !!again && Number.isInteger(again.n);
+    const myN = takenUp ? again.n : (n += 1);
+    const outcome = (event) => (takenUp ? { ...event, replaces: again.replaces } : event);
     emit({ phase, status: 'start', label, n: myN, total });
     try {
       const out = await fn();
-      emit({ phase, status: 'ok', label, n: myN, total });
+      emit(outcome({ phase, status: 'ok', label, n: myN, total }));
       return out;
     } catch (err) {
       // Idempotency escape hatch: a create that fails only because the component already
@@ -1453,12 +1776,12 @@ function makeRunner({ emit, total, throttle }) {
       // collision: an environment that does not declare a platform member cannot host the artifact
       // at all, and labelling that "(exists)" would tell the operator the exact opposite of what
       // happened. Boolean callers are unaffected.
-      const why = skipIf && skipIf(err);
+      const why = skipIf && skipIf(err, myN);
       if (why) {
-        emit({ phase, status: 'skip', label: `${label} (${typeof why === 'string' ? why : 'exists'})`, n: myN, total });
+        emit(outcome({ phase, status: 'skip', label: `${label} (${typeof why === 'string' ? why : 'exists'})`, n: myN, total }));
         return undefined;
       }
-      emit({ phase, status: 'error', label, n: myN, total, detail: String((err && err.message) || err) });
+      emit(outcome({ phase, status: 'error', label, n: myN, total, detail: String((err && err.message) || err) }));
       throw new BuildHalt(`${phase} failed: ${(err && err.message) || err}${operatorRemedy(err)}`, { phase, code: (err && err.code) || 'sdk-error', recoverable, cause: err, retry: retryPolicyFor(err) });
     }
   };
@@ -1525,6 +1848,10 @@ const RESET_WORKSPACE = 'stop any other build or teardown using the .maker-works
 // message ends with "Do NOT re-run the create" and the SDK call that sets the level. Running this build again is the fix: it finds the table (it
 // is not created twice) and sets the level the way it does for any existing column with an explicit `required`.
 function operatorRemedy(err) {
+  // A create refused with the lag of a table this attempt just created, still refused when the bounded check ran out (createInLagWindow,
+  // recoverRefusedBatch, drainLagStatuses). Recognised by the error object itself, never by its words: the event the step reported while the
+  // lease was held carries the SDK's message as it was, and only this halt — which the command prints after its lease is let go — says more.
+  if (persistedLagRefusals.has(err)) return LAG_REMEDY;
   if (err && err.code === 'PRIMARY_COLUMN_REQUIRED_NOT_APPLIED') {
     return ' — the table exists. Run the build again: it finds the table, does not create it again, and sets the required level of its primary name column (the call the message names is made for you).';
   }
@@ -1692,6 +2019,19 @@ async function resolveAuthoringLanguage({ envUrl, languageCode, spec, warn, read
   });
 }
 
+// The table probe's request (findExistingTable): one narrow read of a table by its logical name — and, with `includeKeys`, the identity of
+// each of its alternate keys, its schema name and its columns, which are scalars, never a label:
+//   GET /EntityDefinitions(LogicalName='contoso_project')?$select=LogicalName,EntitySetName&$expand=Keys($select=SchemaName,KeyAttributes)
+//   -> { "LogicalName": "contoso_project", "EntitySetName": "contoso_projects",
+//        "Keys": [ { "SchemaName": "contoso_CodeKey", "KeyAttributes": [ "contoso_code" ], "MetadataId": "<guid>" } ] }
+// A quote in the name is doubled, as an OData string literal escapes it. Also the read of a table's keys after a key create the platform
+// refused because another key is over the same columns (keyOverSameColumns).
+// See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/define-alternate-keys-entity#retrieve-and-delete-alternate-keys
+function tableProbeUrl(logical, { includeKeys = false } = {}) {
+  const escaped = logical.replace(/'/g, "''");
+  return `/EntityDefinitions(LogicalName='${escaped}')?$select=LogicalName,EntitySetName${includeKeys ? '&$expand=Keys($select=SchemaName,KeyAttributes)' : ''}`;
+}
+
 // Discover-then-create global choices, tables, columns, status reasons, alternate keys,
 // and relationships (idempotent). Returns captured maps used by sample data + later phases.
 // Does this table already exist? Returns { logicalName, entitySetName } or null.
@@ -1724,10 +2064,9 @@ async function findExistingTable(provision, schemaName, { hasLocalizedLabels = f
   const logical = String(schemaName).toLowerCase();
   const raw = provision && provision.dataverse;
   if (raw && typeof raw.get === 'function') {
-    const escaped = logical.replace(/'/g, "''");
     // Keys' identities are scalars, so they can ride this already-required probe
     // without a label-bearing read ahead of a localized create.
-    const url = `/EntityDefinitions(LogicalName='${escaped}')?$select=LogicalName,EntitySetName${includeKeys ? '&$expand=Keys($select=SchemaName,KeyAttributes)' : ''}`;
+    const url = tableProbeUrl(logical, { includeKeys });
     // Retried only for a LOCALIZED entity, where the alternative to a conclusive answer is a halt.
     // For everything else one attempt then `findTables` is both cheaper and exactly the old
     // behaviour.
@@ -1820,9 +2159,11 @@ async function provisionDataModel(args) {
   const carriedIn = new Set(owed.keys());
   const waitingKeys = [];
   const waitingStatuses = [];
+  // The lag work of the tables this attempt creates ("The lag of a table this attempt just created", above). `now`, `sleep` and `random` are seams.
+  const lag = lagContext(args);
   let result;
   try {
-    result = await provisionDataModelSteps(args, { owed, carriedIn, waitingKeys, waitingStatuses });
+    result = await provisionDataModelSteps(args, { owed, carriedIn, waitingKeys, waitingStatuses, lag });
   } catch (err) {
     await payOwedLengths(args, owed, carriedIn, { halted: true, waitingKeys });
     throw err;
@@ -1832,19 +2173,21 @@ async function provisionDataModel(args) {
   // Option labels must be read only AFTER every labelled schema create (including deferred keys).
   // Reading them inside the table loop can strip later creates' non-base-language labels.
   for (const status of waitingStatuses) await applyStatusReasons(args, status, result, true);
+  // The status reasons a table this attempt created refused with its lag, read and sent again here for the same reason (drainLagStatuses).
+  await drainLagStatuses(args, lag, result);
   return result;
 }
 
-async function applyStatusReasons({ sdk, provision, runner, warn }, { entity, logical, languageCode }, result, checkExisting = false) {
+async function applyStatusReasons({ sdk, provision, runner, warn }, { entity, logical, languageCode, window }, result, checkExisting = false) {
   const read = checkExisting ? await readStatusOptions(provision && provision.dataverse, logical) : {};
   if (read.failed && typeof warn === 'function') {
     warn(`could not read status reasons for ${logical} (${read.failed}); using the duplicate-protected insert instead`);
   }
   for (const { statusReason: sr, stateCode, value: pinned } of statusReasonTargets(entity)) {
-    (result.statusReasonValues[logical] = result.statusReasonValues[logical] || {})[sr.label] = { value: pinned, stateCode };
-    const same = (read.options || []).some((o) => o && o.Value === pinned && o.State === stateCode
-      && labelsByLcid(o.Label)[languageCode] === sr.label
-      && (sr.color === undefined || o.Color === sr.color));
+    // The table's reasons by LABEL — the maker's text, which can be `__proto__` or `constructor` — in a null-prototype map, so each label is
+    // an own entry (lib/own-keys.js). On a plain object the `__proto__` reason was never stored: its value object became the map's prototype.
+    (result.statusReasonValues[logical] = result.statusReasonValues[logical] || Object.create(null))[sr.label] = { value: pinned, stateCode };
+    const same = (read.options || []).some((o) => statusOptionIs(o, { pinned, stateCode, label: sr.label, color: sr.color, languageCode }));
     if (same) {
       runner.skip('data-model', `status reason ${entity.schemaName}: ${sr.label} (exists — reuse)`);
       continue;
@@ -1852,7 +2195,83 @@ async function applyStatusReasons({ sdk, provision, runner, warn }, { entity, lo
     await runner.run('data-model', `status reason ${entity.schemaName}: ${sr.label}`, async () => {
       const value = await sdk.insertStatusValue(logical, { label: sr.label, stateCode, color: sr.color, value: pinned, languageCode });
       result.statusReasonValues[logical][sr.label] = { value: typeof value === 'number' ? value : pinned, stateCode };
-    }, { recoverable: true, skipIf: (err) => isAlreadyExists(err, ALREADY_EXISTS_CODES.statusReason) });
+    }, {
+      recoverable: true,
+      skipIf: (err, step) => {
+        if (isAlreadyExists(err, ALREADY_EXISTS_CODES.statusReason)) return true;
+        // A table this attempt created (`window`): the insert refused with the table's lag is not sent again here, and its options are not read
+        // here either — that read carries labels. It is queued for the end of the phase (drainLagStatuses), with the number of its step, which
+        // the drain takes up again; the step is a skip that says so.
+        const code = window ? lagCodeOf(err) : null;
+        if (!code) return false;
+        sayLagOnce(window, `status reason ${entity.schemaName}: ${sr.label}`, code);
+        window.lag.statuses.push({ window, entity, logical, languageCode, sr, stateCode, pinned, original: err, code, step });
+        return LAG_SKIP;
+      },
+    });
+  }
+}
+
+// Whether a status option the environment holds is the status reason the spec declares: its pinned value, its state, its label in the authoring
+// language — and its colour, when the spec declares one.
+function statusOptionIs(o, { pinned, stateCode, label, color, languageCode }) {
+  return !!o && o.Value === pinned && o.State === stateCode && labelsByLcid(o.Label)[languageCode] === label && (color === undefined || o.Color === color);
+}
+
+// The status reasons a table this attempt created refused with its lag (applyStatusReasons), after every labelled create of the phase: for each,
+// the step its insert was deferred under, taken up again — it keeps that step's number, so the phase's steps stay within the plan's total — which
+// reads the table's status options and acts on what the read proves —
+//   - the pinned value there, with the declared state, label and colour: adopted, nothing sent;
+//   - the pinned value there with another state, label or a declared colour it does not have: the original refusal, and nothing is sent, adopted
+//     or updated — that option is not this reason;
+//   - the pinned value absent from a list that holds the stock reason 1 or 2, every option of which carries an integer value: sent again, after a
+//     wait, up to 4 times; a resend refused with the lag is read again, refused otherwise is that failure (an "already exists" answer is the
+//     step's skip);
+//   - a read that proves nothing — the pinned value held twice, an option without a value, no stock reason: read again, after a wait.
+// The table's budget is the one its column work used, if any; a budget spent with the reason still missing stops the build with the original
+// refusal (persistedLagRefusals), a read that failed with that failure. A step that throws stops the phase there: the reasons after it are not tried.
+//   GET /EntityDefinitions(<id>)/Attributes/Microsoft.Dynamics.CRM.StatusAttributeMetadata?$select=LogicalName&$expand=OptionSet($select=Options)
+//   → { "value": [{ "LogicalName": "statuscode", "OptionSet": { "Options": [{ "Value": 1, "State": 0, "Label": {…}, "Color": null }, …] } }] }
+// See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/statusoptionmetadata
+async function drainLagStatuses({ sdk, runner, warn }, lag, result) {
+  for (const queued of lag.statuses.splice(0)) {
+    const { window, entity, logical, languageCode, sr, stateCode, pinned, original, code, step } = queued;
+    await runner.run('data-model', `status reason ${entity.schemaName}: ${sr.label} (retried after the other schema creates)`, async () => {
+      let resends = 0;
+      for (let waits = 0; ;) {
+        if (lagSpent(window.budget)) throw persisted(original);
+        const read = await lagRead(window, `/EntityDefinitions(${window.tableId})/Attributes/Microsoft.Dynamics.CRM.StatusAttributeMetadata?$select=LogicalName&$expand=OptionSet($select=Options)`, (body) => {
+          const status = body && Array.isArray(body.value) && body.value.find((a) => a && String(a.LogicalName).toLowerCase() === 'statuscode');
+          return status && status.OptionSet ? status.OptionSet.Options : undefined;
+        }, 'the status reasons');
+        if (read.kind === 'failed') throw read.error;
+        // An option is USABLE when it is an object with an integer `Value`; only a list of usable options proves the pinned value absent — an
+        // option without a value could be this very reason. Two options at the pinned value cannot both be it: that proves nothing either way.
+        const options = read.kind === 'list' ? read.items : null;
+        const atPinned = options ? options.filter((o) => o && o.Value === pinned) : [];
+        if (atPinned.length === 1) {
+          if (!statusOptionIs(atPinned[0], { pinned, stateCode, label: sr.label, color: sr.color, languageCode })) throw original;
+          if (typeof warn === 'function') warn(`status reason ${entity.schemaName}: ${sr.label} was refused (HTTP 400 ${code}) and then found, so it is reused`);
+          return;
+        }
+        const usable = !!options && options.every((o) => o && typeof o === 'object' && Number.isInteger(o.Value));
+        const absent = usable && atPinned.length === 0 && options.some((o) => o.Value === 1 || o.Value === 2);
+        if (lagSpent(window.budget)) throw persisted(original);
+        if (absent && resends >= LAG_SINGLE_RESENDS) throw persisted(original);
+        if (!(await lagWait(window, waits++))) throw persisted(original);
+        if (!absent) continue;
+        if (typeof runner.stopIfRefused === 'function') runner.stopIfRefused('data-model');
+        resends += 1;
+        try {
+          const value = await charged(window, () => sdk.insertStatusValue(logical, { label: sr.label, stateCode, color: sr.color, value: pinned, languageCode }));
+          result.statusReasonValues[logical][sr.label] = { value: typeof value === 'number' ? value : pinned, stateCode };
+          return;
+        } catch (again) {
+          if (!lagCodeOf(again)) throw again;
+        }
+      }
+    // The same step as the insert the lag deferred — not one more: it keeps that step's number, and its outcome replaces the deferral's skip.
+    }, { recoverable: true, skipIf: (err) => isAlreadyExists(err, ALREADY_EXISTS_CODES.statusReason), again: { n: step, replaces: 'skip' } });
   }
 }
 
@@ -1890,13 +2309,87 @@ async function payOwedLengths({ runner, sdk, provision, spec, warn, sleep }, owe
   return outcomes;
 }
 
+// The code of a key create the platform refuses because ANOTHER key of the table is over the same columns — it allows one key per set of
+// columns: EntityKeyWithSelectedAttributesExists, in the reference's words
+//   HTTP 400 {"error":{"code":"0x80060894","message":"An entity key with the selected attributes already exists on entity."}}
+// That does not say the DECLARED key is there: the key over those columns may be another one. Its English words read as an already-exists
+// answer all the same (isAlreadyExists), so when the platform's message was in English the build skipped the key — which was then never
+// created, and the build's verification found it missing — while the same answer in another language stopped the build with the platform's
+// words. Which of the two happened depends on the language of the MESSAGE, not of the build or the environment: measured live, an environment
+// whose only language is Spanish answered this code in English. So the key step decides this code, whatever the language of the answer and
+// before any word is read, from the keys the table holds (keyOverSameColumns).
+// See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/web-service-error-codes
+const KEY_OVER_SAME_COLUMNS = '0x80060894';
+
+// What the table's keys say of a key create refused with KEY_OVER_SAME_COLUMNS, read once, by the table probe's request (tableProbeUrl):
+//   { state: 'declared' }       a key of the declared schema name, in any case, over exactly the declared columns (alternateKeyMatches): the
+//                               declared key is there, and the step is a skip — as for a key the probe found before the create;
+//   { state: 'other', holder }  a key of another name over exactly those columns (alternateKeyOverColumns): the table's key,
+//                               `{ SchemaName, KeyAttributes }`, beside which the declared key cannot be made;
+//   { state: 'unknown' }        the read failed, or showed no key over exactly those columns: nothing says which key the platform means, so
+//                               nothing is guessed, and the create's own error stops the build.
+// The read carries no label — it is the narrow read the build makes of a table ahead of its labelled creates — so a create in several
+// languages that follows it keeps its labels (findExistingTable). The client resolves a status that is not 2xx and throws only for a request
+// that got no answer; neither throws here.
+async function keyOverSameColumns(provision, logical, key) {
+  const raw = provision && provision.dataverse;
+  if (!raw || typeof raw.get !== 'function') return { state: 'unknown' };
+  let res;
+  try { res = await raw.get(tableProbeUrl(logical, { includeKeys: true })); } catch { return { state: 'unknown' }; }
+  const keys = res && res.status >= 200 && res.status < 300 && res.body && Array.isArray(res.body.Keys) ? res.body.Keys : null;
+  if (!keys) return { state: 'unknown' };
+  if (alternateKeyMatches(keys, key)) return { state: 'declared' };
+  const holder = alternateKeyOverColumns(keys, key);
+  return holder ? { state: 'other', holder } : { state: 'unknown' };
+}
+
+// The stop for a key the platform refused because the key `holder` of the table is over the same columns: the declared key, the key the
+// table has (as the platform names it), the columns, and what to do. Which advice is right depends on what the spec says of the holder's name:
+//   - nothing: the holder is not the spec's — declare it under its own name, or delete it where nothing uses it;
+//   - another of the table's keys under that name over the SAME columns: the spec itself asks for two keys over one set of columns, so deleting
+//     the holder is no way out (the next build makes it again) — one of the two has to go, or change its columns;
+//   - another of the table's keys under that name over OTHER columns: the spec is valid, and the key in the environment drifted from it (the spec
+//     changed that key's columns, or the key was made otherwise). Its name exists, so the build skipped it (0x80060893) and does not change its
+//     columns; it has to be reconciled — deleted, where nothing relies on it as it is — before the declared key can be made. Asking to drop or
+//     change a declaration would be wrong here: keeping only that key leaves it skipped again, and verification still finds its columns wrong.
+function keyOverSameColumnsStop(entity, logical, key, holder) {
+  const lower = (list) => (list || []).map((c) => String(c).toLowerCase());
+  const columns = lower(key.columns);
+  const over = `the same column${columns.length === 1 ? '' : 's'} (${columns.join(', ')})`;
+  const head = `alt key ${entity.schemaName}.${key.schemaName} was not created: the table ${logical} already has the key ${holder.SchemaName} over ${over}`;
+  const named = (entity.alternateKeys || []).filter((k) => k && k !== key && String(k.schemaName).toLowerCase() === holder.SchemaName.toLowerCase());
+  if (named.some((k) => sameKeyColumnSet(k.columns, key.columns))) {
+    return `${head}, and the spec declares both — Dataverse allows one key per set of columns. Keep one of them in the table's alternateKeys, or give the other different columns.`;
+  }
+  if (named.length) {
+    const declared = lower(named[0].columns);
+    return `${head}, and Dataverse allows one key per set of columns. The spec declares ${holder.SchemaName} over other columns (${declared.join(', ')}): `
+      + `the key in the environment is not the one the spec describes, and a build does not change the columns of a key that exists. `
+      + `Reconcile ${holder.SchemaName} first: if nothing relies on it as it is (an integration that writes records by it, say), delete it in Power Apps (the table's Keys) and run the build again — it then creates both keys as the spec declares them.`;
+  }
+  return `${head}, and Dataverse allows one key per set of columns. To keep that key, declare it as it is — set this key's schemaName to '${holder.SchemaName}' — `
+    + `or, if ${holder.SchemaName} is a leftover that nothing uses, delete it in Power Apps (the table's Keys) and run the build again.`;
+}
+
 // One alternate key: a narrated step. The SDK has no key lister, so a re-run that finds the key already there gets an
-// already-exists answer, which is a skip and not a halt. The same step wherever the key is made — with its table, or after the
-// length of the table's name column (createWaitingKeys).
-function alternateKeyStep({ runner, sdk, entity, logical, key, languageCode }) {
-  return runner.run('data-model', `alt key ${entity.schemaName}.${key.schemaName}`,
-    () => sdk.createAlternateKey(logical, { schemaName: key.schemaName, displayName: key.displayName || key.schemaName, keyAttributes: (key.columns || []).map((x) => x.toLowerCase()), languageCode }),
-    { recoverable: true, skipIf: (err) => isAlreadyExists(err, ALREADY_EXISTS_CODES.alternateKey) });
+// already-exists answer, which is a skip and not a halt. The same step wherever the key is made — with its table, ahead of the
+// length of the table's name column (alternateKeyAheadOfLength), or after it (createWaitingKeys). A refusal because another key is over
+// the key's columns (KEY_OVER_SAME_COLUMNS) is decided by the table's keys instead: a skip where they show the declared key, a stop that
+// says what to do where they show another (a refusal: a run again meets the same key), and the create's own error otherwise. Either stop
+// goes the way a key the platform refuses always went: a failed step, which halts the phase.
+function alternateKeyStep({ runner, sdk, provision, entity, logical, key, languageCode }) {
+  // What the table's keys said of a KEY_OVER_SAME_COLUMNS refusal; unset for any other answer, which is read as it always was.
+  let overSameColumns;
+  return runner.run('data-model', `alt key ${entity.schemaName}.${key.schemaName}`, async () => {
+    try {
+      return await sdk.createAlternateKey(logical, { schemaName: key.schemaName, displayName: key.displayName || key.schemaName, keyAttributes: (key.columns || []).map((x) => x.toLowerCase()), languageCode });
+    } catch (err) {
+      if (serviceCodeOf(err) !== KEY_OVER_SAME_COLUMNS) throw err;
+      overSameColumns = await keyOverSameColumns(provision, logical, key);
+      if (overSameColumns.state === 'other') throw refusal(keyOverSameColumnsStop(entity, logical, key, overSameColumns.holder), { cause: err });
+      throw err;
+    }
+  }, { recoverable: true, skipIf: (err) => (overSameColumns ? overSameColumns.state === 'declared' : isAlreadyExists(err, ALREADY_EXISTS_CODES.alternateKey)) });
 }
 
 // What the build can tell of an alternate key over a table's name column with that column at the length the spec asks — the one wording every
@@ -1948,11 +2441,14 @@ function keyRoomAtAskedLength(entity, key) {
 // the key, if the length the spec asks leaves room for it, and where that run is refused the same way, the platform's error and the sizes of
 // the key's columns say why.
 // See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/define-alternate-keys-entity#create-alternate-keys
-async function alternateKeyAheadOfLength({ runner, sdk, entity, logical, key, languageCode, warn }) {
+async function alternateKeyAheadOfLength({ runner, sdk, provision, entity, logical, key, languageCode, warn }) {
   try {
-    await alternateKeyStep({ runner, sdk, entity, logical, key, languageCode });
+    await alternateKeyStep({ runner, sdk, provision, entity, logical, key, languageCode });
   } catch (err) {
-    if (typeof warn === 'function') {
+    // A key refused because another key of the table is over its columns (KEY_OVER_SAME_COLUMNS) was refused for its columns, not for its
+    // size: the stop says what to do about that, and the advice below — about the length of the name column — does not apply to it.
+    const refusedForItsColumns = causeChain(err).some((e) => serviceCodeOf(e) === KEY_OVER_SAME_COLUMNS);
+    if (typeof warn === 'function' && !refusedForItsColumns) {
       const column = String(entity.primaryAttribute.schemaName).toLowerCase();
       const asked = askedPrimaryNameLength(entity);
       // Said from the languages the label goes out in, which is what keeps the key from waiting. A key that does not wait is a map that does not
@@ -2017,7 +2513,7 @@ async function keyMustWaitForShorterNameColumn({ provision, entity, logical, key
 // failed with, which the halt declares), the code of the service's answer, a reset, an explicit "never retry" — and never the halt's own
 // words or code. The retry then finds the length still owed (`owedLengths`), sets it, and asks for the key.
 // See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/define-alternate-keys-entity#create-alternate-keys
-async function createWaitingKeys({ runner, sdk }, waitingKeys, outcomes) {
+async function createWaitingKeys({ runner, sdk, provision }, waitingKeys, outcomes) {
   for (const { entity, logical, key, languageCode } of waitingKeys) {
     const outcome = outcomes.get(logical);
     if (outcome && !outcome.ok && !outcome.left) {
@@ -2040,7 +2536,7 @@ async function createWaitingKeys({ runner, sdk }, waitingKeys, outcomes) {
       );
       await runner.run('data-model', `alt key ${entity.schemaName}.${key.schemaName}`, async () => { throw halt; }, { recoverable: true });
     }
-    await alternateKeyStep({ runner, sdk, entity, logical, key, languageCode });
+    await alternateKeyStep({ runner, sdk, provision, entity, logical, key, languageCode });
   }
 }
 
@@ -2067,7 +2563,7 @@ async function settleOwedLengths({ sdk, provision, spec, owed, warn, sleep } = {
 // `owed` is the Map provisionDataModel keeps (see there): this attempt's tables whose length is to be set, and those an earlier attempt
 // left unset. `carriedIn` is the set of the second kind as the phase found them; `waitingKeys` collects the alternate keys that wait for
 // a length step, for createWaitingKeys to make once the steps have run.
-async function provisionDataModelSteps({ sdk, provision, runner, spec, apply, languageCode, warn, provisionedLanguages, preResolvedLanguageCode, sleep, reconcileLookupLabels = false, inlineColumns = true }, { owed, carriedIn, waitingKeys, waitingStatuses }) {
+async function provisionDataModelSteps({ sdk, provision, runner, spec, apply, languageCode, warn, provisionedLanguages, preResolvedLanguageCode, sleep, reconcileLookupLabels = false, inlineColumns = true }, { owed, carriedIn, waitingKeys, waitingStatuses, lag }) {
   // `lookupLabels` records the label each spec lookup column carries once this phase is done
   // (`<referencing>|<lookup logical>` -> { label }), so a later phase that repairs something derived
   // from it — an existing form's cell label — repairs it to what the column now says.
@@ -2239,10 +2735,21 @@ async function provisionDataModelSteps({ sdk, provision, runner, spec, apply, la
     }
     // A table THIS build created gets its ordinary columns in one change set (createColumnsInOneRequest). A table found after its
     // create is not given one: nothing shows what it already holds, and the per-column path below skips what exists.
+    // The same table is in its lag window (lagWindow): its column creates and status reason inserts refused with the table's lag are read and
+    // sent again within its budget. Every other table — one that existed, one found after its create — has none, and nothing changes for it.
+    const window = createdTable ? lagWindow(lag, provision, e, createdTable) : null;
+    // A change set whose bounded check ran out with a column still missing (`terminal`): the column loop sends no further column, and stops at
+    // the first one the check did not confirm.
+    let inlineTerminal = null;
+    // A change set the table's lag refused, whose missing columns a read then proved absent (`fallback`): the column loop creates them one by one,
+    // but each of those creates is one of the check's own sends — made only while the table's budget has room, and charged to it — and once the
+    // budget is spent, by them or by the reads and waits between them, the loop stops at the next column it has not confirmed, as `terminal` does.
+    let inlineFallback = null;
+    const stopIfRefused = typeof runner.stopIfRefused === 'function' ? () => runner.stopIfRefused('data-model') : undefined;
     if (createdTable && inlineEnabled) {
       const inlineSet = inlineColumnsOf(buildable, { primaryName: e.primaryAttribute && e.primaryAttribute.schemaName, tableLogical: logical });
       if (inlineSet.length) {
-        inlineConfirmed = await createColumnsInOneRequest({
+        const inline = await createColumnsInOneRequest({
           sdk,
           provision,
           table: { metadataId: createdTable.metadataId, logicalName: createdTable.logicalName || logical },
@@ -2252,8 +2759,12 @@ async function provisionDataModelSteps({ sdk, provision, runner, spec, apply, la
           warn,
           sleep,
           // A runner without the check (a stand-in for one) never stops here.
-          stop: typeof runner.stopIfRefused === 'function' ? () => runner.stopIfRefused('data-model') : undefined,
+          stop: stopIfRefused,
+          lagTable: window,
         });
+        inlineConfirmed = inline.map;
+        inlineTerminal = inline.terminal || null;
+        inlineFallback = inline.fallback || null;
       }
     }
     // columns: every buildable column (all scalar types + Customer; Lookup comes from a
@@ -2273,9 +2784,18 @@ async function provisionDataModelSteps({ sdk, provision, runner, spec, apply, la
     for (const c of buildable) if (existingCols.has(c.schemaName.toLowerCase())) runner.skip('data-model', `column ${e.schemaName}.${c.schemaName} (exists)`);
     const toCreate = buildable.filter((c) => !existingCols.has(c.schemaName.toLowerCase()));
     const colResults = await runner.mapLimit(toCreate, 1, (c) => runner.run('data-model', `column ${e.schemaName}.${c.schemaName} (${c.type || 'Text'})`,
-      () => inlineConfirmed.get(c) || (c.type === 'Customer'
-        ? sdk.createCustomerColumn(logical, { schemaName: c.schemaName, displayName: c.displayName || c.schemaName, required: REQUIRED(c), languageCode: resolvedLanguageCode })
-        : sdk.createColumn(logical, columnOptions(c, globalChoiceIds, spec.globalChoices, resolvedLanguageCode))),
+      () => {
+        const confirmed = inlineConfirmed.get(c);
+        if (confirmed) return confirmed;
+        if (inlineTerminal) throw inlineTerminal;
+        // Proved absent is not permission to create once the budget is spent: the change set's refusal, here, before any further POST.
+        if (inlineFallback && lagSpent(window.budget)) throw persisted(inlineFallback.original);
+        if (c.type === 'Customer') return sdk.createCustomerColumn(logical, { schemaName: c.schemaName, displayName: c.displayName || c.schemaName, required: REQUIRED(c), languageCode: resolvedLanguageCode });
+        // A Customer column is created by an action of its own, which the lag was not seen on: it is not in the window.
+        return createInLagWindow(() => sdk.createColumn(logical, columnOptions(c, globalChoiceIds, spec.globalChoices, resolvedLanguageCode)), {
+          window, column: c, stop: stopIfRefused, warn, charge: !!inlineFallback && inlineFallback.columns.has(c),
+        });
+      },
       { skipIf: (err) => isAlreadyExists(err, ALREADY_EXISTS_CODES.column) }));
     if (existingTable) {
       const existingColMeta = new Map(existingColRows.map((c) => [String(c.logicalName || c.schemaName || '').toLowerCase(), c]));
@@ -2450,7 +2970,8 @@ async function provisionDataModelSteps({ sdk, provision, runner, spec, apply, la
     // proof keeps that duplicate-protected path. A fresh insert records the server-returned value.
     // The same statusReasonTargets supply both the insert and verification state/value contract.
     if (e.statusReasons && e.statusReasons.length) {
-      const status = { entity: e, logical, languageCode: resolvedLanguageCode };
+      // `window`: a table this attempt created, whose inserts refused with its lag are queued for the end of the phase (applyStatusReasons).
+      const status = { entity: e, logical, languageCode: resolvedLanguageCode, window };
       if (existingTable && provision.dataverse && typeof provision.dataverse.get === 'function') waitingStatuses.push(status);
       else await applyStatusReasons({ sdk, provision, runner, warn }, status, result);
     }
@@ -2477,10 +2998,10 @@ async function provisionDataModelSteps({ sdk, provision, runner, spec, apply, la
           waitingKeys.push({ entity: e, logical, key: k, languageCode: resolvedLanguageCode });
           continue;
         }
-        await alternateKeyAheadOfLength({ runner, sdk, entity: e, logical, key: k, languageCode: resolvedLanguageCode, warn });
+        await alternateKeyAheadOfLength({ runner, sdk, provision, entity: e, logical, key: k, languageCode: resolvedLanguageCode, warn });
         continue;
       }
-      await alternateKeyStep({ runner, sdk, entity: e, logical, key: k, languageCode: resolvedLanguageCode });
+      await alternateKeyStep({ runner, sdk, provision, entity: e, logical, key: k, languageCode: resolvedLanguageCode });
     }
   }
 
@@ -2923,7 +3444,9 @@ function buildSeedGroup({ spec, e, records, statusReasonValues }) {
     // captured during the data-model phase (insertStatusValue); if that phase was skipped this run
     // the value is unknown — halt loudly instead of silently inserting a default status.
     if (raw && raw.statusReason) {
-      const sv = (statusReasonValues[e.schemaName.toLowerCase()] || {})[raw.statusReason];
+      // An OWN entry of the captured values (lib/own-keys.js): a label such as `constructor` that was not captured — the data-model phase
+      // did not run — must halt here like any other, not read the inherited member as a captured value.
+      const sv = ownValue(statusReasonValues[e.schemaName.toLowerCase()], raw.statusReason);
       if (!sv) throw refusal(`record sets statusReason '${raw.statusReason}' on ${e.schemaName}, but its status value wasn't captured — include the data-model phase (don't --skip data-model) so the custom status reason is created and its option value captured`);
       body.statuscode = sv.value; body.statecode = sv.stateCode;
     }

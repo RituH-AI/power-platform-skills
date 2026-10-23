@@ -74,6 +74,33 @@ test('validatePageOutput accepts a complete TSX module', () => {
   assert.deepEqual(result.problems, []);
 });
 
+// A page whose default export is a generic arrow — `<T,>`, a constraint or `const` before the name, as TypeScript requires in .tsx — was refused as having
+// no default export, and the page was sent to the inline rewrite. The CLI is what the skill runs.
+test('the CLI accepts a page whose default export is a generic arrow, and still refuses one cut off before its body', () => {
+  const { spawnSync } = require('node:child_process');
+  const script = path.join(__dirname, '..', 'genpage-worker-output.js');
+  const run = (code) => spawnSync(process.execPath, [script, '--file', write(code)], { encoding: 'utf8' });
+  for (const code of [
+    'type Props<T> = { items: T[] };\nexport default <T,>(props: Props<T>) => {\n  return <div>{props.items.length}</div>;\n};\n',
+    'export default <T extends object>(props: T) => <div>ok</div>;\n',
+    'export default <const T,>(props: T): JSX.Element => <div>ok</div>;\n',
+    'export default async <T,>(props: T) => {\n  await Promise.resolve(props);\n  return null;\n};\n',
+    // A return type is read to its end: a type named `module` is a name, and the arrow follows it.
+    'type module<T> = Promise<T>;\nexport default async <T,>(p: T): module<T> => p;\n',
+  ]) {
+    const accepted = run(code);
+    assert.equal(accepted.status, 0, accepted.stdout);
+    assert.deepEqual(JSON.parse(accepted.stdout).problems, [], code);
+  }
+  // Cut off after the parameter list, after a return type, and after a return type that is a function type (its `=>` is no arrow); an element; an arrow with no body.
+  for (const code of ['export default <T,>(props: { items: T[] })', 'export default <T,>(props: T): JSX.Element', 'export default <T>(props: T) => <div>ok</div>;\n',
+    'export default <T,>(p: T): (x: T) => T', 'export default <T,>() => ;\n']) {
+    const refused = run(code);
+    assert.equal(refused.status, 3, code);
+    assert.match(JSON.parse(refused.stdout).problems.join('\n'), /no complete default export/, code);
+  }
+});
+
 // The skill runs the CLI and acts on its exit code: 0 accepts the worker's file, 3 sends the page to
 // the inline fallback. A missing or empty file is output that failed, never a pass.
 test('the CLI accepts with exit 0 and sends a failed page to the fallback with exit 3', () => {

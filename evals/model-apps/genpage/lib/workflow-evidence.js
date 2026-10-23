@@ -121,6 +121,14 @@ function unassociatedCallProblems(fixture) {
     .map(([key]) => `${key}: logged command has no associated result event`);
 }
 
+// The entity-builder's one-line identity warning in genpage-entity-creation-log.md: a line that says it is a
+// warning and names both identities check-auth.js reported, e.g. under the log's `## Environment`:
+//   - Warning: az (admin@contoso.onmicrosoft.com) and pac (maker@contoso.onmicrosoft.com) use different identities; WhoAmI passed, so provisioning proceeds.
+function identityWarningLogged(log, result) {
+  const names = [result.azUser, result.pacUser].filter((name) => typeof name === 'string' && name);
+  return String(log || '').split(/\r?\n/).some((line) => /\bwarn/i.test(line) && names.every((name) => line.includes(name)));
+}
+
 function authGateProblems(fixture, { required = false } = {}) {
   const calls = workflowCalls(fixture);
   const gates = calls.filter((call) => isAuth(call.command));
@@ -155,8 +163,16 @@ function authGateProblems(fixture, { required = false } = {}) {
           || (plannedEnv && normalizedEnv(plannedEnv) !== normalizedEnv(result.envUrl)))) {
           problems.push('successful auth gate belongs to a different command/plan environment');
         }
-        if (strict && result.identitiesMatch === false && call.userMessage !== result.message) {
-          problems.push('warning-only identity mismatch was not surfaced verbatim');
+        if (strict && result.identitiesMatch === false) {
+          // A working sign-in whose az and pac identities differ is a warning, not a blocker. SKILL.md Phase 2a
+          // has the orchestrator proceed and show the result's `message` to the user; the entity-builder re-probes
+          // the same way but is headless, so agents/genpage-entity-builder.md Step 2 has it log a one-line warning
+          // in its transaction log instead. Each is graded where its spec says the warning goes.
+          if (call.by === 'genpage-entity-builder') {
+            if (!identityWarningLogged(fixture.entityCreationLog, result)) problems.push('the entity-builder did not log its identity-mismatch warning in genpage-entity-creation-log.md');
+          } else if (call.userMessage !== result.message) {
+            problems.push('warning-only identity mismatch was not surfaced verbatim');
+          }
         }
         timeoutAttempts = 0;
       } else {
@@ -253,6 +269,47 @@ function discoveryProblems(fixture, { required = false, needsBinding = false } =
   return problems;
 }
 
+// edit-flow.md Edit Phase 1b: "0 pages: Tell the user 'This app has no generative pages to edit. Did you mean to
+// create a new page?' and stop the edit flow." The page listing (scripts/genpage.js list) answers
+//   { "ok": true, "scope": "app", "appId": "…", "layer": "published", "count": 0, "pages": [] }
+// and an entry whose page is gone (`"exists": false`) is no page to offer, so a listing of only those is empty
+// too. A failed listing (`"ok": false`) is never "no pages" (edit-flow.md: "a failed read is never 'no pages'").
+function isEmptyPageListing(result) {
+  return Boolean(result) && result.ok === true && Array.isArray(result.pages) && !result.pages.some((page) => page && page.exists !== false);
+}
+
+// What the run must show once a listing came back empty: the user was told (an empty listing's `userMessage`
+// in a current trace, the log's prose in an older one), nothing was downloaded, planned, generated or written
+// after it, and the log says the flow stopped. The flow stops at the FIRST empty listing, so everything after
+// it is graded against that stop: another read later cannot take back what the run did in between. Returns
+// the problems, empty when that stop is shown.
+function emptyPageListingProblems(fixture) {
+  // Loaded here, not at the top: expectation-evidence.js builds on this module, so a top-level require would
+  // hand it a half-initialized copy of these exports.
+  const { GENPAGE_LIST, GENPAGE_DOWNLOAD } = require('./expectation-evidence.js');
+  const calls = workflowCalls(fixture);
+  const listings = calls.flatMap((call, at) => (GENPAGE_LIST.test(call.command) ? [{ call, at }] : []));
+  if (!listings.length) return ['genpage.js list was not run, so no page listing came back empty'];
+  const stop = listings.find(({ call }) => isEmptyPageListing(resultObject(call)));
+  if (!stop) {
+    const last = resultObject(listings.at(-1).call);
+    return [last?.ok === true && Array.isArray(last.pages) ? 'the page listing returned pages to edit' : 'the page listing did not succeed, and a failed listing is never "no pages"'];
+  }
+  const problems = [];
+  const toldNoPages = (text) => typeof text === 'string' && /\bno\b[^.\n]*\bpages?\b/i.test(text);
+  // Told at an empty listing: the stop itself, or a read after it.
+  const told = currentContract(fixture)
+    ? listings.some(({ call }) => isEmptyPageListing(resultObject(call)) && toldNoPages(call.userMessage))
+    : toldNoPages(fixture.workflowLog);
+  if (!told) problems.push('the user was not told the app has no pages to edit');
+  if (calls.slice(stop.at + 1).some((call) => GENPAGE_DOWNLOAD.test(call.command) || /\bgenpage-edit-planner\b/.test(call.command)
+    || isGeneration(call.command) || isMutation(call))) {
+    problems.push('the run went on to download, plan, edit or upload after the app listed no pages');
+  }
+  if (!/\bstop(?:s|ped)?\b|\bhalt(?:s|ed)?\b/i.test(fixture.workflowLog || '')) problems.push('the workflow does not record that the edit flow stopped');
+  return problems;
+}
+
 function refusalProblems(fixture) {
   if (fixture.manifest?.expectedOutcome !== 'refused') return ['fixture does not declare an expected refusal'];
   const stage = fixture.manifest.refusal?.stage;
@@ -267,6 +324,10 @@ function refusalProblems(fixture) {
     const { customApiGateProblems } = require('./custom-api-contract.js');
     return problems.concat(customApiGateProblems(fixture));
   }
+  // A run refused at Edit Phase 1b because the chosen app has no generative pages: its "gate" is the empty
+  // page listing, and an auth call it made on the way (the edit flow captures its environment with
+  // check-auth.js) must still be well formed.
+  if (stage === 'edit-pages') return problems.concat(emptyPageListingProblems(fixture), authGateProblems(fixture));
   const predicate = stage === 'auth' ? isAuth : stage === 'discovery' ? isDiscovery : null;
   if (!predicate) return [...problems, `unsupported refusal stage: ${stage}`];
   const gate = calls.filter((call) => predicate(call.command)).at(-1);
@@ -276,6 +337,6 @@ function refusalProblems(fixture) {
 
 module.exports = {
   currentContract, isObject, isUpload, isAuth, isDiscovery, isMutation, isGeneration,
-  resultObject, workflowCalls, authGateProblems, discoveryProblems, refusalProblems,
-  unassociatedCallProblems,
+  resultObject, workflowCalls, authGateProblems, discoveryProblems, refusalProblems, emptyPageListingProblems,
+  isEmptyPageListing, unassociatedCallProblems,
 };

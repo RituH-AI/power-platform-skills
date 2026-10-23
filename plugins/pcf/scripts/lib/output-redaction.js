@@ -30,17 +30,22 @@
 //     (guardFatalErrors).
 //   - the files the plugin writes: `writeFileSafe` and `appendFileSafe` (lib/safe-fs.js: the build's journal and status file, a download's spec and pages, a page's file and its deployed copy, the plan, the settings template),
 //     `writeFileAtomic` (lib/apply-snapshot-store.js: the apply snapshot, the baseline `last-applied.json`, the page ownership and publish records) and the SDK's workspace storage — every file the bundle writes goes through its
-//     `writeTextAtomic` (lib/maker-sdk.js wraps it: guardWorkspaceStorage). tests/output-token-writers.test.js lists every other write in the plugin and says why none of them can carry a token.
+//     `writeTextAtomic` (lib/maker-sdk.js wraps it: guardWorkspaceStorage). The three writers clean what they are given as the file gets it (redactFileData): a text as a text; BYTES — every view of an ArrayBuffer: a
+//     Buffer, any typed array, a DataView — and a string given with a `hex`, `base64` or `base64url` encoding as the bytes written, a hit masked with as many `*` in a copy. Each call is read on its own: an append is
+//     not read together with the file it extends. tests/output-token-writers.test.js lists every other write in the plugin and says why none of them can carry a token.
 //   - in the pcf plugin (which carries a copy of this module): its streams and its fatal errors as above (its scripts note their tokens through the same lib/dataverse-auth.js), the receipt `pcf-push.js` writes
 //     (`pcf-receipt.json`) and the SDK workspace `makePcfSdk` makes; pcf's tests/pcf-push-token.test.js lists every other write of pcf and says why none of them can carry a token.
 //   - not covered, by design: a token another process obtained (`pac` has its own); a piece of a token SHORTER than MIN_TOKEN_PART_LENGTH at the edge of a write or before a cut (it would be taken out of ordinary words — a
 //     token written in two pieces leaves the shorter piece when it is under 24 characters; the first one is written before the second exists); a piece from the MIDDLE of a token that neither begins nor ends a needle (a
 //     token written in three pieces or more, or cut at both ends); the start of a write read through an escape's letters (it is read on the first reading only: a literal backslash before its first letter leaves that letter);
 //     the piece of a token that an escape cut between two writes leaves on its far side when that piece is shorter than 24 characters (the escape stays whole, so its characters count for neither piece);
-//     a spelling other than those below (a partial percent-encoding, a numeric entity for every character, base64 of a part alone, hex, a token spelled backwards — a reader that guessed at them would blank ordinary data);
-//     a cut other than util.inspect's, an ellipsis or the end of a text the process writes; inside BYTES only whole needles and the edges of a write are read (no cut, no fold, no escape); bytes given to a FILE writer (the
-//     writers below clean text); the cuts and edges of a token searched for literally (one with white space, a backslash or an ESC of its own — no token a service issues); a raw control character other than white space
-//     and ESC between two of its characters.
+//     a spelling other than those below (a partial percent-encoding, a numeric entity for every character, base64 of a substring that is not a whole part — or of a part shorter than 24 characters, or of a base64
+//     spelling —, hex, a token spelled backwards — a reader that guessed at them would blank ordinary data);
+//     a cut other than util.inspect's, an ellipsis or the end of a text the process writes; inside BYTES only whole needles and the edges of a write are read (no cut, no fold, no escape); a token split between two
+//     appends to a file, and the part of a chunk an append that failed part way left in the file (it is of the cleaned chunk, and is not taken back); what a child process writes, a write of the file system the
+//     plugin does not list (tests/output-token-writers.test.js), the files listed there as data handed on as it is (the settings a person gave, the package pac is given), and a file the SDK writes other than
+//     through `writeTextAtomic`; the cuts and edges of a token searched for literally (one with white space, a backslash or an ESC of its own — no token a service issues); a raw control character other than
+//     white space and ESC between two of its characters.
 //
 // A TOKEN AS A TEXT SPELLS IT. A token is looked for as the text spells it, one character at a time: a character is itself, or an escape of it (`\u0073` for `s`, in either case of hex; `\x73`; `\/` for `/`), and between
 // two characters of the token there may be a fold — any white space, a line break and its indentation (the obsolete line folding of https://www.rfc-editor.org/rfc/rfc9112#section-5.2, a column a gateway wrapped), spelled as
@@ -50,8 +55,9 @@
 // the token. The span from the token's first character to its last — the folds and escapes inside it included, an escape always whole — becomes `<token>`, and the white space before and after it stays. In JSON text the
 // span is always inside one string and never leaves half of an escape, so what was JSON is still JSON (the baseline and the journal are read back by the next run).
 //
-// OTHER SPELLINGS of a token the process obtained are needles of their own, read the same way (spellingsOf): its base64, standard and URL-safe, at each of the three byte alignments it can have inside a longer value (a
-// whole `Authorization` header, a body encoded once more), and its percent-encoded and HTML spellings where they differ from it. Exact spellings of a KNOWN token — nothing in a text is decoded to look inside it.
+// OTHER SPELLINGS of a token the process obtained are needles of their own, read the same way (spellingsOf): its base64 and that of each of its parts of 24 characters or more, standard and URL-safe, at each of the three
+// byte alignments it can have inside a longer value (a whole `Authorization` header, a body encoded once more, the one part a diagnostic complains about) — the characters made of its own bits, not the ones beside them that
+// also hold bits of their neighbours, nor the padding — and its percent-encoded and HTML spellings where they differ from it. Exact spellings of a KNOWN token — nothing in a text is decoded to look inside it.
 //
 // A TOKEN CUT SHORT. A formatter that cuts a long text keeps its beginning, and the end of what it kept can be the beginning of a token: util.inspect prints at most 10,000 characters of a string and then says how many it
 // left out (`'Rejected bearer syntheticHeaderPartNotA'... 9876 more characters`), and a text cut to a length by hand ends with an ellipsis (`...`, `…`). Where a text says it was cut, the run before it that BEGINS a needle — 24
@@ -69,7 +75,7 @@
 // a dot, an ellipsis, while a needle is being read), and its pieces are the alignments the pass already follows; the start of a text is read for at most the longest needle's length; bytes are read in one pass of the
 // same kind, needle by needle in lockstep. A text that would need more is not guessed at: the search fails, and every caller fails closed (tests/output-redaction.test.js and tests/output-token-forms.test.js measure
 // all of it). A text that holds no token comes back as the very string, and bytes as the very bytes.
-const { inspect, types: { isUint8Array } } = require('node:util');
+const { inspect, types: { isUint8Array, isArrayBufferView } } = require('node:util');
 
 // What takes the place of a token, or of a part of one, in a text.
 const TOKEN_MARKER = '<token>';
@@ -106,12 +112,15 @@ const HTML_ENTITIES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "
 
 /**
  * The other spellings of `token` that are taken out of what the process writes, each an exact needle read as any needle is (with folds and escapes in it):
- *   - its base64, standard and URL-safe (https://www.rfc-editor.org/rfc/rfc4648#section-4 and #section-5), as it is spelled INSIDE a longer value: base64 spells three bytes as four characters of six bits, so the token's
- *     first byte can stand at any of three places in a group and each place spells it differently. Of each, only the characters made of the token's own bits — a character that also holds bits of the byte before or
- *     after it changes with that byte, so it is left out at either end;
+ *   - the base64, standard and URL-safe (https://www.rfc-editor.org/rfc/rfc4648#section-4 and #section-5), of the token AND of each of its parts of 24 characters or more (needlesOf) — a diagnostic can encode the one
+ *     part it complains about as well as the whole header — as each is spelled INSIDE a longer value: base64 spells three bytes as four characters of six bits, so a needle's first byte can stand at any of three
+ *     places in a group and each place spells it differently. Of each, only the characters made of the needle's own bits — a character that also holds bits of the byte before or after it changes with that byte,
+ *     so it is left out at either end: a complete encoding of a part keeps that character and its padding (`<token>Q==`), and so does one of the token;
  *   - its percent-encoded spelling (upper- and lower-case hex) and its HTML spelling, and those of each of its parts of 24 characters or more — only where they differ from it: a JWT is base64url and dots, which
  *     neither changes, so a JWT has base64 spellings only.
- * Each is kept only when it is MIN_TOKEN_PART_LENGTH characters or more, as a part is; a spelling that is already a needle of the token is not repeated. The longest first.
+ * Each is kept only when it is MIN_TOKEN_PART_LENGTH characters or more — the length of the SPELLING, so that a token of 18 characters keeps the 24 characters of its first alignment; a part shorter than 24 characters
+ * is no needle and so has no spelling — and a spelling that is already a needle of the token, or another needle's spelling, is not repeated. The longest first. needlesOf is not changed by any of it: the Dataverse
+ * client scrubs the answers it fails with by that list alone (lib/sdk-http-client.js).
  * @param {string} token
  * @returns {string[]}
  */
@@ -122,13 +131,15 @@ function spellingsOf(token) {
   const keep = (spelled) => {
     if (spelled.length >= MIN_TOKEN_PART_LENGTH && !plain.includes(spelled)) spellings.add(spelled);
   };
-  const bytes = Buffer.from(token, 'utf8');
-  for (let offset = 0; offset < 3; offset += 1) {
-    // With `offset` bytes before the token, its bits are bits [8 * offset, 8 * (offset + n)) of the value, and character i holds bits [6i, 6i + 6): the characters from ceil(8 * offset / 6) to floor(8 * (offset + n) / 6)
-    // hold the token's bits and nothing else.
-    const standard = Buffer.concat([Buffer.alloc(offset), bytes]).toString('base64').slice(Math.ceil((4 * offset) / 3), Math.floor((4 * (offset + bytes.length)) / 3));
-    keep(standard);
-    keep(standard.replace(/\+/g, '-').replace(/\//g, '_'));
+  for (const needle of plain) {
+    const bytes = Buffer.from(needle, 'utf8');
+    for (let offset = 0; offset < 3; offset += 1) {
+      // With `offset` bytes before the needle, its bits are bits [8 * offset, 8 * (offset + n)) of the value, and character i holds bits [6i, 6i + 6): the characters from ceil(8 * offset / 6) to floor(8 * (offset + n) / 6)
+      // hold the needle's bits and nothing else.
+      const standard = Buffer.concat([Buffer.alloc(offset), bytes]).toString('base64').slice(Math.ceil((4 * offset) / 3), Math.floor((4 * (offset + bytes.length)) / 3));
+      keep(standard);
+      keep(standard.replace(/\+/g, '-').replace(/\//g, '_'));
+    }
   }
   for (const needle of plain) {
     keep(percentSpelling(needle, true));
@@ -822,6 +833,56 @@ function redactOutput(text) {
   return redactWith(preparedNow(), text, true);
 }
 
+// What a file writer is told when the data it was given could not be checked: a fixed sentence, never the data, which may hold the token.
+const UNCHECKED_FILE_DATA = 'output-redaction: the data given to a file writer could not be checked for an access token, so it was not written';
+
+/**
+ * `data` as a file writer of the plugin writes it (lib/safe-fs.js `writeFileSafe` and `appendFileSafe`, lib/apply-snapshot-store.js `writeFileAtomic`), with every token this process has obtained taken out — whatever
+ * `fs.writeFileSync` and `fs.appendFileSync` take, read as what they write:
+ *   - a text, as redactOutput reads it (a whole text: a needle's start at its end and its end at its start go too);
+ *   - BYTES — any view of an ArrayBuffer: a Buffer, a Uint8Array, a Uint16Array or any typed array, a DataView, from this realm or another (`util.types.isArrayBufferView`) — read byte for byte, only the bytes the view
+ *     covers (`[byteOffset, byteOffset + byteLength)`), and a hit masked with as many `*` in a COPY: the file keeps its length and the caller's memory is not written into. Node writes every such view as its raw bytes
+ *     (measured on Node 20 and 22: `writeFileSync` writes a Uint16Array and a DataView byte for byte), so a view is read as those bytes and never through `Buffer.from(view)`, which turns a Uint16Array into one byte
+ *     an element;
+ *   - a string given with `encoding` `hex`, `base64` or `base64url`, which the writer decodes into the bytes it writes: those bytes are read and, on a hit, masked and returned as a Buffer — the writer must then
+ *     write it WITHOUT that encoding (it would decode it again).
+ * The very `data` when it holds no token, and — before anything is looked at — when no token has been obtained: a process that has none writes what it always wrote, and gets the same errors (a detached view, which
+ * Node writes as nothing, included). A view whose bytes cannot be read (detached) or a string that cannot be decoded, when a token has been obtained, is not written: this throws, with a message that does not
+ * hold the data, before the writer writes anything — never the data unchecked, and never another text in its place. A raw ArrayBuffer is no view: it is passed on, and Node refuses it (ERR_INVALID_ARG_TYPE).
+ * Nothing is carried from one call to the next — two appends of a token's two halves are two writes, read each alone — and nothing is read from the file.
+ * @template T
+ * @param {T} data
+ * @param {{ encoding?: string } | string | null} [opts]
+ * @returns {T | Buffer}
+ */
+function redactFileData(data, opts) {
+  if (obtained.size === 0) return data;
+  const encoding = opts && typeof opts.encoding === 'string' ? opts.encoding : '';
+  if (typeof data === 'string' && BINARY_ENCODINGS.test(encoding)) {
+    let decoded;
+    try {
+      decoded = Buffer.from(data, encoding);
+    } catch {
+      throw new TypeError(UNCHECKED_FILE_DATA);
+    }
+    if (decoded.length === 0) return data;
+    const masked = maskWith(preparedNow(), decoded, true, 0);
+    return masked === decoded ? data : masked;
+  }
+  if (isArrayBufferView(data)) {
+    let raw;
+    try {
+      raw = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    } catch {
+      throw new TypeError(UNCHECKED_FILE_DATA);
+    }
+    if (raw.length === 0) return data;
+    const masked = maskWith(preparedNow(), raw, true, 0);
+    return masked === raw ? data : masked;
+  }
+  return redactOutput(data);
+}
+
 /**
  * What a guarded stream writes in place of `chunk`: a text as `redactOutput` makes it, and bytes with every token this process has obtained masked (maskTokenBytes, with the edges of the write) — the very bytes when they
  * hold none. `from`: where an escape the stream's last write ended inside is finished (guardStream). Anything else is returned as it is.
@@ -906,13 +967,17 @@ function guardStream(stream, redact = redactWritten) {
     }
     // The memory is this write's before the stream takes it, so that a callback the stream calls at once, and writes from, reads on from it. A write the stream REFUSES — it throws (an encoding it does not know, a
     // chunk that is no text and no bytes, a stream already ended) — wrote nothing, so the memory goes back to what the last written one left, unless a write made inside it has moved it on; the error is the
-    // stream's own. A write that returns false was taken (the stream asks the writer to wait): its memory stands.
+    // stream's own. A write that returns false was taken (the stream asks the writer to wait): its memory stands. A refused write also takes back its own count: a write made inside another one that the
+    // stream refuses as well wrote nothing either, and its count left behind would read, to the outer write, as a write the stream took — the outer one would then keep a memory nothing was written with.
     writes += 1;
     const mine = writes;
     try {
       return write.call(this, given, ...rest);
     } catch (error) {
-      if (writes === mine) open = before;
+      if (writes === mine) {
+        open = before;
+        writes = mine - 1;
+      }
       throw error;
     }
   };
@@ -1044,6 +1109,7 @@ module.exports = {
   redactTokens,
   maskTokenBytes,
   redactOutput,
+  redactFileData,
   guardStream,
   makeWritesBlocking,
   guardFatalErrors,

@@ -480,7 +480,8 @@ phase re-uses what's already created and only fills the gaps. SDK metadata is pe
 `--from <phase>` shortcut; a full rerun is the correct and safe recovery path — after a `WEB_RESOURCE_UNVERIFIED`
 halt too: a web resource was written but its publication could not be confirmed (often because another customization
 held the environment's lock), the build recorded it, and a rerun using the **same writable workspace** writes it
-again by its id; do not delete or rename it. If the halt says its recovery record could not be saved, or reports
+again by its id (the page manifest only when its published copy does not already hold that content; otherwise the
+rerun keeps it); do not delete or rename it. If the halt says its recovery record could not be saved, or reports
 a conflicting name/id, follow that explicit resolution instead — automatic retry is unsafe without the identity.
 One exception: an
 `already-exists` halt recurs on a rerun until that workspace directory is deleted — follow its message.
@@ -502,6 +503,8 @@ no usable environment, or is not valid JSON, halts too: move it aside (rename it
 hold page-ownership receipts and the baseline) and run again. The same environment under its other host name
 (`<org>.api.crm…` against `<org>.crm…`) also halts: re-run with the host the halt names. The standalone verifier
 never opens that workspace either, so it verifies any environment the app is deployed to.
+
+Run only one apply command for an app in its workspace at a time, including its data stage and full build. If another build holds the build or pages lock, let it finish and then rerun the same full command; do not repeatedly launch retries, use a second workspace to bypass it, or delete the workspace. A lock refusal is on stderr with exit 1 and no stdout JSON; do not treat empty stdout as an unknown crash or a reason to reset the workspace. A teardown, download, standalone `/genpage` or `apps.js` mutation, or workspace clear is not stopped by this lock; do not run one against the same app/workspace beside the apply. A lock is abandoned only after its owner is confirmed no longer running; age alone is never sufficient. If automatic reclaim cannot complete, inspect the owner evidence and consider removing only the named lock/reclaim file manually after that confirmation. Keep the workspace and its recovery records. For concurrent-build protection, all overlapping build commands must use the new version. During a mixed-version transition, finish older builds first and keep the downloaded app unique name's spelling unchanged.
 
 With `--publish`, the tables the build changed, and the tables whose forms or charts the app holds or is about to hold, are published in one
 request before the build writes or publishes the app: the tables whose existing views and forms the build edited, the tables of the

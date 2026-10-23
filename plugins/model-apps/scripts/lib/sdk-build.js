@@ -19,9 +19,10 @@ const { resolveAppSource } = require('./app-source-path.js');
 const { readPageOwnership, recordPageCreation, recordPagePending, readPendingCreations, completePendingCreations, creationIds } = require('./page-ownership-records.js');
 const { readPublishedPages, writePublishedPages, sameFileVersions } = require('./page-publish-records.js');
 const { leftOnDiskWarning } = require('./left-on-disk.js');
-// The pages lock is taken through the snapshot lease's exclusive create-and-reclaim, and reclaimed only from a build that is provably gone.
-const { acquireLease, releaseLease } = require('./apply-snapshot-store.js');
-const { ownerStamp, ownerState, describeOwner } = require('./process-owner.js');
+// The pages lock: two files (one keyed without regard to case, one spelled as every earlier release spells it), each taken through the snapshot
+// lease's exclusive create-and-reclaim and reclaimed only from a build that is provably gone; and the build lease an apply holds outside it
+// (lib/app-operation-lease.js).
+const { acquireAppPagesLease, withAppBuildLease, applyWorkspaceOf } = require('./app-operation-lease.js');
 const { unreadableAnswer } = require('./collection-answers.js');
 // normalizePageSource: read the page source from the discriminated `source` field (v2) or the
 // legacy top-level `codeFile` (pre-migration). PHASES: canonical ordered phase list — imported
@@ -58,7 +59,7 @@ const {
   statedPageBindings,
 } = require('./app-spec.js');
 const { PHASES } = require('./stages.js');
-const { pagesStatingBindings, readBindingTargets, judgeBindingTargets } = require('./page-binding-targets.js');
+const { pagesStatingBindings, pagesMadeUnchecked, pagesLeftOutAsDeployed, bindingReads, readBindingTargets, judgeBindingTargets, unconfirmedDeployedText } = require('./page-binding-targets.js');
 const { topoOrderEntities, entityByLogical } = require('./_graph.js');
 const {
   isMainForm,
@@ -138,12 +139,13 @@ const { DASHBOARD_LAUNCHER_URL, adoptLiveSitemap, chromeByTargetKey, describeSit
 const { buildPromptSpec } = require('./ai-prompt.js');
 const { odataLit } = require('./odata.js');
 const { isRestrictedSolution } = require('./system-solutions.js');
-const { tableRefs, pinAppTables, publishAppComponents, resolveMainForms, appComponentsFor, applyAppMainForms, explainAppPushWarnings } = require('./app-components.js');
+const { tableRefs, pinAppTables, publishAppComponents, resolveMainForms, appComponentsFor, applyAppMainForms, explainAppPushWarnings, savedPageRows } = require('./app-components.js');
 const { appWriteTables, appPushTables, preAppTables, publishTablesXml, readSavedNotPublished, describeSavedNotPublished, readAppFormChartTables, describePreAppRefusal, describeUnreadAppComponents } = require('./table-publish.js');
 const { hasUnsyncedEdits } = require('./unsynced-edits.js');
 const { createSolutionMembership, ensureSolutionComponent } = require('./solution-membership.js');
 const { openUnconfirmedWebResources } = require('./web-resource-records.js');
 const { openDashboardCreations } = require('./dashboard-creation-records.js');
+const { ownValue } = require('./own-keys.js');
 const { navigationEntryKind, navigationHolds, navigationIsPagesOnly, navigationVerdict } = require('./app-navigation.js');
 const { isAppTextMap, appTextKind, localizedAppText } = require('./app-header-text.js');
 // The build's retry policy (retry-policy.js): every halt below is raised with what a run again may do — RETRY.NEVER, or a policy decided from the failure it wraps — and every failure the engine
@@ -531,9 +533,10 @@ function commandDef(entityLogical, cmds, webResources) {
   return { entityLogicalName: entityLogical, commandBars };
 }
 
-// Group an entity's commands (keyed by lowercased entity logical name).
+// Group an entity's commands (keyed by lowercased entity logical name). A null-prototype map: the name is the spec's text, and
+// `(map[k] = map[k] || []).push(…)` on a plain object throws for `constructor` or `__proto__` (it reads the inherited member).
 function commandsByEntity(spec) {
-  const byEntity = {};
+  const byEntity = Object.create(null);
   for (const c of spec.commands || []) {
     const k = String(c.entity).toLowerCase();
     (byEntity[k] = byEntity[k] || []).push(c);
@@ -1163,7 +1166,8 @@ function defaultAppIconSvg(appName) {
 // The row is therefore never created again (a second create of the name is refused), and its content may be what was written, the old content, or
 // none. What the build does about it is the same at every site that writes one (the spec's web resources, the generated app icon, the page manifest):
 // it records the row — in the run's result, and in the workspace (lib/web-resource-records.js), so that the run that follows writes its content again
-// by id instead of reusing it untouched — adds it to the solution as the success path does, and stops with what a run again does.
+// by id instead of reusing it untouched (the page manifest: unless its published copy already holds what that run would write, which it keeps) — adds it
+// to the solution as the success path does, and stops with what a run again does.
 const isUnconfirmedWrite = (e) => Boolean(e) && e.code === 'WEB_RESOURCE_UNVERIFIED' && typeof e.id === 'string' && e.id.length > 0;
 // The SDK's answer to a write by an id whose row is gone: HTTP 404 (`ensureSuccess` throws it as a ConnectionError).
 const isGoneRow = (e) => Boolean(e) && e.code === 'CONNECTION_ERROR' && e.statusCode === 404;
@@ -1173,10 +1177,17 @@ const contentOf = (options) => (options.contentBase64 !== undefined ? { contentB
 // that recovers it), then the plugin's — what this build did with the row and what a run again does, which makes that call. Its code is the SDK's, so the
 // runner's halt carries it, and the SDK's error is its cause: the build's retry reads that as the wrapper it is (lib/retry-policy.js, CAUSE_WRAPPER_CODES),
 // judged by the failure the SDK's error carries, and run again when it carries none.
-function unconfirmedWebResource(error, { name, recorded, inSolution }) {
+// What a run again does is not the same at every site. The spec's web resources and the generated icon are written again by id whatever was published
+// (writeOwnedWebResource). The page manifest is first compared with its PUBLISHED copy, and written again only where that copy is not the content the run
+// would write (persistPageManifest, `comparesPublished`): live, a manifest created and never published — each of its publishes refused — was read back
+// with that content by the run that followed (the build's own retry), and kept, its record cleared. So its stop says so, and does not promise a write.
+function unconfirmedWebResource(error, { name, recorded, inSolution, comparesPublished = false }) {
   const solution = inSolution === true ? 'added it to the solution' : `could not add it to the solution (${(inSolution && inSolution.message) || inSolution}; a run again adds it)`;
+  const nextRun = comparesPublished
+    ? 'it reads the published copy and keeps it if it already holds the content that build would write; otherwise it writes the content again by that id, publishes it and reads it back (the call the message names is made for you)'
+    : 'it writes the content again by that id, publishes it and reads it back (the call the message names is made for you)';
   const remedy = recorded
-    ? `this build recorded the row as its own and ${solution}. Its publication is UNCONFIRMED, not lost: run the build again — it writes the content again by that id, publishes it and reads it back (the call the message names is made for you).`
+    ? `this build recorded the row as its own and ${solution}. Its publication is UNCONFIRMED, not lost: run the build again — ${nextRun}.`
     : `this build ${solution}, but could not save its local recovery record. Its publication is UNCONFIRMED, not lost: this build will not automatically retry it without that record. Write its content again by the id above in Power Apps once the cause is resolved; keep the same writable build workspace for automatic recovery.`;
   // SDK updates report only the id; the build also knows the authored name, which is what a maker needs to find the resource.
   const detail = error.webResourceName ? error.message : `Web resource '${name}' (${error.id}): ${error.message}`;
@@ -1188,12 +1199,13 @@ function unconfirmedWebResource(error, { name, recorded, inSolution }) {
 }
 
 // Records a row the SDK wrote and could not confirm, puts it in the solution, and answers the error to stop the step with (unconfirmedWebResource).
-// The record is written FIRST: it is local, and it is what the next run needs whatever happens to the add.
-async function keepUnconfirmedWebResource(error, { name, unconfirmed, addToSolution }) {
+// The record is written FIRST: it is local, and it is what the next run needs whatever happens to the add. `comparesPublished` is the page manifest's:
+// the next run compares it with its published copy before it writes it again (see unconfirmedWebResource).
+async function keepUnconfirmedWebResource(error, { name, unconfirmed, addToSolution, comparesPublished = false }) {
   const recorded = unconfirmed.note(name, error.id);
   let inSolution = true;
   try { await addToSolution(error.id); } catch (e) { inSolution = e; }
-  return unconfirmedWebResource(error, { name, recorded, inSolution });
+  return unconfirmedWebResource(error, { name, recorded, inSolution, comparesPublished });
 }
 
 // A receipt authorizes only its original id, never a different row that came to hold the same name after it. This check costs nothing
@@ -1350,7 +1362,7 @@ async function persistPageManifest(provision, spec, keyToId, sol, appUnique, exi
       }
       return (await provision.createWebResource({ name, displayName: `${spec.app.name} Page Manifest`, type: 'js', content })).id;
     } catch (e) {
-      if (isUnconfirmedWrite(e)) throw await keepUnconfirmedWebResource(e, { name, unconfirmed, addToSolution });
+      if (isUnconfirmedWrite(e)) throw await keepUnconfirmedWebResource(e, { name, unconfirmed, addToSolution, comparesPublished: true });
       throw e;
     }
   };
@@ -1500,16 +1512,31 @@ async function checkNavigationBeforeWriting(spec, { provision, phases, changedOn
 //   - a reference or a Custom API that is not there, a reference that has no connection, an operation a binding calls that the custom connector there does not define, a Custom API of the other kind or bound
 //     to another table, and a read that failed are SAID, by name, and the build goes on: the page is written with its binding (a reference made, or given its connection, later makes the page work without a
 //     rebuild), and an ordinary read failure says only that the bindings were not checked. A refused throttle wait is still the attempt's budget stop, checked by its runner before any mutation.
-// Only a run that has the pages phase writes a binding, and a changed-only run writes the pages it selected (pagesStatingBindings). A spec that states none reads nothing.
-async function readPageBindingVerdict(spec, { provision, phases, changedOnly }) {
+// Only a run that has the pages phase writes a binding, and a changed-only run writes the pages it selected and the navigation targets it has to make (pagesStatingBindings). A spec that states none reads nothing.
+// `seen` is what the attempt has read of what bindings name (bindingReads); the pages phase's check of a target it makes is given the same one.
+async function readPageBindingVerdict(spec, { provision, phases, changedOnly, seen }) {
   if (!phases.includes('pages')) return null;
-  const pages = pagesStatingBindings(spec, { changedOnly });
-  if (!pages.length) return null;
-  return judgeBindingTargets(pages, await readBindingTargets(provision, pages));
+  return judgePageBindings(provision, pagesStatingBindings(spec, { changedOnly: bindingCheckScope(phases, changedOnly) }), seen);
 }
 
-async function checkPageBindingsBeforeWriting(spec, { provision, phases, changedOnly, warn }) {
-  const verdict = await readPageBindingVerdict(spec, { provision, phases, changedOnly });
+// What a run is told of the pages that are deployed (`changedOnly.deployedKeys`, pagesStatingBindings) is heeded only by a run whose pages phase is its FIRST writer — the changed-only fast apply runs that
+// phase alone (lib/changed-only-flow.js). A target the run was told of and that the pages phase finds absent is checked there, before it is made (pagesMadeUnchecked); in such a run that is still before
+// anything is written, so the refusal says so truly. A run with an earlier phase (the solution, the tables, the app) would have written them by then, so it is not told: it checks every navigation target
+// before it writes anything, as every run did before it could be told. A phase this build does not know is taken to come first.
+function bindingCheckScope(phases, changedOnly) {
+  if (!changedOnly || changedOnly.deployedKeys === undefined) return changedOnly;
+  const pagesWriteFirst = phases.every((phase) => PHASES.indexOf(phase) >= PHASES.indexOf('pages'));
+  return pagesWriteFirst ? changedOnly : { ...changedOnly, deployedKeys: undefined };
+}
+
+// What the environment has for the names `pages` state, judged (lib/page-binding-targets.js): null when no page states one, which reads nothing. A name `seen` already holds is not read again.
+async function judgePageBindings(provision, pages, seen) {
+  if (!pages.length) return null;
+  return judgeBindingTargets(pages, await readBindingTargets(provision, pages, seen));
+}
+
+// The apply's answer to a verdict: a conflict stops the build, and all else is said.
+function haltOnPageBindingConflicts(verdict, warn) {
   if (!verdict) return;
   const refused = verdict.findings.filter((finding) => finding.severity === 'refuse');
   if (refused.length) {
@@ -1524,10 +1551,50 @@ async function checkPageBindingsBeforeWriting(spec, { provision, phases, changed
   if (typeof warn === 'function') for (const text of [...verdict.unchecked.map((u) => u.text), ...verdict.findings.map((finding) => finding.text)]) warn(text);
 }
 
+async function checkPageBindingsBeforeWriting(spec, { provision, phases, changedOnly, warn, seen }) {
+  haltOnPageBindingConflicts(await readPageBindingVerdict(spec, { provision, phases, changedOnly, seen }), warn);
+}
+
+// A dry run has no pages phase, which is what finds a navigation target absent (reconcilePageIds: the spec's page id, or the manifest's, that the environment still lists). So for each target a
+// changed-only run was told is deployed (`changedOnly.deployedKeys`) and would leave unread (pagesLeftOutAsDeployed), the dry run asks the environment, read only, whether the page is still there —
+// never taking the record of an earlier apply as proof. Two reads, made only when there is such a target:
+//   GET <webresource set>?$select=webresourceid,content&$filter=name eq '<app>_pagemanifest'&$top=1                    the manifest (readPageManifest): each page's key and id
+//   GET /uxagentprojects/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()?$select=uxagentprojectid,name,componentstate&$filter=uxagentprojectid eq <id> or …
+//                                                                                                                    the pages in the SAVED layer, a never-published one included (savedPageRows)
+// A target whose page answers to the id the spec or the manifest gives it is there: its binding is left unread, as the apply leaves it. One whose ids answer to no page is absent — the apply
+// makes it — and one these reads cannot settle (no id, a read that fails) is not known to be there: both are checked, as if the build will make them, and a read that failed is said. Answers the
+// run's `changedOnly` with `deployedKeys` keeping only the targets found.
+async function confirmDeployedTargets(spec, { provision, phases, changedOnly, warn }) {
+  const scoped = bindingCheckScope(phases, changedOnly);
+  const leftOut = pagesLeftOutAsDeployed(spec, scoped);
+  if (!leftOut.length) return scoped;
+  const found = new Set();
+  let unsettled;
+  try {
+    const { manifest } = await readPageManifest(provision, appUniqueName(spec));
+    const manifestIds = new Map(((manifest && manifest.pages) || []).map((entry) => [entry.key, entry.pageId]));
+    const specIds = new Map((spec.pages || []).map((page) => [page.key || page.name, page.pageId]));
+    const idsOf = new Map(leftOut.map((page) => [page.key, [specIds.get(page.key), manifestIds.get(page.key)].filter((id) => typeof id === 'string' && FORM_GUID_RE.test(id)).map((id) => id.toLowerCase())]));
+    const wanted = [...new Set([...idsOf.values()].flat())];
+    if (wanted.length && !(provision.dataverse && typeof provision.dataverse.get === 'function')) unsettled = 'the pages cannot be read here';
+    else if (wanted.length) {
+      const rows = await savedPageRows(provision.dataverse, wanted, { label: 'the pages recorded as deployed' });
+      for (const page of leftOut) if (idsOf.get(page.key).some((id) => rows.has(id))) found.add(page.key);
+    }
+  } catch (error) {
+    unsettled = (error && error.message) || String(error);
+  }
+  if (unsettled !== undefined && typeof warn === 'function') warn(unconfirmedDeployedText(leftOut, unsettled));
+  const unfound = new Set(leftOut.filter((page) => !found.has(page.key)).map((page) => page.key));
+  return unfound.size ? { ...scoped, deployedKeys: scoped.deployedKeys.filter((key) => !unfound.has(key)) } : scoped;
+}
+
 // The dry run's share: say on the page's own line that an apply would stop there, and why. The line is marked as a view the build would refuse is (annotateLivePlan): `? unknown` with the reason, and `wouldHalt` so
-// the summary counts it among the steps that would stop the build. What an apply would only say is said the same way.
+// the summary counts it among the steps that would stop the build. What an apply would only say is said the same way. The pages judged are those an apply judges before it writes anything
+// (readPageBindingVerdict) — save a target the run was told is deployed that the dry run does not find in the environment (confirmDeployedTargets): the apply's pages phase makes that one, and
+// stops on it (pagesMadeUnchecked), so the plan judges it too.
 async function checkPageBindingsInPlan(plan, spec, { provision, phases, changedOnly, warn }) {
-  const verdict = await readPageBindingVerdict(spec, { provision, phases, changedOnly });
+  const verdict = await readPageBindingVerdict(spec, { provision, phases, changedOnly: await confirmDeployedTargets(spec, { provision, phases, changedOnly, warn }) });
   if (!verdict) return;
   const refusedBy = new Map();
   for (const finding of verdict.findings.filter((f) => f.severity === 'refuse')) refusedBy.set(finding.page.name, [...(refusedBy.get(finding.page.name) || []), finding.text]);
@@ -1541,44 +1608,8 @@ async function checkPageBindingsInPlan(plan, spec, { provision, phases, changedO
   if (typeof warn === 'function') for (const text of [...verdict.unchecked.map((u) => u.text), ...verdict.findings.filter((f) => f.severity !== 'refuse').map((f) => f.text)]) warn(text);
 }
 
-// SINGLE-MACHINE advisory lockfile over the pages protocol (design §9, DESCOPED from a cross-machine guarantee).
-// A courtesy to stop two LOCAL builds of the same app racing to CREATE duplicate pages; correctness does
-// NOT depend on it — the convergence spine (fail-closed enumeration + create-absent-first + persist-after-
-// each-create) makes any re-run idempotent. Atomic exclusive create picks one winner; if the lock already
-// exists we HALT — unless the build that took it is PROVABLY GONE. A build killed outright (SIGKILL, "End
-// task", a timeout, a power cut) cannot release its lock, and used to leave every later build stopped on it
-// until a person deleted the file; the lock now records who took it (lib/process-owner.js: pid, host, platform,
-// and on Linux the process's start time), and a later build releases it itself, and says so (`deps.warn`),
-// when that process is no longer running on this machine.
-//
-// "Provably" is the whole rule, and every doubt keeps the lock, in the words it has always had: a lock whose
-// pid still runs, one made on another machine, platform or pid namespace — or where the maker's or this
-// process's pid namespace cannot be told (on Linux a pid that is not found proves nothing unless both name
-// the same pid space) — one with no readable record (a release before the record existed, a damaged file, a
-// field of it that is not what it should be) is never taken — and none is ever taken by AGE, since a
-// live build may be paused as long as a laptop sleeps. The take-over itself is the snapshot lease's
-// (apply-snapshot-store.js acquireLease): one claim file makes exactly one of several builds that start
-// together the winner, and a lock that changed meanwhile is left alone. Release is OWNER-CHECKED: remove
-// only if the file still holds OUR exact token. Cross-machine/worktree concurrency for the SAME app is
-// UNSUPPORTED. `deps` = seams: now, warn, and owner (the process-owner.js seams).
-function acquireAppPagesLease(wsDir, appUnique, deps = {}) {
-  const now = deps.now || (() => Date.now());
-  const file = `pages-${String(appUnique).replace(/[^A-Za-z0-9_-]/g, '_')}.lock`;
-  const lockPath = path.join(wsDir, file);
-  const lease = acquireLease(wsDir, { file, now, stamp: ownerStamp({ ...deps.owner, now }), isStale: (held) => ownerState(held, deps.owner).state === 'gone' });
-  if (!lease.ok) {
-    // A create that failed for any other reason than the lock being there (a workspace that cannot be written) is that error, as it always was.
-    if (lease.error) throw lease.error;
-    // `stale`: the lock's owner is gone, but the lock could not be released (another build was releasing it at the same moment, or died doing so).
-    const unreleased = lease.stale ? ` The build that held it is no longer running, but its lock could not be released: ${lease.reason}.` : '';
-    // `retry: NEVER`: the lock belongs to a build that is still running, or to one that is gone but whose lock could not be released — running the earlier phases again releases neither — and the message quotes the lock's path, which holds the maker's folder.
-    throw new BuildHalt(`another build is deploying pages for '${appUnique}' — refusing a second concurrent pages deploy (would risk duplicate page creation). Retry after it finishes, or delete ${lockPath} if it is stale.${unreleased}`, { phase: 'pages', code: 'pages-locked', recoverable: true, retry: RETRY.NEVER });
-  }
-  if (lease.reclaimed && typeof deps.warn === 'function') {
-    deps.warn(`released the pages lock for '${appUnique}': the build that held it (${describeOwner(lease.previous)}) is no longer running`);
-  }
-  return { release: () => releaseLease(lease) };
-}
+// The pages lock (acquireAppPagesLease) lives in lib/app-operation-lease.js, beside the build lease that every apply holds outside it; it is
+// still exported from this module, where the build and its callers have always found it.
 
 function appDef(spec, result, opts = {}) {
   const sol = spec.solution;
@@ -1605,7 +1636,9 @@ function appDef(spec, result, opts = {}) {
     // page entries left out of a new app's first navigation below are the ones it does not count.
     const kind = navigationEntryKind(s);
     if (kind === 'dashboard') {
-      const dashboardId = (result.dashboards || {})[s.dashboard];
+      // Read as an OWN entry (lib/own-keys.js): a dashboard may be called `constructor` or `__proto__`, and a map a caller hands in — or the
+      // `{}` of a result with no dashboards — answers those names with an inherited member, which would pass for a built dashboard's id.
+      const dashboardId = ownValue(result.dashboards, s.dashboard);
       if (!dashboardId) throw refusal(`sitemap subarea "${s.title}" references dashboard '${s.dashboard}' which wasn't built — declare it in dashboards[] and don't skip the dashboards phase`);
       // The designer gives every dashboard entry it creates this launcher Url, recognizes a dashboard
       // entry by it, and the runtime shows the dashboard glyph only for it — without it the entry
@@ -1613,7 +1646,8 @@ function appDef(spec, result, opts = {}) {
       return { ...withVector, type: 'DashBoard', dashboardId, dashboardUrl: DASHBOARD_LAUNCHER_URL };
     }
     if (kind === 'page') {
-      const genPageId = (result.pages || {})[s.page];
+      // An own entry too: a page key is a lowercase slug, so `constructor` is a key a page can have.
+      const genPageId = ownValue(result.pages, s.page);
       if (!genPageId) {
         // During the initial app-create (app_early) pages aren't uploaded yet — omit the subarea;
         // the pages phase rewrites the sitemap once the genPageIds exist. A genuinely-missing page
@@ -2910,7 +2944,16 @@ function genpageCommand(verb, { env, pageId, app, flags = '' }) {
 // everything that app has saved, so the user is asked first), or detach it in Maker, or give this app a page of its own. `commands` are the lines `genpageCommand` made, one per app that holds the page.
 const detachAdvice = (commands) => `Detach it from the other app — ask the user first, since this changes another app: ${commands.join('; ')} (each takes the page out of that app's navigation and publishes that app, which publishes everything that app has saved; the page itself stays) — or detach it in Maker, or give this app its own page.`;
 
-// Every caller enters here; the phases run in runSdkBuildPhases. This wrapper only carries what an attempt
+// The entry every caller enters by. An APPLY holds the app's build lease for the whole of it (lib/app-operation-lease.js): one taken here when the
+// caller holds none, or the caller's own (`opts.buildLease`, which buildModelApp hands to each attempt), borrowed and left to the caller to let go. A
+// second apply of the same app in the same workspace is refused before anything is read or written, so two builds cannot both find the app's icon,
+// the app or a page missing and both create it. A dry run reads only, and takes no lease.
+async function runSdkBuild(spec, opts = {}) {
+  if (!opts.apply) return runSdkBuildAttempt(spec, opts);
+  return withAppBuildLease({ workspaceDir: applyWorkspaceOf(opts), appUniqueName: appUniqueName(spec), buildLease: opts.buildLease, warn: opts.warn }, () => runSdkBuildAttempt(spec, opts));
+}
+
+// One attempt; the phases run in runSdkBuildPhases. This wrapper only carries what an attempt
 // still owes out of a halt, for the caller that retries:
 //  - the deferred publishes (default-view enrichment, reconciled views and forms): `owedPublishes`, and
 //    `owedPaid` when this run's publish phase completed — which pays what an earlier attempt of the same
@@ -2921,7 +2964,7 @@ const detachAdvice = (commands) => `Detach it from the other app — ask the use
 //    next attempt as `opts.owedLengths` and which that attempt pays at the end of its own data-model phase, to the
 //    table it was recorded for. What is on the halt is everything still owed: what the attempt was handed and did
 //    not pay, and what it created.
-async function runSdkBuild(spec, opts = {}) {
+async function runSdkBuildAttempt(spec, opts = {}) {
   // tables: entity logical -> [type, id, names] of a saved view or form that owes its publish, and the names of
   // what is deferred onto that table: its reconciled views and forms, and its enriched default views
   // (oweTablePublish). lengths: table logical -> { table, column, asked, tried, tableId, columnId? } of a name column whose
@@ -3005,12 +3048,20 @@ async function runSdkBuildPhases(spec, opts, owed) {
   // A navigation Dataverse will refuse stops the build here, before anything is written, rather than at the app step
   // after the solution, tables, columns, views and forms have been (app-navigation.js). Only a run that has the app step.
   if (has('app-shell')) await checkNavigationBeforeWriting(spec, { provision, phases, changedOnly: opts.changedOnly, warn: opts.warn });
-  // A binding whose connection reference is another connector's stops the build here too, before anything is written, for the same reason (checkPageBindingsBeforeWriting).
-  await checkPageBindingsBeforeWriting(spec, { provision, phases, changedOnly: opts.changedOnly, warn: opts.warn });
+  // A binding whose connection reference is another connector's stops the build here too, before anything is written, for the same reason (checkPageBindingsBeforeWriting). What it reads is kept for
+  // the attempt (bindingReads): the pages phase judges a navigation target it finds it has to make by the same reads, and reads only a name this check did not.
+  const bindingReadsOfAttempt = bindingReads();
+  await checkPageBindingsBeforeWriting(spec, { provision, phases, changedOnly: opts.changedOnly, warn: opts.warn, seen: bindingReadsOfAttempt });
   runner.stopIfRefused('preflight');
 
   const createdFormsThisRun = new Set();
-  const result = { ok: true, created: { entities: {}, relationships: {}, records: {}, webResources: {}, views: {}, charts: {}, forms: {}, formIds: {}, businessRules: {}, businessProcessFlows: {}, bpfBackingTables: {}, commands: {}, dashboards: {}, pages: {}, pageDeployedShas: {}, pageSourceShas: {}, ai: { appFeatures: null, summaries: {} }, roles: {}, roleGrants: {}, bpfRoleGrants: {}, app: null }, skipped: { businessRules: [], aiSummaries: [], layout: [], unauthorizedRemovals: [] } };
+  // The maps keyed by a name a maker writes freely — a dashboard's, a page's key, a persona's (its role's), a business process flow's — are
+  // null-prototype objects (lib/own-keys.js): any such name can be `__proto__`, `constructor`, `toString`, … and must be stored and read as an
+  // entry like any other. On a plain object a dashboard called `__proto__` was never stored, and a page keyed `constructor` that was not built
+  // yet read the Object function as its id. JSON.stringify writes them exactly as it writes a plain object with the same entries. The other maps
+  // are keyed by Dataverse logical names (a table's, a web resource's: the publisher prefix and `_`, or a system component's), by GUIDs or by
+  // `entity|name` pairs, none of which can be such a member.
+  const result = { ok: true, created: { entities: {}, relationships: {}, records: {}, webResources: {}, views: {}, charts: {}, forms: {}, formIds: {}, businessRules: {}, businessProcessFlows: {}, bpfBackingTables: {}, commands: {}, dashboards: Object.create(null), pages: Object.create(null), pageDeployedShas: Object.create(null), pageSourceShas: Object.create(null), ai: { appFeatures: null, summaries: {} }, roles: Object.create(null), roleGrants: {}, bpfRoleGrants: Object.create(null), app: null }, skipped: { businessRules: [], aiSummaries: [], layout: [], unauthorizedRemovals: [] } };
   // #changed-only (pages-only fast apply): seed the LIVE app id (discovered by unique name upstream) so the
   // pages phase's `pages-requires-app` guard passes WITHOUT running the app-shell phase in this invocation.
   // The full-build path never sets opts.changedOnly, so result.created.app stays null and app-shell
@@ -3018,7 +3069,8 @@ async function runSdkBuildPhases(spec, opts, owed) {
   if (opts.changedOnly && opts.changedOnly.resolvedAppId) result.created.app = opts.changedOnly.resolvedAppId;
   const sol = spec.solution;
   // The web resources an earlier run of this build wrote and could not confirm were published (lib/web-resource-records.js), read at first use: the
-  // spec's web resources, the generated app icon and the page manifest are written again by id when they are in it. One per run of the phases, so the
+  // spec's web resources and the generated app icon are written again by id when they are in it, and the page manifest is written again by its id where
+  // its published copy is not what the run wants (kept where it is: persistPageManifest). One per run of the phases, so the
   // build's own re-run of a halt reads what the attempt before it recorded.
   const unconfirmedWebResources = openUnconfirmedWebResources({ workspaceDir: opts.workspaceDir, environment: opts.env, warn: opts.warn });
 
@@ -6575,7 +6627,7 @@ async function runSdkBuildPhases(spec, opts, owed) {
     // (e.g. --from pages), there is nothing to upload against — HALT and require a FULL rerun. An app the app step left to this
     // phase to create has no id yet, by design: it is made below, once the pages exist.
     if (!result.created.app && !createAppWithPages) throw new BuildHalt('pages phase requires the app (app-shell) in the same run — the app id is not carried across invocations. Re-run a FULL build (do not use --from pages).', { phase: 'pages', code: 'pages-requires-app', recoverable: false, retry: RETRY.NEVER });
-    const wsDir = opts.workspaceDir || path.join(path.resolve(opts.appDir || '.'), '.maker-workspace');
+    const wsDir = applyWorkspaceOf(opts);
     // Advisory lease: acquired OUTSIDE the try so a failed acquire (pages-locked HALT) never triggers the
     // finally that would release a lease we never held. Correctness rests on the convergence spine, not this.
     // A lock a killed build left behind is released by this call, and `opts.warn` says so.
@@ -6879,8 +6931,9 @@ async function runSdkBuildPhases(spec, opts, owed) {
         }
       }
 
-      // A write the SDK could not confirm leaves the manifest's row under the error's id: kept, so that this run's next persist — and the record, the next
-      // run's — writes it again by id rather than creating the name a second time (persistPageManifest).
+      // A write the SDK could not confirm leaves the manifest's row under the error's id: kept, so that this run's next persist writes it again by that id,
+      // and the record gives the next run the id to write it by where its published copy is not what that run wants (where it is, that run keeps it) —
+      // never a second create of the name (persistPageManifest).
       const persistNow = async () => {
         let pr;
         try { pr = await persistPageManifest(provision, spec, keyToId, sol, appUnique, manifestId, lastManifestContent, solutionMembers, unconfirmedWebResources); } catch (e) {
@@ -7056,6 +7109,16 @@ async function runSdkBuildPhases(spec, opts, owed) {
             griffelWarnings.push(describeGriffelWarning(problems, file, { ...words, standing }));
           }
         }
+      }
+      // The navigation targets this run MAKES (absent: `keyToId` holds no id for them) whose bindings the check before writing did not judge, because the run was told the page is deployed
+      // (bindingCheckScope, `changedOnly.deployedKeys`) — one deleted in Maker since the last apply. The create sends the page's spec entry, bindings and all, so they are judged now, before the
+      // first page is written, by the same verdict and with the same halt as that check (`preflight`: nothing is written yet — such a run writes nothing before its pages phase), and by what the
+      // attempt has already read (bindingReadsOfAttempt): a name that check read is not read again, so a read here can neither add a request for it nor, failing, undo what that read proved. A
+      // refused throttle wait stops the run here, as it does after that check. A run that was told nothing has none: every target was checked before it wrote anything.
+      const madeUnchecked = pagesMadeUnchecked(spec, { changedOnly: bindingCheckScope(phases, opts.changedOnly), made: new Set(implemented.filter((p) => navTargets.has(keyOf(p)) && !keyToId.has(keyOf(p))).map(keyOf)) });
+      if (madeUnchecked.length) {
+        haltOnPageBindingConflicts(await judgePageBindings(provision, madeUnchecked, bindingReadsOfAttempt), opts.warn);
+        runner.stopIfRefused('preflight');
       }
       // After the whole scan, so a build that halts on a later page says only why it halted. Nothing has been written yet, and the pages that are warned about are sent as they are.
       if (typeof opts.warn === 'function') for (const warning of griffelWarnings) opts.warn(warning);

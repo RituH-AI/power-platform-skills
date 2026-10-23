@@ -85,7 +85,13 @@ function buildCustomApiFilter(entities) {
 // mapParameterKind). Because the rows arrive nested under their parent API there is no parent id to
 // group on — unlike the flat cross-API query this replaced.
 function parameterKindsFromRows(rows) {
-  const kinds = {};
+  // A null-prototype map, as a defence (lib/own-keys.js): a lookup of a name the API does not have reads as absent, never as a member of
+  // Object.prototype (`constructor`, `toString`). It changes nothing a listing holds. A parameter's unique name carries no publisher prefix,
+  // and Dataverse requires it to begin with a letter (measured live: HTTP 400 `0x800608ab` for one that does not), so no parameter is called
+  // `__proto__` — the one name a plain object would have left out — while `constructor`, `toString` or `hasOwnProperty` were own entries of a
+  // plain object too. JSON.stringify writes the map as it writes a plain object with the same entries.
+  // See: https://learn.microsoft.com/power-apps/developer/data-platform/custom-api-tables#customapirequestparameter-table-columns
+  const kinds = Object.create(null);
   for (const row of rows || []) {
     const name = row.uniquename;
     const kind = mapParameterKind(row.type);
@@ -100,7 +106,9 @@ function parameterKindsFromRows(rows) {
 // names outside parameterKinds so a required lookup does not disappear when its kind is omitted.
 // See: https://learn.microsoft.com/power-apps/developer/data-platform/reference/entities/customapirequestparameter
 function lookupParametersFromRows(rows) {
-  const lookups = {};
+  // Null-prototype, as parameterKindsFromRows's map is, and as a defence too: no parameter is called `__proto__`, whose object a plain object
+  // would have taken for its prototype.
+  const lookups = Object.create(null);
   for (const row of rows || []) {
     if (Number(row.type) !== 5 || !row.uniquename) continue;
     const lookup = { isOptional: row.isoptional === true };

@@ -16,7 +16,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { pageFileProblems } = require('../../../../plugins/model-apps/scripts/lib/page-file-targets.js');
-const { currentContract, workflowCalls, isAuth, isDiscovery, authGateProblems, discoveryProblems, refusalProblems, resultObject, isGeneration, isUpload } = require('./workflow-evidence.js');
+const { currentContract, workflowCalls, isAuth, isDiscovery, authGateProblems, discoveryProblems, refusalProblems, emptyPageListingProblems, isEmptyPageListing, resultObject, isGeneration, isUpload, isMutation } = require('./workflow-evidence.js');
 const { gradeEvidence, isGuid, fileName, artifactText, commandInfo } = require('./evidence-utils.js');
 const { navigationProblems, navTargets } = require('./navigation-contract.js');
 const { workerProblems } = require('./worker-contract.js');
@@ -24,6 +24,9 @@ const { uploadProblems, uploadPreservationProblems } = require('./upload-contrac
 const { planSection, findMarkdownTable, parseMarkdownRows } = require('./plan-evidence.js');
 const { customApiProblems, customApiGateProblems } = require('./custom-api-contract.js');
 const { packagingProblems, isPackaging } = require('./packaging-contract.js');
+const { preservationProblems } = require('./preservation-contract.js');
+const { columnProblems } = require('./column-contract.js');
+const { escapeRe } = require('./source-evidence.js');
 const evidence = require('./expectation-evidence.js');
 const { blankLiterals } = require('../../../../plugins/model-apps/scripts/lib/source-literals.js');
 const { planTargets } = require('../../../../plugins/model-apps/scripts/genpage-plan-provenance.js');
@@ -68,7 +71,21 @@ function skip(reason) { return { status: 'skip', reason }; }
 // COMMON assertions was never exercised, and the first edit fixture added reported six false
 // failures that say nothing about the page under test.
 function isEditFlowFixture(fixture) {
-  return Boolean(fixture && fixture.genpageEditPlan && !fixture.genpagePlan);
+  return Boolean(fixture && ((fixture.genpageEditPlan && !fixture.genpagePlan) || noPagesRefusal(fixture)));
+}
+
+// An edit run refused at Edit Phase 1b because the chosen app has no generative pages (fixture.json
+// `"expectedOutcome": "refused", "refusal": { "stage": "edit-pages" }`). It ends before a page is chosen, so it
+// writes no plan of either kind, and refusalProblems grades the stop itself.
+function noPagesRefusal(fixture) {
+  return fixture?.manifest?.expectedOutcome === 'refused' && fixture.manifest.refusal?.stage === 'edit-pages';
+}
+
+// The page listing a run refused at Edit Phase 1b stopped at: its first listing that came back empty (the
+// same stop emptyPageListingProblems grades), else its last listing.
+function stopListing(fixture) {
+  const listings = evidence.commandCalls(fixture, evidence.GENPAGE_LIST);
+  return listings.find((entry) => isEmptyPageListing(resultObject(entry.call))) || listings.at(-1);
 }
 
 function beforePlanningRefusal(fixture) {
@@ -764,9 +781,18 @@ PHASE_EXPECTATIONS.set(
   ({ fixture }) => gradeEvidence(workerProblems, fixture)
 );
 
+// A refusal is graded whole: its failed gate, the halt, and nothing provisioned or uploaded. A run that went
+// on is graded only when an auth call timed out on the way — it must then have retried once and been
+// authorized by a later ok:true gate (authGateProblems counts the attempts). A run with no timeout at all
+// has nothing for this expectation to grade.
 PHASE_EXPECTATIONS.set(
   'Phase 2a: Auth timeout retries once then halts before provisioning or upload',
-  ({ fixture }) => checkProblems(refusalProblems(fixture))
+  ({ fixture }) => {
+    if (fixture.manifest?.expectedOutcome === 'refused') return checkProblems(refusalProblems(fixture));
+    const timedOut = workflowCalls(fixture).some((call) => isAuth(call.command) && /^(az|pac)_timeout$/.test(resultObject(call)?.blocker || ''));
+    if (!timedOut) return skip('no auth timeout in this scenario');
+    return checkProblems(authGateProblems(fixture, { required: true }));
+  }
 );
 
 PHASE_EXPECTATIONS.set(
@@ -976,9 +1002,17 @@ PHASE_EXPECTATIONS.set(
   }
 );
 
+// The same check Layer 2 runs on the code (lib/column-contract.js): the column names the pages give their
+// dataApi calls, against the RuntimeTypes.ts the run kept. A trace that kept no RuntimeTypes.ts has no
+// schema to verify them against.
 PHASE_EXPECTATIONS.set(
   'Phase 5b: Generated .tsx uses only column names verified from RuntimeTypes.ts — no guessed names',
-  () => skip('column-name verification needs schema cross-check')
+  ({ fixture }) => {
+    if (!fixture.runtimeTypes) return skip('column-name verification requires RuntimeTypes.ts fixture');
+    const problems = columnProblems(fixture.files || [], fixture.runtimeTypes);
+    if (problems === null) return skip('the pages name no Dataverse column for RuntimeTypes.ts to verify');
+    return resultOf(problems);
+  }
 );
 
 PHASE_EXPECTATIONS.set(
@@ -1111,27 +1145,55 @@ PHASE_EXPECTATIONS.set(
   }
 );
 
+// The blocker is read from check-auth.js's own result — `{ "ok": false, "blocker": "az_not_logged_in",
+// "message": "Azure CLI is installed but not logged in. Run `az login` with the same identity as your active
+// `pac auth` profile." }` — and from a historical log's `Result: ok=false, blocker=az_not_logged_in` line
+// (workflow-evidence.js historicalResult). A current trace must show the message reaching the user verbatim
+// (the event's `userMessage`); a historical one, the `az login` advice in its log. Halting is nothing that
+// writes or generates after the blocker, and the log saying the run stopped.
 PHASE_EXPECTATIONS.set(
   'Phase 2a: If the script returns blocker:\'az_not_logged_in\', orchestrator surfaces the message (\'Run `az login`...\') to the user and halts (entity-builder is NOT invoked)',
   ({ fixture }) => {
     const log = fixture.workflowLog;
     if (!log) return fail('no workflow-log.md');
-    if (!/blocker[:\s]+['"]?az_not_logged_in['"]?/i.test(log)) {
-      return skip('az_not_logged_in blocker not in scenario');
+    const calls = workflowCalls(fixture);
+    const at = calls.findIndex((call) => isAuth(call.command) && resultObject(call)?.blocker === 'az_not_logged_in');
+    if (at === -1) {
+      // A log that names the blocker only in prose, with no result line to read it from.
+      if (!/blocker[:\s]+['"]?az_not_logged_in['"]?/i.test(log)) return skip('az_not_logged_in blocker not in scenario');
+      if (/genpage-entity-builder\s+invoked/i.test(log)) return fail('entity-builder invoked despite az_not_logged_in blocker');
+      if (!/halt|halted|stopped|abort/i.test(log)) return fail('orchestrator did not halt after blocker');
+      return pass();
     }
-    if (/genpage-entity-builder\s+invoked/i.test(log)) {
-      return fail('entity-builder invoked despite az_not_logged_in blocker');
+    const result = resultObject(calls[at]);
+    if (currentContract(fixture)) {
+      if (!/\baz login\b/.test(result.message || '')) return fail('the az_not_logged_in result carries no `az login` advice');
+      if (calls[at].userMessage !== result.message) return fail('the az_not_logged_in message was not surfaced to the user verbatim');
+    } else if (!/\baz login\b/.test(log)) {
+      return fail('the log records no `az login` advice for the az_not_logged_in blocker');
     }
+    if (calls.slice(at + 1).some((call) => isMutation(call) || isGeneration(call.command))) return fail('entity-builder invoked despite az_not_logged_in blocker');
     if (!/halt|halted|stopped|abort/i.test(log)) return fail('orchestrator did not halt after blocker');
     return pass();
   }
 );
 
+// The builder is found among the recorded calls — its dispatch (`Task genpage-entity-builder`) or the
+// provisioning only it runs (BUILDER_CALL) — and the latest check-auth.js result before the first of them must
+// be ok:true. A capture that predates both says "entity-builder invoked" in prose, and is read by position.
 PHASE_EXPECTATIONS.set(
   'Phase 2b: genpage-entity-builder is only invoked AFTER check-auth returns ok:true',
   ({ fixture }) => {
     const log = fixture.workflowLog;
     if (!log) return fail('no workflow-log.md');
+    const calls = workflowCalls(fixture);
+    const builderAt = calls.findIndex((call) => BUILDER_CALL.test(call.command));
+    if (builderAt !== -1) {
+      const gate = calls.slice(0, builderAt).filter((call) => isAuth(call.command)).at(-1);
+      if (!gate) return fail('entity-builder invoked before check-auth.js');
+      if (resultObject(gate)?.ok !== true) return fail('entity-builder invoked although the check-auth.js result before it is not ok:true');
+      return checkProblems(authGateProblems(fixture, { required: true }));
+    }
     const idxCheck = log.search(/check-auth\.js/);
     const idxBuilder = log.search(/genpage-entity-builder\s+invoked|entity-builder\s+invoked/i);
     if (idxBuilder === -1) return skip('entity-builder not invoked');
@@ -1934,6 +1996,84 @@ PHASE_EXPECTATIONS.set(
   ({ fixture }) => checkProblems(authGateProblems(fixture, { required: true }))
 );
 
+// The table is the one the plan creates — `### widget` under the selected publisher's prefix (cnt_widget for
+// a cnt publisher) — or the prompt's own cr_widget, whichever name the planner searched for (suffixOf); the
+// verdict must rest on an exact logical-name match (missingEntityProblems `exact`), so a `cr_widgetpart` row
+// a substring search returns is never read as the table existing.
+PHASE_EXPECTATIONS.set(
+  'Phase 1 (Planner): cr_widget is identified as NOT existing (exact logical-name match, not fuzzy)',
+  ({ fixture }) => {
+    const prefix = planPrefix(fixture.genpagePlan);
+    const names = [...new Set([prefix && `${prefix}_widget`, 'cr_widget'].filter(Boolean))];
+    const verdicts = names.map((name) => missingEntityProblems(fixture, [name], { exact: true }));
+    return resultOf(verdicts.find((problems) => !problems.length) || verdicts[0]);
+  }
+);
+
+// check-auth.js answers a 403 from WhoAmI with the fix when pac is signed in as someone else:
+//   { "ok": false, "blocker": "whoami_403", "pacUser": "maker@contoso.onmicrosoft.com", "identitiesMatch": false,
+//     "message": "WhoAmI returned 403. az is signed in as \"…\" but pac is using \"maker@…\". Run `az login --username maker@…` so both clients use the same identity." }
+// With matching identities there is no such command (the user needs access to the environment instead), so
+// only the verbatim message and the halt are required then. SKILL.md Phase 2a: `ok: false` → show the
+// `message` field verbatim and stop the workflow.
+PHASE_EXPECTATIONS.set(
+  'Phase 2a: If blocker:\'whoami_403\', orchestrator surfaces the message including the specific `az login --username <pacUser>` command and halts',
+  ({ fixture }) => {
+    const log = fixture.workflowLog;
+    if (!log) return fail('no workflow-log.md');
+    const calls = workflowCalls(fixture);
+    const at = calls.findIndex((call) => isAuth(call.command) && resultObject(call)?.blocker === 'whoami_403');
+    if (at === -1) return skip('whoami_403 blocker not in scenario');
+    const result = resultObject(calls[at]);
+    const strict = currentContract(fixture);
+    if (strict && result.identitiesMatch === false) {
+      if (typeof result.pacUser !== 'string' || !result.pacUser) return fail('the whoami_403 result names no pacUser to sign in as');
+      if (!String(result.message || '').includes(`az login --username ${result.pacUser}`)) return fail(`the whoami_403 message does not name \`az login --username ${result.pacUser}\``);
+    }
+    if (strict && calls[at].userMessage !== result.message) return fail('the whoami_403 message was not surfaced to the user verbatim');
+    if (!strict && !/\baz login --username\b/.test(log)) return fail('the log records no `az login --username` advice for the whoami_403 blocker');
+    if (calls.slice(at + 1).some((call) => isMutation(call) || isGeneration(call.command))) return fail('the run provisioned, generated or uploaded after the whoami_403 blocker');
+    if (!/\bhalt(?:ed)?\b|\bstop(?:ped)?\b/i.test(log)) return fail('the workflow did not halt after the whoami_403 blocker');
+    return pass();
+  }
+);
+
+// check-auth.js answers a working sign-in whose az and pac identities differ with ok:true and a warning, not a
+// blocker (scripts/check-auth.js):
+//   { "ok": true, "blocker": null, "identitiesMatch": false, "azUser": "admin@…", "pacUser": "maker@…",
+//     "message": "Ready, but az (\"admin@…\") and pac (\"maker@…\") use different identities. WhoAmI passed so this
+//                 works for now — but if a later step returns 403, run `az login --username maker@…` to align them." }
+// SKILL.md Phase 2a: proceed to 2b, but surface the `message` to the user as an inline warning. The orchestrator's
+// gate is the one graded (a builder's re-probe logs its warning in the transaction log, which authGateProblems
+// checks): its one-line message must reach the user verbatim, carry the `az login --username <pacUser>` fix, and
+// the run must go on to the entity-builder rather than stop.
+PHASE_EXPECTATIONS.set(
+  'Phase 2a: If ok:true but identitiesMatch:false, orchestrator proceeds but surfaces a one-line warning',
+  ({ fixture }) => {
+    const log = fixture.workflowLog;
+    if (!log) return fail('no workflow-log.md');
+    const calls = workflowCalls(fixture);
+    const at = calls.findIndex((call) => isAuth(call.command) && call.by !== 'genpage-entity-builder'
+      && resultObject(call)?.ok === true && resultObject(call).identitiesMatch === false);
+    if (at === -1) return skip('no ok:true, identitiesMatch:false auth result in this scenario');
+    const result = resultObject(calls[at]);
+    if (currentContract(fixture)) {
+      const warning = typeof result.message === 'string' ? result.message.trim() : '';
+      if (!warning) return fail('the identity-mismatch result carries no warning message');
+      if (calls[at].userMessage !== result.message) return fail('the identity-mismatch warning was not surfaced to the user verbatim');
+      if (/[\r\n]/.test(warning)) return fail('the identity-mismatch warning is not one line');
+      if (typeof result.pacUser === 'string' && result.pacUser && !warning.includes(`az login --username ${result.pacUser}`)) {
+        return fail(`the identity-mismatch warning does not name \`az login --username ${result.pacUser}\``);
+      }
+    } else if (!/\baz login --username\b/.test(log)) {
+      return fail('the log records no identity-mismatch warning naming `az login --username`');
+    }
+    if (fixture.manifest?.expectedOutcome === 'refused') return fail('the run stopped although its only auth finding was a warning-only identity mismatch');
+    if (!calls.slice(at + 1).some((call) => isMutation(call) || isGeneration(call.command))) return fail('the run did not go on past the ok:true, identitiesMatch:false gate');
+    return checkProblems(authGateProblems(fixture, { required: true }));
+  }
+);
+
 // --- Eval 11 -----------------------------------------------------------------------------------
 
 PHASE_EXPECTATIONS.set(
@@ -2409,8 +2549,21 @@ PHASE_EXPECTATIONS.set(
     if (!fixture.workflowLog) return fail('no workflow-log.md');
     const calls = workflowCalls(fixture);
     const at = (pattern) => calls.findIndex((c) => pattern.test(c.command));
+    // commandCalls re-reads the log, so locate its calls in `calls` by their recorded command text.
+    const positionOf = (entry) => calls.findIndex((c) => c.command === entry.call.command);
     const download = commandCalls(fixture, evidence.GENPAGE_DOWNLOAD)[0];
-    if (!download) return fail('genpage.js download was not run, so no page was selected');
+    if (!download) {
+      if (!noPagesRefusal(fixture)) return fail('genpage.js download was not run, so no page was selected');
+      // The run stopped at an empty listing (the app has no pages), so that listing is what is graded: it must
+      // be of an app the apps.js list output returned, run after that discovery.
+      const list = stopListing(fixture);
+      if (!list) return fail('genpage.js list --app-id <selected> was not run');
+      const listedApp = String(list.flags['app-id'] || '').toLowerCase();
+      const apps = commandCalls(fixture, LIST_APPS).at(-1);
+      if (!apps || positionOf(apps) > positionOf(list)) return fail('pages were listed before the app was discovered with apps.js list');
+      if (!listedApp || !listingRows(apps.call).some((r) => r.id === listedApp)) return fail(`genpage.js list ran for app ${listedApp || '(none)'}, which apps.js list did not return`);
+      return pass();
+    }
     const app = String(download.flags['app-id'] || '').toLowerCase();
     const page = String(download.flags['page-id'] || '').toLowerCase();
     const lists = commandCalls(fixture, GENPAGE_LIST).filter((c) => String(c.flags['app-id'] || '').toLowerCase() === app);
@@ -2423,8 +2576,6 @@ PHASE_EXPECTATIONS.set(
     const listed = (c) => c.text.split(/\r?\n/).some((line) => !/\bselect/i.test(line) && line.toLowerCase().includes(page));
     if (!page || !lists.some(listed)) return fail(`page ${page || '(none)'} does not appear in the recorded genpage list output`);
     const appsAt = at(LIST_APPS);
-    // commandCalls re-reads the log, so locate its calls in `calls` by their recorded command text.
-    const positionOf = (entry) => calls.findIndex((c) => c.command === entry.call.command);
     const listAt = positionOf(lists[0]);
     if (appsAt === -1 || appsAt > listAt) return fail('pages were listed before the app was discovered with apps.js list');
     if (listAt > positionOf(download)) return fail('the page was downloaded before pages were listed');
@@ -2578,7 +2729,10 @@ const pageFilesOf = (plan) => pageRowsOf(plan).map((r) => r.file);
 
 PHASE_EXPECTATIONS.set(
   'Edit Phase 1a: Apps are presented to the user via AskUserQuestion using the actual app name and app-id GUID from the apps.js list output',
-  ({ fixture }) => resultOf(presentedFromListingProblems(fixture, { listing: LIST_APPS, noun: 'app', selected: downloadTarget(fixture)?.app }))
+  // The app the run went on with: the one it downloaded from, or — for a run that stopped because that app
+  // listed no pages — the one whose empty listing it stopped at.
+  ({ fixture }) => resultOf(presentedFromListingProblems(fixture, { listing: LIST_APPS, noun: 'app',
+    selected: downloadTarget(fixture)?.app ?? (String(stopListing(fixture)?.flags['app-id'] || '').toLowerCase() || undefined) }))
 );
 
 PHASE_EXPECTATIONS.set(
@@ -2704,6 +2858,17 @@ PHASE_EXPECTATIONS.set(
     const grid = openingTags(code, 'DataGrid').some((attrs) => /\bsortable\b/.test(attrs) && /\bonSortChange\b/.test(attrs)) && /\bcompare\s*:/.test(code);
     const headers = ['DataGridHeaderCell', 'TableHeaderCell'].some((tag) => openingTags(code, tag).some((attrs) => /\b(?:onClick|sortDirection)\b/.test(attrs)));
     return grid || headers ? pass() : fail(`${page.name}: columns are not sorted through column header handlers`);
+  }
+);
+
+// What the approved edit plan promised to keep, checked against the page the run downloaded and the
+// page it uploaded (lib/preservation-contract.js): every identifier a Preservation Constraint quotes
+// in a code span and the downloaded page uses must still be used after the edit.
+PHASE_EXPECTATIONS.set(
+  'Edit Phase 5: Existing functionality is preserved per the edit plan\'s Preservation Constraints',
+  ({ fixture }) => {
+    const problems = preservationProblems(fixture);
+    return Array.isArray(problems) ? resultOf(problems) : skip(problems.skip);
   }
 );
 
@@ -2912,6 +3077,49 @@ PHASE_EXPECTATIONS.set(
     if (seeded.some((c) => !c.call.historical && resultObject(c.call)?.ok !== true)) return fail('the --sample-data run did not return ok:true');
     const input = provisionInput(fixture);
     if (input && !Object.values(input.sampleData || {}).some((rows) => Array.isArray(rows) && rows.length)) return fail('provision-input.json carries no sampleData rows');
+    return pass();
+  }
+);
+
+// "Realistic values (not lorem ipsum)", decided from the rows provision-entities.js was handed: the
+// `sampleData` of the captured input JSON, e.g.
+//   "sampleData": { "cr_Project": [ { "cr_name": "Contoso Website Redesign", "cr_manager": "Avery Chen", … } ] }
+// A text value is filler when it is lorem-ipsum Latin, a placeholder word on its own ("test", "sample",
+// "foo", "TBD", "N/A", "xxx", optionally numbered) or the table's own name numbered ("Project 1",
+// "Milestone #3"); and a table whose rows repeat one primary name holds copies, not records. Keys that
+// start with `$` (the `$parent` reference) are not values. That is the line the expectation draws; whether a
+// value is plausible for its column beyond it is left to a person (Layer 3).
+const LOREM_IPSUM = /\b(?:lorem|ipsum|dolor\s+sit|consectetur|adipiscing|eiusmod|incididunt)\b/i;
+const PLACEHOLDER_VALUE = /^\s*(?:test(?:ing)?|sample|dummy|placeholder|example|foo|bar|baz|qux|asdf|qwerty|x{2,}|abc|string|text|value|tbd|todo|n\/a|none|null|undefined)(?:[\s_#-]*\d+)?\s*$/i;
+
+PHASE_EXPECTATIONS.set(
+  'Phase 2b (Entity Builder): Sample data is provisioned via provision-entities.js; realistic values (not lorem ipsum)',
+  ({ fixture }) => {
+    const seeded = provisionCalls(fixture).filter((c) => c.flags['sample-data'] === true);
+    if (!seeded.length) return fail('no provision-entities.js --sample-data run');
+    if (!seeded.some((c) => typeof c.flags.input === 'string')) return fail('sample data was not passed through an --input <json>');
+    if (seeded.some((c) => !c.call.historical && resultObject(c.call)?.ok !== true)) return fail('the --sample-data run did not return ok:true');
+    const input = provisionInput(fixture);
+    if (input === null) return currentContract(fixture) ? fail('provision-input.json was not captured') : skip('provision-input.json was not captured');
+    if (input === undefined) return fail('provision-input.json is not JSON');
+    const tables = Object.entries(input.sampleData || {}).filter(([, rows]) => Array.isArray(rows) && rows.length);
+    if (!tables.length) return fail('provision-input.json carries no sampleData rows');
+    for (const [table, rows] of tables) {
+      const entity = (input.entities || []).find((e) => String(e.schemaName || '').toLowerCase() === table.toLowerCase());
+      const ownNames = [entity?.displayName, schemaSuffix(table)].filter((name) => typeof name === 'string' && name);
+      const numberedName = new RegExp(`^\\s*(?:${ownNames.map(escapeRe).join('|')})\\s*#?\\s*\\d+\\s*$`, 'i');
+      for (const [i, row] of rows.entries()) {
+        for (const [column, value] of Object.entries(row || {})) {
+          if (column.startsWith('$') || typeof value !== 'string') continue;
+          if (LOREM_IPSUM.test(value)) return fail(`${table} row ${i + 1} ${column} is lorem ipsum: "${value}"`);
+          if (PLACEHOLDER_VALUE.test(value) || numberedName.test(value)) return fail(`${table} row ${i + 1} ${column} is a placeholder, not a realistic value: "${value}"`);
+        }
+      }
+      const primary = String(entity?.primaryAttribute?.schemaName || '').toLowerCase();
+      const names = primary ? rows.map((row) => Object.entries(row || {}).find(([key]) => key.toLowerCase() === primary)?.[1]).filter((v) => typeof v === 'string') : [];
+      const repeated = names.find((name, i) => names.indexOf(name) !== i);
+      if (repeated !== undefined) return fail(`${table} rows repeat the name "${repeated}"`);
+    }
     return pass();
   }
 );
@@ -3275,6 +3483,30 @@ PHASE_EXPECTATIONS.set(
     return calls.some((c) => c.sources.includes('account')) ? pass() : fail('genpage.js types was not run for account');
   }
 );
+
+// --- Eval 3: an app with no pages ---------------------------------------------------------------------
+
+PHASE_EXPECTATIONS.set(
+  'Edit Phase 1b: If the app has zero genpages, the user is told there are no pages to edit and the flow stops',
+  ({ fixture }) => {
+    // Any listing that came back empty puts the run on this branch, wherever it is in the run.
+    const empty = commandCalls(fixture, GENPAGE_LIST).some((listing) => isEmptyPageListing(resultObject(listing.call)));
+    if (!empty && !noPagesRefusal(fixture)) return skip('no page listing came back empty in this scenario');
+    return resultOf(emptyPageListingProblems(fixture));
+  }
+);
+
+// A run that stopped at Edit Phase 1b because the app has no pages never reaches a page choice, a download,
+// an edit plan, an edit or an upload, so the expectations of those phases do not apply to it: they skip with
+// that reason instead of failing. The stop itself is graded by the zero-pages expectation above and by
+// refusalProblems (the common upload assertion and Layer 2's refusal gate).
+const AFTER_PAGE_LISTING = /^Edit Phase (?:1b: Pages are presented\b|1c\b|[2-9])/;
+for (const [text, check] of PHASE_EXPECTATIONS) {
+  if (!AFTER_PAGE_LISTING.test(text)) continue;
+  PHASE_EXPECTATIONS.set(text, (context) => (noPagesRefusal(context.fixture)
+    ? skip('the run stopped at Edit Phase 1b: the app has no pages to edit')
+    : check(context)));
+}
 
 module.exports = {
   WORKFLOW_ASSERTIONS,
