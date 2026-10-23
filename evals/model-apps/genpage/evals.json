@@ -412,7 +412,7 @@
         "Phase 1 (Planner): Plan includes a datetime column for due date",
         "Phase 1 (Planner): Solution selection question is asked (because new entity will be created) and recorded in ## Environment",
         "Phase 2a: scripts/check-auth.js returns ok:true before entity-builder is invoked",
-        "Phase 2b (Entity Builder): cr_ticket is provisioned with choice columns via provision-entities.js input JSON; picklist options include {value,label} pairs",
+        "Phase 2b (Entity Builder): cr_ticket is provisioned with choice columns via provision-entities.js input JSON; each picklist option is written as its label, in the plan's order (numbered 100000000 + index)",
         "Phase 2b (Entity Builder): Priority picklist has 4 options starting at 100000000 (Low=100000000, Medium=100000001, High=100000002, Critical=100000003)",
         "Phase 2b (Entity Builder): Status picklist has 4 options starting at 100000000",
         "Phase 2b (Entity Builder): Solution is specified via provision-entities.js input JSON; verified through ## Environment → Solution: declaration",

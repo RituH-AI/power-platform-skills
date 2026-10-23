@@ -31,6 +31,8 @@ const { escapeRe } = require('./source-evidence.js');
 const evidence = require('./expectation-evidence.js');
 const { blankLiterals } = require('../../../../plugins/model-apps/scripts/lib/source-literals.js');
 const { planTargets } = require('../../../../plugins/model-apps/scripts/genpage-plan-provenance.js');
+// The gate provision-entities.js puts its input through, so an input the plugin would refuse is never graded as written right.
+const { validateProvisionInput } = require('../../../../plugins/model-apps/scripts/lib/provision-input.js');
 
 function fail(reason) { return { status: 'fail', reason }; }
 function pass() { return { status: 'pass', reason: '' }; }
@@ -2501,6 +2503,43 @@ PHASE_EXPECTATIONS.set(
 PHASE_EXPECTATIONS.set(
   'Phase 2b (Entity Builder): Status picklist has 4 options starting at 100000000',
   ({ fixture }) => picklistResult(fixture, 'ticket', 'status', { count: 4 })
+);
+
+// What the entity-builder handed provision-entities.js for the two choice columns (agents/genpage-entity-builder.md Step 4): each option
+// is its label — a string, or a map of LCID to label — in the plan's order, and that order is what numbers it 100000000 + index. An option
+// written as a {"label", "value"} object is refused by the plugin's own gate ("'label' is not an LCID"), so the gate is asked rather than
+// its rule repeated here. Only the captured input JSON shows how the options were written: a capture made without it is skipped, a
+// current fixture without it fails.
+PHASE_EXPECTATIONS.set(
+  "Phase 2b (Entity Builder): cr_ticket is provisioned with choice columns via provision-entities.js input JSON; each picklist option is written as its label, in the plan's order (numbered 100000000 + index)",
+  ({ fixture }) => {
+    const calls = provisionCalls(fixture).filter((c) => typeof c.flags.input === 'string');
+    if (!calls.length) return fail('provision-entities.js was not run with --input <json>');
+    if (calls.some((c) => !c.call.historical && resultObject(c.call)?.ok !== true)) return fail('a provision-entities.js run did not return ok:true');
+    const input = provisionInput(fixture);
+    if (input === null) return currentContract(fixture) ? fail('provision-input.json was not captured') : skip('provision-input.json was not captured');
+    if (input === undefined) return fail('provision-input.json is not JSON');
+    const gate = validateProvisionInput(input);
+    if (!gate.ok) return fail(`provision-entities.js refuses the captured input: ${gate.errors[0]}`);
+    const ticket = (input.entities || []).find((e) => schemaSuffix(e.schemaName) === 'ticket');
+    if (!ticket) return fail('provision-input.json does not declare ticket');
+    const block = planEntityBlocks(fixture.genpagePlan).find((b) => b.suffix === 'ticket');
+    // A string option is its label; a language map holds it under one of its languages.
+    const isLabel = (option, label) => (typeof option === 'string' ? option.trim() === label : Object.values(option || {}).some((text) => String(text).trim() === label));
+    for (const name of ['priority', 'status']) {
+      const column = (ticket.columns || []).find((c) => schemaSuffix(c.schemaName) === name);
+      if (!column) return fail(`provision-input.json declares no ticket ${name} column`);
+      if (column.type !== 'Choice') return fail(`ticket ${name} is ${column.type === undefined ? 'untyped' : column.type}, not a Choice column`);
+      const planned = block && block.choices.find((c) => c.suffix === name);
+      if (!planned || !planned.options.length) return fail(`the plan lists no ${name} options to number the input's by`);
+      const labels = [...planned.options].sort((a, b) => a.value - b.value).map((o) => o.label);
+      const options = Array.isArray(column.options) ? column.options : [];
+      if (options.length !== labels.length || options.some((option, i) => !isLabel(option, labels[i]))) {
+        return fail(`ticket ${name} options are ${options.map((o) => JSON.stringify(o)).join(', ')}, but the plan numbers ${labels.join(', ')} from 100000000 in that order`);
+      }
+    }
+    return pass();
+  }
 );
 
 PHASE_EXPECTATIONS.set(
