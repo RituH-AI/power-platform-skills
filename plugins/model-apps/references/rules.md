@@ -676,7 +676,7 @@ return (
 9. **Check TableRegistrations** - Only use tables defined in TableRegistrations interface
 10. **Follow dataApi_definition** - Use the DataAPI interfaces defined below
 11. **queryTable returns `{ rows: T[] }`, NOT a raw array** — `dataApi.queryTable()` returns a `DataTable<T>` object with `.rows`, `.hasMoreRows`, and `.loadMoreRows()`. Always access the records via `result.rows`. `retrieveRow()` returns the row object directly (no wrapper).
-12. **Lookup display-name fields cannot be in $select** - Any field ending in `name` or `yominame` that corresponds to a Foreign Key column (e.g., `primarycontactidname`, `parentaccountidname`, `regardingobjectidname`, `owneridname`, `createdbyname`) is an OData annotation, not a selectable column. This applies to **every** such field in the schema, not just the example. Select the FK column (e.g., `_primarycontactid_value`) and read the display name from its `@OData.Community.Display.V1.FormattedValue` annotation instead:
+12. **Lookup display-name fields cannot be in $select** - Any field ending in `name` or `yominame` that corresponds to a Foreign Key column (e.g., `primarycontactidname`, `parentaccountidname`, `regardingobjectidname`, `owneridname`, `createdbyname`) is an OData annotation, not a selectable column. This applies to **every** such field in the schema, not just the example. Select the FK column (e.g., `_primarycontactid_value`) and read the display name from its `@OData.Community.Display.V1.FormattedValue` annotation instead (the label is display text only — to filter, retrieve or open the referenced record, see **Lookup references** below):
 
 
 ```typescript
@@ -688,7 +688,7 @@ select: ["subject", "_regardingobjectid_value"]
 const name = row["_regardingobjectid_value@OData.Community.Display.V1.FormattedValue"];
 ```
 
-13. **Setting a lookup on create/update — use `_<field>_value`, never `@odata.bind`** - To *write* a lookup via `createRow`/`updateRow`, set the FK key `_<field>_value` to a string of the form `/<entityLogicalNameSingular>(<guid>)` — singular logical name (e.g. `/account(<id>)`, `/systemuser(<id>)`). Clear it with `_<field>_value: null`. The writable row type in RuntimeTypes proves the shape — the FK column is typed as a template literal, e.g. `` _primarycontactid_value: `/contact(${string})` ``. **The trap:** the raw Dataverse Web API binds lookups with `"<PascalCaseNavProp>@odata.bind": "/<entitySetPlural>(<id>)"`. The DataAPI **silently ignores** any `@odata.bind` key (unknown property → dropped, no error) and creates the row **orphaned**, with the lookup null. Symptom: `createRow` resolves with no error, but the row isn't linked, so a child list filtered by that parent stays empty — looks like "the write didn't save." Don't mix the conventions: **DataAPI → `_field_value: "/logicalSingular(id)"`**; `@odata.bind` + `/setPlural(id)` is for raw Web API only.
+13. **Setting a lookup on create/update — use `_<field>_value`, never `@odata.bind`** - To *write* a lookup via `createRow`/`updateRow`, set the FK key `_<field>_value` to a string of the form `/<entityLogicalNameSingular>(<guid>)` — singular logical name (e.g. `/account(<id>)`, `/systemuser(<id>)`). Clear it with `_<field>_value: null`. The writable row type in RuntimeTypes proves the shape — the FK column is typed as a template literal, e.g. `` _primarycontactid_value: `/contact(${string})` ``. **The trap:** the raw Dataverse Web API binds lookups with `"<PascalCaseNavProp>@odata.bind": "/<entitySetPlural>(<id>)"`. The DataAPI **silently ignores** any `@odata.bind` key (unknown property → dropped, no error) and creates the row **orphaned**, with the lookup null. Symptom: `createRow` resolves with no error, but the row isn't linked, so a child list filtered by that parent stays empty — looks like "the write didn't save." Don't mix the conventions: **DataAPI → `_field_value: "/logicalSingular(id)"`**; `@odata.bind` + `/setPlural(id)` is for raw Web API only. On a lookup with more than one target (Customer, Owner, Regarding) the table you write is the one the user selected, kept with its id — see **Lookup references**, pitfall E.
 
 ```typescript
 // WRONG — DataAPI silently drops @odata.bind → row created with null lookup (orphaned)
@@ -698,6 +698,153 @@ await dataApi.createRow("task", { subject: "Call", "Regarding@odata.bind": "/acc
 await dataApi.createRow("task", { subject: "Call", _regardingobjectid_value: `/account(${accountId})` });
 await dataApi.updateRow("task", id, { _regardingobjectid_value: null }); // clear it
 ```
+
+### Lookup references (Customer, Owner, Regarding and every other lookup)
+
+A lookup's `_<field>_value` is a **reference** — a table and a bare id — not its label and not the first table its column can point to. Rules 12 and 13 cover the label and the write format; this section covers reading, filtering, retrieving, navigating and choosing the table to write.
+
+**What a read returns.** On a row returned by `queryTable` or `retrieveRow`, a lookup value may be a **bare GUID** or a **qualified value `/<table>(<guid>)`**. The current player has been live-verified to return the qualified form — beside a `<property>@Microsoft.Dynamics.CRM.lookuplogicalname` annotation naming the same table — for Customer lookups (both account- and contact-valued rows) and for user-owned Owner lookups. The service itself sends a bare GUID, and another player or version may pass it through, so handle both shapes everywhere. Single-target lookups, team-owned rows, Regarding and `loadMoreRows` pages were not part of that verification. A filter compares the **bare** id — `_parentcustomerid_value eq <guid>` selects the row, and the qualified value is refused with HTTP 400 — and `retrieveRow({ id })` takes the bare id (the player refuses a qualified one before sending it). Background: [lookup property data](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/query/select-columns#lookup-property-data), [multi-table lookups](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/web-api-navigation-properties#multi-table-lookups), [filtering on lookup values](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/query/filter-rows#filter-using-lookup-column-property-values).
+
+**Normalize before you consume.** Copy this helper **unchanged** into the page, at the top level beside the other helpers, and pass every lookup value through it before you filter, retrieve, compare or navigate. Take `property` and `allowedTargets` from the plan's `#### Lookup metadata` record for that column — `allowedTargets` is its **complete** target set, never a subset you chose — never from user input.
+
+```typescript
+type LookupReference = { table: string; id: string };
+type LookupNormalization =
+  | { state: 'unset' }
+  | { state: 'resolved'; reference: LookupReference }
+  | { state: 'needs-target'; id: string }
+  | { state: 'invalid' };
+
+const LOOKUP_GUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const LOOKUP_QUALIFIED = /^\/([a-z_][a-z0-9_]*)\(([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\)$/;
+
+function normalizeLookupReference(
+  row: unknown,
+  property: string,
+  allowedTargets: readonly string[],
+): LookupNormalization {
+  if (typeof row !== 'object' || row === null || Array.isArray(row) || allowedTargets.length === 0) return { state: 'invalid' };
+  const record = row as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(record, property)) return { state: 'invalid' };
+  const raw = record[property];
+  if (raw === null) return { state: 'unset' };
+  if (typeof raw !== 'string') return { state: 'invalid' };
+  const value = raw.trim();
+  const qualified = LOOKUP_QUALIFIED.exec(value);
+  if (!qualified && !LOOKUP_GUID.test(value)) return { state: 'invalid' };
+  const prefix = qualified ? qualified[1] : undefined;
+  const id = (qualified ? qualified[2] : value).toLowerCase();
+  if (prefix !== undefined && !allowedTargets.includes(prefix)) return { state: 'invalid' };
+  const annotationKey = `${property}@Microsoft.Dynamics.CRM.lookuplogicalname`;
+  let annotation: string | undefined;
+  if (Object.prototype.hasOwnProperty.call(record, annotationKey)) {
+    const named = record[annotationKey];
+    if (typeof named !== 'string' || !allowedTargets.includes(named)) return { state: 'invalid' };
+    annotation = named;
+  }
+  if (annotation !== undefined && prefix !== undefined && annotation !== prefix) return { state: 'invalid' };
+  const table = annotation ?? prefix ?? (allowedTargets.length === 1 ? allowedTargets[0] : undefined);
+  return table === undefined ? { state: 'needs-target', id } : { state: 'resolved', reference: { table, id } };
+}
+```
+
+What each state means for the page:
+
+- **`resolved`** — a validated pair. Use `reference.id` for filters, `retrieveRow({ id })`, comparisons and `entityId`, and `reference.table` for the target. Only a write rebuilds `/<table>(<id>)` (pair E).
+- **`unset`** — an explicit `null`: the row has no link. A normal empty state, not an error.
+- **`needs-target`** — a valid bare id with no table evidence on a lookup that has more than one target. Show the label with target-dependent actions disabled; a separate, user-started "Resolve reference" may run the bounded resolution read described below.
+- **`invalid`** — a missing or malformed value, or contradictory evidence (a prefix or annotation outside the targets, or the two disagreeing). Show the label with target-dependent actions disabled. Never resolve it by any fallback.
+
+The helper never infers a table from the FormattedValue, from a GUID being unique, from the order of the targets, or from the `@Microsoft.Dynamics.CRM.associatednavigationproperty` annotation (Owner's is the shared `ownerid`; never split a navigation name on `_` to find a table). It holds no hook, state, I/O, logging or retry. Do not log during render.
+
+#### Five pitfalls, WRONG and CORRECT
+
+The examples use a Customer lookup (`opportunity.customerid` → account, contact). Use the names your schema and the plan's lookup record verify, adapted to the column's actual target set.
+
+**A. Read and consume a normalized identity.**
+
+```typescript
+// WRONG: today's qualified read value is neither a filter operand nor a retrieveRow id.
+const customerId = row['_customerid_value'];
+const filter = `_customerid_value eq ${customerId}`;
+await dataApi.retrieveRow('account', { id: customerId });
+
+// CORRECT: normalize before consuming; this branch requires a resolved pair.
+const normalized = normalizeLookupReference(row, '_customerid_value', ['account', 'contact']);
+if (normalized.state !== 'resolved') return;
+const reference = normalized.reference;
+// reference.id is bare; reference.table is metadata-validated, not assumed account.
+```
+
+Retrieve only a target table registered in this page's verified schema, using its actual table and `reference.id`. Display the FormattedValue, never the raw or normalized id. An account-specific predicate must still constrain the target as in B and C: extracting the bare id alone is not a target scope.
+
+**B. Select the relationship and roll-up meaning before generating a filter.**
+
+```typescript
+// WRONG: silently deciding what "opportunities for this account" means.
+filter: `_parentaccountid_value eq ${accountId}`
+
+// CORRECT only after the plan's assumption chose direct Customer-to-account and metadata verified the path.
+filter: `customerid_account/accountid eq ${reference.id}`
+```
+
+The CORRECT branch also requires `reference.table === 'account'`. If the maker chose `parentaccountid`, use it instead. Rolling up rows whose customer is one of the account's contacts is a separate recorded decision that needs the contact-to-account relationship — never an `or` across both columns. A GUID operand is validated, bare and unquoted.
+
+**C. Non-id filters and name searches do not implicitly select a target.**
+
+```typescript
+// WRONG for an account-only view: includes contact customers too.
+filter: '_customerid_value ne null'
+
+// CORRECT for that approved view, with the metadata-supplied concrete path.
+filter: 'customerid_account/accountid ne null'
+
+// CORRECT account-only name search: the target's name column is verified separately.
+const escaped = searchText.replace(/'/g, "''");
+const filter = `customerid_account/accountid ne null and contains(customerid_account/name,'${escaped}')`;
+```
+
+Matching the formatted label alone is also WRONG as an account discriminator. Never filter on annotation keys or on invented lookup-name columns. For a view that explicitly covers every target, `_customerid_value ne null` is correct. A label search across all targets is allowed only when it is described as a search of the loaded rows, not of all matches or totals. If the service refuses a typed path, stop the operation and report a read failure — never post-filter the first page and present it as complete.
+
+**D. Navigate to the resolved target with the bare id.**
+
+```typescript
+// WRONG: a Customer row may refer to a contact, and its raw value may be qualified.
+await Xrm.Navigation.navigateTo({ pageType: 'entityrecord', entityName: 'account', entityId: row['_customerid_value'] });
+
+// CORRECT after the resolved-state guard:
+await Xrm.Navigation.navigateTo({ pageType: 'entityrecord', entityName: reference.table, entityId: reference.id });
+```
+
+An unset, invalid or needs-target reference cannot call navigation. Catch a rejected `navigateTo` and call `reportPageError(PAGE_NAME, 'openCustomerRecord', undefined, error, 'read')`. Never build a raw URL or infer the target from a label or from the metadata order.
+
+**E. Write the selected target; rebuild the qualified form only at the write boundary.**
+
+```typescript
+// WRONG: the contact selected by the maker becomes an account link.
+await dataApi.updateRow('opportunity', opportunityId, { _customerid_value: `/account(${selected.id})` });
+
+// CORRECT after validating selected.table and its bare id against the picker target union:
+const link: `/account(${string})` | `/contact(${string})` = selected.table === 'account'
+  ? `/account(${selected.id})`
+  : `/contact(${selected.id})`;
+await dataApi.updateRow('opportunity', opportunityId, { _customerid_value: link });
+```
+
+The two-way formatter is legal only after every selection outside account and contact has been rejected. Keep the table in the picker's state, even for equal labels or for one GUID in two tables. Clear the link with `_customerid_value: null` — never an empty string, a plural entity set or `@odata.bind`. Honor read-only fields; no automatic Owner reassignment is introduced. The source row's `opportunityId` is a validated bare id too. A failed write calls `reportPageError(PAGE_NAME, 'changeCustomer', undefined, error, 'write')` with **no retry argument**: never retry an unknown outcome automatically. Custom API lookup inputs keep their own `{ entityName, id }` contract.
+
+#### When a bare id has no table evidence
+
+Today's qualified values normally resolve with no extra read even when the annotation is absent. The following applies **only** to `needs-target` — never to `invalid` evidence:
+
+1. Prefer a target already proven by the exact typed source-relationship query that returned this same source row and value.
+2. For Owner, use the verified `_owninguser_value` / `_owningteam_value` only when both were loaded, exactly one is non-null, and its **normalized** bare id equals the owner value's id (normalize each with its own target set — a raw string comparison is wrong when one is qualified). Missing or malformed values, both or neither non-null, or a mismatch stay unresolved. Never build an owner navigation path.
+3. Otherwise, for an explicitly opened row and a bounded approved target subset, query the **source table** restricted by its primary key and a concrete target navigation predicate, with `pageSize: 1` — for a Customer account test, `opportunityid eq <source id> and customerid_account/accountid eq <bare lookup id>`; the contact test uses the verified contact path. Only one successful exact match proves the target.
+4. Never retrieve account, then contact, by the same GUID and keep the first that succeeds. Zero or several matches, or unavailable discriminators, mean unresolved. A refused query is an error — report it with `reportPageError(…, 'read')` — never zero matches, a cached unknown, a weakened predicate or a raw `fetch`.
+
+Use the page's existing in-flight de-duplication and cache rules for these reads. Cache a successful resolution by source table, source row id, lookup column and value snapshot — not by the lookup GUID alone — and invalidate it on a lookup write or a refresh. A missing-evidence unknown may be remembered for that snapshot; a thrown read is never cached as unknown, no match, rows or success. Ignore a stale or unmounted result. Regarding follows the same algorithm: never fan out across its targets on mount.
+
+**Failures.** A requested resolution, read or navigation that fails is reported as `'read'`; a failed lookup write as `'write'` with no retry. Pass the thrown error or a fixed diagnostic `Error` — never a row, a reference pair or a returned success payload. The four states above are classifications, not error kinds.
 
 ### DataGrid Requirements
 - Import `createTableColumn` from Fluent UI V9
@@ -841,8 +988,11 @@ const contactName = row["_primarycontactid_value@OData.Community.Display.V1.Form
 const choices = await dataApi.getChoices("table1-status");
 ```
 
-For lookups: `_<field>_value` is the GUID — never display it. Always read the
-paired `..._value@OData.Community.Display.V1.FormattedValue` for the label.
+For lookups: a `_<field>_value` read value may be a bare GUID or `/<table>(<guid>)` — the current player has
+been verified to return the qualified form for Customer and user-owned Owner lookups. Never display it: read the
+paired `..._value@OData.Community.Display.V1.FormattedValue` for the label. Before filtering, retrieving or
+navigating, normalize it with `normalizeLookupReference`, which validates the annotation and the prefix against
+the column's metadata targets and returns the table and the bare id (see "Lookup references" under DataAPI Rules).
 
 ---
 
