@@ -35,6 +35,13 @@ digits are parsed as the eval id; the slug is purely cosmetic.
 - A current synthetic `fixture.json` declares contract version 2, provenance,
   source skill/reference sections, ordered `tool-results.json` and artifact paths.
   Nested snapshots are evidence, not additional generated pages.
+- A scenario that grades a newly authored plan names its evidence under
+  `fixture.json` `semantics` (each also listed in `artifacts`): `approvedPlan` (the
+  approved preview the run saved), and for eval 26 `lookupMetadata` (the saved
+  `get-lookup-metadata.js` answer), `interactions` (the ordered `needs_input`,
+  answer and approval of its semantic question) and `lookupRows` (synthetic lookup
+  values with the state the published normalizer gives each). Its expectations fail
+  — they do not skip — when a declared key or its file is missing.
 
 ## How to capture a real fixture from /genpage
 
@@ -90,7 +97,7 @@ Two rules for evidence files:
 
 ## Current state
 
-This directory has **34 fixtures, 38 top-level TSX files and 26 represented
+This directory has **35 fixtures, 39 top-level TSX files and 27 represented
 prompt IDs**. All are green under both runners. Directories listed in
 `contracts.json` are historical contract-1 evidence; every other directory is a
 current contract-2 synthetic. Registered prompts with no fixture:
@@ -133,6 +140,7 @@ of step with the fixtures.
 | `16-account-list/` | 16 | Current synthetic | green | Minimal single list page over an existing table; code-only, no solution question or auth gate |
 | `1-account-cards-verified-columns/` | 1 | Current synthetic | green | Account card gallery over an existing table; keeps the RuntimeTypes.ts it was written against, so every column its dataApi call names is checked against the schema |
 | `7-job-candidates-verified-columns/` | 7 | Current synthetic | green | Two new related tables (cr_jobrequisition, cr_candidate with a lookup and a status choice), auth gate, dependency-ordered provisioning, `$parent`/match sample data; keeps the RuntimeTypes.ts it generated, so the page's columns are checked against the schema |
+| `26-customer-lookup/` | 26 | Current synthetic | green | Lookup identities: an opportunity's Customer (account or contact) normalized to its own table before it is opened, filtered by or written; the account-scope question asked with no default and its answer recorded as a user-confirmed assumption before approval; the lookup records built from the saved `get-lookup-metadata.js` read, typed in RuntimeTypes.ts and gated with `--require-observed-lookups`; synthetic customer values in `lookup-rows.json` |
 | `27-page-error-helper/` | 27 | Current synthetic | green | The page error contract: a cached list read, an awaited record read and a Custom API Action report every failure through the canonical reporter into rendered error bars, inside the boundary; a newly authored plan with its assumptions, verified against the approved preview with `--require-assumptions` |
 
 Historical captures remain compatibility/parser evidence, not proof of today's

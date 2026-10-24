@@ -492,4 +492,23 @@ function lookupContractProblems(content, { lookups, targetColumns = {} }) {
   return [...new Set(problems)];
 }
 
-module.exports = { lookupContractProblems, normalizerProblems, canonicalNormalizer, literalRanges };
+/**
+ * The lookups of a successful scripts/get-lookup-metadata.js answer, in the shape lookupContractProblems takes (each with its
+ * table), or null when the answer is not a successful one:
+ *   { "ok": true, "tables": [ { "logicalName": "opportunity", "lookups": [ { "column", "readProperty", "targets", "paths", … } ] } ] }
+ * Every lookup of every table read is kept, not only the ones a plan records: a page that touches another lookup of the same
+ * table is graded on it too.
+ * @param {object} evidence - the parsed answer
+ */
+function evidenceLookups(evidence) {
+  if (!evidence || evidence.ok !== true || !Array.isArray(evidence.tables)) return null;
+  return evidence.tables.flatMap((table) => (Array.isArray(table?.lookups) ? table.lookups : []).map((lookup) => ({
+    table: table.logicalName,
+    column: lookup.column,
+    readProperty: lookup.readProperty,
+    targets: Array.isArray(lookup.targets) ? lookup.targets : [],
+    paths: Array.isArray(lookup.paths) ? lookup.paths : [],
+  })));
+}
+
+module.exports = { lookupContractProblems, normalizerProblems, canonicalNormalizer, literalRanges, evidenceLookups };

@@ -176,3 +176,54 @@ test('with lookup context a typed path is checked whole; without it the column c
   assert.deepEqual(columnProblems(filtered("name eq 'x'"), RUNTIME_TYPES), [], 'neighbour: a plain column');
   assert.deepEqual(columnProblems(filtered("name eq 'x'"), RUNTIME_TYPES, PATH_CONTEXT), [], 'neighbour: a plain column with context');
 });
+
+// ---------- eval 26's synthetic customer values, run through the published normalizer ----------
+// The fixture's lookup-rows.json holds synthetic Customer values (account and contact, bare and qualified, null, contradictory and
+// foreign evidence, a plural entity set, equal labels, one GUID in two tables), each with the state the normalizer must give it.
+// The trusted helper is the rules.md block itself, transpiled with the TypeScript the plugin vendors and called directly — the
+// fixture's page module is never executed to find out what it means.
+const { loadVendoredTypeScript } = require('../../../../plugins/model-apps/scripts/lib/typescript-compiler.js');
+const { evidenceLookups } = require('../lib/polymorphic-lookup-contract.js');
+const FIXTURE_26 = path.join(__dirname, '..', 'fixtures', '26-customer-lookup');
+
+function publishedNormalizer() {
+  const typescript = loadVendoredTypeScript();
+  const { outputText } = typescript.transpileModule(`${NORMALIZER}\nexport { normalizeLookupReference };\n`, {
+    fileName: 'normalizer.ts',
+    compilerOptions: { module: typescript.ModuleKind.CommonJS, target: typescript.ScriptTarget.ES2020 },
+  });
+  const module = { exports: {} };
+  new Function('module', 'exports', 'require', outputText)(module, module.exports, () => { throw new Error('the helper imports nothing'); });
+  return module.exports.normalizeLookupReference;
+}
+
+test('eval 26: every synthetic customer value gets the state lookup-rows.json records, and the resolved ones stay apart by table and id', () => {
+  const normalize = publishedNormalizer();
+  const { lookup, rows } = JSON.parse(fs.readFileSync(path.join(FIXTURE_26, 'lookup-rows.json'), 'utf8'));
+  const metadata = evidenceLookups(JSON.parse(fs.readFileSync(path.join(FIXTURE_26, 'lookup-metadata.json'), 'utf8')));
+  const recorded = metadata.find((entry) => entry.table === lookup.table && entry.column === lookup.column);
+  assert.deepEqual(recorded.targets, lookup.targets, 'the rows are normalized with the complete target set the metadata read');
+  const states = new Set();
+  for (const entry of rows) {
+    assert.deepEqual(normalize(entry.row, lookup.readProperty, lookup.targets), entry.expected, entry.case);
+    states.add(entry.expected.state);
+  }
+  assert.deepEqual([...states].sort(), ['invalid', 'needs-target', 'resolved', 'unset'], 'every state is exercised');
+  // Equal labels, and one GUID in two tables, are different customers: the picker keys them by table and id.
+  const resolved = rows.map((entry) => normalize(entry.row, lookup.readProperty, lookup.targets)).filter((result) => result.state === 'resolved');
+  const keys = new Set(resolved.map(({ reference }) => `${reference.table}:${reference.id}`));
+  const label = (entry) => entry.row['_customerid_value@OData.Community.Display.V1.FormattedValue'];
+  const contoso = rows.filter((entry) => label(entry) === 'Contoso').map((entry) => normalize(entry.row, lookup.readProperty, lookup.targets));
+  assert.deepEqual(contoso.map(({ reference }) => reference.table), ['account', 'contact']);
+  assert.equal(contoso[0].reference.id, contoso[1].reference.id, 'one GUID in both tables');
+  assert.ok(keys.has(`account:${contoso[0].reference.id}`) && keys.has(`contact:${contoso[1].reference.id}`));
+});
+
+test('evidenceLookups reads every lookup of a successful metadata answer with its table, and nothing from a failed one', () => {
+  const answer = JSON.parse(fs.readFileSync(path.join(FIXTURE_26, 'lookup-metadata.json'), 'utf8'));
+  const lookups = evidenceLookups(answer);
+  assert.deepEqual(lookups.map((entry) => `${entry.table}.${entry.column}`), ['opportunity.customerid', 'opportunity.ownerid', 'opportunity.parentaccountid', 'opportunity.parentcontactid']);
+  assert.deepEqual(lookups.find((entry) => entry.column === 'ownerid').paths, [], 'a shared path is not a concrete one');
+  assert.equal(evidenceLookups({ ok: false, code: 'LOOKUP_TABLE_NOT_FOUND', error: 'x' }), null);
+  assert.equal(evidenceLookups(null), null);
+});

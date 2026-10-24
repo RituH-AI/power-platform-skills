@@ -35,7 +35,7 @@ const { planTargets, sha256 } = require('../../../../plugins/model-apps/scripts/
 const { validateProvisionInput } = require('../../../../plugins/model-apps/scripts/lib/provision-input.js');
 const {
   writtenSemanticsProblems, readWrittenSemantics, readPreviewSemantics, requiredContractProblems, compareSemantics, semanticRecord,
-  lookupEvidenceProblems,
+  lookupEvidenceProblems, normalizeValue,
 } = require('../../../../plugins/model-apps/scripts/lib/genpage-plan-semantics.js');
 
 function fail(reason) { return { status: 'fail', reason }; }
@@ -3596,7 +3596,7 @@ function declaredLookupEvidence(fixture) {
   try { return JSON.parse(text); } catch { return { unreadable: name }; }
 }
 
-function newContractProblems(fixture, { requireObservedLookups = false } = {}) {
+function newContractProblems(fixture) {
   const plan = fixture.genpagePlan;
   if (!plan) return ['genpage-plan.md not present in fixture'];
   const problems = validateGenpagePlanSchema(plan, { requireSemantics: true }).map((error) => `genpage-plan.md: ${error.message}`);
@@ -3613,7 +3613,7 @@ function newContractProblems(fixture, { requireObservedLookups = false } = {}) {
   const promotions = Boolean(evidence && evidence.ok === true);
   problems.push(...compareSemantics(previewRead, writtenRead, { promotions }).map((p) => `the written plan differs from the approved preview: ${p}`));
   if (promotions) problems.push(...lookupEvidenceProblems(writtenRead, evidence).map((p) => p.message));
-  const verifies = commandCalls(fixture, PROVENANCE_VERIFY).filter((verify) => /(?:^|\s)--require-assumptions(?=\s|$|['"`])/.test(verify.call.command));
+  const verifies = commandCalls(fixture, PROVENANCE_VERIFY).filter((verify) => REQUIRE_ASSUMPTIONS.test(verify.call.command));
   if (!verifies.length) problems.push('provenance was never verified with --require-assumptions');
   const hash = sha256(JSON.stringify(semanticRecord(writtenRead)));
   for (const verify of verifies) {
@@ -3621,20 +3621,245 @@ function newContractProblems(fixture, { requireObservedLookups = false } = {}) {
     if (result?.ok !== true) problems.push(`${verify.call.id || verify.call.command}: the --require-assumptions verification did not pass`);
     else if (result.semanticsHash !== hash) problems.push(`${verify.call.id || verify.call.command}: its semanticsHash is not the hash of this plan's records`);
   }
-  if (requireObservedLookups) {
-    const gate = verifies.filter((verify) => /--require-observed-lookups\b/.test(verify.call.command) && /--lookup-metadata\b/.test(verify.call.command));
-    if (!gate.length) problems.push('generation was not gated by a verification with --require-observed-lookups --lookup-metadata');
-    const generated = workflowCalls(fixture).findIndex((call) => isGeneration(call));
-    const gatedAt = gate.length ? workflowCalls(fixture).indexOf(gate[gate.length - 1].call) : -1;
-    if (gate.length && generated >= 0 && gatedAt > generated) problems.push('the observed-lookups verification ran after the page was generated');
+  return problems;
+}
+
+const REQUIRE_ASSUMPTIONS = /(?:^|\s)--require-assumptions(?=\s|$|['"`])/;
+const NEW_CONTRACT = 'Phase 1 (Planner): The newly authored plan records its assumptions and every page\'s data semantics and lookup metadata, the approved preview carries the same records, and provenance is verified with --require-assumptions';
+PHASE_EXPECTATIONS.set(NEW_CONTRACT, ({ fixture }) => resultOf(newContractProblems(fixture)));
+
+// --- Eval 26: an answered semantic question, the lookup metadata behind the records, the gate before generation ----
+// Each check reads evidence the fixture DECLARES under fixture.json `semantics` — the approved preview, the saved lookup metadata
+// read, the ordered semantic interactions — and fails when the declaration, the artifact or an event it names is gone: a
+// scenario that lost its evidence is a failure, never a skip. What they prove is that the recorded run agrees with itself (the
+// question the planner returned, the answer relayed back by its id, the assumption both documents keep, the approval after it;
+// the metadata read and the records built from it), not that a person answered or that the answer is what the request meant.
+
+const GET_LOOKUP_METADATA = /\bget-lookup-metadata\.js\b/;
+
+// A JSON artifact the fixture declares as fixture.json `semantics.<key>`: { name, value }, or { problem } when it is not declared,
+// not among the artifacts, or not JSON.
+function declaredJson(fixture, key) {
+  const name = fixture.manifest?.semantics?.[key];
+  if (!name) return { problem: `the fixture does not declare its ${key} evidence (fixture.json semantics.${key})` };
+  const text = fixture.artifacts?.[name];
+  if (typeof text !== 'string') return { problem: `the declared ${key} evidence ${name} is not one of the fixture's artifacts` };
+  try { return { name, value: JSON.parse(text) }; } catch { return { problem: `the declared ${key} evidence ${name} is not JSON` }; }
+}
+
+// The lookup rows the written plan records, across its pages (a page with `None.` records none).
+function recordedLookups(read) {
+  return [...read.pages.values()].flatMap((page) => (page.lookups && !page.lookups.sentinel ? [...page.lookups.rows.values()] : []));
+}
+
+const optionLabel = (option) => (typeof option === 'string' ? option : typeof option?.label === 'string' ? option.label : '');
+const sameList = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// The semantic interactions a run records (fixture.json `semantics.interactions`), in order:
+//   { "type": "needs_input", "event": "<tool-results id>", "question": "<id>", "options": ["<label>", …], "defaults": [] }
+//   { "type": "answer", "event": "<tool-results id>", "question": "<id>", "selected": "<label>", "source": "AskUserQuestion" }
+//   { "type": "approval", "preview": "<approved preview artifact>", "outcome": "approved", "source": "ExitPlanMode" }
+// A needs_input is the planner event it names returning that question with those options and defaults (several candidates carry
+// no default). Its answer is one of the options, asked with AskUserQuestion — or, unattended (`"source": "unattended-default"`),
+// the one option the planner marked — and handed back by question id in the later planner event it names. The written plan and
+// the approved preview both record it as the assumption with that Question and Answer (user-confirmed, or unattended-default with
+// its Default record logged). The approval comes last, after every answer: the preview the fixture declares, saved after the
+// answer reached the planner, with the ExitPlanMode approval logged after the question (or the unattended plan-approval record).
+function semanticInteractionProblems(fixture) {
+  const declared = declaredJson(fixture, 'interactions');
+  if (declared.problem) return [declared.problem];
+  if (!Array.isArray(declared.value) || !declared.value.length) return [`${declared.name} must be an ordered array of needs_input, answer and approval entries`];
+  const problems = [];
+  const calls = workflowCalls(fixture);
+  const eventAt = (id) => (typeof id === 'string' ? calls.findIndex((call) => call.id === id) : -1);
+  const log = String(fixture.workflowLog || '');
+  const logAt = (pattern) => { const match = pattern.exec(log); return match ? match.index : -1; };
+  const previewName = fixture.manifest?.semantics?.approvedPlan;
+  const previewText = previewName ? fixture.artifacts?.[previewName] : undefined;
+  const documents = [
+    ['the written plan', readWrittenSemantics(fixture.genpagePlan || '')],
+    ['the approved preview', typeof previewText === 'string' ? readPreviewSemantics(previewText) : null],
+  ];
+  const asked = new Map();
+  const answered = new Map();
+  let approval = null;
+  declared.value.forEach((entry, index) => {
+    const where = `${declared.name} entry ${index + 1}`;
+    if (approval) { problems.push(`${where}: nothing follows the plan approval`); return; }
+    if (entry?.type === 'needs_input') {
+      const at = eventAt(entry.event);
+      const result = at >= 0 ? resultObject(calls[at]) : null;
+      const question = result?.action === 'needs_input' && Array.isArray(result.questions) ? result.questions.find((q) => q?.id === entry.question) : null;
+      if (!question) { problems.push(`${where}: the planner event ${entry.event} did not return ${entry.question} as needs_input`); return; }
+      if (asked.has(entry.question)) { problems.push(`${where}: ${entry.question} is asked twice`); return; }
+      const options = (Array.isArray(question.options) ? question.options : []).map(optionLabel);
+      const defaults = (Array.isArray(question.options) ? question.options : []).filter((option) => option?.default === true).map(optionLabel);
+      if (!sameList(options, entry.options)) problems.push(`${where}: its options are not the ones the planner returned`);
+      if (!sameList(defaults, entry.defaults)) problems.push(`${where}: its defaults are not the ones the planner marked`);
+      if (options.length > 1 && defaults.length) problems.push(`${where}: a question with several candidates carries no default`);
+      asked.set(entry.question, { text: String(question.question || ''), options, defaults, at });
+    } else if (entry?.type === 'answer') {
+      const ask = asked.get(entry.question);
+      if (!ask) { problems.push(`${where}: answers ${entry.question}, which no earlier needs_input asked`); return; }
+      if (answered.has(entry.question)) { problems.push(`${where}: ${entry.question} is answered twice`); return; }
+      if (!ask.options.includes(entry.selected)) problems.push(`${where}: "${entry.selected}" is not one of the options of ${entry.question}`);
+      const at = eventAt(entry.event);
+      if (at <= ask.at) problems.push(`${where}: no planner event after the question carries its answer (event ${entry.event})`);
+      else if (!calls[at].command.includes(entry.question) || !calls[at].command.includes(String(entry.selected))) {
+        problems.push(`${where}: the planner event ${entry.event} does not hand back ${entry.question} → ${entry.selected}`);
+      }
+      let resolution = null;
+      let line = -1;
+      if (entry.source === 'AskUserQuestion') {
+        resolution = 'user-confirmed';
+        if (isUnattendedLog(log)) problems.push(`${where}: an unattended run asks no question`);
+        // - AskUserQuestion: Which opportunities should this account show? → Direct customer
+        line = logAt(new RegExp(`AskUserQuestion:[ \\t]*${escapeRe(ask.text)}[^\\n]*?[ \\t](?:→|->)[ \\t]*${escapeRe(String(entry.selected))}[ \\t]*\\r?$`, 'm'));
+        if (line < 0) problems.push(`${where}: workflow-log.md has no "AskUserQuestion: ${ask.text} → ${entry.selected}"`);
+      } else if (entry.source === 'unattended-default') {
+        resolution = 'unattended-default';
+        if (ask.defaults.length !== 1 || ask.defaults[0] !== entry.selected) problems.push(`${where}: an unattended run may take only the one option the planner marked as the default`);
+      } else problems.push(`${where}: source must be AskUserQuestion or unattended-default`);
+      for (const [label, read] of documents) {
+        if (!read) { problems.push(`${where}: the fixture does not declare the approved preview (fixture.json semantics.approvedPlan)`); continue; }
+        const assumption = read.assumptions ? [...read.assumptions.entries.values()].find((item) => item.question === entry.question) : undefined;
+        if (!assumption) { problems.push(`${where}: ${label} records no assumption answering ${entry.question}`); continue; }
+        if (assumption.answer !== normalizeValue(String(entry.selected))) problems.push(`${where}: ${label} records ${assumption.id}'s Answer as "${assumption.answer}", not "${entry.selected}"`);
+        if (resolution && assumption.resolution !== resolution) problems.push(`${where}: ${label} records ${assumption.id} as ${assumption.resolution}, not ${resolution}`);
+        if (resolution === 'unattended-default' && label === 'the written plan') {
+          line = assumption.defaultRecord ? log.indexOf(assumption.defaultRecord) : -1;
+          if (line < 0) problems.push(`${where}: workflow-log.md does not hold ${assumption.id}'s Default record`);
+        }
+      }
+      answered.set(entry.question, { at, line });
+    } else if (entry?.type === 'approval') {
+      for (const question of asked.keys()) if (!answered.has(question)) problems.push(`${where}: the plan was approved while ${question} was unanswered`);
+      if (!previewName || entry.preview !== previewName) problems.push(`${where}: the approval names ${entry.preview}, not the approved preview the fixture declares (${previewName || 'none'})`);
+      if (entry.outcome !== 'approved') problems.push(`${where}: outcome must be approved (got ${entry.outcome})`);
+      const saved = previewName ? calls.findIndex((call) => call.artifact === previewName) : -1;
+      const lastAnswer = Math.max(-1, ...[...answered.values()].map((item) => item.at));
+      if (saved < 0) problems.push(`${where}: no event saved the approved preview`);
+      else if (saved < lastAnswer) problems.push(`${where}: the approved preview was saved before the answer reached the planner`);
+      if (entry.source === 'ExitPlanMode') {
+        const approvedAt = logAt(/^[^\n]*\bExitPlanMode\b[^\n]*\bapproved\b/im);
+        if (approvedAt < 0) problems.push(`${where}: workflow-log.md records no ExitPlanMode approval`);
+        else if (approvedAt < Math.max(-1, ...[...answered.values()].map((item) => item.line))) problems.push(`${where}: the plan was approved before the question was answered`);
+      } else if (entry.source === 'unattended-default') {
+        if (!PLAN_APPROVAL_RECORD.test(log)) problems.push(`${where}: workflow-log.md has no unattended plan-approval record`);
+      } else problems.push(`${where}: source must be ExitPlanMode or unattended-default`);
+      approval = entry;
+    } else problems.push(`${where}: type must be needs_input, answer or approval`);
+  });
+  if (!asked.size) problems.push(`${declared.name} records no semantic question`);
+  if (!approval) problems.push(`${declared.name} does not end with the plan approval`);
+  return problems;
+}
+
+// The lookup metadata behind the plan's records: a get-lookup-metadata.js read of every table the records name, made before the
+// approved preview was saved, whose successful answer IS the saved artifact; every lookup of an existing table recorded
+// `observed`, its Evidence naming that artifact, and each record agreeing with the read (complete targets, concrete paths).
+function lookupDiscoveryProblems(fixture) {
+  const declared = declaredJson(fixture, 'lookupMetadata');
+  if (declared.problem) return [declared.problem];
+  const written = readWrittenSemantics(fixture.genpagePlan || '');
+  const rows = recordedLookups(written);
+  if (!rows.length) return ['the plan records no lookup, but the scenario relies on one'];
+  const problems = [];
+  if (declared.value?.ok !== true) problems.push(`${declared.name} is not a successful get-lookup-metadata.js answer`);
+  const calls = workflowCalls(fixture);
+  const tables = [...new Set(rows.map((row) => row.table))];
+  const reads = commandCalls(fixture, GET_LOOKUP_METADATA).filter(({ flags }) => tables.every((table) => csvList(flags.tables).includes(table)));
+  const read = reads.find(({ call }) => JSON.stringify(resultObject(call)) === JSON.stringify(declared.value));
+  if (!reads.length) problems.push(`get-lookup-metadata.js never read ${tables.join(', ')}`);
+  else if (!read) problems.push(`no get-lookup-metadata.js answer is the saved ${declared.name}`);
+  const saved = calls.findIndex((call) => call.artifact === fixture.manifest?.semantics?.approvedPlan);
+  if (saved < 0) problems.push('no event saved the approved preview');
+  else if (read && calls.indexOf(read.call) > saved) problems.push('the lookup metadata was read after the plan was approved');
+  const existing = existingEntities(fixture.genpagePlan || '');
+  for (const row of rows) {
+    if (existing.includes(row.table) && row.state !== 'observed') problems.push(`${row.table}.${row.column} is recorded ${row.state}, but ${row.table} exists: its lookup is read before the plan`);
+  }
+  for (const [file, page] of written.pages) {
+    if (page.lookups && !page.lookups.sentinel && !String(page.lookups.evidence || '').includes(declared.name)) problems.push(`${file}: the lookup Evidence does not name ${declared.name}`);
+  }
+  problems.push(...lookupEvidenceProblems(written, declared.value).map((p) => p.message));
+  return problems;
+}
+
+// RuntimeTypes.ts types a lookup's read property as the union of its targets' qualified forms (the type generator's shape):
+//   _customerid_value: `/account(${string})` | `/contact(${string})`,
+// Returns the sorted target tables, or null when the table or the property is not declared.
+function runtimeLookupTargets(runtimeTypes, table, readProperty) {
+  const block = new RegExp(`^export type ${escapeRe(table)} = TableRow<\\{\\r?\\n([\\s\\S]*?)^\\}>`, 'm').exec(runtimeTypes);
+  if (!block) return null;
+  const line = new RegExp(`^[ \\t]*(?:readonly[ \\t]+)?${escapeRe(readProperty)}[ \\t]*:([^\\r\\n]*)$`, 'm').exec(block[1]);
+  if (!line) return null;
+  return [...line[1].matchAll(/`\/([a-z_][a-z0-9_]*)\(\$\{string\}\)`/g)].map((match) => match[1]).sort();
+}
+
+function runtimeLookupProblems(fixture) {
+  if (!fixture.runtimeTypes) return ['RuntimeTypes.ts was not captured'];
+  const rows = recordedLookups(readWrittenSemantics(fixture.genpagePlan || ''));
+  if (!rows.length) return ['the plan records no lookup, but the scenario relies on one'];
+  const problems = [];
+  const sources = generateTypesCalls(fixture).flatMap((call) => call.sources);
+  for (const row of rows) {
+    if (!sources.includes(row.table)) problems.push(`genpage.js types was not run for ${row.table}`);
+    const typed = runtimeLookupTargets(fixture.runtimeTypes, row.table, row.readProperty);
+    if (!typed) problems.push(`RuntimeTypes.ts does not declare ${row.table}.${row.readProperty}`);
+    else if (!sameList(typed, [...row.targets].sort())) problems.push(`RuntimeTypes.ts types ${row.table}.${row.readProperty} as ${typed.join(' | ') || 'no table'}, the plan records ${row.targets.join(', ')}`);
   }
   return problems;
 }
 
-const NEW_CONTRACT = 'Phase 1 (Planner): The newly authored plan records its assumptions and every page\'s data semantics and lookup metadata, the approved preview carries the same records, and provenance is verified with --require-assumptions';
-PHASE_EXPECTATIONS.set(NEW_CONTRACT, ({ fixture }) => resultOf(newContractProblems(fixture, {
-  requireObservedLookups: Boolean(fixture.manifest?.semantics?.lookupMetadata),
-})));
+// SKILL.md Phase 5a's gate for a plan that records a lookup: before the page is generated, a verification with
+// --require-assumptions --require-observed-lookups and the saved --lookup-metadata passes on THIS plan's records (its
+// semanticsHash), and no lookup is still `planned`.
+function observedLookupGateProblems(fixture) {
+  const plan = fixture.genpagePlan;
+  if (!plan) return ['genpage-plan.md not present in fixture'];
+  const written = readWrittenSemantics(plan);
+  const rows = recordedLookups(written);
+  const problems = [];
+  if (!rows.length) problems.push('the plan records no lookup, but the scenario relies on one');
+  for (const row of rows) if (row.state !== 'observed') problems.push(`${row.table}.${row.column} is still ${row.state} when the page is generated`);
+  const declared = declaredJson(fixture, 'lookupMetadata');
+  if (declared.problem) problems.push(declared.problem);
+  const calls = workflowCalls(fixture);
+  const generated = calls.findIndex((call) => isGeneration(call.command));
+  if (generated < 0) problems.push('the page was never generated');
+  const gates = commandCalls(fixture, PROVENANCE_VERIFY).filter(({ call }) => REQUIRE_ASSUMPTIONS.test(call.command)
+    && /--require-observed-lookups\b/.test(call.command) && /--lookup-metadata\b/.test(call.command));
+  if (!gates.length) return [...problems, 'generation was not gated by a verification with --require-assumptions --require-observed-lookups --lookup-metadata'];
+  const hash = sha256(JSON.stringify(semanticRecord(written)));
+  const passed = gates.filter(({ call, flags }) => {
+    const result = resultObject(call);
+    return result?.ok === true && result.semanticsHash === hash && (!declared.name || fileName(flags['lookup-metadata']) === declared.name);
+  });
+  if (!passed.length) problems.push('no observed-lookups verification passed on this plan\'s records with the saved lookup metadata');
+  else if (generated >= 0 && !passed.some(({ call }) => calls.indexOf(call) < generated)) problems.push('the observed-lookups verification ran after the page was generated');
+  return problems;
+}
+
+PHASE_EXPECTATIONS.set(
+  'Phase 1 (Planner): The open account-scope question reaches the maker as needs_input with no default, the answer returns to the planner by its question id, and the written plan and the approved preview record it as a user-confirmed assumption before approval',
+  ({ fixture }) => resultOf(semanticInteractionProblems(fixture))
+);
+
+PHASE_EXPECTATIONS.set(
+  'Phase 1 (Planner): get-lookup-metadata.js reads opportunity\'s lookups before approval, its successful answer is the saved lookup-metadata.json, and every recorded lookup is observed with the complete targets and concrete paths it read',
+  ({ fixture }) => resultOf(lookupDiscoveryProblems(fixture))
+);
+
+PHASE_EXPECTATIONS.set(
+  'Phase 4: RuntimeTypes.ts is generated for opportunity and types each recorded lookup\'s read property with exactly its recorded targets',
+  ({ fixture }) => resultOf(runtimeLookupProblems(fixture))
+);
+
+PHASE_EXPECTATIONS.set(
+  'Phase 5a: The page is generated only after provenance is verified with --require-assumptions --require-observed-lookups --lookup-metadata on this plan\'s records',
+  ({ fixture }) => resultOf(observedLookupGateProblems(fixture))
+);
 
 // --- Eval 3: an app with no pages ---------------------------------------------------------------------
 

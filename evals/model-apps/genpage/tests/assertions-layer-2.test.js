@@ -615,3 +615,53 @@ test('eval 27: a page that passes the contract without making the call it exerci
     assert.match(result.reason, reason, `${label}: ${result.reason}`);
   }
 });
+
+// ---------- Eval 26: lookup identities in the page ----------
+
+const FIXTURE_26 = require('../lib/fixture-loader.js').loadFixtures(require('node:path').join(__dirname, '..', 'fixtures')).find((fixture) => fixture.id === 26);
+const CUSTOMER_LOOKUP = FIXTURE_26.files.find((file) => file.name === 'customer-lookup.tsx').content.replace(/\r\n/g, '\n');
+const SCENARIO_26 = "Phase 5: The page normalizes every customer with the canonical lookup normalizer and its complete targets, lists the customers of both tables, labels its customer search as a search of the loaded rows, filters an account's opportunities through the verified customerid_account path only for an account customer, opens and writes the customer's own table, and reports the reads and the write through reportPageError";
+const grade26 = (content, fixture = FIXTURE_26) => PHASE5_EXPECTATIONS.get(SCENARIO_26)({ fixture, files: [f('customer-lookup.tsx', content)], eval: evalStub(26) });
+const variant26 = (from, to) => {
+  assert.ok(CUSTOMER_LOOKUP.includes(from), `the fixture page holds: ${from}`);
+  return CUSTOMER_LOOKUP.replace(from, to);
+};
+
+test('eval 26: the fixture page passes the lookup contract, the page error contract and the views its approved plan names', () => {
+  assert.deepEqual(grade26(CUSTOMER_LOOKUP), { status: 'pass', reason: '' });
+  assert.equal(ASSERTIONS.get('Generated .tsx routes every supported dataApi failure through reportPageError and mounts PageErrorBoundary around PageBody')({ files: [f('customer-lookup.tsx', CUSTOMER_LOOKUP)] }).status, 'pass');
+});
+
+test('eval 26: a page that drops a target, a view, the honest search label, the picked table or an error kind fails', () => {
+  for (const [label, source, reason] of [
+    ['an account-only "every customer" list', variant26("filter: '_customerid_value ne null'", "filter: 'customerid_account/accountid ne null'"), /every customer of either table/],
+    ['a search through the account name', variant26("filter: '_customerid_value ne null'", "filter: \"_customerid_value ne null and contains(customerid_account/name, 'Contoso')\""), /customerid_account\/name|one target/],
+    ['the search not labelled as a search of the loaded rows', variant26('aria-label="Search the loaded opportunities by customer name"', 'aria-label="Search opportunities by customer name"'), /not labelled as a search of the loaded rows/],
+    ['an account view without the table check', variant26("    if (reference.table !== 'account') return;\n", ''), /before the page checks that reference.table is account/],
+    ['an account view over part of the targets', variant26("normalizeLookupReference(row, '_customerid_value', ['account', 'contact']);\n    if (normalized.state !== 'resolved') return;\n    const reference = normalized.reference;\n    if (reference.table !== 'account') return;", "normalizeLookupReference(row, '_customerid_value', ['account']);\n    if (normalized.state !== 'resolved') return;\n    const reference = normalized.reference;\n    if (reference.table !== 'account') return;"), /not its complete metadata target set/],
+    ['navigation to a fixed table', variant26('entityName: reference.table, entityId: reference.id', "entityName: 'account', entityId: reference.id"), /not the reference's own table/],
+    ['a write that loses the picked table', variant26('{ _customerid_value: link }', '{ _customerid_value: `/account(${selected.id})` }'), /written to a fixed table/],
+    ['choices keyed by id only', variant26('value={`${choice.table}:${choice.id}`}', 'value={choice.id}'), /keyed by table and id/],
+    ['a failed write that offers a retry', variant26("'changeCustomer', undefined, failure, 'write')", "'changeCustomer', undefined, failure, 'write', reloadOpportunities)"), /retry/],
+    ['a failed navigation reported as a write', variant26("'openCustomerRecord', undefined, failure, 'read')", "'openCustomerRecord', undefined, failure, 'write')"), /Open customer reports its failure as write, not read/],
+    ['a raw lookup value in a filter', variant26('const filter = `customerid_account/accountid eq ${reference.id}`;', 'const filter = `customerid_account/accountid eq ${row._customerid_value}`;'), /raw _customerid_value/],
+  ]) {
+    const result = grade26(source);
+    assert.equal(result.status, 'fail', label);
+    assert.match(result.reason, reason, `${label}: ${result.reason}`);
+  }
+});
+
+test('eval 26: without the lookup metadata it was built from, or the RuntimeTypes.ts it is checked against, the scenario fails — it never skips', () => {
+  for (const [label, change, reason] of [
+    ['no lookup metadata declared', (fixture) => { delete fixture.manifest.semantics.lookupMetadata; }, /semantics\.lookupMetadata/],
+    ['a failed metadata read', (fixture) => { fixture.artifacts['lookup-metadata.json'] = JSON.stringify({ ok: false, code: 'LOOKUP_TABLE_NOT_FOUND', error: 'opportunity: not found' }); }, /not a successful get-lookup-metadata.js answer/],
+    ['no RuntimeTypes.ts', (fixture) => { fixture.runtimeTypes = null; }, /RuntimeTypes.ts was not captured/],
+  ]) {
+    const fixture = structuredClone(FIXTURE_26);
+    change(fixture);
+    const result = grade26(CUSTOMER_LOOKUP, fixture);
+    assert.equal(result.status, 'fail', label);
+    assert.match(result.reason, reason, `${label}: ${result.reason}`);
+  }
+});

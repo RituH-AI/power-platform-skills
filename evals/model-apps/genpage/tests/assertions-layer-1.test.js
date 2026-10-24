@@ -1303,3 +1303,108 @@ test('a newly authored plan without its records, preview or matching verificatio
     assert.match(result.reason, reason, `${label}: ${result.reason}`);
   }
 });
+
+// ---------- eval 26: the answered question, the lookup metadata behind the records, the types and the gate ----------
+
+const SEMANTIC_QUESTION = 'Phase 1 (Planner): The open account-scope question reaches the maker as needs_input with no default, the answer returns to the planner by its question id, and the written plan and the approved preview record it as a user-confirmed assumption before approval';
+const LOOKUP_DISCOVERY = "Phase 1 (Planner): get-lookup-metadata.js reads opportunity's lookups before approval, its successful answer is the saved lookup-metadata.json, and every recorded lookup is observed with the complete targets and concrete paths it read";
+const LOOKUP_TYPES = "Phase 4: RuntimeTypes.ts is generated for opportunity and types each recorded lookup's read property with exactly its recorded targets";
+const OBSERVED_GATE = "Phase 5a: The page is generated only after provenance is verified with --require-assumptions --require-observed-lookups --lookup-metadata on this plan's records";
+const grade = (text, fixture) => PHASE_EXPECTATIONS.get(text)({ fixture, eval: { id: fixture.id } });
+// A changed copy of fixture 26: the manifest, events, artifacts and documents are cloned, so a variant never leaks into another.
+const variant26 = (change) => {
+  const copy = structuredClone({ ...scenarioFixture(26), files: [] });
+  change(copy);
+  return copy;
+};
+const event26 = (fixture, id) => fixture.events.find((event) => event.id === id);
+const interactions26 = (fixture, change) => {
+  const entries = JSON.parse(fixture.artifacts['semantic-interactions.json']);
+  fixture.artifacts['semantic-interactions.json'] = JSON.stringify(change(entries));
+};
+const moveEvent26 = (fixture, id, after) => {
+  const [moved] = fixture.events.splice(fixture.events.findIndex((event) => event.id === id), 1);
+  fixture.events.splice(fixture.events.findIndex((event) => event.id === after) + 1, 0, moved);
+};
+const assertFails26 = (text, cases) => {
+  for (const [label, change, reason] of cases) {
+    const result = grade(text, variant26(change));
+    assert.equal(result.status, 'fail', label);
+    assert.match(result.reason, reason, `${label}: ${result.reason}`);
+  }
+};
+
+test('eval 26: the answered question, the lookup metadata read, the typed lookup, the gate and the new contract all pass', () => {
+  const fixture = scenarioFixture(26);
+  for (const text of [SEMANTIC_QUESTION, LOOKUP_DISCOVERY, NEW_CONTRACT, LOOKUP_TYPES, OBSERVED_GATE]) {
+    assert.deepEqual(grade(text, fixture), { status: 'pass', reason: '' }, text);
+  }
+});
+
+test('eval 26: a question that was not asked, answered, handed back, recorded or approved in that order fails — it never skips', () => {
+  const SCOPE_LINE = '- AskUserQuestion: Which opportunities should this account show? → Direct customer\n';
+  assertFails26(SEMANTIC_QUESTION, [
+    ['no interactions declared', (f) => { delete f.manifest.semantics.interactions; }, /semantics\.interactions/],
+    ['the answer removed before approval', (f) => interactions26(f, (entries) => entries.filter((entry) => entry.type !== 'answer')), /approved while opportunities-account-scope was unanswered/],
+    ['approval before the answer', (f) => interactions26(f, (entries) => [entries[0], entries[2], entries[1]]), /unanswered/],
+    ['a pre-settled default on a question with three candidates', (f) => {
+      event26(f, 'planner-discovery').result.questions[0].options[1].default = true;
+      interactions26(f, (entries) => { entries[0].defaults = ['Direct customer']; return entries; });
+    }, /several candidates carries no default/],
+    ['the options differ from the planner\'s', (f) => interactions26(f, (entries) => { entries[0].options = ['Direct customer']; return entries; }), /not the ones the planner returned/],
+    ['an answer that is not an option', (f) => interactions26(f, (entries) => { entries[1].selected = 'Every account'; return entries; }), /not one of the options/],
+    ['no AskUserQuestion for it in the log', (f) => { f.workflowLog = f.workflowLog.replace(SCOPE_LINE, ''); }, /AskUserQuestion: Which opportunities should this account show\? → Direct customer/],
+    ['the plan approved before the question was asked', (f) => { f.workflowLog = f.workflowLog.replace(SCOPE_LINE, '') + '\n' + SCOPE_LINE; }, /approved before the question was answered/],
+    ['an unattended default for a question with no default', (f) => interactions26(f, (entries) => { entries[1].source = 'unattended-default'; return entries; }), /only the one option the planner marked/],
+    ['the answer never handed back to the planner', (f) => interactions26(f, (entries) => { entries[1].event = 'planner-discovery'; return entries; }), /no planner event after the question carries its answer/],
+    ['a re-invocation that does not carry the answer', (f) => { event26(f, 'planner-answers').command = 'Task genpage-planner (answers: app → Sales Hub)'; }, /does not hand back opportunities-account-scope → Direct customer/],
+    ['the written plan records another answer', (f) => { f.genpagePlan = f.genpagePlan.replace('- Answer: Direct customer', '- Answer: Parent account'); }, /the written plan records A1's Answer as "Parent account"/],
+    ['the preview records another answer', (f) => { f.artifacts['approved-plan.md'] = f.artifacts['approved-plan.md'].replace('- Answer: Direct customer', '- Answer: Customer plus contacts'); }, /the approved preview records A1's Answer/],
+    ['no Assumptions in the written plan', (f) => { f.genpagePlan = f.genpagePlan.replace(/\n## Assumptions\n[\s\S]*?\n## Working Directory\n/, '\n## Working Directory\n'); }, /the written plan records no assumption answering opportunities-account-scope/],
+    ['the preview saved before the answer reached the planner', (f) => moveEvent26(f, 'save-approved', 'planner-discovery'), /saved before the answer reached the planner/],
+    ['an approval of another preview', (f) => interactions26(f, (entries) => { entries[2].preview = 'genpage-plan.md'; return entries; }), /not the approved preview the fixture declares/],
+  ]);
+});
+
+test('eval 26: the lookup records must come from a successful lookup metadata read the run saved before approval', () => {
+  const metadata = (f) => JSON.parse(f.artifacts['lookup-metadata.json']);
+  assertFails26(LOOKUP_DISCOVERY, [
+    ['no lookup metadata declared', (f) => { delete f.manifest.semantics.lookupMetadata; }, /semantics\.lookupMetadata/],
+    ['no get-lookup-metadata.js read', (f) => { f.events = f.events.filter((event) => event.id !== 'lookup-metadata'); }, /never read opportunity/],
+    ['a saved file that is not the answer read', (f) => {
+      const changed = metadata(f);
+      changed.tables[0].lookups[0].targets = ['account'];
+      f.artifacts['lookup-metadata.json'] = JSON.stringify(changed);
+    }, /no get-lookup-metadata.js answer is the saved lookup-metadata.json/],
+    ['a failed read', (f) => {
+      const failed = { ok: false, code: 'LOOKUP_RELATIONSHIPS_UNREADABLE', error: 'opportunity: the relationship read was refused' };
+      f.artifacts['lookup-metadata.json'] = JSON.stringify(failed);
+      event26(f, 'lookup-metadata').result = failed;
+    }, /not a successful get-lookup-metadata.js answer/],
+    ['metadata read after the approval', (f) => moveEvent26(f, 'lookup-metadata', 'save-approved'), /read after the plan was approved/],
+    ['a record whose targets are not the complete set read', (f) => { f.genpagePlan = f.genpagePlan.replace('| _customerid_value | account, contact |', '| _customerid_value | account |'); }, /not the complete set read/],
+    ['an existing table\'s lookup left planned', (f) => { f.genpagePlan = f.genpagePlan.replace('customer navigation; customer picker | observed |', 'customer navigation; customer picker | planned |'); }, /recorded planned, but opportunity exists/],
+  ]);
+});
+
+test('eval 26: RuntimeTypes.ts must be generated for the table and type the lookup with exactly the recorded targets', () => {
+  assertFails26(LOOKUP_TYPES, [
+    ['RuntimeTypes.ts not captured', (f) => { f.runtimeTypes = null; }, /RuntimeTypes.ts was not captured/],
+    ['types not generated for opportunity', (f) => { f.events = f.events.filter((event) => event.id !== 'generate-types'); }, /genpage.js types was not run for opportunity/],
+    ['a one-target type', (f) => { f.runtimeTypes = f.runtimeTypes.replace(' | `/contact(${string})`,\n    readonly customeridname', ',\n    readonly customeridname'); }, /types opportunity._customerid_value as account, the plan records account, contact/],
+    ['the read property not declared', (f) => { f.runtimeTypes = f.runtimeTypes.replace(/^ {4}_customerid_value:.*\n/m, ''); }, /does not declare opportunity._customerid_value/],
+  ]);
+});
+
+test('eval 26: generation waits for a passing --require-observed-lookups verification of these records — removing the manifest key does not turn it off', () => {
+  const gate = (f) => event26(f, 'plan-verify-5a');
+  assertFails26(OBSERVED_GATE, [
+    ['no gate', (f) => { f.events = f.events.filter((event) => event.id !== 'plan-verify-5a'); }, /not gated by a verification with --require-assumptions --require-observed-lookups --lookup-metadata/],
+    ['the gate after the page was written', (f) => moveEvent26(f, 'plan-verify-5a', 'write-page'), /ran after the page was generated/],
+    ['the gate verified other records', (f) => { gate(f).result = { ...gate(f).result, semanticsHash: '0'.repeat(64) }; }, /no observed-lookups verification passed/],
+    ['the gate failed', (f) => { gate(f).result = { ok: false, action: 'verify', semanticProblems: ['opportunity.customerid is still planned'] }; }, /no observed-lookups verification passed/],
+    ['the gate read another metadata file', (f) => { gate(f).command = gate(f).command.replace('/lookup-metadata.json', '/other-metadata.json'); }, /no observed-lookups verification passed/],
+    ['a lookup still planned', (f) => { f.genpagePlan = f.genpagePlan.replace('customer navigation; customer picker | observed |', 'customer navigation; customer picker | planned |'); }, /opportunity.customerid is still planned/],
+    ['the lookup metadata declaration removed', (f) => { delete f.manifest.semantics.lookupMetadata; }, /semantics\.lookupMetadata/],
+  ]);
+});
