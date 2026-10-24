@@ -16,8 +16,7 @@
 //   1  {"ok":false,"error":…}   — usage error, or the file cannot be read
 // `calls` is how many makeStyles calls were read. A problem's `code` is `unsupported-shorthand`; or `unread-style-object`, a style object the checker cannot see — one
 // passed to the call (`makeStyles(styles)`), a slot or a selector given a variable, a spread of anything but an inline object — whose keys may be any of the ten, or a
-// computed key it cannot read as a name (`[key]: …`), so it is never reported as clean (write it inline, or in a `const` at the top of the page that nothing but the
-// styles uses, which is read where it is used); or — where the checker cannot read the code for certain —
+// computed key it cannot read as a name (`[key]: …`), so it is never reported as clean (write it inline); or — where the checker cannot read the code for certain —
 // `unverifiable-style-call` and `unbalanced-style-call`. `within` is
 // the slot, selectors and at-rules a key sits under (`["root", ":hover"]`): where it is apart from its line, and `value` is what the key is set to, as written (a quoted
 // string as its text in double quotes, anything else as its source text); `owner` is the hook the key is in (the name it is bound to at the top of the page, or null when the page does not prove one),

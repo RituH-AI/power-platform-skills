@@ -246,15 +246,14 @@ test('griffel-styles: a getter that runs is reported whatever key it defines, an
 // however the file ends its lines (the TRV of a LineTerminatorSequence), so it is the key a quoted '\n' names, which replaces it, and not the key '\r\n' or '\r'
 // names, which does not. U+2028 and U+2029 stay as written, in a template and in a string alike: neither is the key '\n' names.
 test('griffel-styles: a line break written in a template key is read as JavaScript reads it', () => {
-  // `bad` is a style constant the check reads (topLevelStyleConsts), so a slot that holds it is read: its `borderWidth` is reported where the slot is held.
   const page = (slots) => styles(slots, `${IMPORT}const bad: Record<string, string> = { borderWidth: '1px' };\n`);
-  assert.deepEqual(names(page("{ ...{ [`a\r\nb`]: bad }, 'a\\r\\nb': { color: 'red' } }")), ['borderWidth']);
-  assert.deepEqual(names(page("{ ...{ [`a\rb`]: bad }, 'a\\rb': { color: 'red' } }")), ['borderWidth']);
+  assert.deepEqual(names(page("{ ...{ [`a\r\nb`]: bad }, 'a\\r\\nb': { color: 'red' } }")), ['unread-style-object']);
+  assert.deepEqual(names(page("{ ...{ [`a\rb`]: bad }, 'a\\rb': { color: 'red' } }")), ['unread-style-object']);
   assert.deepEqual(names(page("{ ...{ [`a\r\nb`]: bad }, 'a\\nb': { color: 'red' } }")), []);
   assert.deepEqual(names(page("{ ...{ [`a\rb`]: bad }, [`a\nb`]: { color: 'red' } }")), []);
   // The page text below holds U+2028 and U+2029 themselves (the test's own string escapes put them there), not the escape `\u2028`.
-  assert.deepEqual(names(page("{ ...{ [`a\u2028b`]: bad }, 'a\\nb': { color: 'red' } }")), ['borderWidth']);
-  assert.deepEqual(names(page("{ ...{ [`a\u2029b`]: bad }, 'a\\nb': { color: 'red' } }")), ['borderWidth']);
+  assert.deepEqual(names(page("{ ...{ [`a\u2028b`]: bad }, 'a\\nb': { color: 'red' } }")), ['unread-style-object']);
+  assert.deepEqual(names(page("{ ...{ [`a\u2029b`]: bad }, 'a\\nb': { color: 'red' } }")), ['unread-style-object']);
   assert.deepEqual(names(page("{ ...{ [`a\u2029b`]: bad }, 'a\u2029b': { color: 'red' } }")), []);
   assert.deepEqual(names(page("{ ...{ [`a\u2028b`]: bad }, 'a\\u2028b': { color: 'red' } }")), []);
   // A backslash before a line break is a continuation, which adds nothing, whichever line break follows it.
@@ -855,9 +854,7 @@ test('griffel-styles: a position is the line and column an editor shows — any 
 // ─── What cannot be read ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 test('griffel-styles: a call whose style object is built elsewhere is reported, never passed as clean', () => {
-  // `let` can be assigned again anywhere in the page, so what it holds when Griffel reads it is not what it was set to: not read (a top-level `const` the page uses
-  // only where styles are read is: see the tests of style constants below).
-  const source = `${IMPORT}let base = { root: { borderWidth: 1 } };\nconst useStyles = makeStyles(base);\nconst other = makeStyles(cond ? a : b);\n`;
+  const source = `${IMPORT}const base = { root: { borderWidth: 1 } };\nconst useStyles = makeStyles(base);\nconst other = makeStyles(cond ? a : b);\n`;
   const result = griffelStyleProblems(source);
   assert.equal(result.calls, 0);
   assert.equal(result.notRead, undefined, 'no list of calls left for someone to check by eye');
@@ -866,151 +863,36 @@ test('griffel-styles: a call whose style object is built elsewhere is reported, 
   assert.deepEqual(griffelStyleProblems(`${IMPORT}const s = makeStyles();\n`).problems, [], 'a call with no argument has nothing to read');
 });
 
-// ─── Style constants ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-// A style object written once in a `const` at the top of the page, and used only where the check reads styles, is read where it is used, as if written there
-// (topLevelStyleConsts): its keys pass or fail as inline keys do. [what, page body after the import, the problems as `property-or-code@line:column`]
-const STYLE_CONSTANTS = [
-  ['the call\'s argument', "const styles = { root: { color: 'red' } };\nconst useStyles = makeStyles(styles);\n", []],
-  ['the call\'s argument, with a key Griffel drops', "const styles = { root: { borderWidth: '1px' } };\nconst useStyles = makeStyles(styles);\n", ['borderWidth@2:26']],
-  ['a spread in a slot', "const base = { padding: '4px' };\nconst useStyles = makeStyles({ root: { ...base, color: 'red' } });\n", []],
-  ['a spread with a key Griffel drops', "const base = { borderColor: 'red' };\nconst useStyles = makeStyles({ root: { ...base } });\n", ['borderColor@2:16']],
-  ['a slot\'s value, and a spread of the same one', "const root = { color: 'red' };\nconst useStyles = makeStyles({ root: root, other: { ...root } });\n", []],
-  ['a slot written as a shorthand', "const root = { borderStyle: 'solid' };\nconst useStyles = makeStyles({ root });\n", ['borderStyle@2:16']],
-  ['a selector\'s value', "const hover = { borderColor: 'red' };\nconst useStyles = makeStyles({ root: { ':hover': hover } });\n", ['borderColor@2:17']],
-  ['a constant spread in another', "const a = { borderWidth: 1 };\nconst b = { ...a, color: 'red' };\nconst useStyles = makeStyles({ root: b });\n", ['borderWidth@2:13']],
-  ['a type annotation, `as const` and `satisfies`',
-    "const a: GriffelStyle = { borderWidth: 1 };\nconst b = { color: 'red' } as const;\nconst c = { padding: 1 } satisfies GriffelStyle;\nconst useStyles = makeStyles({ root: { ...a, ...b, ...c } });\n",
-    ['borderWidth@2:27']],
-  ['a condition between two objects', "const base = dark ? { color: 'red' } : { borderColor: 'x' };\nconst useStyles = makeStyles({ root: { ...base } });\n", ['borderColor@2:42']],
-  ['two calls that use one', "const base = { borderInline: 'x' };\nconst a = makeStyles({ root: { ...base } });\nconst b = makeStyles({ root: base });\n", ['borderInline@2:16', 'borderInline@2:16']],
-  ['a key that a later definition replaces', "const base = { borderWidth: 1 };\nconst useStyles = makeStyles({ root: { ...base, borderWidth: undefined } });\n", ['borderWidth@3:49']],
-];
-// [what, page body]: the name is used somewhere the check does not read as a style value, so what it holds when Griffel reads it is not known — not read, as before:
-// the use in the call is an `unread-style-object`. [what, page body, the problems]
-const UNREAD_STYLE_CONSTANTS = [
-  ['a property set on it', "const base = { color: 'red' };\nbase.borderWidth = '1px';\nconst useStyles = makeStyles({ root: { ...base } });\n", ['unread-style-object@4:40']],
-  ['Object.assign on it', "const base = { color: 'red' };\nObject.assign(base, { borderWidth: '1px' });\nconst useStyles = makeStyles({ root: { ...base } });\n", ['unread-style-object@4:40']],
-  ['another name for it', "const base = { color: 'red' };\nconst other = base;\nother.borderWidth = 1;\nconst useStyles = makeStyles({ root: { ...base } });\n", ['unread-style-object@5:40']],
-  ['a change in a template\'s substitution', "const base = { color: 'red' };\nconst t = `${Object.assign(base, { borderWidth: 1 })}`;\nconst useStyles = makeStyles({ root: { ...base } });\n", ['unread-style-object@4:40']],
-  ['a `let`', "let base = { color: 'red' };\nconst useStyles = makeStyles({ root: { ...base } });\n", ['unread-style-object@3:40']],
-  ['a `var`', "var base = { color: 'red' };\nconst useStyles = makeStyles({ root: { ...base } });\n", ['unread-style-object@3:40']],
-  ['a use before the declaration', "const useStyles = makeStyles({ root: { ...base } });\nconst base = { color: 'red' };\n", ['unread-style-object@2:40']],
-  // A shorthand member reads the binding of its name as a slot's value does: before the declaration ends it is not yet set (TypeScript's transpile hands Griffel
-  // `{ root: undefined }`), whichever way the slot is written, and in every call that holds such a use.
-  ['a shorthand slot before the declaration', "const useStyles = makeStyles({ root });\nconst root = { color: 'red' };\n", ['unread-style-object@2:32']],
-  ['a slot\'s value before the declaration', "const useStyles = makeStyles({ root: root });\nconst root = { color: 'red' };\n", ['unread-style-object@2:32']],
-  ['a shorthand slot before the declaration and one after it', "const a = makeStyles({ root });\nconst root = { color: 'red' };\nconst b = makeStyles({ root });\n",
-    ['unread-style-object@2:24', 'unread-style-object@4:24']],
-  ['a parameter of the same name', "const base = { color: 'red' };\nfunction make(base) { return makeStyles({ root: { ...base } }); }\n", ['unread-style-object@3:51']],
-  ['a variable of the same name in a function', "const base = { color: 'red' };\nfunction make() { const base = { borderWidth: 1 }; return makeStyles({ root: { ...base } }); }\n", ['unread-style-object@3:80']],
-  ['a constant inside a function', "function make() { const base = { color: 'red' }; return makeStyles({ root: { ...base } }); }\n", ['unread-style-object@2:78']],
-  ['a use in JSX', "const base = { color: 'red' };\nconst useStyles = makeStyles({ root: { ...base } });\nexport default () => <div style={base} />;\n", ['unread-style-object@3:40']],
-  ['a type query', "const base = { color: 'red' };\ntype Base = typeof base;\nconst useStyles = makeStyles({ root: { ...base } });\n", ['unread-style-object@4:40']],
-  ['a use in an object the check does not read as a style value', "const base = { color: 'red' };\nconst useStyles = makeStyles({ root: { ...base }, other: pick({ ...base }) });\n",
-    ['unread-style-object@3:40', 'unread-style-object@3:51', 'unread-style-object@3:65']],
-  ['an exported constant', "export const base = { color: 'red' };\nconst useStyles = makeStyles({ root: { ...base } });\n", ['unread-style-object@3:40']],
-  ['a declaration no `;` ends', "const base = { color: 'red' }\nconst useStyles = makeStyles({ root: { ...base } });\n", ['unread-style-object@3:40']],
-  ['two declarators', "const base = { color: 'red' }, other = {};\nconst useStyles = makeStyles({ root: { ...base } });\n", ['unread-style-object@3:40']],
-  ['a value that is a call', "const base = make();\nconst useStyles = makeStyles({ root: { ...base } });\n", ['unread-style-object@3:40']],
-  ['a page where the lexer guessed', "const base = { color: 'red' };\nconst o = {a: 1} / 2; const x = /re/;\nconst useStyles = makeStyles({ root: { ...base } });\n", ['unverifiable-style-call@4:19']],
-];
-
-test('griffel-styles: a style object written once in a top-level const and used only where styles are read is read as if written there', () => {
-  for (const [what, body, expected] of STYLE_CONSTANTS) {
-    const result = griffelStyleProblems(`${IMPORT}${body}`);
-    assert.deepEqual(found(`${IMPORT}${body}`), expected, what);
-    assert.ok(result.calls >= 1, what);
-  }
-  // The key is reported where it is written, under the slot and the selectors it is used in, with the hook the call is bound to.
-  const [key] = griffelStyleProblems(`${IMPORT}const hover = { borderColor: 'red' };\nconst usePanel = makeStyles({ root: { ':hover': hover } });\n`).problems;
-  assert.deepEqual({ within: key.within, owner: key.owner, value: key.value }, { within: ['root', ':hover'], owner: 'usePanel', value: '"red"' });
-});
-
-test('griffel-styles: a constant whose name is used anywhere else is not read, and the call is reported as before', () => {
-  for (const [what, body, expected] of UNREAD_STYLE_CONSTANTS) assert.deepEqual(found(`${IMPORT}${body}`), expected, what);
-  // What the check never reads stays unread with a constant behind it: a computed key, and a getter, whose body is code.
-  assert.deepEqual(names(`${IMPORT}const key = 'borderWidth';\nconst useStyles = makeStyles({ root: { [key]: '1px' } });\n`), ['unread-style-object']);
-  assert.deepEqual(names(`${IMPORT}const base = { color: 'red' };\nconst useStyles = makeStyles({ get root() { return base; } });\n`), ['unread-style-object']);
-});
-
-// With every use of a constant one the check reads, what Griffel gets is what the constant was set to. Run: pages are built of constants, uses and code that changes a
-// constant or binds its name again, and each is run with a makeStyles that reads its argument as Griffel does (every slot, and every key of every nested selector, with
-// `for … in`); wherever the check passes a page, Griffel is given none of the ten keys.
-test('griffel-styles: a page the check passes hands Griffel no key it drops, constants and code that changes them included', () => {
-  const NESTED = /^[:[>&@]/;
-  const dropped = (stylesBySlots) => {
-    const keys = [];
-    const visit = (object) => {
-      for (const key in object) {
-        const value = object[key];
-        if (UNSUPPORTED_GRIFFEL_SHORTHANDS.has(key)) keys.push(key);
-        else if (NESTED.test(key) && value && typeof value === 'object') visit(value);
-      }
-    };
-    for (const slot in stylesBySlots) visit(stylesBySlots[slot]);
-    return keys;
-  };
-  const run = (body) => {
-    const received = [];
-    const vm = require('node:vm');
-    vm.runInNewContext(`${body}`, { makeStyles: (s) => { received.push(s); return () => ({}); }, Object, cond: true });
-    return received.flatMap(dropped);
-  };
-  const constants = [
-    "const a = { color: 'red' };", "const a = { borderWidth: '1px' };", "const a = { ':hover': { color: 'red' } };", "const a = { ':hover': { borderColor: 'x' } };",
+// Known limit, pinned as it is (AGENTS.md, "A style object the check cannot see is a problem, never a pass"): a style object kept in a `const` is not read where it
+// is used — one at the top of the page, written once and used by the styles alone, included — so the call, the slot, the selector, the spread or the shorthand member
+// that names it is `unread-style-object`: a fail-closed refusal, kept on purpose. Reading the constant there would need the order in which the page's code runs, which
+// its text does not show (a call in a function declared below the constant runs when the page calls it, and the page is transpiled to `var`, so a call made before
+// the constant is initialized hands Griffel `undefined`), and every use read again (constants spread twice into the next double what is read at each step). The way
+// out is the one the message gives: write the style object in place.
+test('griffel-styles: known limit — a style object kept in a const is not read where it is used, a call in a hoisted function and constants spread into one another included', () => {
+  const cases = [
+    ['the call\'s argument', `${IMPORT}const styles = { root: { color: 'red' } };\nconst useStyles = makeStyles(styles);\n`, ['unread-style-object@3:19']],
+    ['a slot', `${IMPORT}const base = { color: 'red' };\nconst useStyles = makeStyles({ root: base });\n`, ['unread-style-object@3:32']],
+    ['a selector', `${IMPORT}const hover = { color: 'blue' };\nconst useStyles = makeStyles({ root: { ':hover': hover } });\n`, ['unread-style-object@3:40']],
+    ['a spread', `${IMPORT}const base = { color: 'red' };\nconst useStyles = makeStyles({ root: { ...base, padding: 0 } });\n`, ['unread-style-object@3:40']],
+    ['a shorthand slot after the declaration', `${IMPORT}const root = { color: 'red' };\nconst useStyles = makeStyles({ root });\n`, ['unread-style-object@3:32']],
+    ['a shorthand slot before the declaration', `${IMPORT}const useStyles = makeStyles({ root });\nconst root = { color: 'red' };\n`, ['unread-style-object@2:32']],
+    ['a call in a hoisted function that the page calls before the constant is initialized',
+      `${IMPORT}const useStyles = make();\nconst base = { color: 'red' };\nfunction make() { return makeStyles({ root: { ...base } }); }\n`, ['unread-style-object@4:47']],
+    // A key Griffel drops in such a constant is not named either: the object is unread, and the page is held all the same.
+    ['a constant that holds a key Griffel drops', `${IMPORT}const base = { borderWidth: '1px' };\nconst useStyles = makeStyles({ root: base });\n`, ['unread-style-object@3:32']],
   ];
-  const seconds = ["const b = { ...a, padding: 1 };", "const b = { ':focus': a };", "const b = cond ? a : { color: 'blue' };", "const b = { padding: 1 };"];
-  const changes = ['', "a.borderStyle = 'solid';", "Object.assign(a, { borderInline: 'x' });", "b.borderWidth = 1;", "const c = b; c.borderColor = 'y';",
-    "function f(a) { a.borderWidth = 1; } f(a);", "const t = `${Object.assign(b, { borderBlock: 'x' })}`;", "a[':hover'] = { borderStyle: 'x' };"];
-  const uses = ['makeStyles({ root: { ...a } })', 'makeStyles({ root: b })', 'makeStyles(cond ? { r: a } : { r: b })', 'makeStyles({ root: { ...b, color: 1 } })', 'makeStyles({ a, b })'];
-  let pages = 0;
-  let passed = 0;
-  for (const first of constants) {
-    for (const second of seconds) {
-      for (const change of changes) {
-        for (const use of uses) {
-          const body = `${first}\n${second}\n${change}\nconst useStyles = ${use};\n`;
-          pages += 1;
-          const { problems } = griffelStyleProblems(`${IMPORT}${body}`);
-          if (problems.length) continue;
-          passed += 1;
-          assert.deepEqual(run(body), [], `the check passed ${JSON.stringify(body)}`);
-        }
-      }
-    }
+  for (const [what, source, expected] of cases) assert.deepEqual(found(source), expected, what);
+  assert.deepEqual(found(`${IMPORT}const useStyles = makeStyles({ root: { color: 'red', ':hover': { color: 'blue' }, padding: 0 } });\n`), [], 'the style object written in place');
+  // Constants spread twice into the next: the slot that names the last one is reported at once, whatever their number, where a reading of every use read 2^n objects.
+  const chain = (n) => `${IMPORT}const c0 = { color: 'red' };\n${Array.from({ length: n }, (_, i) => `const c${i + 1} = { ...c${i}, ...c${i} };\n`).join('')}const useStyles = makeStyles({ root: c${n} });\n`;
+  for (const n of [20, 400]) {
+    const start = process.hrtime.bigint();
+    const problems = found(chain(n));
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    assert.deepEqual(problems, [`unread-style-object@${n + 3}:32`], `${n} constants spread twice into the next`);
+    assert.ok(ms < 1000, `${n} constants spread twice into the next took ${ms.toFixed(0)} ms`);
   }
-  // Pages of every kind are met: the check reads constants (and passes the clean ones) and refuses the rest.
-  assert.ok(passed > 20 && pages - passed > 300, `${passed} of ${pages} pages passed`);
-});
-
-// A constant used before its declaration ends is not yet set where it is used. Run as TypeScript's transpile emits the page (`const` becomes `var`), Griffel is handed
-// `undefined` there; so the check passes no page with such a use — a shorthand member (`{ root }`) included, which reads the binding as `{ root: root }` does — and every
-// page it passes hands Griffel a style object wherever a constant stands.
-test('griffel-styles: a page the check passes uses no constant before its declaration ends, a shorthand member\'s use included', () => {
-  const vm = require('node:vm');
-  const received = (body) => {
-    const calls = [];
-    vm.runInNewContext(body.replace(/\bconst /g, 'var '), { makeStyles: (s) => { calls.push(s); return () => ({}); } });
-    return calls;
-  };
-  // Whether every style object Griffel is handed is an object, down to each slot, selector and spread it reaches.
-  const allObjects = (value) => value !== null && typeof value === 'object' && Object.values(value).every((v) => typeof v !== 'object' || v === null || allObjects(v))
-    && Object.values(value).every((v) => v !== undefined);
-  const uses = ['makeStyles({ root })', 'makeStyles({ root: root })', 'makeStyles({ root: { ...root } })', "makeStyles({ root: { ':hover': root } })", 'makeStyles(root)',
-    'makeStyles({ root, other: { color: 1 } })', 'makeStyles({ other: { ...root }, root })'];
-  let passedAfter = 0;
-  for (const use of uses) {
-    for (const before of [true, false]) {
-      const declaration = "const root = { color: 'red' };";
-      const body = before ? `const useStyles = ${use};\n${declaration}\n` : `${declaration}\nconst useStyles = ${use};\n`;
-      const problems = names(`${IMPORT}${body}`);
-      if (before) assert.ok(problems.includes('unread-style-object'), `${JSON.stringify(body)}: ${JSON.stringify(problems)}`);
-      if (problems.length > 0) continue;
-      if (!before) passedAfter += 1;
-      for (const styles of received(body)) assert.ok(allObjects(styles), `the check passed ${JSON.stringify(body)}, and Griffel gets ${JSON.stringify(styles)}`);
-    }
-  }
-  assert.ok(passedAfter >= 5, `${passedAfter} pages that use the constant after it is declared pass`);
 });
 
 test('griffel-styles: a call that never closes is reported, not skipped', () => {
@@ -1462,27 +1344,12 @@ test('check-griffel-styles CLI: exit 0 and one JSON line for a page with nothing
 });
 
 test('check-griffel-styles CLI: a style object written elsewhere fails the check (exit 3), never a pass', () => {
-  withPage(`${IMPORT}let styles = { root: { borderWidth: '1px' } };\nconst useStyles = makeStyles(styles);\n`, (file) => {
+  withPage(`${IMPORT}const styles = { root: { borderWidth: '1px' } };\nconst useStyles = makeStyles(styles);\n`, (file) => {
     const res = runCli('--file', file);
     assert.equal(res.status, 3, res.stderr);
     const out = JSON.parse(res.stdout);
     assert.equal(out.ok, false);
     assert.deepEqual(out.problems.map((p) => `${p.code}@${p.line}:${p.column}`), ['unread-style-object@3:19']);
-  });
-});
-
-test('check-griffel-styles CLI: a style constant is read where it is used — its keys pass or fail as if written in the call', () => {
-  withPage(`${IMPORT}const styles = { root: { borderWidth: '1px' } };\nconst useStyles = makeStyles(styles);\n`, (file) => {
-    const res = runCli('--file', file);
-    assert.equal(res.status, 3, res.stderr);
-    const out = JSON.parse(res.stdout);
-    assert.equal(out.calls, 1);
-    assert.deepEqual(out.problems.map((p) => `${p.code}:${p.property}@${p.line}:${p.column}:${p.within.join('/')}`), ['unsupported-shorthand:borderWidth@2:26:root']);
-  });
-  withPage(`${IMPORT}const base = { padding: '4px' };\nconst styles = { root: { ...base, borderTopWidth: '1px' } };\nconst useStyles = makeStyles(styles);\n`, (file) => {
-    const res = runCli('--file', file);
-    assert.equal(res.status, 0, res.stderr);
-    assert.deepEqual(JSON.parse(res.stdout), { ok: true, filePath: path.resolve(file), calls: 1, problems: [] });
   });
 });
 
@@ -1684,10 +1551,6 @@ test('griffel-styles: the time grows with the page, not with its square', (t) =>
     ['casts before a comparison', 500, (n) => styles(`{ root: { ${Array.from({ length: n }, (_, i) => `'--v${i}': size as number < 10 ? '12px' : '16px'`).join(', ')} } }`)],
     ['unclosed type arguments', 500, (n) => styles(`{ root: { ${Array.from({ length: n }, (_, i) => `'--v${i}': size as Num < 10 ? '12px' : '16px'`).join(', ')} } }`)],
     ['a run of unclosed casts', 1000, (n) => styles(`{ root: x ${'as T<'.repeat(n)} }`)],
-    // Constants that are no styles — data — on a page with no style call, and beside one: whether each is at the top of the page and where its name is used are read
-    // in one pass for all of them, and only on a page with a call (topLevelStyleConsts, constUses), where asking for each read the page again.
-    ['constants and no style call', 1000, (n) => `${Array.from({ length: n }, (_, i) => `const value${i} = ${i};`).join('\n')}\nexport default function P() { return null; }\n`],
-    ['constants beside a style call', 2000, (n) => styles("{ root: { color: 'red' } }", `${IMPORT}${Array.from({ length: n }, (_, i) => `const value${i} = ${i};`).join('\n')}\n`)],
   ];
   const medianMs = (fn, runs) => {
     const times = [];

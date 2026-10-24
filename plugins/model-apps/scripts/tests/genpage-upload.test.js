@@ -1924,7 +1924,7 @@ test('an UPDATE of an unreadable page that IS the deployed page only warns; one 
 // A style object written elsewhere — `const styles = { root: { borderWidth: '1px' } }; makeStyles(styles)` — holds keys the check cannot see, and this one holds a key
 // Griffel drops. The page is refused as one the check could not read, as an unreadable call is: a create before anything is sent, and an update that changes the page;
 // an update that IS the deployed page only warns, because sending the same bytes again ships nothing new.
-const GRIFFEL_INDIRECT = `${GRIFFEL_IMPORT}let styles = { root: { borderWidth: '1px' } };\nconst useStyles = makeStyles(styles);\nexport default function P() { return null; }\n`;
+const GRIFFEL_INDIRECT = `${GRIFFEL_IMPORT}const styles = { root: { borderWidth: '1px' } };\nconst useStyles = makeStyles(styles);\nexport default function P() { return null; }\n`;
 test('a page whose style object is written elsewhere is refused before anything is sent, as one the check could not read', async () => {
   const none = untouchable();
   const r = await run(createArgs(codeFile(GRIFFEL_INDIRECT)), none.factory);
@@ -1945,23 +1945,6 @@ test('a page whose style object is written elsewhere is refused before anything 
 // The script reads the page file ONCE and decides everything on those bytes: the Griffel check, an update's comparison with the deployed page, the base marker's hash and what is
 // written to the page. A save to the file in between — an update reads the deployed page first, and that takes seconds — would otherwise ship bytes nothing here checked. And
 // JavaScript passed with --compiled-code-file would be deployed instead of the checked TypeScript, so that flag is refused.
-
-// A style object kept in a `const` at the top of the page that nothing but the styles uses is read where it is used (griffel-styles.js, topLevelStyleConsts): a key Griffel drops
-// in it is refused as one written in the call is, and a page with none goes through with no Griffel warning.
-const GRIFFEL_CONSTANT = `${GRIFFEL_IMPORT}const styles = { root: { borderWidth: '1px' } };\nconst useStyles = makeStyles(styles);\nexport default function P() { return null; }\n`;
-test('a page whose style object is a constant at its top is read: a key Griffel drops in it is refused, and a page with none is sent', async () => {
-  const none = untouchable();
-  const r = await run(createArgs(codeFile(GRIFFEL_CONSTANT)), none.factory);
-  assert.strictEqual(r.ok, false);
-  assert.strictEqual(r.payload.code, 'griffel-shorthand');
-  assert.deepStrictEqual(r.payload.problems.map((p) => [p.code, p.property, p.line, p.column]), [['unsupported-shorthand', 'borderWidth', 2, 26]]);
-  assert.strictEqual(none.made.n, 0, 'nothing is listed, read or written');
-  const clean = GRIFFEL_CONSTANT.replace('borderWidth', 'borderTopWidth');
-  const sent = await griffelUpdate(clean, clean);
-  assert.strictEqual(sent.r.ok, true, JSON.stringify(sent.r.payload));
-  assert.strictEqual(sent.genpage.of('update').length, 1, 'the page is written');
-  assert.deepStrictEqual((sent.r.payload.warnings || []).filter((warning) => /Griffel/.test(warning)), [], 'with no Griffel warning');
-});
 
 test('--compiled-code-file is refused before anything runs: the JavaScript in it would be deployed without the Griffel check', async () => {
   const file = codeFile(TEXT);
