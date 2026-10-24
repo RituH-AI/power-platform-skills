@@ -268,12 +268,21 @@ test('a named helper\u2019s destructured parameter binds its own names', () => {
 //   );
 // React then hands PageBody exactly the page props, so its first parameter is proven to be them — but only through that
 // one bounded shape, never because a function happens to be called PageBody.
+// The forwarding proof also requires PageErrorBoundary to be the documented class itself — a function or an altered class
+// of that name could clone its child with another dataApi — so every wrapper below declares that class, copied from
+// references/rules.md.
+const BOUNDARY_CLASS = (() => {
+  const rules = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', '..', '..', '..', 'plugins', 'model-apps', 'references', 'rules.md'), 'utf8').replace(/\r\n/g, '\n');
+  const start = rules.indexOf('class PageErrorBoundary extends React.Component<');
+  return rules.slice(start, rules.indexOf('\n}\n', start) + 3);
+})();
 const body = (inner, { name = 'PageBody', param = 'props' } = {}) => `function ${name}(${param}: GeneratedComponentProps) {
   ${inner}
   return null;
 }
 `;
-const wrapper = (jsx, param = 'props') => `const GeneratedComponent = (${param}: GeneratedComponentProps) => (
+const wrapper = (jsx, param = 'props') => `${BOUNDARY_CLASS}
+const GeneratedComponent = (${param}: GeneratedComponentProps) => (
   ${jsx}
 );
 export default GeneratedComponent;
@@ -292,7 +301,7 @@ test('the canonical boundary wrapper forwards the page props to PageBody, so its
   return null;
 };
 ` + wrapper(CANONICAL)), true, 'an arrow PageBody with its own parameter name');
-  assert.equal(receiverOk(helper('client', 'client') + body(DESTRUCTURED) + `function GeneratedComponent(props: GeneratedComponentProps) {
+  assert.equal(receiverOk(helper('client', 'client') + body(DESTRUCTURED) + BOUNDARY_CLASS + `function GeneratedComponent(props: GeneratedComponentProps) {
   return (
     <PageErrorBoundary appInsights={props.appInsights}>
       <PageBody {...props} />
@@ -303,6 +312,13 @@ export default GeneratedComponent;
 `), true, 'a function wrapper, with the boundary given its telemetry prop');
   // Neighbour: a page without the wrapper keeps the old proof from its default export.
   assert.equal(receiverOk(helper('client', 'client') + page('props', DESTRUCTURED)), true, 'a page without the wrapper is unchanged');
+  // The same wrapper around a boundary that is not the documented class proves nothing.
+  const bare = wrapper(CANONICAL).replace(BOUNDARY_CLASS, '');
+  assert.equal(receiverOk(helper('client', 'client') + body(DESTRUCTURED) + bare), false, 'no boundary class declared');
+  const cloning = 'function PageErrorBoundary(p: { children: React.ReactElement }) { return React.cloneElement(p.children, { dataApi: mockApi }); }\n';
+  assert.equal(receiverOk(helper('client', 'client') + body(DESTRUCTURED) + cloning + bare), false, 'a PageErrorBoundary function that clones its child');
+  const twice = wrapper(CANONICAL).replace('  public render(): React.ReactNode {', '  public render(): React.ReactNode {\n    return React.cloneElement(this.props.children as React.ReactElement, { dataApi: mockApi });\n  }\n\n  public renderOriginal(): React.ReactNode {');
+  assert.equal(receiverOk(helper('client', 'client') + body(DESTRUCTURED) + twice), false, 'an altered boundary class');
 });
 
 test('anything but the exact forwarding shape leaves PageBody\u2019s props unproven', () => {
