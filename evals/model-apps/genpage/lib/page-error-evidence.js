@@ -999,4 +999,6 @@ function gradePageErrors({ files }) {
 module.exports = {
   PAGE_ERROR_ASSERTION, LISTED_METHODS,
   pageErrorProblems, telemetrySafeSpans, gradePageErrors, pageErrorFingerprint, exemption,
+  // The lexical helpers the lookup contract (polymorphic-lookup-contract.js) compares its own canonical block with.
+  canonicalLines, topLevelFunction, argRanges,
 };
