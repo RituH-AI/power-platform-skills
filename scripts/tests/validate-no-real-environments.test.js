@@ -176,6 +176,8 @@ test('OData annotations are not mistaken for e-mail addresses', () => {
     '_ownerid_value@OData.Community.Display.V1.FormattedValue',
     'publisherid@odata.bind',
     'IconWebResourceId@odata.bind',
+    '_customerid_value@Microsoft.Dynamics.CRM.lookuplogicalname',
+    '_ownerid_value@Microsoft.Dynamics.CRM.associatednavigationproperty',
   ].join('\n');
   assert.deepEqual(scanText(odata), []);
 });

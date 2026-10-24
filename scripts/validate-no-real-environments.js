@@ -94,8 +94,11 @@ const PLACEHOLDER_EMAIL_DOMAIN_ROOTS = ['contoso', 'fabrikam', 'example', 'compa
 
 // OData annotations parse as e-mail addresses but are not: `_ownerid_value@OData.Community.Display.
 // V1.FormattedValue`, `publisherid@odata.bind`. Both begin their "domain" with `odata.`, which is
-// not a registrable domain, so skipping them costs no real coverage.
-const ODATA_ANNOTATION = /^odata\./i;
+// not a registrable domain, so skipping them costs no real coverage. Dataverse's own instance
+// annotations read the same way under its `Microsoft.Dynamics.CRM.` namespace, which is no host either:
+// `_customerid_value@Microsoft.Dynamics.CRM.lookuplogicalname`, `…@Microsoft.Dynamics.CRM.associatednavigationproperty`
+// (https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/query/select-columns#lookup-property-data).
+const ODATA_ANNOTATION = /^(?:odata|microsoft\.dynamics\.crm)\./i;
 
 const HOST_RE = /\b([a-z0-9][a-z0-9-]*)\.crm[a-z0-9]*\.dynamics\.com\b/gi;
 const TENANT_RE = /\b([a-z0-9][a-z0-9-]*)\.onmicrosoft\.com\b/gi;
