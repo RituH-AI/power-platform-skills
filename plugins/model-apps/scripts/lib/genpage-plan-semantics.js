@@ -408,11 +408,30 @@ function readWrittenSemantics(plan) {
   const contract = read.assumptions !== null || blocks.some((block) => sectionsAt(block.body, 4)
     .some((sub) => ['data semantics', 'lookup metadata'].includes(sub.title.trim().toLowerCase())));
   if (specs.length > 1 && contract) problems.push(problem('invalid-data-semantics', 'the plan has more than one ## Per-Page Specifications section'));
+  const fileLines = (block) => block.body.map((line) => /^\s*[-*]\s+\*\*File:\*\*\s*(.*?)\s*$/i.exec(line)).filter(Boolean).map((match) => pageFileKey(match[1]));
+  if (contract) {
+    // A plan carrying the contract has ONE specification per page. A second block with the same title or file — with or
+    // without records of its own, before or after the one that has them — is refused here, before the legacy branch below
+    // skips a block without records: the schema reader keeps the LAST block of a title and this reader the first with
+    // records, so two authoritative blocks would otherwise be certified as one approved page. An older plan (no contract)
+    // keeps its absence-only reading.
+    const titles = new Set();
+    const named = new Set();
+    for (const block of specs.length ? sectionsAt(specs[0].body, 3) : []) {
+      const title = block.title.trim().toLowerCase();
+      if (titles.has(title)) problems.push(problem('invalid-data-semantics', `### ${block.title}: the plan has another page specification with this title`));
+      titles.add(title);
+      for (const file of new Set(fileLines(block).filter(Boolean))) {
+        if (named.has(file)) problems.push(problem('invalid-data-semantics', `### ${block.title}: another page specification has the file ${file}`));
+        named.add(file);
+      }
+    }
+  }
   for (const block of specs.length ? sectionsAt(specs[0].body, 3) : []) {
     const subs = sectionsAt(block.body, 4);
     const semantics = subs.filter((sub) => sub.title.trim().toLowerCase() === 'data semantics');
     const lookups = subs.filter((sub) => sub.title.trim().toLowerCase() === 'lookup metadata');
-    const files = block.body.map((line) => /^\s*[-*]\s+\*\*File:\*\*\s*(.*?)\s*$/i.exec(line)).filter(Boolean).map((match) => pageFileKey(match[1]));
+    const files = fileLines(block);
     const where = `### ${block.title}`;
     if (!semantics.length && !lookups.length) {
       if (files.length === 1 && files[0] && !read.pages.has(files[0])) read.pages.set(files[0], { page: block.title, semantics: null, lookups: null });

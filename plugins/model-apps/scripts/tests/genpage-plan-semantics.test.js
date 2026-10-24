@@ -142,6 +142,24 @@ test('an older plan or preview without the contract reads as not recorded — no
   assert.deepEqual(semantics.writtenSemanticsProblems(written({ assumptions: null, decisions: null, lookups: null })), []);
 });
 
+test('a plan carrying the contract has one specification per page: a second block with its title or file is refused in either order', () => {
+  const block = (title, file, binding) => ['', `### ${title}`, `- **File:** ${file}`, '- **Purpose:** Browse opportunities by customer', `- **Data Binding:** ${binding}`, ''].join('\n');
+  const contact = block('Customer Lookup', 'customer-lookup.tsx', 'customerid_contact/contactid');
+  for (const [label, plan] of [
+    ['a later block without records, same title and file', written() + contact],
+    ['an earlier block without records, same title and file', written().replace('\n### Customer Lookup\n', `${contact}\n### Customer Lookup\n`)],
+    ['a later block under another title, same file', written() + block('Customer Lookup (contacts)', 'customer-lookup.tsx', 'customerid_contact/contactid')],
+    ['a later block with the same title, another file', written() + block('Customer Lookup', 'customer-lookup-2.tsx', 'customerid_contact/contactid')],
+  ]) {
+    const read = semantics.readWrittenSemantics(plan);
+    assert.ok(read.problems.some((p) => p.code === 'invalid-data-semantics' && /another page specification/.test(p.message)), `${label}: ${JSON.stringify(read.problems)}`);
+    assert.ok(semantics.writtenSemanticsProblems(plan, { require: true }).length > 0, `${label}: the schema check refuses it too`);
+  }
+  // An older plan without the contract keeps its absence-only reading: duplicates there are the schema reader's business.
+  const legacy = written({ assumptions: null, decisions: null, lookups: null });
+  assert.deepEqual(semantics.readWrittenSemantics(legacy + contact).problems, []);
+});
+
 test('the empty sentinels are exact and read as recorded-and-empty', () => {
   const w = semantics.readWrittenSemantics(written({ assumptions: 'No assumptions.', decisions: 'None.', lookups: 'None.' }));
   assert.deepEqual(w.problems, []);

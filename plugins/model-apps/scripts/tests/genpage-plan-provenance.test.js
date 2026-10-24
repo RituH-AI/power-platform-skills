@@ -710,6 +710,28 @@ test('evidence that is read is validated whatever its value: JSON null is not "n
   assert.match(fixtureResult.error, /not a successful get-lookup-metadata\.js answer/);
 });
 
+test('a second specification of a page is refused, whichever block carries the records: the approved page is the one written', () => {
+  const fixture = path.join(__dirname, '..', '..', '..', '..', 'evals', 'model-apps', 'genpage', 'fixtures', '26-customer-lookup');
+  const plan = fs.readFileSync(path.join(fixture, 'genpage-plan.md'), 'utf8').replace(/\r\n/g, '\n');
+  const approved = fs.readFileSync(path.join(fixture, 'approved-plan.md'), 'utf8');
+  const evidence = path.join(fixture, 'lookup-metadata.json');
+  const verify = (text) => verifyPlanProvenance({ planPath: tmpPlan(text), approvedPlan: approved, requireAssumptions: true,
+    requireObservedLookups: true, lookupMetadataPath: evidence });
+  assert.equal(verify(plan).ok, true, 'neighbour: the fixture plan');
+  const start = plan.indexOf('\n### Customer Opportunities\n');
+  assert.ok(start > 0, 'the fixture has the page specification');
+  const fileLine = /\n- \*\*File:\*\* [^\n]+/.exec(plan.slice(start))[0];
+  const duplicate = `\n### Customer Opportunities${fileLine}\n- **Purpose:** Browse opportunities by customer\n- **Data Binding:** customerid_contact/contactid\n`;
+  for (const [label, text] of [
+    ['a later duplicate without records', `${plan.trimEnd()}\n${duplicate}`],
+    ['an earlier duplicate without records', plan.slice(0, start) + duplicate + plan.slice(start)],
+  ]) {
+    const result = verify(text);
+    assert.equal(result.ok, false, label);
+    assert.match(result.error, /another page specification/, label);
+  }
+});
+
 test('the CLI takes the semantic options as declared flags and refuses an unknown or misspelled one', () => {
   const { spawnSync } = require('node:child_process');
   const script = path.join(__dirname, '..', 'genpage-plan-provenance.js');
