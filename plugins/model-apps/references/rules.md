@@ -12,7 +12,7 @@ Comprehensive rules for generating generative page code. Read this file during c
 4. **Limited Imports**: Only React, Fluent UI V9, FluentUI icons, and D3.js for charts
 5. **DataAPI**: ONLY use when explicit TableRegistrations provided; otherwise use mocked data
 6. **Entity Logical Names**: Use singular lowercase (e.g., `"account"` not `"accounts"`)
-7. **Styling**: Use `makeStyles` with tokens; avoid inline styles except for dynamic values
+7. **Styling**: Use `makeStyles` with tokens; avoid inline styles except for dynamic values. Tokens give the default model-driven look. When the plan's `## Design Preferences` → `Styling:` starts with `Maker-requested:`, apply that style instead — see **Layout and Styling > Maker-requested styling**
 8. **Responsive Design**: Use flexbox and relative units; NEVER use `100vh`/`100vw`
 9. **Icons — verified names only**: Import from `@fluentui/react-icons`; use unsized variants only (e.g., `AddRegular` not `Add24Regular`). Icon names are frequently hallucinated — names like `MedicalRegular`, `PawRegular`, `AnimalRabbitRegular`, `BirdRegular` do not exist. **Always Read `${PLUGIN_ROOT}/references/verified-icons.txt`** (~5000 names) and cross-check every icon import against that list. After writing, Grep your own output for `from "@fluentui/react-icons"` and verify each named import. If an icon you want is not in the list, pick the closest semantic substitute that is. Never guess a name.
 10. **No External Libraries**: No routing libraries (React Router) or assumptions of implicit dependencies
@@ -103,7 +103,7 @@ export default GeneratedComponent;
 ### Design Principles
 - Follow Microsoft Fluent Design System principles
 - Use sentence case for all text
-- Use theme tokens (e.g., `tokens.spacingVerticalXL`, `tokens.colorNeutralBackground1`)
+- Use theme tokens (e.g., `tokens.spacingVerticalXL`, `tokens.colorNeutralBackground1`) — the default look when the maker asked for no style of their own
 - `makeStyles` for styling; inline styles only for dynamic values
 - Group content in sections for visual separation
 
@@ -162,6 +162,62 @@ const useStyles = makeStyles({
 - Maintain all technical constraints: accessibility (ARIA, keyboard nav, WCAG AA), responsive design, proper semantic HTML
 - If the mockup conflicts with accessibility or responsive design requirements, prioritize accessibility while staying as close to the visual design as possible
 - Translate design elements to equivalent Fluent UI components (e.g., custom buttons -> Fluent Button with appropriate styling)
+
+### Maker-requested styling
+
+When the maker asks for a look of their own, that style wins over the default model-driven look.
+The maker can give a screenshot or mockup to follow, an existing website to match, or a description
+("navy and gold, serif headings, square corners"). The planner writes the style into
+`## Design Preferences` as a `Styling:` line that starts with `Maker-requested:` and gives concrete
+values. Apply each value. Do not fall back to the default tokens for a value that the style sets:
+
+- **Colors.** Build a theme from the stated colors over `webLightTheme` (or `webDarkTheme` for a dark
+  style). Apply it with the `themeToVars` two-div wrapper (see **Special Patterns > Dark Mode
+  Toggle**), so every Fluent component on the page uses the colors: `colorBrandBackground`,
+  `colorBrandForeground1`, `colorNeutralBackground1`, `colorNeutralForeground1`, and so on. Set
+  `color: tokens.colorNeutralForeground1` on the page root, so that inherited text follows the
+  theme (see the inherited-text note under **Dark Mode Toggle**). Use the same hex values in
+  `makeStyles` for the elements that the theme does not reach.
+- **Typography.** Set `fontFamily` on the page root to the stated font, with fallbacks that the
+  user's device has (for example `"Georgia, 'Times New Roman', serif"`). Set heading sizes and
+  weights in `makeStyles`.
+- **Shape and density.** Set the stated corner radius, spacing, borders and shadows in `makeStyles`.
+  For borders, write the longhands (see **Styling gotchas**).
+- **What the style does not set** keeps the default tokens, so the page stays consistent.
+
+```typescript
+import { webLightTheme } from "@fluentui/react-components";
+
+// Maker-requested: navy #0b2545 primary, gold #c9a227 accent, warm white #faf7f0 background, Georgia headings, 2px corners.
+const brandTheme = {
+    ...webLightTheme,
+    colorBrandBackground: "#0b2545",
+    colorBrandBackgroundHover: "#13315c",
+    colorBrandForeground1: "#0b2545",
+    colorNeutralBackground1: "#faf7f0",
+    borderRadiusMedium: "2px",
+};
+// In the component: the outer div sets the variables, the inner div reads them.
+// <div style={{ ...themeToVars(brandTheme), height: "100%", overflow: "hidden" }}>
+//     <div className={styles.root}>{/* … */}</div>
+// </div>
+```
+
+**What cannot be matched.** Tell the maker when the request needs one of these:
+
+- A page is one `.tsx` file that uses React, Fluent UI V9, Fluent icons and D3. It cannot load a
+  stylesheet, a CSS file, a web font, an image or a script from another site, and it cannot use
+  another component library. The page rebuilds the widgets of a website with Fluent components that
+  are styled to match. It does not copy them.
+- A font that is not installed on the user's device shows its fallback. Name the closest common
+  font, and a fallback.
+- Only the page's own area gets the style. The app header, the navigation and the command bar around
+  the page keep the look of the app. The page must not style `body` or anything outside its root.
+- A screenshot is matched by eye. The layout, the colors and the type are close, not exact to the pixel.
+- Contrast stays at WCAG AA. If a requested pair of colors fails, use the nearest color that passes,
+  and tell the maker.
+
+**No style asked for:** keep the model-driven defaults (Fluent UI tokens and the default theme).
 
 ---
 

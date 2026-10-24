@@ -1912,6 +1912,15 @@ custom control), but the spec validator emits a warning.
 ```
 - Shared styling tokens threaded to every page so generated pages look consistent with each other
   and the model-driven shell (both Fluent UI V9). Unknown keys are rejected.
+- **`style`** *(optional)* — the maker's own look, in words, when they ask for one: a screenshot or
+  mockup read into colors and fonts, a website to match, or a description (`"navy #0b2545 primary,
+  gold #c9a227 accent, warm white #faf7f0 background, Georgia headings, 2px corners (from:
+  screenshot)"`). Give concrete values: hex colors with their roles, a font with a fallback, corner
+  radius, density. It wins over the default model-driven look: the page plan carries it as a
+  `Styling:` line that starts with `Maker-requested:`, and every page applies it
+  (`references/rules.md` → *Maker-requested styling*, which also says what a page cannot match).
+  Omit it to keep the default look. It must be a non-empty string. It is stored in the app's page
+  manifest with the rest of `design`, so a download keeps it.
 - During **generate-pages** the design contract is passed to each headless `page-builder` agent
   so all generated `.tsx` files apply the same Fluent UI V9 token set (accent color, density,
   corner radius, dark-mode policy). Run `node scripts/preview-app.js @<dir>/app-spec.json` to

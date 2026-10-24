@@ -234,6 +234,18 @@ other source: there is none. Fixing the cause is the maker's (`az login` with th
 4. **"Any specific requirements?"** — styling, features (search, filtering, sorting),
    accessibility, responsive behavior, interactions
 
+   **A look of the maker's own wins over the default model-driven look.** The maker can attach a
+   screenshot or mockup, name a website to match, or describe the style. Turn the request into
+   concrete values and write them in the plan's `## Design Preferences` as a `Styling:` line that
+   starts with `Maker-requested:`. Give each color as a hex value with its role (primary, accent,
+   background, text), the font family with a fallback, the corner radius, the density, the borders
+   and shadows, and how buttons, cards and tables look. Then add `(from: screenshot)`,
+   `(from: website <url>)` or `(from: description)`. Read a screenshot or a website for these values.
+   If you cannot open a website, ask the maker for a screenshot or for its colors and fonts. Do not
+   assume them. If part of the request cannot be matched (`references/rules.md` → *Maker-requested
+   styling*, "What cannot be matched"), say so in the plan. When the maker asks for no look, write
+   the defaults (`Fluent UI V9 defaults`).
+
 **Skip logic:**
 - If the user provided a description with the `/genpage` command, skip question 2.
 - If the description already specifies a data source, skip question 3.

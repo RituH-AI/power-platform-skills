@@ -327,7 +327,11 @@ Write `genpage-edit-plan.md` to the working directory root (NOT inside the
 
 ## Design Notes
 <Styling, accessibility, or behavior guidance the orchestrator should follow
- when applying the changes.>
+ when applying the changes. When the maker asks to restyle the page — a
+ screenshot, a website to match, a description — write the style as a line
+ that starts with `Maker-requested:` and gives the concrete values, as
+ references/plan-schema.md says for `Styling:`; it wins over the page's
+ current look (references/rules.md → Maker-requested styling).>
 
 ## Relevant Samples
 <Optional. If a sample from ${PLUGIN_ROOT}/samples/ would help the

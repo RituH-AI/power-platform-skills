@@ -181,7 +181,12 @@ connector bindings." sentinel).]
 - Connection references: [comma-separated connectionreference logical names to include, or "none"]
 
 ## Design Preferences
-- Styling: [user's styling preferences — colors, theme, visual aesthetic]
+- Styling: [EITHER `Maker-requested: <the look as concrete values — each color as a hex value with
+  its role (primary, accent, background, text), the font family with a fallback, corner radius,
+  density, borders and shadows, and the component treatments> (from: screenshot | website <url> |
+  description)` when the maker asked for a look of their own — a screenshot or mockup, a website to
+  match, or a description; OR the model-driven defaults (`Fluent UI V9 defaults`, plus any
+  preference that does not replace that look) when they did not]
 - Features: [specific features mentioned — search, filtering, sorting, navigation, etc.]
 - Accessibility: [any specific accessibility requirements beyond WCAG AA defaults]
 
@@ -230,7 +235,7 @@ connector bindings." sentinel).]
 | `## Custom API Bindings` | Planner, page-builder, orchestrator deploy | Exact literal "No custom API bindings." when empty; names must match existing Dataverse Custom APIs (`customapi.uniquename`); entity-bound rows carry the bound table (else `(Global)`); every row carries its discovered `Parameters` kinds |
 | `## Dataverse Operations` | Planner, page-builder, orchestrator deploy (Phase 4.6b) | Optional; absent = no new built-in operation. Exact literal "No Dataverse operations." or the builder's table under its not-checked verification line; only `WhoAmI` / `RetrieveVersion`, catalogue cells, `Invoke` = `button` |
 | `## Solution Packaging` | Orchestrator (Phase 6.7) | Opt-in; absent = skip |
-| `## Design Preferences` | Page-builder | Prose, free-form |
+| `## Design Preferences` | Page-builder | Prose, free-form; a `Styling:` line that starts with `Maker-requested:` wins over the default look (`references/rules.md` → *Maker-requested styling*) |
 | `## Relevant Samples` | Page-builder (for Read path resolution) | Sample filename must match a file in `${PLUGIN_ROOT}/samples/` |
 | `## Per-Page Specifications` | Page-builder | Each page gets one `### [Page Name]` subsection matching the Pages table |
 

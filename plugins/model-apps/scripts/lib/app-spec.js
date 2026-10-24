@@ -4175,8 +4175,11 @@ function validateAppSpec(spec, opts = {}) {
     if (typeof spec.design !== 'object' || spec.design === null || Array.isArray(spec.design)) {
       errors.push('design must be an object');
     } else {
-      const allowed = new Set(['accentColor', 'density', 'cornerRadius', 'darkMode', 'layout']);
+      const allowed = new Set(['accentColor', 'density', 'cornerRadius', 'darkMode', 'layout', 'style']);
       for (const k of Object.keys(spec.design)) if (!allowed.has(k)) errors.push(`design: unknown key '${k}' (allowed: ${[...allowed].join(', ')})`);
+      // `style` is the maker's own look in words (a screenshot read into colors and fonts, a website to match, a description), which the page plan
+      // carries as a `Maker-requested:` styling line that wins over the default look (lib/page-plan.js designPreferences). Text, or it says nothing.
+      if (spec.design.style !== undefined && (typeof spec.design.style !== 'string' || !spec.design.style.trim())) errors.push('design.style must be a non-empty string: the look the maker asked for, in words');
     }
   }
   // Security personas (optional; additive — validated on v1 and v2 specs). Each persona authors ONE

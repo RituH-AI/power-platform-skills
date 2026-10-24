@@ -99,7 +99,10 @@ Locate and extract:
 
 - The **Per-Page Specification** subsection for your assigned page (purpose, entities,
   features, components, layout, data binding, interactions)
-- The **Design Preferences** section (styling, features, accessibility notes)
+- The **Design Preferences** section (styling, features, accessibility notes). A `Styling:` line
+  that starts with `Maker-requested:` is the maker's own look, and it wins over the default
+  model-driven styling. Apply every value it gives, as `references/rules.md` → *Maker-requested
+  styling* says. Keep the default tokens only for what it does not set.
 - The **Environment** section (languages for localization)
 - The **Relevant Samples** table (which sample to read for your page)
 
@@ -366,7 +369,9 @@ export default GeneratedComponent;
 - **No external libraries** — only React, Fluent UI V9, approved Fluent icons, D3.js for charts
   (see `references/supported-dependencies.md`; `scripts/lib/supported-dependencies.js`
   is the source of truth for the generated package names, versions, and feature gates)
-- **makeStyles with tokens** — no inline styles for static values
+- **makeStyles with tokens** — no inline styles for static values. Tokens are the default look:
+  a `Maker-requested:` style in the plan's Design Preferences replaces them for the values it sets
+  (see Step 1)
   ```typescript
   const useStyles = makeStyles({
     container: {

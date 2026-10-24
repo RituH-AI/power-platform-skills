@@ -63,6 +63,17 @@ test('spec.design accepts known keys and rejects unknown ones', () => {
   assert.ok(validateAppSpec(bad, { profile: 'plan' }).errors.some((e) => /design: unknown key 'accent'/.test(e)));
 });
 
+test('spec.design.style — the maker\u2019s own look in words — is a known key, and must be text that says something', () => {
+  const s = base();
+  s.design = { style: 'navy #0b2545 primary, gold #c9a227 accent, Georgia headings (from: website)', accentColor: '#0b2545' };
+  assert.strictEqual(validateAppSpec(s, { profile: 'plan' }).ok, true, JSON.stringify(validateAppSpec(s, { profile: 'plan' }).errors));
+  for (const style of ['', '   ', 42, ['navy'], { primary: '#0b2545' }, null]) {
+    const bad = base();
+    bad.design = { style };
+    assert.ok(validateAppSpec(bad, { profile: 'plan' }).errors.includes('design.style must be a non-empty string: the look the maker asked for, in words'), JSON.stringify(style));
+  }
+});
+
 // Edge cases of navigatesTo, pageInput and design validation --------------------------
 
 test('navigatesTo entry with a missing or non-string targetKey errors (isV2)', () => {
