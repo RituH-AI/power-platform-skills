@@ -3196,28 +3196,25 @@ refuses more: where it changes what a default value holds, the page must be comp
 `await f<T, U>()`). A computed key that holds
 an expression is one even where it starts with a regular expression (`({ [/key/.source]: value }: R) => | T | null`
 is a function type, whose `=>` and leading `|` are its own) — but not right after `await`, where TypeScript reads a
-division. And a mapped type whose key type is in parentheses, inside
-a parenthesised return type — `(p): ({ [K in (keyof T)]: boolean }) => …`, `((keyof T))`, `(keyof T) as K`, a
-parenthesised conditional key type, `[keyof T]` — is a parenthesised type, as TypeScript reads it: the braces are tried
-as a binding pattern first, whose key `K in (keyof T)` holds two names side by side in parentheses, which is no
-expression, so the pattern fails (`parenthesizedMappedType`; the mapped type is read strictly to the `)` that closes the
-parentheses around it, and `K in (T)` and `K in (Extract<keyof T, string>)`, which are expressions, still make a pattern).
-That answer makes the gate accept a page it refused before, so it is given only where Babel's parser reads the page the same
-way: a key that holds `await` is not read (TypeScript parses a type outside the await context, where `(await)` is a name and
-an expression; Babel refuses it as a name in a module), and neither is a key or member type that only TypeScript's parser
-takes — a JSDoc type, a predicate (`asserts x`), a reserved word or `await` for a type's name, `readonly` before a type that
-is no array or tuple, a type parameter named by a word strict code reserves (`[yield in …]`, `infer yield`).
-`source-literals.test.js` sweeps such key types against both parsers (with the oracle variables set): the gate reads the
-braces as a mapped type only where TypeScript and Babel both parse the page so.
-**Known limits** (rare, pinned in `source-literals.test.js`, each checked against TypeScript's parser): a type argument
-that the strict reading does not read — a function type, an object type with members, a template literal type, an import
-type — leaves the default value read to its first comma, so a write cut right after a function type whose parameter has
-`{ a = f<(x: T) => U, V>() }` is accepted (the page compile refuses it); a function type whose parameter's default passes
-over a generic call's type arguments and whose own return type begins with a `|` (`({ a = f<T, U>() }: R) => | X | null =>
-…`) is refused although TypeScript parses it, as it was before the type arguments were read; a mapped type whose key type
-is an object type with members or a function or constructor type in parentheses (`[K in ({ a: keyof T })]`,
-`[K in (new () => T)]`), or one that only TypeScript's parser takes (above), is refused although TypeScript parses it —
-write the key type without the parentheses, drop the parentheses around the return type, or name the type with a type alias.
+division.
+**Known limits** (rare, pinned in `source-literals.test.js`, each checked against TypeScript's parser and Babel's): a type
+argument that the strict reading does not read — a function type, an object type with members, a template literal type, an
+import type — leaves the default value read to its first comma, so a write cut right after a function type whose parameter
+has `{ a = f<(x: T) => U, V>() }` is accepted (the page compile refuses it); a function type whose parameter's default
+passes over a generic call's type arguments and whose own return type begins with a `|` (`({ a = f<T, U>() }: R) => | X |
+null => …`) is refused although TypeScript parses it, as it was before the type arguments were read.
+**Refused on purpose — a fail-closed reading:** a mapped type whose key type is in parentheses (or brackets) and whose
+member type is a name, inside a parenthesised return type — `(p): ({ [K in (keyof T)]: boolean }) => …`, and so
+`((keyof T))`, `(keyof T) as K`, `[keyof T]`, a parenthesised conditional key type — although TypeScript and Babel parse it,
+sync and async. The key's reading takes any group for an operand, so `K in (keyof T)` reads as an expression, the braces as
+a binding pattern, the parentheses as a function type's parameters and the arrow as that function type's, and the page as
+cut off; by the same reading the page that only such a function type takes (`… => | T | U => …`) is accepted, and the page
+compile refuses it. Both parsers try that binding pattern first and drop it because `(keyof T)` is no expression; reading
+the braces as a mapped type instead would accept a page on the strength of every token in its key and member types, which
+the gate does not check as the parsers do (an escaped keyword, a legacy octal number, a string escape) — a reading that
+tried let pages through that TypeScript or Babel refuses, so it is not made. Write the key type without its parentheses
+(`[K in keyof T]`), drop the parentheses around the return type (`(p): { [K in (keyof T)]: boolean } => …`), or name the
+type with a type alias (`type Flags<T> = { [K in (keyof T)]: boolean }`, then `(p): Flags<T> => …`).
 The export pattern once took no `<` after `default`, and every such page was refused as having no default export.
 And `endsMidStatement` catches the cuts that leave every bracket balanced: the
 lexer reports when a file stops inside a string, template, comment or JSX element, and a file
