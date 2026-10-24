@@ -14,6 +14,10 @@
 //     existing guard), where it used to store them as English;
 //   * a rebuild into the same environment writes no label;
 //   * a download with --language-code 3082, rebuilt with it (as the flag requires), keeps the ENGLISH label in English.
+// The fake stores a label in exactly the languages it was sent in, which lets the first cases hold a label in Spanish alone on an
+// English-base environment. Dataverse does not (measured): it fills the base language in, with the same text, when a label is created
+// in another language only, so on a live environment the one language a label holds alone is the base language, and the change shows
+// as the last case does — a label held only in the base language, downloaded with --language-code naming another.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');

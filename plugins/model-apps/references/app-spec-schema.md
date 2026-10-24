@@ -324,8 +324,11 @@ column, lookup, alternate key or option labelled in several languages comes back
 in a single language comes back as a plain string when that language is the download's authoring
 language (`--language-code`, else the `languageCode` the spec already on disk pins, else the environment's
 base language — so no ordinary spec changes shape), and as a **one-entry map** when it is another:
-`{ "3082": "Pedido" }` for a table labelled only in Spanish, downloaded from an environment whose base
-language is English. A plain string is written in the language a rebuild resolves, so that label used to
+`{ "3082": "Pedido" }` for a table labelled only in Spanish, the base language of its environment,
+downloaded in English with `--language-code 1033`; `{ "1033": "Note" }` for an English-only column of an
+English environment downloaded with `--language-code 3082`. (Dataverse fills the base language in, with the
+same text, when a label is created in another language only, so the one language a label holds alone is the
+environment's base language.) A plain string is written in the language a rebuild resolves, so that label used to
 come back as an English label with Spanish text; a map keeps its language, and a rebuild into an
 environment that does not have it stops at the start of its data model and names it (see the rule above)
 instead. Every plain label in a downloaded spec is in the authoring language, as its navigation titles

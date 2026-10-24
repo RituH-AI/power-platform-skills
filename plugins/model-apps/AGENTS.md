@@ -1605,7 +1605,12 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   not the authoring language** (`labelFromDataverse`): it is written as a one-entry LCID map, `{ "3082": "Pedido" }`,
   so a rebuild stores it in that language — a plain string was stored in the language the rebuild resolves, which
   put Spanish text in the English label, in a fresh environment that had Spanish as much as in one that had not — and
-  a rebuild into an environment without the language stops at the start of its data model and names it. A label in
+  a rebuild into an environment without the language stops at the start of its data model and names it. Measured:
+  Dataverse fills the base language in, with the same text, when a label is created or updated in another language
+  only, so the one language a label holds alone is the environment's base language — and the label keeps it when
+  the download's authoring language is another: a Spanish-only label of a Spanish-base environment downloaded with
+  `--language-code 1033` is `{ "3082": "Pedido" }`, an English-only one of an English-base environment downloaded with
+  `--language-code 3082` is `{ "1033": "Note" }`. A label in
   the authoring language stays a plain string, so an ordinary download is byte-identical
   (`download-label-language-real-bundle.test.js`). A lookup's label is left out only where its text is the label a
   rebuild gives a lookup that sets none, as before, **and** that label is the same in every language — the parent's

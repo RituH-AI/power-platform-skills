@@ -2564,6 +2564,11 @@ async function readMediaColumns(sdk, logical, attributes, concurrency) {
 // plain labels in ITS language — as it writes the navigation titles — unless the spec pins
 // `languageCode` (or the build is given `--language-code`); a one-entry map needs its language
 // provisioned there, and the build stops at the start of its data-model phase when it is not.
+//
+// MEASURED: Dataverse fills the base language in, with the same text, when a label is created or
+// updated in another language only, so the one language a label holds alone is the environment's
+// base language — the map is written when the authoring language is another (`--language-code`, or
+// the spec's pin): `{ "1033": "Note" }` for an English-only column read with `--language-code 3082`.
 function labelFromDataverse(value, languageCode) {
   if (!value || typeof value !== 'object') return undefined;
   const rows = Array.isArray(value.LocalizedLabels) ? value.LocalizedLabels : [];
