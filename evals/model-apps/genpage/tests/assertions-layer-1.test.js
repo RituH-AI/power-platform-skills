@@ -1432,6 +1432,14 @@ test('eval 26: an unattended run that takes the one option the planner marked, h
   for (const [label, change, reason] of [
     ['the default record missing from the log', (f) => { f.workflowLog = f.workflowLog.replace(`- ${RECORD}\n`, ''); }, /does not hold A1's Default record/],
     ['no plan-approval record', (f) => { f.workflowLog = f.workflowLog.replace('- Unattended default: plan approval → approved (unattended mode; all semantic questions resolved)\n', ''); }, /no unattended plan-approval record/],
+    // The interaction artifact still lists the approval last; only the log says it came first.
+    ['the plan approved in the log before its default was recorded', (f) => {
+      const approval = '- Unattended default: plan approval → approved (unattended mode; all semantic questions resolved)\n';
+      f.workflowLog = approval + f.workflowLog.replace(approval, '');
+    }, /approved before its unattended default was recorded/],
+    ['a second approval record after an early one', (f) => {
+      f.workflowLog = '- Unattended default: plan approval -> approved\n' + f.workflowLog;
+    }, /approved before its unattended default was recorded/],
     ['an answer recorded as user-confirmed', (f) => { f.genpagePlan = f.genpagePlan.replace('- Resolution: unattended-default', '- Resolution: user-confirmed').replace(`- Default record: ${RECORD}\n`, ''); }, /records A1 as user-confirmed, not unattended-default/],
   ]) {
     const result = grade(SEMANTIC_QUESTION, unattended(change));

@@ -3746,7 +3746,12 @@ function semanticInteractionProblems(fixture) {
         if (approvedAt < 0) problems.push(`${where}: workflow-log.md records no ExitPlanMode approval`);
         else if (approvedAt < Math.max(-1, ...[...answered.values()].map((item) => item.line))) problems.push(`${where}: the plan was approved before the question was answered`);
       } else if (entry.source === 'unattended-default') {
-        if (!PLAN_APPROVAL_RECORD.test(log)) problems.push(`${where}: workflow-log.md has no unattended plan-approval record`);
+        // As in the attended branch: the approval follows every answer's own record in the log (here each Default record),
+        // so an approval logged first — before the semantic default was settled — fails even when the interaction artifact
+        // lists the approval last. The first approval record counts: a later copy does not repair an earlier approval.
+        const approvedAt = logAt(PLAN_APPROVAL_RECORD);
+        if (approvedAt < 0) problems.push(`${where}: workflow-log.md has no unattended plan-approval record`);
+        else if (approvedAt < Math.max(-1, ...[...answered.values()].map((item) => item.line))) problems.push(`${where}: the plan was approved before its unattended default was recorded`);
       } else problems.push(`${where}: source must be ExitPlanMode or unattended-default`);
       approval = entry;
     } else problems.push(`${where}: type must be needs_input, answer or approval`);
