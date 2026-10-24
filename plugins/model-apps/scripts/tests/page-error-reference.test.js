@@ -294,3 +294,85 @@ test('the default export only forwards its props, unchanged, to PageBody inside 
   assert.deepEqual(Object.keys(child.props), ['dataApi', 'pageInput']);
   assert.equal(child.props.dataApi, props.dataApi, 'the same dataApi object');
 });
+
+// ---------- the rule text and the templates a builder copies ----------
+
+const BUILDER = fs.readFileSync(path.join(__dirname, '..', '..', 'agents', 'genpage-page-builder.md'), 'utf8').replace(/\r\n/g, '\n');
+const squashed = (text) => text.replace(/\s+/g, ' ');
+const CRITICAL_RULES = RULES.slice(RULES.indexOf('\n## Critical Rules\n'), RULES.indexOf('\n## Supported Libraries\n'));
+// The numbered Critical Rule `n`, from its number to the next one.
+function criticalRule(n) {
+  const match = new RegExp(`\\n${n}\\. ([\\s\\S]*?)(?=\\n\\d+\\. |\\n---)`).exec(CRITICAL_RULES);
+  assert.ok(match, `rules.md has Critical Rule ${n}`);
+  return squashed(match[1]);
+}
+// Does a TSX source parse? A transpile with diagnostics on reports syntax only — it is not a type check.
+function parses(source, label) {
+  typescript ||= loadVendoredTypeScript();
+  const { diagnostics } = typescript.transpileModule(source, {
+    fileName: 'page.tsx',
+    reportDiagnostics: true,
+    compilerOptions: { module: typescript.ModuleKind.CommonJS, target: typescript.ScriptTarget.ES2020, jsx: typescript.JsxEmit.React },
+  });
+  assert.deepEqual((diagnostics || []).map((entry) => typescript.flattenDiagnosticMessageText(entry.messageText, '\n')), [], `${label} parses`);
+}
+const WRAPPER = /const GeneratedComponent = \(props: (\w+)\) => \(\n\s*<PageErrorBoundary>\n\s*<PageBody \{\.\.\.props\} \/>\n\s*<\/PageErrorBoundary>\n\);\n\nexport default GeneratedComponent;/;
+
+test('Critical Rule 22 states the one error contract, and Rule 3 makes the boundary the single class exception', () => {
+  assert.equal(criticalRule(22), squashed(`**Consistent errors**: Route failed data operations through the page's single top-level
+    \`reportPageError\`, retain bounded code and message diagnostics, and put its returned view in the operation's error state. Render
+    errors as escaped Fluent MessageBar text with localized application fallbacks. Offer manual retry only for proven-safe reads or the
+    documented pre-dispatch Custom API network result; never retry an indeterminate result automatically. Wrap PageBody in the page's
+    one top-level React PageErrorBoundary. Instrument only explicitly authorized failure sites, only through the helper. Expected
+    null/empty states are not failures. See “Missing Error Handling” for the canonical patterns and the static check's declared limits.`));
+  const rule3 = criticalRule(3);
+  assert.match(rule3, /each as separate top-level function \(no nesting\)/, 'Rule 3 still forbids nesting');
+  assert.match(rule3, /The one exception is a single top-level React class, `PageErrorBoundary` \(Rule 22\)/);
+  assert.match(rule3, /Event handlers and loaders that close over a component's state stay inside that component/);
+  assert.match(rule3, /No new library or runtime dependency/);
+  // The section the rule points at states what the eval check reads and what it does not.
+  assert.match(squashed(MISSING_ERROR_HANDLING), /What the eval check reads, and what it does not\./);
+  assert.match(squashed(MISSING_ERROR_HANDLING), /It does not read `loadMoreRows`/);
+});
+
+test('rules.md Component Structure and both builder templates mount PageBody inside the boundary', () => {
+  const structure = RULES.slice(RULES.indexOf('\n## Component Structure\n'), RULES.indexOf('\n## Layout and Styling\n'));
+  const block = /```typescript\n([\s\S]*?)\n```/.exec(structure)[1];
+  assert.match(block, /function PageBody\(props: GeneratedComponentProps\) \{\n\s*const \{ dataApi, pageInput \} = props;/);
+  assert.match(block, WRAPPER);
+  assert.match(block, /The page error block of "Missing Error Handling" \(Common Errors\), copied unchanged/);
+  assert.doesNotMatch(block, /const GeneratedComponent = \(props: GeneratedComponentProps\) => \{/, 'the old component body is gone');
+  parses(block, 'rules.md Component Structure');
+  const templates = BUILDER.slice(BUILDER.indexOf('\n### Component Structure\n'), BUILDER.indexOf('\n### Mandatory Rules\n'));
+  const [dataverse, mock] = [...templates.matchAll(/```typescript\n([\s\S]*?)\n```/g)].map((match) => match[1]);
+  assert.ok(dataverse && mock, 'the builder shows the Dataverse and the mock template');
+  assert.equal(WRAPPER.exec(dataverse)?.[1], 'GeneratedComponentProps');
+  assert.equal(WRAPPER.exec(mock)?.[1], 'Props', 'the mock page keeps its local Props');
+  assert.match(dataverse, /function PageBody\(props: GeneratedComponentProps\) \{\n\s*const \{ dataApi, pageInput \} = props;/);
+  assert.match(mock, /function PageBody\(props: Props\) \{\n\s*const \{ pageInput \} = props;/);
+  assert.doesNotMatch(mock, /RuntimeTypes/, 'a mock page imports nothing from ./RuntimeTypes');
+  for (const [label, source] of [['the Dataverse template', dataverse], ['the mock template', mock]]) {
+    assert.match(source, /The page error block of rules\.md "Missing Error Handling"[\s\S]*copied unchanged/, `${label} copies the canonical block`);
+    parses(source, label);
+  }
+  assert.match(squashed(templates), /copy the page error block of `rules\.md` → \*Common Errors\* → \*Missing Error Handling\* \*\*unchanged\*\*/);
+});
+
+test('the builder routes every failure through the five-argument reporter, with the boundary as its one class', () => {
+  const rules = squashed(BUILDER.slice(BUILDER.indexOf('\n### Mandatory Rules\n'), BUILDER.indexOf('\n### Localization\n')));
+  assert.doesNotMatch(rules, /all async `dataApi` calls wrapped in try-catch/, 'the old try/catch-only instruction is gone');
+  assert.match(rules, /\*\*Error handling\*\* — every failed data operation goes through the page's one `reportPageError` with its five required arguments — `reportPageError\(PAGE_NAME, '<operation>', code, error, '<kind>'\)`/);
+  assert.match(rules, /rendered by `PageErrorBar`/);
+  assert.match(rules, /never retry a write or an indeterminate result/);
+  assert.match(rules, /\*\*Top-level functions\*\* — components and utilities as separate top-level functions, no nesting; the page's one class is `PageErrorBoundary`/);
+  // The connector and Custom API fragments the builder shows report their failures, never set a bare string.
+  const examples = BUILDER.slice(BUILDER.indexOf('\n### Connector-backed data\n'), BUILDER.indexOf('\n## Step 6'));
+  assert.doesNotMatch(examples, /\bsetError\(|if \(!response\.ok\) \{ return; \}|isSubmitting/);
+  assert.match(examples, /if \(!response\.ok\) \{ setWeather\(\{ weather: null, error: reportPageError\(PAGE_NAME, 'loadWeather', undefined, undefined, 'read', retryWeather\) \}\); return; \}/);
+  const order = ['if (res.indeterminate)', "if (res.error?.code === 'indeterminate')", "if (!res.ok && res.error?.code === 'network')", 'if (!res.ok)', 'const status = res.outputs?.NewStatus;'];
+  const at = order.map((guard) => examples.indexOf(guard));
+  assert.ok(at.every((index, i) => index > 0 && (i === 0 || index > at[i - 1])), `the Custom API guards come in order before the outputs: ${at}`);
+  for (const report of ["'indeterminate')); return; }", "'network', retryApprove)); return; }", "res.error?.message, 'write')); return; }", "undefined, error, 'write'));"]) {
+    assert.ok(examples.includes(report), `the Custom API fragment reports: ${report}`);
+  }
+});

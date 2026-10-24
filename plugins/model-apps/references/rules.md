@@ -8,7 +8,7 @@ Comprehensive rules for generating generative page code. Read this file during c
 
 1. **React 17 + TypeScript**: All code must use React 17 with TypeScript
 2. **Fluent UI V9**: Use `@fluentui/react-components` (DatePicker from `@fluentui/react-datepicker-compat`, TimePicker from `@fluentui/react-timepicker-compat` — both require `mountNode` prop)
-3. **Single File**: All code (components, utilities) in one file; each as separate top-level function (no nesting)
+3. **Single File**: All code (components, utilities) in one file; each as separate top-level function (no nesting). The one exception is a single top-level React class, `PageErrorBoundary` (Rule 22). Event handlers and loaders that close over a component's state stay inside that component, as before — they are not nested components or free-standing utilities. No new library or runtime dependency.
 4. **Limited Imports**: Only React, Fluent UI V9, FluentUI icons, and D3.js for charts
 5. **DataAPI**: ONLY use when explicit TableRegistrations provided; otherwise use mocked data
 6. **Entity Logical Names**: Use singular lowercase (e.g., `"account"` not `"accounts"`)
@@ -27,6 +27,8 @@ Comprehensive rules for generating generative page code. Read this file during c
 19. **All hooks above every early return — no conditional hook calls**: Detail/record pages crash with **minified React error #310** ("rendered more/fewer hooks than the previous render") on the *first* open of a record, then work on the second click. Cause: a hook — usually a `useMemo` deriving chart points or display rows from loaded data — sits *below* a loading/empty early return (`if (data.loading) return <Spinner/>`). On the first render data is still loading, the component early-returns and never reaches that `useMemo` (fewer hooks); when data arrives it renders past the return and calls the extra hook → the hook count differs between renders → #310. The "works the second time" intermittency (the cached render skips the loading branch) is the signature of this bug. **Fix:** place every `useMemo`/`useState`/`useEffect`/`useCallback` **above all early returns**, and make derived memos tolerate not-yet-loaded data (read from an always-initialized value, e.g. `data.rows ?? []`). Early returns are fine — they just must come *after* the last hook call. This is the React rules of hooks: never call a hook below a conditional `return`.
 20. **Never put `...` alone on a line**: Write the spread/rest token and its operand together (`...rows`, not `...` followed by `rows` on the next line).
 21. **End final type-argument statements with `;`**: If the file's last statement ends in a type argument list (`Page<string>`, `Array<Row>`), terminate it with a semicolon.
+22. **Consistent errors**: Route failed data operations through the page's single top-level `reportPageError`, retain bounded code and message diagnostics, and put its returned view in the operation's error state. Render errors as escaped Fluent MessageBar text with localized application fallbacks. Offer manual retry only for proven-safe reads or the documented pre-dispatch Custom API network result; never retry an indeterminate result automatically. Wrap PageBody in the page's one top-level React PageErrorBoundary. Instrument only explicitly authorized failure sites, only through the helper. Expected null/empty states are not failures. See “Missing Error Handling” for the canonical patterns and the static check's declared limits.
+23. **Lookup identities**: A lookup reference is a validated table-and-bare-id pair, not its label or the first metadata target. Normalize bare GUID and `/<table>(<guid>)` read values using the logical-name annotation and/or qualified prefix, checking both against metadata and rejecting conflicts. Use the bare id for filters, retrieval and navigation; rebuild the qualified value only for writes. Record every lookup used by a join/filter and its complete target set in Per-Page Specifications. Ask about unresolved relationship/filter meaning; never broaden a failed typed query. Unresolved references cannot trigger target-dependent actions. See **DataAPI Rules > Lookup references** for the canonical `normalizeLookupReference` and the five WRONG/CORRECT pairs.
 
 ---
 
@@ -68,10 +70,12 @@ matching flag: `charts` adds `d3` and `@types/d3`, `datepicker` adds
 
 ## Component Structure
 
-Standard component pattern:
+Standard component pattern — the exported component only mounts the page inside its error
+boundary (Critical Rule 22); the page itself lives in `PageBody`:
 
 ```typescript
-import {useEffect, useState} from 'react';
+import * as React from 'react';
+import { MessageBar, MessageBarBody } from '@fluentui/react-components';
 import type {
   TableRow,
   DataColumnValue,
@@ -84,17 +88,30 @@ import type {
 
 // Additional imports: @fluentui/react-components, @fluentui/react-icons, @fluentui/react-datepicker-compat, d3
 
+// The page error block of "Missing Error Handling" (Common Errors), copied unchanged: the PageErrorKind,
+// PageErrorView and PageErrorTelemetry types, PAGE_NAME, the error copy and translate, reportPageError,
+// PageErrorBar and PageErrorBoundary
+
 // Utility functions as separate top-level functions
 
 // Sub-components as separate top-level functions
 
-const GeneratedComponent = (props: GeneratedComponentProps) => {
+function PageBody(props: GeneratedComponentProps) {
   const { dataApi, pageInput } = props;
-  // Component implementation
+  // Component implementation: hooks, state and handlers; every failed data operation goes through reportPageError
 }
+
+const GeneratedComponent = (props: GeneratedComponentProps) => (
+  <PageErrorBoundary>
+    <PageBody {...props} />
+  </PageErrorBoundary>
+);
 
 export default GeneratedComponent;
 ```
+
+`GeneratedComponent` passes its props to `PageBody` unchanged and does nothing else; never call
+`PageBody(props)` as a function. `PageErrorBoundary` is the page's one class component.
 
 ---
 
@@ -590,7 +607,7 @@ Two host behaviors make a naive on-mount fetch run more than once:
 - **Never put `dataApi` in a dependency array** (`useEffect`/`useMemo`/`useCallback`) and never `useCallback` a fetch function — the host hands a new `dataApi` ref every render, so it re-fires the effect each render. Depend on a **readiness boolean** (`const dataReady = !!dataApi;`) plus `recordId`/`reloadKey` as needed.
 - **Scope each `window` key by page + query** (include the page name, e.g. `__ppAccountOverview_accountCache`), not just the entity — two pages querying the same entity with different `select`/`filter` must not share a cache or in-flight entry.
 - Seed initial `useState` from the `window` cache so the second mount paints final content with no spinner.
-- Use a single batched state object (`{ records, loading, error }`) — separate `setState` calls in async functions produce intermediate renders in React 17.
+- Use a single batched state object (`{ records, loading, error }`) — separate `setState` calls in async functions produce intermediate renders in React 17. `error` is the `PageErrorView | null` that `reportPageError` returns (see **Common Errors > Missing Error Handling**), never a string.
 - For detail pages, key both the cache and the in-flight map by `recordId` (`Map<string, ...>` on `window`).
 - On mutation or manual refresh, clear the cache **and** the in-flight promise before refetching.
 
@@ -1250,6 +1267,27 @@ Custom API code or a Dataverse `0x` error code) as `statusCode`; any other code 
     ...(/^(?:wrong_operation_kind|invalid_parameter|invalid_bound_to|not_bound|not_permitted|not_enabled|indeterminate|network|0x[0-9a-fA-F]{8})$/.test(normalizedCode) ? { statusCode: normalizedCode } : {}),
   });
 ```
+
+**The complete shape of each operation** — each reference shows a whole `PageBody` built on this block:
+a cached on-mount read (`references/data-caching.md`), a Custom API Action and Function
+(`references/custom-api.md`), the two built-in operations (`references/dataverse-operations.md`),
+connector reads and operations (`references/connectors.md`), the usersettings read of a localized page
+(`references/localization.md`) and authorized failure telemetry (`references/page-telemetry.md`). Several
+reads that load together either go through named helpers that each catch, report and return
+`{ error }` — awaited with `Promise.all`, then one state update — or through `Promise.allSettled` with a
+`status === 'rejected'` branch that reports each item's `reason` before the one update. A single `catch`
+around `Promise.all` hides every failure after the first.
+
+**What the eval check reads, and what it does not.** The page error check of the eval suite reads a page's
+source; it never runs it. It accepts a closed set of shapes — an awaited call in a `try` whose `catch`
+reports, a named helper that returns `{ error: view }` to a caller that stores it, the cached promise of
+`references/data-caching.md`, a guarded Custom API, built-in or connector result, the two grouped-read
+forms above — and refuses anything else as unverifiable, never as a pass. It requires this block's
+reporter line for line (comments, indentation and line endings aside; only the telemetry insertion may be
+added), a literal kind as the fifth argument, a view that reaches a rendered `PageErrorBar`, and the
+boundary wrapper. It does not read `loadMoreRows` (report its failure the same way all the same) or the
+synchronous `setPageOutput`, it does not prove that a request is current or that a retry is safe, and it
+cannot tell whether the maker asked for telemetry.
 
 ### 3. Inline Styles Instead of makeStyles
 Use `makeStyles` with tokens.

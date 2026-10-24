@@ -305,10 +305,17 @@ rules.md:
 
 ### Component Structure
 
+Every page — Dataverse or mock — renders inside the page error boundary (rules.md Critical Rule 22):
+copy the page error block of `rules.md` → *Common Errors* → *Missing Error Handling* **unchanged** (set
+`PAGE_NAME` to the plan's display name for this page — a fixed literal, never the file name), put the
+page itself in a top-level `PageBody`, and export the wrapper below. A reporter that is reformatted,
+renamed or "improved" is not the canonical one: copy its lines as they are.
+
 **Data mode = `dataverse`** — import types from RuntimeTypes:
 
 ```typescript
-import {useEffect, useState} from 'react';
+import * as React from 'react';
+import { Button, MessageBar, MessageBarActions, MessageBarBody } from '@fluentui/react-components';
 import type {
     TableRow,
     DataColumnValue,
@@ -321,23 +328,38 @@ import type {
 
 // Additional imports: @fluentui/react-components, @fluentui/react-icons, d3, etc.
 
+// The page error block of rules.md "Missing Error Handling", copied unchanged: the PageErrorKind,
+// PageErrorView and PageErrorTelemetry types, PAGE_NAME, the error copy and translate,
+// reportPageError, PageErrorBar and PageErrorBoundary
+
 // Utility functions as separate top-level functions
 // Sub-components as separate top-level functions
 
-const GeneratedComponent = (props: GeneratedComponentProps) => {
+function PageBody(props: GeneratedComponentProps) {
   const { dataApi, pageInput } = props;
-  // Component implementation
+  // Component implementation: hooks, state and handlers
 }
+
+const GeneratedComponent = (props: GeneratedComponentProps) => (
+  <PageErrorBoundary>
+    <PageBody {...props} />
+  </PageErrorBoundary>
+);
 
 export default GeneratedComponent;
 ```
 
 **Data mode = `mock`** — do NOT import from `./RuntimeTypes` (it isn't generated
 for mock pages and the import would fail at build time). Define minimal local
-types instead and skip the dataApi-typed imports:
+types instead and skip the dataApi-typed imports. A mock page has no data call
+to report, but its boundary still reports a render crash, so it copies the
+block's types, `PAGE_NAME`, error copy, `translate`, `reportPageError` and
+`PageErrorBoundary` unchanged — but not the block's `./RuntimeTypes` import —
+and leaves out `PageErrorBar` when nothing renders one:
 
 ```typescript
-import {useEffect, useState} from 'react';
+import * as React from 'react';
+import { MessageBar, MessageBarBody } from '@fluentui/react-components';
 
 // Additional imports: @fluentui/react-components, @fluentui/react-icons, d3, etc.
 
@@ -346,10 +368,19 @@ type Props = {
   pageInput?: { id?: string };
 };
 
-const GeneratedComponent = (props: Props) => {
+// The page error block of rules.md "Missing Error Handling" (its types, PAGE_NAME, the error copy and
+// translate, reportPageError and PageErrorBoundary), copied unchanged
+
+function PageBody(props: Props) {
   const { pageInput } = props;
   // Component implementation with inline mock data
 }
+
+const GeneratedComponent = (props: Props) => (
+  <PageErrorBoundary>
+    <PageBody {...props} />
+  </PageErrorBoundary>
+);
 
 export default GeneratedComponent;
 ```
@@ -391,7 +422,15 @@ export default GeneratedComponent;
   ```
 - **Responsive design** — flexbox, relative units, never `100vh`/`100vw`
 - **WCAG AA accessibility** — ARIA labels, keyboard navigation, semantic HTML
-- **Error handling** — all async `dataApi` calls wrapped in try-catch
+- **Error handling** — every failed data operation goes through the page's one `reportPageError`
+  with its five required arguments — `reportPageError(PAGE_NAME, '<operation>', code, error, '<kind>')`,
+  the operation one stable literal, the code `res.error?.code` or `undefined`, the message the caught
+  `error` or `res.error?.message`, the kind a literal (`'read'` for a read or a rejected navigation,
+  `'write'` for a write, `'indeterminate'` / `'network'` only for those Custom API results) — and the view
+  it returns goes into that operation's state in the same update, rendered by `PageErrorBar`. Retry only
+  a read or a Custom API `network` result, through a named function the user presses; never retry a write
+  or an indeterminate result. A null lookup, zero rows or an absent optional value is not a failure.
+  The page renders inside `PageErrorBoundary`. See rules.md Critical Rule 22 and *Missing Error Handling*.
 - **No telemetry by default** — never emit `props.appInsights` calls unless your dispatch says `Telemetry: enabled` **and** the maker asked to measure or track something. Absence of a request means zero telemetry, not "instrument the obvious things". See references/page-telemetry.md.
 - **Lookup fields** — read display names via `@OData.Community.Display.V1.FormattedValue`; *set* a lookup on create/update with `_<field>_value: "/logicalSingular(guid)"`, never `@odata.bind` (the DataAPI silently drops it → orphaned row). See rules.md DataAPI Rule 13.
 - **Lookup references** — a lookup's `_<field>_value` may be a bare GUID or `/<table>(<guid>)`. Copy `normalizeLookupReference` unchanged from rules.md → *Lookup references*, pass it the column's complete target set from the plan's `#### Lookup metadata`, and use only a resolved pair: `reference.id` (bare) for filters, `retrieveRow({ id })` and `entityId`, `reference.table` for the target. Filter a target through a typed path only when the plan records that concrete path; write the table the user selected, kept with its id (pitfall E). Never infer a table from a label, the first target or a navigation name.
@@ -399,7 +438,9 @@ export default GeneratedComponent;
 - **All hooks above early returns** — every `useMemo`/`useState`/`useEffect`/`useCallback` must precede any loading/empty `return`, or detail pages crash with React error #310 on first open. See rules.md Critical Rule 19.
 - **Entity logical names** — singular lowercase (e.g., `"account"`)
 - **No placeholders** — no TODOs, no ellipses, no "implement later" comments
-- **Top-level functions** — components and utilities as separate top-level functions, no nesting
+- **Top-level functions** — components and utilities as separate top-level functions, no nesting; the
+  page's one class is `PageErrorBoundary` (rules.md Critical Rule 3). Handlers and loaders that close over
+  a component's state stay inside that component.
 - **Icons** — unsized variants only (e.g., `AddRegular` not `Add24Regular`)
 - **No FluentProvider** — already provided at root
 - **No createTheme/mergeThemes/useTheme** — these don't exist in Fluent UI V9
@@ -521,8 +562,9 @@ connector field name, parameter name, or response field name that is not in the
 plan. Read
 `${PLUGIN_ROOT}/references/connectors.md` and emit connector calls with the
 verified runtime patterns below. Connector methods are optional at runtime, so
-every call must be presence-checked and wrapped in `try`/`catch` with a graceful
-empty or error state.
+every call must be presence-checked and awaited in a `try` whose `catch` reports
+the failure through `reportPageError` into the panel's error state, beside its
+graceful empty state.
 
 Connector rows are not covered by RuntimeTypes. Before using
 `queryConnectorTable`, declare an inline row interface from the plan's discovered
@@ -549,7 +591,9 @@ schema. Before calling `executeConnectorOperation`, declare the response
 interface from the plan and mark every response field optional. Build the
 parameter object from discovered parameters plus maker-provided values; never
 invent parameter or response field names. Check `response.ok` before casting or
-using the body:
+using the body, and report a failed response even though nothing was thrown — its
+envelope carries no message, so pass none and the bar shows its fallback copy
+(`connectors.md` has the whole `PageBody`):
 
 ```typescript
 type WeatherResponse = { temperature?: number; conditions?: string; humidity?: number };
@@ -559,10 +603,17 @@ const parameters: { Location: string; units?: string } = { Location: 'Seattle', 
 ```typescript
 const connectorApi = dataApi as unknown as { executeConnectorOperation?: (connectorLogicalName: string, operationName: string, parameters: Record<string, unknown>) => Promise<{ ok: boolean; body: unknown }>; };
 if (typeof connectorApi.executeConnectorOperation !== 'function') { return; }
-const response = await connectorApi.executeConnectorOperation('new_uxtest_msnweather', 'CurrentWeather', parameters);
-if (!response.ok) { return; }
-const weather = response.body as WeatherResponse;
+try {
+  const response = await connectorApi.executeConnectorOperation('new_uxtest_msnweather', 'CurrentWeather', parameters);
+  if (!response.ok) { setWeather({ weather: null, error: reportPageError(PAGE_NAME, 'loadWeather', undefined, undefined, 'read', retryWeather) }); return; }
+  setWeather({ weather: response.body as WeatherResponse, error: null });
+} catch (error) {
+  setWeather({ weather: null, error: reportPageError(PAGE_NAME, 'loadWeather', undefined, error, 'read', retryWeather) });
+}
 ```
+
+`'read'` and a retry fit `CurrentWeather` because it only reads. An operation the plan does not record
+as a read is `'write'`, with no retry.
 
 ### Custom API invocation (Dataverse Actions & Functions)
 
@@ -578,6 +629,11 @@ there. The methods are optional at runtime, so every call must be presence-check
 each **Action** against double-submit, read results from `res.outputs` (never `res.value`),
 surface only the sanitized `res.error?.message`, and **never auto-retry** an `indeterminate`
 result (only `error.code === 'network'` is safely retryable, via a manual "Try again").
+Every failed result and every rejection goes through `reportPageError` with a literal kind, in
+this order: `res.indeterminate`, then `res.error?.code === 'indeterminate'` (both
+`'indeterminate'`), then a `network` result (`'network'`, with the named manual retry), then any
+other failure (`'write'` for an Action) — each reports, stores the view and returns before
+`res.outputs` is read.
 
 Match the call to the row's `Kind`: an **Action** row uses `executeAction`; a **Function** row
 uses `executeFunction`. Calling the wrong one is rejected with `wrong_operation_kind`.
@@ -589,15 +645,24 @@ equals that table; for a `(Global)` row, omit `boundTo` entirely.
 
 ```typescript
 const actionApi = dataApi as unknown as { executeAction?: (request: { name: string; parameters?: Record<string, unknown>; boundTo?: { entityName: string; id: string } }) => Promise<{ ok: boolean; indeterminate?: boolean; outputs?: Record<string, unknown>; error?: { message: string; code?: string } }>; };
-if (typeof actionApi.executeAction !== 'function' || isSubmitting) { return; } // presence-check + double-submit guard
-setIsSubmitting(true);
+if (typeof actionApi.executeAction !== 'function' || pending.current) { return; } // presence-check + double-submit guard
+pending.current = true;
+setApproval({ pending: true, status: '', error: null });
 try {
   const res = await actionApi.executeAction({ name: 'new_ApproveOrder', parameters: { Comment: comment, Amount: amount }, boundTo: { entityName: pageInput.entityName, id: pageInput.recordId } });
-  if (res.indeterminate) { setError("We couldn't confirm this completed — refresh before retrying."); return; }
-  if (!res.ok) { setError(res.error?.message ?? 'The action failed.'); return; }
-  const { NewStatus } = res.outputs as { NewStatus: string };
-} finally { setIsSubmitting(false); }
+  if (res.indeterminate) { setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'indeterminate')); return; }
+  if (res.error?.code === 'indeterminate') { setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'indeterminate')); return; }
+  if (!res.ok && res.error?.code === 'network') { setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'network', retryApprove)); return; }
+  if (!res.ok) { setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'write')); return; }
+  const status = res.outputs?.NewStatus;
+  setApproval({ pending: false, status: typeof status === 'string' ? status : '', error: null });
+} catch (error) {
+  setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', undefined, error, 'write'));
+} finally { pending.current = false; }
 ```
+
+`setActionFailure(view)` stores the view and `pending: false` in one update; `retryApprove` calls the
+handler again when the user presses "Try again". custom-api.md has the whole `PageBody`.
 
 ### Built-in Dataverse operations (WhoAmI, RetrieveVersion)
 
@@ -607,9 +672,10 @@ For each row of the plan's `## Dataverse Operations` table, copy the "Generated 
 `parameters` and no `boundTo`, called only from that operation's own button; `res.ok !== true`
 returns before `res.outputs` is read; outputs are read only as own properties of a checked
 object, all or nothing (three GUIDs, or a `Version` of 1 to 128 characters), never logged,
-stored, spread or serialized. An actual 404 says the operation is unavailable — never that a
-Custom API must be deployed. Never retrieve the `systemuser`, `businessunit` or `organization`
-row, and never copy an identity the auth preflight printed into the page.
+stored, spread or serialized. A failure is reported through `reportPageError` as a `'read'` with no
+retry, and its view — never the result — is what the request helper returns. An actual 404 says the
+operation is unavailable — never that a Custom API must be deployed. Never retrieve the `systemuser`,
+`businessunit` or `organization` row, and never copy an identity the auth preflight printed into the page.
 
 ## Step 6 — Write the .tsx File
 

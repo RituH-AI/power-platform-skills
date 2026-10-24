@@ -181,3 +181,16 @@ test('the page builder reads the records and consumes lookups only as validated 
   assert.match(rules, /\*\*Traceability\*\*/);
   assert.match(rules, /never `@odata\.bind`/, 'neighbour: the write rule stays');
 });
+
+test('Critical Rule 23 states lookup identities as a validated pair, beside the rules it does not renumber', () => {
+  const critical = RULES.slice(RULES.indexOf('\n## Critical Rules\n'), RULES.indexOf('\n## Supported Libraries\n')).replace(/\s+/g, ' ');
+  const rule23 = /\s23\. (.*?)(?= --- |$)/.exec(critical);
+  assert.ok(rule23, 'rules.md has Critical Rule 23');
+  assert.ok(rule23[1].startsWith(`**Lookup identities**: A lookup reference is a validated table-and-bare-id pair, not its label or the first metadata target. Normalize bare GUID and \`/<table>(<guid>)\` read values using the logical-name annotation and/or qualified prefix, checking both against metadata and rejecting conflicts. Use the bare id for filters, retrieval and navigation; rebuild the qualified value only for writes. Record every lookup used by a join/filter and its complete target set in Per-Page Specifications. Ask about unresolved relationship/filter meaning; never broaden a failed typed query. Unresolved references cannot trigger target-dependent actions.`), rule23[1]);
+  assert.match(rule23[1], /See \*\*DataAPI Rules > Lookup references\*\*/, 'it points at the canonical normalizer');
+  // Rules 1-21 and DataAPI Rules 12/13 keep their numbers: 22 follows 21, and 23 follows 22.
+  assert.ok(critical.indexOf(' 21. **End final type-argument') < critical.indexOf(' 22. **Consistent errors**'));
+  assert.ok(critical.indexOf(' 22. **Consistent errors**') < critical.indexOf(' 23. **Lookup identities**'));
+  assert.match(RULES, /\n12\. \*\*Lookup display-name fields cannot be in \$select\*\*/);
+  assert.match(RULES, /\n13\. \*\*Setting a lookup on create\/update — use `_<field>_value`, never `@odata\.bind`\*\*/);
+});
