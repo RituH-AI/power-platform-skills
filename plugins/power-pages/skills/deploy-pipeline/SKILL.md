@@ -123,7 +123,7 @@ Steps:
 
 1. **Resolve the project's configured environment URL first, then assert PAC is actually connected to it.** `verify-alm-prerequisites.js` resolves the env from PAC's *ambient org context* (`pac env who`), which is **not** guaranteed to match the project. If PAC has drifted to another environment (duplicate active `pac auth` profiles, or an external process flipping the active env), the skill would silently run discovery — and later `pac pipeline deploy` — against the **wrong** environment (potentially PROD). Assert the match and **hard-stop** on mismatch rather than pinning `--envUrl`: pinning would correct only the Dataverse-API calls while later PAC-CLI operations still follow the drifted context, so asserting that PAC itself is on the right env is the safer gate.
 
-   Read the project's recorded env URL (first match wins): `.solution-manifest.json` → top-level `environmentUrl`, else `powerpages.config.json` → `environmentUrl`. Store as `CONFIGURED_ENV_URL`. (Both fields are top-level `environmentUrl` strings; declarative/EDM sites have no `powerpages.config.json`, so the manifest is the source there.)
+   Read the project's recorded env URL (first match wins): `.solution-manifest.json` → top-level `environmentUrl`, else `powerpages.config.json` → `environmentUrl`. Store as `CONFIGURED_ENV_URL`. (Both fields are top-level `environmentUrl` strings; non-SPA/EDM sites have no `powerpages.config.json`, so the manifest is the source there.)
 
    **Pass `--expectedEnvUrl` only when `CONFIGURED_ENV_URL` actually resolved to a URL.** Use the first form when a recorded env URL exists, the second when neither file records one — do **not** pass an empty or unresolved `--expectedEnvUrl "{CONFIGURED_ENV_URL}"`:
 
@@ -222,9 +222,9 @@ Check `docs/alm/last-deploy.json` — if the last deployment to this stage faile
 
 ### Phase 2.5 — Pre-flight: target env blocked-attachments check
 
-Power Pages code-site solutions almost always contain `.js` bundle chunks (Vite/Rollup output) as `Web File` components. If the target env's `blockedattachments` setting includes `.js`, `ImportSolutionAsync` will reject every web-file write — typically 50-75 minutes into an import for sites with thousands of bundle chunks (real-world: a Content solution failed at 3,909 rejected `.js` files on Staging after the same issue had already been fixed on Dev). The reactive Phase 7.6 handler will detect this and offer unblock-and-retry, but the user has already burned an hour. This pre-flight catches it in 10 seconds.
+Power Pages SPA solutions almost always contain `.js` bundle chunks (Vite/Rollup output) as `Web File` components. If the target env's `blockedattachments` setting includes `.js`, `ImportSolutionAsync` will reject every web-file write — typically 50-75 minutes into an import for sites with thousands of bundle chunks (real-world: a Content solution failed at 3,909 rejected `.js` files on Staging after the same issue had already been fixed on Dev). The reactive Phase 7.6 handler will detect this and offer unblock-and-retry, but the user has already burned an hour. This pre-flight catches it in 10 seconds.
 
-**Skip rule.** This check is for Power Pages projects only. Skip when `powerpages.config.json` has no `websiteRecordId` (non-Power-Pages ALM run — pure data-model solution, etc.). Skip when the user's plan/manifest indicates no solution being deployed has `Web File` componentType (rare in code-site projects but possible for back-end-only solutions).
+**Skip rule.** This check is for Power Pages projects only. Skip when `powerpages.config.json` has no `websiteRecordId` (non-Power-Pages ALM run — pure data-model solution, etc.). Skip when the user's plan/manifest indicates no solution being deployed has `Web File` componentType (rare in SPA projects but possible for back-end-only solutions).
 
 **Detection signal.** In MULTI_RUN_MODE / MULTI_PIPELINE_MODE: read `.solution-manifest.json` and check whether any entry in `solutions[]` has `componentTypes` including `"Web File"`. In single-solution mode: assume `true` for any Power Pages project (the umbrella solution carries web files).
 
@@ -252,7 +252,7 @@ Power Pages code-site solutions almost always contain `.js` bundle chunks (Vite/
 
    - **`wasBlocked: ["js"]` or includes other media-relevant extensions** → the deployment WILL fail mid-import. Prompt the user immediately via `AskUserQuestion` (do NOT bury this in chat — it MUST gate Phase 3 progression):
 
-     > **Pre-flight detected an issue.** The target environment **`{targetEnvName}`** currently blocks file types that this solution needs: **`{wasBlocked.join(', ')}`**. Power Pages code sites ship `.js` bundle chunks as web files — if you proceed without unblocking, the deployment will run for ~50-75 minutes and then fail (the failure is recoverable via Phase 7.6's retry path, but the wasted time is not). The block can be removed in 10 seconds.
+     > **Pre-flight detected an issue.** The target environment **`{targetEnvName}`** currently blocks file types that this solution needs: **`{wasBlocked.join(', ')}`**. Power Pages SPA sites ship `.js` bundle chunks as web files — if you proceed without unblocking, the deployment will run for ~50-75 minutes and then fail (the failure is recoverable via Phase 7.6's retry path, but the wasted time is not). The block can be removed in 10 seconds.
      >
      > **Note**: this modifies an environment-level security setting that affects all users of `{targetEnvName}`. Reversible from PPAC → Environments → `{targetEnvName}` → Settings → Product → Features → Blocked Attachments.
 
@@ -1277,7 +1277,7 @@ Authorization: Bearer {HOST_TOKEN}
 
 1. **Phase 2**: Target stage selection (which environment to deploy to)
 2. **Phase 2**: Retry confirmation if last deploy to this stage failed
-3. **Phase 2.5**: Pre-flight blocked-attachments unblock (`Yes — unblock / No — proceed anyway / Cancel deploy`). Only fires when the target env's `blockedattachments` setting blocks extensions the solution needs (typically `.js` for code sites). Modifies a tenant-wide security setting; explicit consent required.
+3. **Phase 2.5**: Pre-flight blocked-attachments unblock (`Yes — unblock / No — proceed anyway / Cancel deploy`). Only fires when the target env's `blockedattachments` setting blocks extensions the solution needs (typically `.js` for SPA sites). Modifies a tenant-wide security setting; explicit consent required.
 4. **Phase 3.5**: Completeness-gap prompt (sync-first / deploy-anyway / cancel) when the live site has components missing from the solution
 5. **Phase 3.5**: **Post-sync approval gate** — only fires after a mid-deploy sync (Option 1). Shows the new solution version + newly-adopted components and asks the user to confirm the post-sync solution before promoting to the target stage. Pause exits cleanly; Cancel aborts.
 6. **Phase 3.6 (`MULTI_RUN_MODE` only)**: **Batch validation outcome** — two possible gates fire here:
