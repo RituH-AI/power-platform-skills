@@ -518,3 +518,135 @@ test('no rule grades a custom-api gate: a run with no probe, or with one that pr
   const undiscovered = createFixture({ rows: [API], plan: CUSTOM_PLAN, source: CUSTOM_ONLY, customApi: 'disabled', builtIns: 'disabled', discovery: false });
   both(undiscovered, 'fail', 'a create with no discovery');
 });
+
+// The page error contract (references/rules.md "Missing Error Handling") lets a maker who asked for failure telemetry hand the page's
+// appInsights prop to the canonical reporter as its seventh argument. For a built-in operation that is the one place appInsights may
+// appear in its helper or handlers: the reporter sends only a bounded code and a fixed "<operation> failed" text, and
+// page-error-evidence.js proves the reporter is the canonical one and the call reports the host's own error fields as a read.
+const { telemetrySafeSpans, pageErrorProblems } = require('../lib/page-error-evidence.js');
+const RULES = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', '..', '..', '..', 'plugins', 'model-apps', 'references', 'rules.md'), 'utf8').replace(/\r\n/g, '\n');
+const SECTION = RULES.slice(RULES.indexOf('\n### 2. Missing Error Handling\n'), RULES.indexOf('\n### 3. '));
+const BLOCKS = [...SECTION.matchAll(/```tsx\n([\s\S]*?)\n```/g)].map((match) => match[1]);
+const FOUNDATION = BLOCKS.find((block) => /\bfunction reportPageError\(/.test(block));
+const TELEMETRY = BLOCKS.find((block) => /appInsights\?\.trackException\?\.\(/.test(block));
+const lines = FOUNDATION.split('\n');
+const anchor = lines.findIndex((line) => /^\s*console\.error\(/.test(line));
+const WITH_TELEMETRY = [...lines.slice(0, anchor + 1), ...TELEMETRY.split('\n'), ...lines.slice(anchor + 1)].join('\n');
+const BODY_AT = WITH_TELEMETRY.indexOf('function PageBody(');
+const WRAPPER_AT = WITH_TELEMETRY.indexOf('const GeneratedComponent = ');
+
+// The request helper sits INSIDE PageBody so it closes over the page's authorized appInsights prop: the seventh argument
+// is then the only appInsights mention in the helper and its handler.
+const AUTHORIZED = `${WITH_TELEMETRY.slice(0, BODY_AT)}type BuiltInResult = { ok: boolean; outputs?: Record<string, unknown>; error?: { message?: string; code?: string; status?: number } };
+type BuiltInApi = { executeFunction?: (request: { name: string }) => Promise<BuiltInResult> };
+type IdentityView = { identity?: { userId: string; businessUnitId: string; organizationId: string }; error?: PageErrorView };
+
+const GUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function ownString(outputs: Record<string, unknown>, field: string): string | undefined {
+  const value = Object.prototype.hasOwnProperty.call(outputs, field) ? outputs[field] : undefined;
+  return typeof value === 'string' ? value : undefined;
+}
+
+function PageBody(props: GeneratedComponentProps & { appInsights?: PageErrorTelemetry }) {
+  const { dataApi, appInsights } = props;
+  const api = dataApi as unknown as BuiltInApi;
+  const mounted = React.useRef(true);
+  React.useEffect(() => () => { mounted.current = false; }, []);
+  const [identityState, setIdentityState] = React.useState<{ pending: boolean; view: IdentityView }>({ pending: false, view: {} });
+  const identityRequest = React.useRef(0);
+
+  async function readIdentity(client: BuiltInApi): Promise<IdentityView> {
+    if (typeof client.executeFunction !== 'function') {
+      const view = reportPageError(PAGE_NAME, 'showIdentity', undefined, 'executeFunction is not available in this player', 'read');
+      view.fallbackKey = 'error.builtinUnsupported';
+      return { error: view };
+    }
+    try {
+      const res = await client.executeFunction({ name: 'WhoAmI' });
+      if (res.ok !== true) {
+        const view = reportPageError(PAGE_NAME, 'showIdentity', res.error?.code, res.error?.message, 'read', undefined, appInsights);
+        const unavailable = typeof res.error?.status === 'number' && res.error.status === 404;
+        view.fallbackKey = unavailable ? 'error.builtinUnavailable' : 'error.builtinFailed';
+        view.message = unavailable ? '' : view.message;
+        return { error: view };
+      }
+      const outputs = res.outputs;
+      if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) {
+        const view = reportPageError(PAGE_NAME, 'showIdentity', undefined, 'WhoAmI returned no output object', 'read');
+        view.fallbackKey = 'error.builtinUnexpected';
+        view.message = '';
+        return { error: view };
+      }
+      const userId = ownString(outputs, 'UserId');
+      const businessUnitId = ownString(outputs, 'BusinessUnitId');
+      const organizationId = ownString(outputs, 'OrganizationId');
+      if (![userId, businessUnitId, organizationId].every((id) => typeof id === 'string' && GUID.test(id))) {
+        const view = reportPageError(PAGE_NAME, 'showIdentity', undefined, 'WhoAmI returned an unexpected identity', 'read');
+        view.fallbackKey = 'error.builtinUnexpected';
+        view.message = '';
+        return { error: view };
+      }
+      return { identity: { userId: userId as string, businessUnitId: businessUnitId as string, organizationId: organizationId as string } };
+    } catch (error) {
+      const view = reportPageError(PAGE_NAME, 'showIdentity', undefined, error, 'read');
+      view.fallbackKey = 'error.builtinFailed';
+      view.message = '';
+      return { error: view };
+    }
+  }
+
+  const showIdentity = async () => {
+    if (identityState.pending) return;
+    const requestId = ++identityRequest.current;
+    setIdentityState({ pending: true, view: {} });
+    try {
+      const view = await readIdentity(api);
+      if (mounted.current && requestId === identityRequest.current) setIdentityState({ pending: false, view });
+    } catch (error) {
+      if (mounted.current && requestId === identityRequest.current) setIdentityState({ pending: false, view: { error: reportPageError(PAGE_NAME, 'showIdentity', undefined, error, 'read') } });
+    }
+  };
+
+  return (
+    <div>
+      <Button disabled={identityState.pending} onClick={() => void showIdentity()}>Show my Dataverse identity</Button>
+      <PageErrorBar error={identityState.view.error ?? null} />
+      {identityState.view.identity && <Text>Dataverse user id: {identityState.view.identity.userId}</Text>}
+    </div>
+  );
+}
+
+${WITH_TELEMETRY.slice(WRAPPER_AT)}`;
+
+function swap(source, from, to) {
+  assert.ok(source.includes(from), `the page holds: ${from}`);
+  return source.split(from).join(to);
+}
+
+test('an authorized built-in failure may name appInsights as the seventh argument of a verified canonical read report', () => {
+  assert.deepEqual(pageErrorProblems(AUTHORIZED), [], 'the page meets the page error contract');
+  assert.equal(telemetrySafeSpans(AUTHORIZED).length, 1, 'exactly one verified safe span');
+  assert.deepEqual(union.builtInRuntimeProblems(AUTHORIZED, ['WhoAmI']), [], 'the built-in privacy check accepts the one safe span');
+});
+
+test('the telemetry exception is narrow: a direct emission, an identity in the report, a retry or an altered reporter still fail', () => {
+  const report = "reportPageError(PAGE_NAME, 'showIdentity', res.error?.code, res.error?.message, 'read', undefined, appInsights);";
+  for (const [label, source] of [
+    ['a direct emission beside the report', swap(AUTHORIZED, report, `${report}\n        appInsights?.trackException?.(new Error('x'));`)],
+    ['the identity as the message', swap(AUTHORIZED, report, "reportPageError(PAGE_NAME, 'showIdentity', res.error?.code, String(res.outputs?.UserId), 'read', undefined, appInsights);")],
+    ['a retry beside the telemetry', swap(AUTHORIZED, report, "reportPageError(PAGE_NAME, 'showIdentity', res.error?.code, res.error?.message, 'read', showIdentity, appInsights);")],
+    ['an altered reporter', swap(AUTHORIZED, "    normalizedMessage = line.length > 300 ? line.slice(0, 299) + '\\u2026' : line;", '    normalizedMessage = line;')],
+  ]) {
+    assert.ok(union.builtInRuntimeProblems(source, ['WhoAmI']).some((problem) => /logged, stored, copied or sent/.test(problem)), label);
+  }
+});
+
+// Under the canonical wrapper the page renders in PageBody, not in the default export, so a call made while PageBody renders is named for
+// what it is — not as PageBody being "handed" to the wrapper that renders it.
+test('a built-in call made while the wrapped PageBody renders is refused as a render-time call', () => {
+  assert.deepEqual(union.builtInRuntimeProblems(AUTHORIZED, ['WhoAmI']), [], 'neighbour: the wrapped page without the call passes');
+  const rendering = swap(AUTHORIZED, '  return (\n    <div>\n      <Button disabled={identityState.pending}', '  void readIdentity(api);\n  return (\n    <div>\n      <Button disabled={identityState.pending}');
+  const found = union.builtInRuntimeProblems(rendering, ['WhoAmI']);
+  assert.ok(found.some((problem) => /while the page renders/.test(problem)), JSON.stringify(found));
+});
