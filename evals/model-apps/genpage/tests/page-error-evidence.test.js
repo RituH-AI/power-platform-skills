@@ -701,6 +701,46 @@ test('a trailing comma after the last argument passes no argument: five-, six- a
   refused(swap(FOUNDATION, call, "reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'write', createAccount,)"), /retry/, 'a write offering a retry, with a trailing comma');
 });
 
+test('the kind is the operation\'s: a mutation\'s rejection is a write, never retried; network only in a result\'s network guard; indeterminate only in its two guards; render only in the boundary', () => {
+  const report = "reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'write')";
+  for (const [label, source, reason] of [
+    ['a rejected write relabelled a read, with a retry', swap(FOUNDATION, report, "reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'read', createAccount)"), /this operation's failure is 'write'/],
+    ['a rejected write relabelled network, with a retry', swap(FOUNDATION, report, "reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'network', createAccount)"), /this operation's failure is 'write'/],
+    ['a rejected read relabelled indeterminate', swap(CACHE_LIST, "undefined, failure, 'read', retryLoad)", "undefined, failure, 'indeterminate')"), /this operation's failure is 'read'/],
+    ['a rejected Action reported as network, with its retry', swap(ACTION, "setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', undefined, error, 'write'));", "setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', undefined, error, 'network', retryApprove));"), /this operation's failure is 'write'/],
+    ['a failed Action result reported as a read', swap(ACTION, "if (!res.ok) { setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'write')); return; }", "if (!res.ok) { setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'read')); return; }"), /guard must report kind 'write'/],
+    ['a render kind outside the boundary', swap(FOUNDATION, report, "reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'render')"), /'render' belongs only/],
+  ]) refused(source, reason, label);
+  // Fixture 27's thrown Action rejection relabelled network with its retry: the common assertion fails the fixture.
+  const fixture = fs.readFileSync(path.join(__dirname, '..', 'fixtures', '27-page-error-helper', 'order-approvals.tsx'), 'utf8');
+  const relabelled = swap(fixture, "setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', undefined, failure, 'write'));", "setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', undefined, failure, 'network', retryApprove));");
+  assert.equal(gradePageErrors({ files: [{ path: '/fixtures/27-page-error-helper/order-approvals.tsx', name: 'order-approvals.tsx', content: relabelled }] }).status, 'fail');
+});
+
+test('a Function or connector failure reported as a read passes, but the grade names that kind as not scored', () => {
+  for (const [label, source, expected] of [
+    ['a connector operation', CONNECTOR, /not scored: the 'read' kind of .*executeConnectorOperation/],
+    ['a Custom API Function', ACTION, /not scored: the 'read' kind of .*executeFunction/],
+  ]) {
+    const grade = gradePageErrors({ files: [{ path: '/fixtures/99-new/page.tsx', name: 'page.tsx', content: source }] });
+    assert.equal(grade.status, 'pass', label);
+    assert.match(grade.reason, expected, label);
+  }
+  // A known mutation, a built-in read and a cached table read are scored: nothing is named.
+  for (const source of [FOUNDATION, BUILT_INS, CACHE_LIST]) {
+    const grade = gradePageErrors({ files: [{ path: '/fixtures/99-new/page.tsx', name: 'page.tsx', content: source }] });
+    assert.deepEqual([grade.status, grade.reason], ['pass', '']);
+  }
+  // The same Function failure reported as a write needs no score: a write is never retried.
+  const asWrite = swap(swap(ACTION,
+    "if (!res.ok) { setSummaryFailure(reportPageError(PAGE_NAME, 'loadSummary', res.error?.code, res.error?.message, 'read', retrySummary)); return; }",
+    "if (!res.ok) { setSummaryFailure(reportPageError(PAGE_NAME, 'loadSummary', res.error?.code, res.error?.message, 'write')); return; }"),
+    "setSummaryFailure(reportPageError(PAGE_NAME, 'loadSummary', undefined, error, 'read', retrySummary));",
+    "setSummaryFailure(reportPageError(PAGE_NAME, 'loadSummary', undefined, error, 'write'));");
+  assert.deepEqual(pageErrorProblems(asWrite), []);
+  assert.deepEqual(gradePageErrors({ files: [{ path: '/fixtures/99-new/page.tsx', name: 'page.tsx', content: asWrite }] }), { status: 'pass', reason: '' });
+});
+
 test('the reporter is the canonical one, bound once, and the only code that sends an exception', () => {
   refused(swap(FOUNDATION, "    normalizedMessage = line.length > 300 ? line.slice(0, 299) + '\\u2026' : line;", '    normalizedMessage = line;'), /canonical/, 'an uncapped message');
   refused(swap(FOUNDATION, "{ code: normalizedCode, message: normalizedMessage });", '{ code: normalizedCode, message: normalizedMessage }, message);'), /canonical/, 'a reporter that logs the thrown value');

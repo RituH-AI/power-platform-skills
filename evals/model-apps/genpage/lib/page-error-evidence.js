@@ -205,6 +205,10 @@ function context(code) {
   const ctx = { code, mask, scopes: namedScopes(mask), functions: functionScopes(mask), named: namedFunctions(mask) };
   ctx.states = useStates(ctx);
   ctx.adapters = adapters(ctx);
+  // Report sites of a recognized result guard → the kinds that guard allows (read by kindOriginProblems).
+  ctx.guardKinds = new Map();
+  // The reports whose kind the page cannot show to be right (noteKind), named in the grade instead of passed silently.
+  ctx.unscored = [];
   ctx.reportSites = callSites(mask, REPORTER).map((site) => {
     const open = mask.indexOf('(', site.at);
     const { close, args } = argRanges(mask, open);
@@ -748,16 +752,54 @@ function awaitedProblems(ctx, call, label) {
   const tries = enclosingTries(ctx, call.at);
   const guarded = tries.map((entry) => ({ ...entry, handler: catchAfter(ctx, entry.close) })).find((entry) => entry.handler);
   if (!guarded) return [`${label}: awaited outside a try with a catch in its own function`];
-  problems.push(...catchProblems(ctx, guarded.handler, label));
+  problems.push(...catchProblems(ctx, guarded.handler, label, call));
   problems.push(...envelopeProblems(ctx, call, guarded, label));
   return problems;
 }
 
 // A catch body reports on its live path: only staleness guards may return first, and a report kept under an `if` sits
-// under the fresh condition.
-function catchProblems(ctx, handler, label) {
+// under the fresh condition. Its kind is the operation's, not the author's choice.
+function catchProblems(ctx, handler, label, call) {
   const body = { open: handler.open, start: handler.open + 1, end: handler.close };
-  return liveReportProblems(ctx, body, label, 'catch');
+  return liveReportProblems(ctx, body, label, 'catch', call);
+}
+
+// ---------- the kind of a failure is the operation's ----------
+// The kind decides whether the view offers a retry (a read or a network result may; a write, an indeterminate result or a
+// render crash never does), so it is read from what failed, not taken from the call: a rejection of a known mutation is a
+// write; of a read, a read; a Custom API Function or a connector operation may be either (its method does not say which);
+// a built-in operation is a read. 'network' belongs only to a Custom API result's network guard after both indeterminate
+// guards, 'indeterminate' only to those guards, and 'render' only to PageErrorBoundary.componentDidCatch.
+const WRITE_METHODS = new Set(['createRow', 'updateRow', 'deleteRow', 'executeAction']);
+// Whether a Custom API Function or a connector operation is a read is the plan's (references/custom-api.md: "a Function
+// the plan records as a read"); the page does not show it. Such a 'read' is accepted but named as not scored in the
+// grade, so a pass never claims it.
+const authorClassified = (call) => !call.builtIn && (call.method === 'executeFunction' || call.method === 'executeConnectorOperation');
+function rejectionKinds(call) {
+  if (call.builtIn) return ['read'];
+  if (authorClassified(call)) return ['read', 'write'];
+  return WRITE_METHODS.has(call.method) ? ['write'] : ['read'];
+}
+function noteKind(ctx, call, kind, label) {
+  if (kind === 'read' && authorClassified(call)) ctx.unscored.push(`${label} (${call.method})`);
+}
+function kindOriginProblems(ctx) {
+  const problems = [];
+  const boundary = boundaryClass(ctx);
+  for (const site of ctx.reportSites) {
+    const kind = literalString(site.text(4) || '');
+    const label = `${REPORTER} at line ${lineOf(ctx.code, site.at)}`;
+    if (kind === 'network' && !ctx.guardKinds.get(site.at)?.includes('network')) {
+      problems.push(`${label}: 'network' belongs only to a Custom API result's network guard, after both indeterminate guards — a thrown failure is a read or a write`);
+    }
+    if (kind === 'indeterminate' && !ctx.guardKinds.get(site.at)?.includes('indeterminate')) {
+      problems.push(`${label}: 'indeterminate' belongs only to a Custom API result's two indeterminate guards`);
+    }
+    if (kind === 'render' && !(boundary && site.at > boundary.didCatch.start && site.at < boundary.didCatch.end)) {
+      problems.push(`${label}: 'render' belongs only to PageErrorBoundary.componentDidCatch`);
+    }
+  }
+  return problems;
 }
 
 // ---------- where a report runs ----------
@@ -831,11 +873,15 @@ function liveReport(ctx, body) {
   return { reason };
 }
 
-function liveReportProblems(ctx, body, label, where) {
+function liveReportProblems(ctx, body, label, where, call = null) {
   const { mask, code } = ctx;
   const found = liveReport(ctx, body);
   if (!found.site) return [`${label}: its ${where} ${found.reason}`];
   const problems = [];
+  const kind = literalString(found.site.text(4) || '');
+  const kinds = call ? rejectionKinds(call) : null;
+  if (kinds && !kinds.includes(kind)) problems.push(`${label}: its ${where} reports the failure as '${kind}', but this operation's failure is ${kinds.map((entry) => `'${entry}'`).join(' or ')}`);
+  else if (call) noteKind(ctx, call, kind, label);
   // Before the report's statement runs, only an `if (<stale condition>) return;` may leave the body.
   const until = found.place.guard ? found.place.ifAt : found.anchor;
   let text = mask.slice(body.start, until);
@@ -884,11 +930,12 @@ function envelopeProblems(ctx, call, guarded, label) {
     const { site } = found;
     const kind = literalString(site.text(4) || '');
     if (!kinds.includes(kind)) problems.push(`${label}: the ${what} guard must report kind ${kinds.map((entry) => `'${entry}'`).join(' or ')}`);
+    else { ctx.guardKinds.set(site.at, kinds); noteKind(ctx, call, kind, `${label}, ${what} guard`); }
     if (!/\breturn\b/.test(mask.slice(site.close, guard.block.end))) problems.push(`${label}: the ${what} guard must return after it reports`);
   };
   if (call.method === 'executeConnectorOperation') {
     if (!notOk) return [`${label}: the connector response is not checked with \`if (!${res}.ok)\` before its body is read`];
-    reports(notOk, ['read', 'write'], 'response.ok');
+    reports(notOk, rejectionKinds(call), 'response.ok');
     const body = read('body');
     if (body >= 0 && region.start + body < notOk.at) problems.push(`${label}: ${res}.body is read before ${res}.ok is checked`);
     return problems;
@@ -904,9 +951,12 @@ function envelopeProblems(ctx, call, guarded, label) {
   if (!codeIndeterminate) problems.push(`${label}: \`if (${res}.error?.code === 'indeterminate')\` must report a code-only indeterminate result`);
   else reports(codeIndeterminate, ['indeterminate'], 'indeterminate code');
   if (!notOk) problems.push(`${label}: \`if (!${res}.ok)\` must report a failed result before its outputs are read`);
-  else reports(notOk, ['read', 'write'], `${res}.ok`);
+  else reports(notOk, rejectionKinds(call), `${res}.ok`);
   if (network) {
-    reports(network, ['network'], 'network');
+    // Only after both indeterminate guards is a network result known never to have reached the server.
+    const ordered = [flagIndeterminate, codeIndeterminate].every((guard) => guard && guard.at < network.at);
+    if (ordered) reports(network, ['network'], 'network');
+    else problems.push(`${label}: the network guard must come after both indeterminate guards`);
     for (const [guard, what] of [[flagIndeterminate, `${res}.indeterminate`], [codeIndeterminate, 'the indeterminate code']]) {
       if (guard && guard.at > network.at) problems.push(`${label}: ${what} must be checked before the network guard`);
     }
@@ -932,7 +982,7 @@ function settledProblems(ctx, call, label) {
   if (!branch) return [`${label}: the allSettled item ${item} is never checked for 'rejected' and reported`];
   // The report is the branch's own statement: right after `if (… === 'rejected')`, or the first statement of its block.
   const closeParen = branch.index + branch[0].length - 1;
-  const reported = ctx.reportSites.some((site) => {
+  const reported = ctx.reportSites.find((site) => {
     if (!(site.at > branch.index && site.at < scopeEnd) || squash(site.text(3) || '') !== `${item}.reason`) return false;
     const anchor = destination(ctx, site.at, site.close + 1).anchor;
     if (anchor === undefined) return false;
@@ -940,6 +990,10 @@ function settledProblems(ctx, call, label) {
     return prev === closeParen || (mask[prev] === '{' && previousToken(mask, prev) === closeParen && enclosingBlock(mask, anchor) === prev);
   });
   if (!reported) return [`${label}: the rejected branch of ${item} does not report ${item}.reason`];
+  const kind = literalString(reported.text(4) || '');
+  const kinds = rejectionKinds(call);
+  if (!kinds.includes(kind)) return [`${label}: the rejected branch of ${item} reports '${kind}', but this operation's failure is ${kinds.map((entry) => `'${entry}'`).join(' or ')}`];
+  noteKind(ctx, call, kind, label);
   return [];
 }
 
@@ -1002,7 +1056,7 @@ function cacheProblems(ctx, call, label) {
   if (!arrow) { problems.push(`${label}: the .catch of ${binding} must be an arrow function that reports`); return problems; }
   const bodyStart = handler.open + 1 + arrow[0].length;
   const body = mask[bodyStart] === '{' ? { open: bodyStart, start: bodyStart + 1, end: groupEnd(mask, bodyStart) } : { start: bodyStart, end: handler.close, expression: true };
-  problems.push(...liveReportProblems(ctx, body, label, `.catch of ${binding}`));
+  problems.push(...liveReportProblems(ctx, body, label, `.catch of ${binding}`, call));
   const handlerText = mask.slice(body.start, body.end);
   if (/\]\s*=(?![=>])|\.\s*__[\w$]+\s*=(?![=>])|\.\s*set\s*\(/.test(handlerText)) problems.push(`${label}: the .catch of ${binding} writes the cache — a rejection is never cached as data`);
   return problems;
@@ -1064,9 +1118,14 @@ function boundaryProblems(ctx) {
 
 // The problems of one page's source; [] when it satisfies the contract.
 function pageErrorProblems(content) {
+  return pageErrorReview(content).problems;
+}
+
+// The problems of one page's source and the reports the check accepted without being able to score their kind.
+function pageErrorReview(content) {
   const code = String(content ?? '');
   let ctx;
-  try { ctx = context(code); } catch (error) { return [`the page is not gradeable (${error.message})`]; }
+  try { ctx = context(code); } catch (error) { return { problems: [`the page is not gradeable (${error.message})`], unscored: [] }; }
   const problems = [];
   try {
     problems.push(...reporterProblems(ctx));
@@ -1074,10 +1133,11 @@ function pageErrorProblems(content) {
     problems.push(...reportCallProblems(ctx));
     problems.push(...returnedViewProblems(ctx));
     problems.push(...dataCallProblems(ctx));
+    problems.push(...kindOriginProblems(ctx));
   } catch (error) {
     problems.push(`the page is not gradeable (${error.message})`);
   }
-  return [...new Set(problems)];
+  return { problems: [...new Set(problems)], unscored: [...new Set(ctx.unscored)] };
 }
 
 // The [start, end) source ranges of the seventh (telemetry) argument of every canonical read report on an unmodified
@@ -1142,20 +1202,25 @@ function gradePageErrors({ files }) {
   if (!files || !files.length) return { status: 'skip', reason: 'no .tsx files' };
   let exempt = 0;
   let checked = 0;
+  const unscored = [];
   for (const file of files) {
     const relative = `${path.basename(path.dirname(file.path || ''))}/${file.name}`;
     if (exemption(relative, file.content)) { exempt += 1; continue; }
     checked += 1;
-    const problems = pageErrorProblems(file.content);
+    const { problems, unscored: kinds } = pageErrorReview(file.content);
     if (problems.length) return { status: 'fail', reason: `${file.name}: ${problems[0]}${problems.length > 1 ? ` (and ${problems.length - 1} more)` : ''}` };
+    unscored.push(...kinds.map((entry) => `${file.name}: ${entry}`));
   }
   if (!checked) return { status: 'skip', reason: `compatibility: ${exempt} page(s) captured before the page error contract and unchanged since (page-error-allowlist.json)` };
-  return { status: 'pass', reason: exempt ? `${exempt} unchanged pre-contract page(s) exempt` : '' };
+  const notes = [];
+  if (exempt) notes.push(`${exempt} unchanged pre-contract page(s) exempt`);
+  if (unscored.length) notes.push(`not scored: the 'read' kind of ${unscored.join('; ')} — only the plan shows a Function or connector operation is a read`);
+  return { status: 'pass', reason: notes.join('; ') };
 }
 
 module.exports = {
   PAGE_ERROR_ASSERTION, LISTED_METHODS,
-  pageErrorProblems, telemetrySafeSpans, gradePageErrors, pageErrorFingerprint, exemption, dataCallFamilies,
+  pageErrorProblems, pageErrorReview, telemetrySafeSpans, gradePageErrors, pageErrorFingerprint, exemption, dataCallFamilies,
   // The lexical helpers the lookup contract (polymorphic-lookup-contract.js) compares its own canonical block with.
   canonicalLines, topLevelFunction, argRanges,
 };

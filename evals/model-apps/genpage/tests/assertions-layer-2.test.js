@@ -606,7 +606,8 @@ test('eval 27: a page that passes the contract without making the call it exerci
   for (const [label, source, reason] of [
     // No list read at all: the contract has nothing to grade there, so the scenario must refuse it.
     ['no cached list read', variant27("      inflight = dataApi\n        .queryTable('salesorder', { select: ['salesorderid', 'name', 'totalamount', 'statuscode'], orderBy: 'name asc', pageSize: 50 })\n", "      inflight = Promise.resolve({ rows: [] as OrderRow[] })\n"), /no queryTable as a list read held by the canonical cached promise/],
-    ['a rejected Action reported as a read', variant27("      setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', undefined, failure, 'write'));", "      setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', undefined, failure, 'read'));"), /not indeterminate, indeterminate, network, write and a rejected write/],
+    // The common contract refuses it first now: a rejected Action is a write whatever the page calls it.
+    ['a rejected Action reported as a read', variant27("      setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', undefined, failure, 'write'));", "      setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', undefined, failure, 'read'));"), /its catch reports the failure as 'read', but this operation's failure is 'write'/],
     ['a skipped network check', variant27("      if (!res.ok && res.error?.code === 'network') { setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'network', retryApprove)); return; }\n", ''), /not indeterminate, indeterminate, network, write/],
     ['no boundary', variant27('  <PageErrorBoundary>\n    <PageBody {...props} />\n  </PageErrorBoundary>', '  <PageBody {...props} />'), /does not mount PageErrorBoundary/],
   ]) {

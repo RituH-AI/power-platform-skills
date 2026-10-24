@@ -1290,8 +1290,12 @@ staleness guard may return — a request counter (`requestId !== request.current
 (`recordId !== approvalFor.current`), or an unmounted or cancelled flag cleared in an effect's cleanup; a
 double-submit latch or page data is not one. It requires this block's
 reporter line for line (comments, indentation and line endings aside; only the telemetry insertion may be
-added), a literal kind as the fifth argument, a view that reaches a rendered `PageErrorBar`, and the
-boundary wrapper. It does not read `loadMoreRows` (report its failure the same way all the same) or the
+added), a literal kind as the fifth argument that matches what failed (a rejected `createRow`,
+`updateRow`, `deleteRow` or `executeAction` is `'write'`; `'network'` only in a Custom API result's
+network check after both indeterminate checks; `'indeterminate'` only in those two checks; `'render'` only
+in the boundary), a view that reaches a rendered `PageErrorBar`, and the boundary wrapper. Whether a
+Function or a connector operation is a read is the plan's, so a `'read'` there passes but the grade names
+it as not scored. It does not read `loadMoreRows` (report its failure the same way all the same) or the
 synchronous `setPageOutput`, it does not prove that a request is current or that a retry is safe, and it
 cannot tell whether the maker asked for telemetry.
 
