@@ -143,6 +143,28 @@ function canonicalBoundaries() {
   return boundary;
 }
 
+// The boundary-wrapper proof (source-evidence.js) holds only a masked source — strings and comments blanked — so it
+// compares the page's boundary with the documented forms masked the same way: the same code, string contents aside (no
+// string decides what the boundary hands its child). The page's PageErrorBoundary must be one top-level class equal to a
+// documented form — one getDerivedStateFromError, one componentDidCatch, one render that returns `this.props.children`,
+// nothing added (a second `render()` overrides the first) — and React and Component must not be names the page binds
+// itself. Returns the class range, or null: a wrapper whose boundary is anything else may hand PageBody any object.
+// Runs of blanks collapse to one, so a string of another length (a blanked `'error.render'`) compares equal.
+const maskedLines = (text) => String(text).split('\n').map((line) => line.trim().replace(/\s+/g, ' ')).filter(Boolean).join('\n');
+let boundaryMasks = null;
+function transparentBoundary(mask) {
+  if (!boundaryMasks) boundaryMasks = canonicalBoundaries().map((form) => maskedLines(blankNonCodePreservingTemplateExpressions(form)));
+  const declarations = mask.match(new RegExp(`\\b(?:function|class|const|let|var)\\s+${BOUNDARY}(?![\\w$])`, 'g')) || [];
+  if (declarations.length !== 1) return null;
+  if (/\b(?:function|class|const|let|var)\s+(?:React|Component)(?![\w$])/.test(mask)) return null;
+  if (/(?<![\w$])(?:React\s*\.\s*)?Component\s*=(?![=>])|(?<![\w$.])React\s*=(?![=>])/.test(mask)) return null;
+  let range;
+  try { range = topLevelClass(mask, mask, BOUNDARY); } catch { return null; }
+  if (!range || !boundaryMasks.includes(maskedLines(mask.slice(range.start, range.end)))) return null;
+  return range;
+}
+
 module.exports = {
   canonicalLines, closeOf, depthAt, topLevelFunction, topLevelClass, canonicalReporter, canonicalBars, canonicalBoundaries,
+  transparentBoundary,
 };

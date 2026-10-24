@@ -39,7 +39,7 @@ const crypto = require('node:crypto');
 const { blankNonCodePreservingTemplateExpressions } = require('../../../../plugins/model-apps/scripts/lib/source-literals.js');
 const { groupEnd, literalString, escapeRe, callSites, receiverIsDataApi, namedScopes, forwardedPageBodyOf } = require('./source-evidence.js');
 const { jsxElements, functionScopes, namedFunctions } = require('./tsx-structure.js');
-const { canonicalLines, depthAt, topLevelFunction, canonicalReporter, canonicalBars } = require('./page-error-canonical.js');
+const { canonicalLines, depthAt, topLevelFunction, topLevelClass, canonicalReporter, canonicalBars, canonicalBoundaries } = require('./page-error-canonical.js');
 
 const PAGE_ERROR_ASSERTION = 'Generated .tsx routes every supported dataApi failure through reportPageError and mounts PageErrorBoundary around PageBody';
 const LISTED_METHODS = ['queryTable', 'retrieveRow', 'createRow', 'updateRow', 'deleteRow', 'getChoices', 'queryConnectorTable',
@@ -1154,6 +1154,15 @@ function boundaryProblems(ctx) {
   if (/setState\(|componentDidUpdate|forceUpdate/.test(body)) problems.push('PageErrorBoundary has a reset (setState): a crashing tree is never re-rendered');
   if (!/render\(\)(?::React\.ReactNode|:ReactNode)?\{if\(this\.state\.failed\)\{return\(?<MessageBarintent='error'><MessageBarBody>\{translate\('error\.render'\)\}<\/MessageBarBody><\/MessageBar>\)?;?\}returnthis\.props\.children;\}/.test(body)) {
     problems.push('PageErrorBoundary.render must show the localized error.render copy in a MessageBar when failed, and its children otherwise');
+  }
+  // The checks above name what is wrong; this one refuses anything else. The class is copied unchanged — one of each
+  // method, nothing added — because a second `render()` or `componentDidCatch` overrides the first at runtime, and it is
+  // named only by its declaration and the wrapper's two tags, so nothing replaces or patches it later.
+  let range = null;
+  try { range = topLevelClass(code, mask, 'PageErrorBoundary'); } catch { range = null; }
+  const copied = range ? canonicalLines(code.slice(range.start, range.end)).join('\n') : '';
+  if (!canonicalBoundaries().includes(copied) || [...mask.matchAll(/(?<![\w$.])PageErrorBoundary(?![\w$])/g)].length !== 3) {
+    problems.push('PageErrorBoundary must be the canonical class of references/rules.md, copied unchanged and named only by its declaration and the wrapper: nothing added, removed or patched later (a second render() or componentDidCatch overrides the first)');
   }
   if (!new RegExp(`^(?:function\\s+translate\\s*\\(|const\\s+translate\\s*=)`, 'm').test(code)) problems.push('no top-level translate() for the error copy');
   if (ctx.reportSites.length && !pageNameDeclared(ctx)) problems.push('no single top-level PAGE_NAME string literal');

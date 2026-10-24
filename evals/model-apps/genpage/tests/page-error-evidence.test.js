@@ -515,6 +515,44 @@ test('the complete Custom API page passes the existing runtime check through the
   assert.ok(runtimeProblems(spoofed, ACTION_BINDINGS, ACTION_OUTPUTS, new Map()).some((problem) => /not the page's dataApi prop/.test(problem)));
 });
 
+test('only the documented boundary class proves where PageBody\'s dataApi comes from: a function or an altered class of that name proves nothing', () => {
+  const { forwardedPageBodyOf, actionCalls, receiverIsDataApi } = require('../lib/source-evidence.js');
+  const fixture = fs.readFileSync(path.join(__dirname, '..', 'fixtures', '27-page-error-helper', 'order-approvals.tsx'), 'utf8').replace(/\r\n/g, '\n');
+  const counterfeit = "{ dataApi: { executeAction: async () => ({ ok: true, outputs: { NewStatus: 'counterfeit' } }) } }";
+  const classStart = fixture.indexOf('class PageErrorBoundary extends');
+  const classEnd = fixture.indexOf('\n}\n', fixture.indexOf('  public render(): React.ReactNode {', classStart)) + 2;
+  const cases = [
+    ['a PageErrorBoundary function that clones its child with another dataApi', fixture.slice(0, classStart)
+      + `function PageErrorBoundary(props: { children: React.ReactElement }) {\n  return React.cloneElement(props.children, ${counterfeit});\n}`
+      + fixture.slice(classEnd), /no single top-level class PageErrorBoundary/],
+    ['the canonical class with a second render() that clones its child', fixture.slice(0, classEnd - 2)
+      + `\n  public render(): React.ReactNode {\n    return React.cloneElement(this.props.children as React.ReactElement, ${counterfeit});\n  }\n`
+      + fixture.slice(classEnd - 2), /PageErrorBoundary must be the canonical class/],
+    ['the canonical class patched after its declaration', fixture.slice(0, classEnd)
+      + `\nPageErrorBoundary.prototype.render = function render() { return React.cloneElement(this.props.children, ${counterfeit}); };\n`
+      + fixture.slice(classEnd), /PageErrorBoundary must be the canonical class/],
+    ['a page that binds React itself', fixture.slice(0, classStart) + 'const React = { Component: class {} } as any;\n' + fixture.slice(classStart), /does not mount PageErrorBoundary around PageBody/],
+  ];
+  const approve = (source) => actionCalls(source).filter((call) => call.fields.get('name') === "'cnt_ApproveOrder'");
+  assert.ok(forwardedPageBodyOf(fixture), 'the fixture itself is forwarded');
+  assert.deepEqual(approve(fixture).map((call) => receiverIsDataApi(call.mask, call.scopes, call.receiver, call.start)), [true]);
+  for (const [label, source, refusal] of cases) {
+    assert.equal(forwardedPageBodyOf(source), null, `${label}: no forwarding proof`);
+    const calls = approve(source);
+    assert.ok(calls.length >= 1, `${label}: the Action call is still read`);
+    assert.ok(calls.every((call) => !receiverIsDataApi(call.mask, call.scopes, call.receiver, call.start)), `${label}: its receiver is not proven to be the page dataApi`);
+    refused(source, refusal, `${label}: the page error check refuses it`);
+  }
+  // The Custom API grader, which does not run the page error check, refuses the cloning boundaries too.
+  const bindings = [{ name: 'cnt_ApproveOrder', isFunction: false, displayName: 'Approve Order', boundEntityLogicalName: 'salesorder', parameterKinds: { Comment: 'String' } }];
+  assert.deepEqual(runtimeProblems(fixture, bindings, { cnt_ApproveOrder: ['NewStatus'] }, new Map()), []);
+  for (const [label, source] of cases.slice(0, 3)) {
+    assert.ok(runtimeProblems(source, bindings, { cnt_ApproveOrder: ['NewStatus'] }, new Map()).some((problem) => /not the page's dataApi prop/.test(problem)), label);
+  }
+  // String contents aside, the class is compared as documented: a translated fallback key still forwards.
+  assert.ok(forwardedPageBodyOf(swap(fixture, "translate('error.render')", "translate('error.renderx')")), 'a string does not decide what the boundary forwards');
+});
+
 test('the two-level built-in page passes both existing built-in checks through the boundary wrapper', () => {
   assert.deepEqual(builtInRuntimeProblems(BUILT_INS, BUILT_IN_NAMES), []);
   assert.deepEqual(runtimeProblems(BUILT_INS, BUILT_IN_BINDINGS, undefined, new Map(), new Set(BUILT_IN_NAMES)), []);

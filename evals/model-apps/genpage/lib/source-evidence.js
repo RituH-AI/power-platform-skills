@@ -2,6 +2,7 @@
 
 const { blankNonCodePreservingTemplateExpressions } = require('../../../../plugins/model-apps/scripts/lib/source-literals.js');
 const { jsxElements } = require('./tsx-structure.js');
+const { transparentBoundary } = require('./page-error-canonical.js');
 
 function groupEnd(mask, open) {
   const pairs = { '(': ')', '{': '}', '[': ']' };
@@ -227,7 +228,11 @@ function componentNamed(mask, scopes, name) {
 // that, so nothing but the real props can reach PageBody:
 //   - the default export's whole body is that one element: an arrow's expression (parenthesized or not), or a block
 //     holding only `return (…);`. Its own first parameter is a plain name the file never assigns again;
-//   - the root is PageErrorBoundary, given nothing, or only its telemetry prop (`appInsights={props.appInsights}`);
+//   - the root is PageErrorBoundary, given nothing, or only its telemetry prop (`appInsights={props.appInsights}`), and
+//     PageErrorBoundary is the documented class itself (page-error-canonical.js transparentBoundary: one top-level class
+//     equal to a documented form, string contents aside), named nowhere but its declaration and this element's two tags
+//     — a function or an altered class of that name (a second `render()` overrides the first) could clone its child with
+//     another dataApi;
 //   - its one child, and nothing else, is a self-closing PageBody whose only attribute is one spread of that parameter;
 //   - PageBody is declared once, at the top level of the module, with a plain first parameter (no destructuring and no
 //     default value), and is named nowhere else: a second JSX use, a call or a value hand-off could pass another object.
@@ -246,6 +251,8 @@ function forwardedPageBody(mask, scopes, wrapper) {
   const around = (mask.slice(scope.body, root.start) + mask.slice(root.end, bodyEnd)).replace(/\s+/g, '');
   if (!['()', '();', '', ';', '{return();}', '{return()}', '{return;}', '{return}'].includes(around)) return null;
   if (root.name !== PAGE_ERROR_BOUNDARY || root.selfClosing) return null;
+  if (!transparentBoundary(mask)) return null;
+  if ([...mask.matchAll(new RegExp(`(?<![\\w$.])${PAGE_ERROR_BOUNDARY}(?![\\w$])`, 'g'))].length !== 3) return null;
   const rootAttrs = [...root.attrs.entries()];
   if (rootAttrs.length > 1 || (rootAttrs.length === 1 && !(rootAttrs[0][0] === 'appInsights' && rootAttrs[0][1].kind === 'expression'
     && normalizeChain(rootAttrs[0][1].value) === `${propsName}.appInsights`))) return null;

@@ -1293,7 +1293,8 @@ reporter line for line (comments, indentation and line endings aside; only the t
 added), a literal kind as the fifth argument that matches what failed (a rejected `createRow`,
 `updateRow`, `deleteRow` or `executeAction` is `'write'`; `'network'` only in a Custom API result's
 network check after both indeterminate checks; `'indeterminate'` only in those two checks; `'render'` only
-in the boundary), a view that reaches a rendered `PageErrorBar`, and the boundary wrapper. Whether a
+in the boundary), a view that reaches a rendered `PageErrorBar`, the boundary class copied unchanged (a
+second `render()` overrides the first) and the boundary wrapper. Whether a
 Function or a connector operation is a read is the plan's, so a `'read'` there passes but the grade names
 it as not scored. It does not read `loadMoreRows` (report its failure the same way all the same) or the
 synchronous `setPageOutput`, it does not prove that a request is current or that a retry is safe, and it
