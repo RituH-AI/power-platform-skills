@@ -690,10 +690,66 @@ function dataCalls(ctx) {
   return ctx.calls;
 }
 
-// A receiver bound to a local object, array, `new` instance or literal in this page: not the page DataAPI, out of scope.
+// A receiver proven unrelated to the page DataAPI is out of scope; one merely not proven to be it is unverifiable. Proven
+// only for a root that is the page's single binding of its name — a `const` whose initializer is a string or number
+// literal, or an object or array literal that names nothing of the page's scope (closedInitializer) — and that is used
+// nowhere but as the receiver of a method call: never written, passed, spread, aliased or rebound. A container that holds
+// the page client (`const services = { client: props.dataApi }`), a `let`, a `new` instance or a parameter of the same
+// name is not proven.
 function unrelatedLocal(ctx, receiver) {
+  const { mask } = ctx;
   const root = receiver.split('.')[0];
-  return new RegExp(`\\b(?:const|let|var)\\s+${escapeRe(root)}\\s*(?::[^=;]+)?=\\s*(?:\\{|\\[|new\\b|['"\`\\d])`).test(ctx.mask);
+  const name = escapeRe(root);
+  const declarations = [...mask.matchAll(new RegExp(`\\b(const|let|var)\\s+${name}(?![\\w$])`, 'g'))];
+  if (declarations.length !== 1 || declarations[0][1] !== 'const') return false;
+  const declared = declarations[0].index + declarations[0][0].length;
+  const head = /^\s*(?::[^=;]+)?=\s*/.exec(mask.slice(declared));
+  if (!head) return false;
+  const start = declared + head[0].length;
+  let end;
+  if (mask[start] === '{' || mask[start] === '[') {
+    end = groupEnd(mask, start) + 1;
+    if (end <= start || !closedInitializer(mask.slice(start, end))) return false;
+  } else if (/['"\d]/.test(mask[start])) {
+    end = start + 1;
+  } else return false;
+  for (const mention of mask.matchAll(new RegExp(`(?<![\\w$.])${name}(?![\\w$])`, 'g'))) {
+    if (mention.index === declared - root.length) continue;
+    if (mention.index >= start && mention.index < end) return false;
+    // `root.member(…)` or `root.a.b?.(…)`: a method call on the object, nothing else.
+    if (!new RegExp(`^(?:\\s*\\??\\.\\s*${IDENT})+\\s*(?:\\?\\.\\s*)?\\(`).test(mask.slice(mention.index + root.length))) return false;
+  }
+  return true;
+}
+// Names an object or array literal may use without reaching the page's scope: the language's globals, keywords and type
+// names, and the parameters and locals it declares itself.
+const CLOSED_NAMES = new Set(['Promise', 'Math', 'JSON', 'Date', 'String', 'Number', 'Boolean', 'Array', 'Object', 'Map', 'Set',
+  'Error', 'RegExp', 'NaN', 'Infinity', 'undefined', 'null', 'true', 'false', 'string', 'number', 'boolean', 'unknown', 'any',
+  'void', 'never', 'object', 'Record', 'Partial', 'Readonly', 'return', 'async', 'await', 'new', 'typeof', 'instanceof', 'as',
+  'in', 'of', 'if', 'else', 'const', 'let', 'var', 'function', 'for', 'while', 'do', 'break', 'continue', 'switch', 'case',
+  'default', 'throw', 'try', 'catch', 'finally', 'delete']);
+function closedInitializer(text) {
+  const bound = new Set();
+  const params = (list) => {
+    for (const part of list.split(',')) {
+      const id = new RegExp(`^\\s*(?:\\.\\.\\.)?(${IDENT})`).exec(part);
+      if (id) bound.add(id[1]);
+    }
+  };
+  for (const match of text.matchAll(/\(([^()]*)\)\s*(?::[^=()]*)?=>/g)) params(match[1]);
+  for (const match of text.matchAll(new RegExp(`\\bfunction\\b\\s*(?:${IDENT})?\\s*\\(([^()]*)\\)`, 'g'))) params(match[1]);
+  for (const match of text.matchAll(new RegExp(`(?<![\\w$.])(${IDENT})\\s*=>`, 'g'))) bound.add(match[1]);
+  for (const match of text.matchAll(new RegExp(`\\b(?:const|let|var)\\s+(${IDENT})`, 'g'))) bound.add(match[1]);
+  for (const match of text.matchAll(new RegExp(`(?<![\\w$.])${IDENT}`, 'g'))) {
+    const id = match[0];
+    if (bound.has(id) || CLOSED_NAMES.has(id)) continue;
+    // A property key or a method name of the literal itself: `{ key: …`, `, key(…) {…}`.
+    const before = text.slice(0, match.index).trimEnd();
+    const after = text.slice(match.index + id.length).trimStart();
+    if (/[{,]$/.test(before) && /^[:(]/.test(after)) continue;
+    return false;
+  }
+  return true;
 }
 
 function dataCallProblems(ctx) {

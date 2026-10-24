@@ -757,6 +757,20 @@ test('a receiver that is not provably the page dataApi is unverifiable; retrieve
   refused(swap(FOUNDATION, "await dataApi.createRow('account', { name });", "await dataApi.retrieveMultipleRecords('account', '?$select=name');"), /retrieveMultipleRecords/, 'an API the page DataAPI does not teach');
   const local = swap(MOCK, '  const rows = [', "  const store = { queryTable: (table: string) => Promise.resolve({ rows: [table] }) };\n  void store.queryTable('account');\n  const rows = [");
   assert.deepEqual(problems(local), [], 'a local object literal is not the page dataApi');
+  // Only a local proven closed is out of scope: a container that holds the page client, a rebinding, a written or passed
+  // object, or an initializer that names the page's scope is unverifiable, never exempt.
+  const hidden = swap(swap(FOUNDATION, '  const { dataApi } = props;', '  const services = { client: props.dataApi };'),
+    "await dataApi.createRow('account', { name });", "void services.client.createRow('account', { name });");
+  refused(hidden, /services\.client is not provably the page dataApi/, 'a local object that holds the page client');
+  const storeLine = "  const store = { queryTable: (table: string) => Promise.resolve({ rows: [table] }) };";
+  for (const [label, from, to] of [
+    ['a let', storeLine, storeLine.replace('const store', 'let store')],
+    ['a member written later', "  void store.queryTable('account');", "  store.queryTable = (props.dataApi as any).queryTable;\n  void store.queryTable('account');"],
+    ['an object filled through Object.assign', "  void store.queryTable('account');", "  Object.assign(store, props.dataApi);\n  void store.queryTable('account');"],
+    ['an initializer that names the page scope', storeLine, "  const store = { queryTable: (props.dataApi as any).queryTable };"],
+    ['a new instance', storeLine, '  const store = new Proxy(props.dataApi, {});'],
+    ['a second binding of the name', "  void store.queryTable('account');", "  void store.queryTable('account');\n  const reload = (store: any) => store.queryTable('account');"],
+  ]) refused(swap(local, from, to), /store(?:\.\w+)? is not provably the page dataApi/, label);
 });
 
 test('telemetry-safe spans cover only the seventh argument of a verified canonical read report on an unmodified result or caught error', () => {
