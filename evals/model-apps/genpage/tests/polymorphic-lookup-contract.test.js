@@ -138,6 +138,31 @@ test('every WRONG form of the pitfalls fails with a reason that names it', () =>
   }
 });
 
+test('a table check proves the target only when it dominates the use with the right polarity', () => {
+  const guard = "    if (reference.table !== 'account') return;\n    const filter";
+  for (const [label, from, to] of [
+    ['the inverted guard returns for an account', guard, "    if (reference.table === 'account') return;\n    const filter"],
+    ['a guard that does not leave', guard, "    if (reference.table !== 'account') console.warn('not an account');\n    const filter"],
+    ['a guard in a branch the use is not in', guard, "    if (row) { if (reference.table !== 'account') return; }\n    const filter"],
+    ['a guard in a function only defined', guard, "    const check = () => { if (reference.table !== 'account') return; };\n    const filter"],
+    ['a guard behind else', guard, "    if (!row) return;\n    else if (reference.table !== 'account') return;\n    const filter"],
+    ['a comparison only mentioned', guard, "    const isAccount = reference.table === 'account';\n    const filter"],
+    ['a comparison in a comment', guard, "    // if (reference.table !== 'account') return;\n    const filter"],
+  ]) {
+    const found = lookupContractProblems(swap(PAGE, from, to), SCENARIO);
+    assert.ok(found.some((problem) => /before the page checks that reference\.table is account/.test(problem)), `${label}: ${JSON.stringify(found)}`);
+  }
+  // The use inside the matching positive branch is proven; a braced early exit is too.
+  const positive = swap(PAGE, "    if (reference.table !== 'account') return;\n    const filter = `customerid_account/accountid eq ${reference.id}`;\n    return dataApi.queryTable('opportunity', { select: ['name', '_customerid_value'], filter });",
+    "    if (reference.table === 'account') {\n      const filter = `customerid_account/accountid eq ${reference.id}`;\n      return dataApi.queryTable('opportunity', { select: ['name', '_customerid_value'], filter });\n    }");
+  assert.deepEqual(lookupContractProblems(positive, SCENARIO), []);
+  assert.deepEqual(lookupContractProblems(swap(PAGE, guard, "    if (reference.table !== 'account') { return; }\n    const filter"), SCENARIO), []);
+  // The same rule for a fixed retrieveRow table.
+  const retrieve = "    if (reference.table !== 'account') return;\n    return dataApi.retrieveRow";
+  assert.ok(lookupContractProblems(swap(PAGE, retrieve, "    if (reference.table === 'account') return;\n    return dataApi.retrieveRow"), SCENARIO)
+    .some((problem) => /not the reference's own table/.test(problem)), 'an inverted guard before a fixed retrieveRow table');
+});
+
 test('without scenario lookup metadata nothing is graded as passing', () => {
   assert.deepEqual(lookupContractProblems(PAGE, { lookups: [] }), ['the scenario names no lookup metadata to grade against']);
 });

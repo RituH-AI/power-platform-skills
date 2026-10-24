@@ -14,9 +14,11 @@
 //     target set, bound to a `const`, checked by `if (<n>.state !== 'resolved') return…` before its `.reference` is used, and at
 //     most aliased once more as `const <r> = <n>.reference;` (the "documented immutable alias");
 //   - a resolved reference's `.id` as a filter operand (`_<field>_value eq ${<r>.id}`), a `retrieveRow` id and a `navigateTo`
-//     entityId, with its `.table` as the table — or a literal table under a `<r>.table === '<table>'` guard;
+//     entityId, with its `.table` as the table — or a literal table where the reference's table is PROVEN to be it: after an
+//     early `if (<r>.table !== '<table>') return…;` that is a statement of a block holding the use, or inside the block of
+//     `if (<r>.table === '<table>') { … }` (an inverted, nested or merely mentioned comparison proves nothing);
 //   - typed paths in a filter (`<navigation>/<column>`) only through a verified concrete path of the queried table; a comparison
-//     of such a path with a reference's id only after that reference's table is checked against the path's target;
+//     of such a path with a reference's id only where that reference's table is proven, the same way, to be the path's target;
 //   - a lookup property in a `select` list, in its FormattedValue annotation key, in a `ne null` / `eq null` predicate, or as a
 //     write key whose value is `null` or the guarded table formatter of pitfall E (directly or through one `const`).
 // Refused: a raw `row._x_value` / `row['_x_value']` read, a lookup annotation read outside the normalizer, a partial target set, a
@@ -227,11 +229,32 @@ function unguardedUses(maskP, found) {
   return problems;
 }
 
-// Whether `holder.table` is compared with '<table>' (`===` to go on, `!==` to return) between the normalization and `at`.
-function tableChecked(code, reference, table, at) {
+// Whether `<holder>.table` is PROVEN to be '<table>' at `at`, by one of two bounded forms (a comparison anywhere else — the
+// inverted `if (<holder>.table === '<table>') return;`, one inside another condition or an `else`, one in a branch `at` is not
+// in — proves nothing):
+//   - an early exit `if (<holder>.table !== '<table>') return…;` (or `throw`, braced or not) that is a statement of a block
+//     holding `at`, after the reference is bound and before `at` — every path to `at` passes it with the table equal;
+//   - `at` inside the braced block of `if (<holder>.table === '<table>') { … }`.
+// `mask` blanks every literal and comment, so the `if`, its braces and its statement position are the code's own.
+function tableChecked(code, mask, reference, table, at) {
   const parts = reference.holder.split('.').map(escapeRe).join('\\s*\\.\\s*');
-  const test = new RegExp(`(?<![\\w$.])${parts}\\s*\\.\\s*table\\s*[!=]==?\\s*(['"])${escapeRe(table)}\\1`, 'g');
-  for (const match of code.matchAll(test)) if (match.index > reference.entry.at && match.index < at) return true;
+  const test = new RegExp(`\\bif\\s*\\(\\s*${parts}\\s*\\.\\s*table\\s*(===?|!==?)\\s*(['"])${escapeRe(table)}\\2\\s*\\)`, 'g');
+  for (const match of code.matchAll(test)) {
+    if (match.index <= reference.entry.at || match.index >= at || mask.slice(match.index, match.index + 2) !== 'if') continue;
+    // A statement of its own block: nothing but `;`, `{` or `}` before it (never `else if`, a label or another `if`).
+    const before = mask.slice(0, match.index).trimEnd();
+    if (before && !';{}'.includes(before[before.length - 1])) continue;
+    const close = match.index + match[0].length - 1;
+    let then = close + 1;
+    while (/\s/.test(mask[then])) then += 1;
+    if (match[1].startsWith('!')) {
+      if (!/^(?:\{\s*)?(?:return|throw)\b/.test(mask.slice(then))) continue;
+      const block = enclosingBlock(mask, match.index);
+      if (block.scopeStart < at && at < block.scopeEnd) return true;
+    } else if (mask[then] === '{' && then < at && at < groupEnd(mask, then)) {
+      return true;
+    }
+  }
   return false;
 }
 
@@ -323,7 +346,7 @@ function consumerProblems(code, mask, found, lookups) {
     const tableRef = referenceOf(found, table, at);
     if (tableRef && tableRef.member === 'table' && tableRef.holder === reference.holder) return;
     const literal = literalTable(table);
-    if (literal !== null && (reference.entry.lookup.targets.length === 1 ? reference.entry.lookup.targets[0] === literal : tableChecked(code, reference, literal, at))) return;
+    if (literal !== null && (reference.entry.lookup.targets.length === 1 ? reference.entry.lookup.targets[0] === literal : tableChecked(code, mask, reference, literal, at))) return;
     problems.push(`${label} opens ${reference.holder}.id in ${table || 'a table'} that is not the reference's own table — use ${reference.holder}.table, or check it first`);
   };
   for (const match of mask.matchAll(/(?<![\w$])navigateTo\s*\(/g)) {
@@ -368,7 +391,7 @@ function queryFilters(code, mask, literals) {
   return out;
 }
 
-function pathProblems(code, maskP, found, lookups, targetColumns, filters) {
+function pathProblems(code, mask, maskP, found, lookups, targetColumns, filters) {
   const problems = [];
   for (const { table, literal, at } of filters) {
     const { text, expressions } = literal.quote === '`' ? templateParts(code, maskP, literal) : { text: literal.text, expressions: [] };
@@ -384,7 +407,7 @@ function pathProblems(code, maskP, found, lookups, targetColumns, filters) {
         const expression = expressions[[...bare.slice(0, match.index + match[0].length)].filter((ch) => ch === '\u0000').length - 1];
         const reference = referenceOf(found, expression || '', at);
         if (!reference || reference.member !== 'id') problems.push(`${via}/${column} is compared with ${expression || 'a value'} that is not a resolved reference's bare id`);
-        else if (!tableChecked(code, reference, path.target, at)) problems.push(`${via}/${column} is compared with ${reference.holder}.id before the page checks that ${reference.holder}.table is ${path.target}`);
+        else if (!tableChecked(code, mask, reference, path.target, at)) problems.push(`${via}/${column} is compared with ${reference.holder}.id before the page checks that ${reference.holder}.table is ${path.target}`);
       }
     }
   }
@@ -485,7 +508,7 @@ function lookupContractProblems(content, { lookups, targetColumns = {} }) {
     problems.push(...unguardedUses(maskP, found));
     problems.push(...mentionProblems(code, mask, maskP, literals, comments, found, lookups));
     problems.push(...consumerProblems(code, mask, found, lookups));
-    problems.push(...pathProblems(code, maskP, found, lookups, targetColumns, queryFilters(code, mask, literals)));
+    problems.push(...pathProblems(code, mask, maskP, found, lookups, targetColumns, queryFilters(code, mask, literals)));
   } catch (error) {
     problems.push(`the page's lookup code could not be read (${error.message})`);
   }
