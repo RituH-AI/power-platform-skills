@@ -1053,7 +1053,8 @@ required arguments:
 - `code` — the host's error code when a returned result carries one (`res.error?.code`), otherwise
   `undefined`.
 - `message` — the result's `res.error?.message`, or the caught value itself (`error`). Never pass
-  the result object, its outputs, a row, a lookup reference or an identity.
+  the result object, its outputs, a row, a lookup reference or an identity, and never change the
+  result's `error` or the caught value (assign, write a field, alias) before reporting it.
 - `kind` — a string literal the caller decides from the operation, never from the code or the
   wording:
 
@@ -1290,7 +1291,9 @@ staleness guard may return — a request counter (`requestId !== request.current
 (`recordId !== approvalFor.current`), or an unmounted or cancelled flag cleared in an effect's cleanup; a
 double-submit latch or page data is not one. It requires this block's
 reporter line for line (comments, indentation and line endings aside; only the telemetry insertion may be
-added), a literal kind as the fifth argument that matches what failed (a rejected `createRow`,
+added), a code and message that are the caught value or the `error` of the result an awaited call
+returned, left unchanged (not reassigned, written, aliased or handed on first), a literal kind as the
+fifth argument that matches what failed (a rejected `createRow`,
 `updateRow`, `deleteRow` or `executeAction` is `'write'`; `'network'` only in a Custom API result's
 network check after both indeterminate checks; `'indeterminate'` only in those two checks; `'render'` only
 in the boundary), a view that reaches a rendered `PageErrorBar`, the boundary class copied unchanged (a

@@ -829,6 +829,35 @@ test('telemetry-safe spans cover only the seventh argument of a verified canonic
   assert.deepEqual(telemetrySafeSpans(BUILT_INS), [], 'no telemetry argument, no span');
 });
 
+test('the diagnostics a report trusts are the unmodified result or caught value: computed and aliased writes, a rebound catch value and a replaced reporter earn no exemption, and the common check refuses them', () => {
+  const reportAt = "      const view = reportPageError(PAGE_NAME, 'showIdentity', res.error?.code, res.error?.message, 'read', undefined, appInsights);";
+  const catchAt = "    const view = reportPageError(PAGE_NAME, 'showIdentity', undefined, error, 'read');";
+  const authorized = swap(swap(withTelemetry(BUILT_INS), reportAt.replace(', undefined, appInsights);', ');'), reportAt),
+    catchAt, catchAt.replace("'read');", "'read', undefined, appInsights);"));
+  assert.equal(telemetrySafeSpans(authorized).length, 2, 'the result report and the catch report');
+  assert.deepEqual(problems(authorized), []);
+  const identity = 'String(res.outputs?.UserId)';
+  for (const [label, source, refusal] of [
+    ['a computed write into the result error', swap(authorized, reportAt, `      if (res.error) res.error['message'] = ${identity};\n${reportAt}`), /res is not that const, or its error is written/],
+    ['a write through an alias of the result error', swap(authorized, reportAt, `      const fault = res.error;\n      if (fault) fault.message = ${identity};\n${reportAt}`), /res is not that const, or its error is written/],
+    ['the result error deleted', swap(authorized, reportAt, `      delete res.error;\n${reportAt}`), /res is not that const, or its error is written/],
+    ['the caught value replaced in its catch', swap(authorized, catchAt.replace("'read');", "'read', undefined, appInsights);"),
+      "    error = { message: props.pageInput?.recordId };\n" + catchAt.replace("'read');", "'read', undefined, appInsights);")), /the caught error is reassigned, written through or handed on/],
+    ['the caught value written through', swap(authorized, catchAt.replace("'read');", "'read', undefined, appInsights);"),
+      "    (error as Error).message = 'x';\n" + catchAt.replace("'read');", "'read', undefined, appInsights);")), /the caught error is reassigned, written through or handed on/],
+    ['a message taken from something other than an awaited result', swap(authorized, reportAt,
+      `      const fake = { error: { code: undefined, message: ${identity} } };\n${reportAt.replace('res.error?.code, res.error?.message', 'fake.error?.code, fake.error?.message')}`), /fake is not that const/],
+    ['the reporter replaced', `${authorized}\nreportPageError = (() => ({})) as any;\n`, /reassigned/],
+  ]) {
+    assert.equal(telemetrySafeSpans(source).length < 2, true, `${label}: one exemption fewer`);
+    refused(source, refusal, label);
+  }
+  // A caught value read through a member, and a result read only through members, stay exempt.
+  const reads = swap(authorized, reportAt, `      const status = res.error?.status;\n      void status;\n${reportAt}`);
+  assert.equal(telemetrySafeSpans(reads).length, 2);
+  assert.deepEqual(problems(reads), []);
+});
+
 // ---------- the compatibility ledger ----------
 
 const FIXTURES = path.join(__dirname, '..', 'fixtures');

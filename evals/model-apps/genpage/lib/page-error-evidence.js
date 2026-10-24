@@ -479,20 +479,82 @@ function reporterProblems(ctx) {
   return problems;
 }
 
-// The parameter names of the function around `at` and of the catch clauses and `.catch(` handlers around it.
+// ---------- where a report's diagnostics come from ----------
+// A report's code and message must be what failed, unchanged, or the console line (and the telemetry the built-in
+// exemption lets through) may carry a record id the page put there. A caught value counts only while its catch names it
+// as a report's message or reads its members — never reassigns it, writes through it (`error.message = …`) or hands
+// it on (`const e = error`, `f(error)`). A result's error.code / error.message counts only when the result is the
+// `const` an awaited call returned in the report's function and every later mention reads a member — `res.ok`,
+// `res.outputs?.Total`, `res.error?.message` — never writes one (`res.error.message = …`, `res.error['message'] = …`,
+// `delete res.error`), takes one computed, or hands the result or its error object on (`const fault = res.error`).
+
+// The member chain read after the name at `at`: { segments, end, computed } (`res?.error.message` → ['error', 'message']).
+function chainAt(mask, at, length) {
+  const segments = [];
+  let i = at + length;
+  for (;;) {
+    const rest = mask.slice(i);
+    const member = new RegExp(`^\\s*(?:\\?\\.|\\.)\\s*(${IDENT})`).exec(rest);
+    if (member) { segments.push(member[1]); i += member[0].length; continue; }
+    return { segments, end: i, computed: /^\s*(?:\?\.\s*)?\[/.test(rest) };
+  }
+}
+const WRITES_AFTER = /^\s*(?:(?:\*\*|<<|>>>?|\?\?|\|\||&&|[-+*/%&|^])?=(?![=>])|\+\+|--)/;
+const WRITES_BEFORE = /(?:\bdelete|\+\+|--)\s*$/;
+// Every mention of `name` in [from, to) is a plain read that `allow(at, chain)` accepts.
+function onlyRead(mask, name, from, to, allow) {
+  for (const mention of mask.slice(from, to).matchAll(new RegExp(`(?<![\\w$.])${escapeRe(name)}(?![\\w$])`, 'g'))) {
+    const at = from + mention.index;
+    // A property key of the same name (`{ saving: false, error: reportPageError(…) }`) is not the binding.
+    if (/[{,]\s*$/.test(mask.slice(Math.max(0, at - 40), at)) && /^\s*:(?!:)/.test(mask.slice(at + name.length))) continue;
+    const chain = chainAt(mask, at, name.length);
+    if (chain.computed || WRITES_BEFORE.test(mask.slice(Math.max(0, at - 12), at)) || WRITES_AFTER.test(mask.slice(chain.end))) return false;
+    if (!allow(at, chain)) return false;
+  }
+  return true;
+}
+// Is `name` at `at` an awaited result left as the host returned it?
+function untouchedResult(ctx, name, at) {
+  const { mask } = ctx;
+  let found = null;
+  for (const decl of mask.matchAll(new RegExp(`\\b(const|let|var)\\s+${escapeRe(name)}(?![\\w$])`, 'g'))) {
+    if (decl.index > at) break;
+    const fn = innermostFunction(ctx, decl.index);
+    if (fn && fn.start < at && at < fn.end) found = { decl, fn };
+  }
+  if (!found || found.decl[1] !== 'const') return false;
+  const declared = found.decl.index + found.decl[0].length;
+  if (!/^\s*(?::[^=;]+)?=\s*await\b/.test(mask.slice(declared))) return false;
+  return onlyRead(mask, name, declared, found.fn.end, (where, chain) => chain.segments.length > 0 && !(chain.segments[0] === 'error' && chain.segments.length === 1));
+}
+// The catch bindings around `at` — catch clauses, `.catch(` handlers, and componentDidCatch's parameter inside its own
+// body — each with whether its catch leaves it untouched: [{ name, untouched }].
+function caughtBindings(ctx, at) {
+  const { mask } = ctx;
+  const found = [];
+  const add = (name, open, close) => {
+    const untouched = onlyRead(mask, name, open, close, (where, chain) => chain.segments.length > 0
+      || ctx.reportSites.some((site) => site.args.length > 3 && site.args[3][0] <= where && where < site.args[3][1] && site.text(3).trim() === name));
+    found.push({ name, untouched });
+  };
+  for (const match of mask.matchAll(new RegExp(`\\bcatch\\s*\\(\\s*(${IDENT})`, 'g'))) {
+    const open = mask.indexOf('{', match.index);
+    if (open > 0 && open < at && at < groupEnd(mask, open)) add(match[1], open, groupEnd(mask, open));
+  }
+  for (const match of mask.matchAll(new RegExp(`\\.\\s*catch\\s*\\(\\s*\\(?\\s*(${IDENT})`, 'g'))) {
+    const open = mask.indexOf('(', match.index);
+    const paramAt = match.index + match[0].length - match[1].length;
+    if (open < at && at < groupEnd(mask, open)) add(match[1], paramAt + match[1].length, groupEnd(mask, open));
+  }
+  for (const match of mask.matchAll(new RegExp(`\\bcomponentDidCatch\\s*\\(\\s*(${IDENT})`, 'g'))) {
+    const open = mask.indexOf('{', groupEnd(mask, mask.indexOf('(', match.index)));
+    if (open > 0 && open < at && at < groupEnd(mask, open)) add(match[1], open, groupEnd(mask, open));
+  }
+  return found;
+}
+// The names a report at `at` may pass as the caught error: catch bindings around it that their catch leaves untouched.
 function caughtNames(ctx, at) {
-  const names = new Set();
-  for (const match of ctx.mask.matchAll(new RegExp(`\\bcatch\\s*\\(\\s*(${IDENT})`, 'g'))) {
-    const open = ctx.mask.indexOf('{', match.index);
-    if (open > 0 && open < at && at < groupEnd(ctx.mask, open)) names.add(match[1]);
-  }
-  for (const match of ctx.mask.matchAll(new RegExp(`\\.\\s*catch\\s*\\(\\s*\\(?\\s*(${IDENT})`, 'g'))) {
-    const open = ctx.mask.indexOf('(', match.index);
-    if (open < at && at < groupEnd(ctx.mask, open)) names.add(match[1]);
-  }
-  const method = new RegExp(`\\bcomponentDidCatch\\s*\\(\\s*(${IDENT})`).exec(ctx.mask);
-  if (method) names.add(method[1]);
-  return names;
+  return new Set(caughtBindings(ctx, at).filter((binding) => binding.untouched).map((binding) => binding.name));
 }
 
 function reportCallProblems(ctx) {
@@ -513,13 +575,22 @@ function reportCallProblems(ctx) {
     const page = site.text(0).trim();
     if (!((page === 'PAGE_NAME' && pageName) || literalString(page) !== null)) problems.push(`${label}: the page name must be the PAGE_NAME literal`);
     if (literalString(site.text(1)) === null) problems.push(`${label}: the operation must be one stable string literal`);
-    const errorField = (field) => new RegExp(`^${IDENT}\\s*\\.\\s*error\\s*(?:\\?\\.|\\.)\\s*${field}$`);
+    const errorField = (field) => new RegExp(`^(${IDENT})\\s*(?:\\?\\.|\\.)\\s*error\\s*(?:\\?\\.|\\.)\\s*${field}$`);
     const codeArg = site.text(2).trim();
     if (!(codeArg === 'undefined' || errorField('code').test(codeArg) || literalString(codeArg) !== null)) {
       problems.push(`${label}: the code must be undefined, a result's error.code or a literal — never derived from data`);
     }
     const messageArg = site.text(3).trim();
+    for (const [field, arg] of [['code', codeArg], ['message', messageArg]]) {
+      const result = errorField(field).exec(arg);
+      if (result && !untouchedResult(ctx, result[1], site.at)) {
+        problems.push(`${label}: the ${field} must be the error.${field} of the result an awaited call returned, left as the host returned it — ${result[1]} is not that const, or its error is written, taken computed or handed on first`);
+      }
+    }
     const caught = caughtNames(ctx, site.at);
+    if (caughtBindings(ctx, site.at).some((binding) => binding.name === messageArg && !binding.untouched)) {
+      problems.push(`${label}: the caught ${messageArg} is reassigned, written through or handed on in its catch, so it is no longer the caught error`);
+    }
     if (!(messageArg === 'undefined' || errorField('message').test(messageArg) || caught.has(messageArg)
       || new RegExp(`^${IDENT}\\s*\\.\\s*reason$`).test(messageArg) || literalString(messageArg) !== null
       || /^new\s+Error\s*\(\s*(['"])[^'"]*\1\s*\)$/.test(messageArg))) {
@@ -1213,11 +1284,9 @@ function telemetrySafeSpans(content) {
   const code = String(content ?? '');
   let ctx;
   try { ctx = context(code); } catch { return []; }
-  const range = topLevelFunction(code, ctx.mask, REPORTER);
-  if (!range) return [];
-  const { base, telemetry } = canonicalReporter();
-  const lines = canonicalLines(code.slice(range.start, range.end)).join('\n');
-  if (lines !== base && lines !== telemetry) return [];
+  // The canonical reporter, declared once and never reassigned or handed on (reporterProblems): a reporter that is not
+  // that one may send whatever it is given.
+  if (reporterProblems(ctx).length) return [];
   const spans = [];
   for (const site of ctx.reportSites) {
     if (site.args.length !== 7) continue;
@@ -1226,20 +1295,11 @@ function telemetrySafeSpans(content) {
     const codeArg = squash(site.text(2));
     const messageArg = squash(site.text(3));
     const result = /^([A-Za-z_$][\w$]*)\.error\.code$/.exec(codeArg);
-    const fromResult = result && messageArg === `${result[1]}.error.message` && !resultWritten(ctx, result[1]);
+    const fromResult = result && messageArg === `${result[1]}.error.message` && untouchedResult(ctx, result[1], site.at);
     const fromCatch = codeArg === 'undefined' && caughtNames(ctx, site.at).has(messageArg);
     if (fromResult || fromCatch) spans.push({ start: site.args[6][0], end: site.args[6][1] });
   }
   return spans;
-}
-
-// A result name rebound, or any of its members written: its error fields no longer prove what the host returned.
-function resultWritten(ctx, name) {
-  const id = escapeRe(name);
-  const rebinds = [...ctx.mask.matchAll(new RegExp(`(?<![\\w$.])${id}\\s*(?:\\?\\?|\\|\\||&&)?=(?![=>])`, 'g'))]
-    .filter((match) => !/\b(?:const|let|var)\s+$/.test(ctx.mask.slice(Math.max(0, match.index - 12), match.index)));
-  return rebinds.length > 0 || new RegExp(`(?<![\\w$.])${id}\\s*(?:\\??\\.\\s*[\\w$]+\\s*)+(?:\\?\\?|\\|\\||&&|[-+*/%])?=(?![=>])`).test(ctx.mask)
-    || new RegExp(`\\bdelete\\s+${id}\\b`).test(ctx.mask);
 }
 
 // ---------- the compatibility ledger ----------
