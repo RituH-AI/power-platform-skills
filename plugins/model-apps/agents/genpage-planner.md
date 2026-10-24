@@ -94,7 +94,9 @@ outcomes — because the eval harness greps the log for these tokens. Concretely
   unattended, never write the literal attended markers `AskUserQuestion:`,
   `EnterPlanMode called`, or `ExitPlanMode called` — not even in explanatory
   prose such as "was not called". Record only
-  `Unattended default: <question> → <answer> (<reason>)`. The evaluator treats
+  `Unattended default: <question> → <answer> (<reason>)` — for a data-semantics
+  question, `Unattended default: <assumption id> / <question id> → <answer> (<reason>)`,
+  whose reason never contains the word "approved". The evaluator treats
   those attended markers as real invocations.
 - The PAC CLI version output is recorded explicitly (the assertion checks
   for `> 2.10.0`-shaped text — `PAC CLI Version 2.10.x` is the canonical
@@ -553,6 +555,91 @@ the user before continuing:
 > "Heads up — env has `<detectedPrefix>_*` tables but you chose `<chosenPrefix>`.
 > New tables won't match the prefix of your existing work."
 
+### Resolve Data Semantics (after Entity Detection, before the plan)
+
+Metadata can list the relationships a request **could** use; it cannot say which one the maker meant. Before
+you hand the plan back, settle every relationship and filter each page will use, and record what you decided
+that the request did not state.
+
+**1. Read the lookup metadata** of every existing table a page reads through a lookup (a join, a filter, a
+navigation to the referenced record, a picker that writes one), and of the target tables whose columns an
+approved filter or search needs (their primary name column):
+
+```powershell
+node "${PLUGIN_ROOT}/scripts/get-lookup-metadata.js" --env '<envUrl>' --tables '<table1>,<table2>'
+```
+
+Exit 0 prints one JSON line, `{ "ok": true, "tables": [ { "logicalName", "primaryIdAttribute",
+"primaryNameAttribute", "lookups": [ { "column", "readProperty", "attributeType", "targets", "paths",
+"sharedPaths" } ] } ] }`, only after every read completed. Save it verbatim as
+`<working-dir>/lookup-metadata.json` and carry it across re-invocations. `targets` is each lookup's
+**complete** target set; `paths` are the concrete per-target navigation paths a filter may use;
+`sharedPaths` (Owner's `ownerid`, for one) are never a target discriminator — do not invent a path such as
+`ownerid_team`. Any non-zero exit (`{ "ok": false, "code", "error" }`) means discovery failed: report it and
+stop, or ask for a supported alternative — never read a failure as "no candidates" or "one candidate". A table
+this run will create has no metadata yet: record its lookups as `planned` (below).
+
+**2. Ask rather than assume** when the meaning is open. Return the existing `needs_input` request — the
+orchestrator asks and re-invokes you — never a log line in place of the question:
+
+| Situation | Decision |
+|---|---|
+| Explicit lookup and predicate, valid in metadata | Record the stated meaning; do not ask again. |
+| Several relationships can implement "opportunities for this account" | Ask which lookup, and whether contacts roll up; show each source column and its complete targets. No default. |
+| "Recent", "open", "my" or another unresolved column, value or range | Ask, offering the discovered fields and choice values. Metadata alone cannot choose the business predicate. |
+| Unqualified list, no restriction requested | Add no active-only, owner-only or date restriction; record that no extra restriction is added. |
+| Explicit direct-relationship intent, exactly one valid candidate, no open target or roll-up choice, but the mapping still needs confirming | Ask with exactly one option marked `"default": true`; settle it only after the answer returns. |
+| Unstated layout, sort, page size or the mandatory initial-read cache | Record a visible `planner-default`; ask nothing. |
+| Failed or partial metadata | Stop, or ask for a supported alternative. |
+
+A question with several candidates carries no default:
+
+```json
+{ "action": "needs_input",
+  "why": "The possible account relationships select different opportunities.",
+  "questions": [ { "id": "opportunities-account-scope",
+    "question": "Which opportunities should this account show?",
+    "options": [
+      { "label": "Parent account", "description": "Filter parentaccountid; metadata targets account." },
+      { "label": "Direct customer", "description": "Filter customerid for account customers; metadata targets account and contact." },
+      { "label": "Customer plus contacts", "description": "Include direct account customers and contact customers linked through the verified contact relationship." } ],
+    "multiSelect": false } ] }
+```
+
+Only a sole candidate that implements an already explicit meaning is marked as the default:
+
+```json
+{ "action": "needs_input",
+  "why": "Confirm the sole metadata-backed direct relationship implementing the requested scope.",
+  "questions": [ { "id": "opportunities-account-scope",
+    "question": "Use the direct account-customer relationship, excluding contact roll-up?",
+    "options": [ { "label": "Direct customer account only",
+      "description": "The request excludes contact roll-up and metadata leaves exactly this matching path.",
+      "default": true } ],
+    "multiSelect": false } ] }
+```
+
+Return the metadata you read and the assumption ids you reserved alongside the request. On re-invocation, bind
+the returned answer to the same question id and candidates, and only then write the settled assumption. In an
+unattended run the orchestrator answers with the marked default and records
+`Unattended default: <assumption id> / <question id> → <answer> (<reason>)` — copy that line into the
+assumption's `Default record`. A question with no marked default halts an unattended run; plan approval never
+answers a semantic question. Whether a phrase entails a filter, and whether a default is genuinely safe, is
+your judgment: the validators prove the records' shape and consistency, not that judgment.
+
+**3. Record the result** in the plan (`references/plan-schema.md`, "Assumptions, data semantics and lookup
+metadata"): one `## Assumptions` entry per decision the request did not state (exactly `No assumptions.` when
+there is none); per page, its `#### Data semantics` (`R<n>`/`F<n>` decisions, each citing its assumption or
+quoting the requirement — `None.` when there is none) and its `#### Lookup metadata` (complete targets,
+uses, `observed` with concrete paths from `lookup-metadata.json`, or `planned` for a table not created yet —
+`None.` when the page uses no lookup). Keep `## User Requirements` exactly the original request.
+
+**4. Reconcile after provisioning.** When the orchestrator re-invokes you with `Lookup reconciliation:` and a
+fresh `lookup-metadata.json` (after Phase 2 created the tables), promote each `planned` lookup whose source
+column and complete target set the read confirms to `observed` and add its measured paths — change nothing
+else. If the read disagrees (another target set, no such column), do not rewrite the plan: return a revised
+plan for approval, naming the difference.
+
 ## Step 5 — Hand the Plan Back for Approval
 
 If you have a task tool (`TaskCreate`, or `todo`), create tasks; if you have none, skip this
@@ -567,10 +654,34 @@ plan mode does not reach the user from a subagent.
 ```
 ## Genpage Plan
 
+### Assumptions
+#### A1 — [title]
+- Decision: [what the plan does]
+- Alternatives considered: [the other candidates]
+- Evidence: [metadata: … | sample: … | default: …]
+- Resolution: [user-confirmed | planner-default | unattended-default]
+[- Question / - Answer / - Default record, exactly as the plan will carry them]
+[or exactly: No assumptions.]
+
 ### Pages (N total)
 | Page | File | Purpose | Entities |
 |------|------|---------|----------|
 | [Name] | [name].tsx | [one-line description] | [entity1, entity2] |
+
+### Data Semantics
+#### [name].tsx
+##### R1
+- Kind: relationship
+- Definition: [source column, target scope, predicate and value source, null and roll-up behaviour]
+- Source: [A1, or User Requirements with a - Requirement quote:]
+[or exactly: None.]
+
+### Lookup Metadata
+#### [name].tsx
+| Table | Column | Read property | Targets | Used by | Metadata state |
+|-------|--------|---------------|---------|---------|----------------|
+| [source table] | [lookup column] | _[column]_value | [complete target set] | [decision ids; purposes] | [observed / planned] |
+[the concrete path table, the - Evidence: and - Read target strategy: lines, as in the plan — or exactly: None.]
 
 ### Data Strategy
 - Entities needed: [list]
@@ -596,6 +707,11 @@ plan mode does not reach the user from a subagent.
 - [styling preferences, features, accessibility notes from requirements]
 ```
 
+The preview shows `### Assumptions` **first**, so the maker sees what was assumed before the page list, and
+carries the same records the plan will (`references/plan-schema.md`, at the preview's own heading levels; a
+page's records are grouped under its file). The provenance gate compares them field by field with the
+written plan, so write them unchanged in Step 6.
+
 The orchestrator calls `ExitPlanMode` to request user approval and tells you the
 outcome when it re-invokes you.
 
@@ -617,7 +733,10 @@ ${PLUGIN_ROOT}/references/plan-schema.md
 ```
 
 Read that file before writing the plan. Every required section must be present with
-the exact heading. Page filenames in the `## Pages` table must be unique, and use only letters,
+the exact heading. Write `## Assumptions` right after `## User Requirements`, and in each page's
+specification its `#### Data semantics` and `#### Lookup metadata` after the bullet fields: the records
+the maker approved, unchanged — only their heading levels differ from the preview's. Keep
+`## User Requirements` the original request, byte for byte; a later answer belongs in an assumption. Page filenames in the `## Pages` table must be unique, and use only letters,
 digits, `-`, `_` and `.` — kebab-case such as `project-overview.tsx`, never a space or a shell
 character: the dispatch gate refuses any other name, and the build halts.
 
@@ -680,6 +799,9 @@ and verify the prefix discipline:
 
 2. If any value fails, do NOT write the plan. Rewrite the offending values to
    their bare suffix form and re-validate. Only write once all values pass.
+
+3. Every relationship and every server-side or client-side filter used in `## Per-Page Specifications` traces to the user's stated text in `## User Requirements` or a named `## Assumptions` entry. The builder introduces no unrecorded business predicate, relationship or roll-up.
+   Validation proves structure, ID resolution, quote presence and agreement with approved structured decisions. It does not prove natural-language entailment, judge materiality, or discover arbitrary contradictory prose. Those remain planner/reviewer responsibilities, supplemented by scenario-specific code checks.
 
 This is a hard gate. If you can't produce a valid plan after one rewrite,
 abort and report the offending name to the user — better to fail loudly than

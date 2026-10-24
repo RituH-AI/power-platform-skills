@@ -89,3 +89,95 @@ test('lookup failures go through the five-argument reporter: reads as read, writ
   assert.match(body, /never a row, a reference pair or a returned success payload/);
   assert.match(body, /a thrown read is never cached as unknown, no match, rows or success/);
 });
+
+// --- The authoring path: the schema, the planner, the orchestrator and the page builder agree on the records ----------------------
+
+const SCHEMA = read('references', 'plan-schema.md');
+const PLANNER = read('agents', 'genpage-planner.md');
+const SKILL = read('skills', 'genpage', 'SKILL.md');
+const BUILDER = read('agents', 'genpage-page-builder.md');
+const CHECKLIST = 'Every relationship and every server-side or client-side filter used in `## Per-Page Specifications` traces to the user\'s stated text in `## User Requirements` or a named `## Assumptions` entry. The builder introduces no unrecorded business predicate, relationship or roll-up.';
+const LIMIT = 'Validation proves structure, ID resolution, quote presence and agreement with approved structured decisions. It does not prove natural-language entailment, judge materiality, or discover arbitrary contradictory prose. Those remain planner/reviewer responsibilities, supplemented by scenario-specific code checks.';
+
+test('plan-schema.md places Assumptions right after User Requirements and gives every record its grammar', () => {
+  const template = SCHEMA.slice(SCHEMA.indexOf('## Required Structure'), SCHEMA.indexOf('## Section Semantics'));
+  const at = (heading) => template.indexOf(`\n${heading}\n`);
+  assert.ok(at('## User Requirements') < at('## Assumptions') && at('## Assumptions') < at('## Working Directory'), 'Assumptions sits between User Requirements and Working Directory');
+  for (const text of ['No assumptions.', '### A1 — [short title]', '- Decision:', '- Alternatives considered:', '- Evidence:', '- Resolution: [user-confirmed | planner-default | unattended-default]', 'Unattended default: A1 / <question id> → <answer> (<reason>)',
+    '#### Data semantics', '##### R1', '##### F1', '- Requirement quote:', '#### Lookup metadata', '| Table | Column | Read property | Targets | Used by | Metadata state |', '| Table | Column | Target | Navigation property | Referenced key |']) {
+    assert.ok(template.includes(text), text);
+  }
+  assert.match(SCHEMA, /`Evidence` starts with `metadata:`, `sample:` or `default:`/);
+  assert.match(SCHEMA, /reason that never contains the word "approved"/);
+  assert.match(SCHEMA, /level five, never level three/);
+  assert.match(SCHEMA, /`### Assumptions` \*\*first\*\*/, 'the preview shows Assumptions first');
+  assert.match(SCHEMA, /never a whole-document hash/);
+  assert.match(SCHEMA, /An older plan without these sections is \*\*not recorded\*\*/);
+  assert.match(SCHEMA, /byte for byte/, 'User Requirements stays the original request');
+});
+
+test('the traceability checklist is stated with its limit beside it, in the schema, the planner and the orchestrator', () => {
+  for (const [name, text] of [['plan-schema.md', SCHEMA], ['genpage-planner.md', PLANNER], ['SKILL.md', SKILL]]) {
+    const flat = text.replace(/\s+/g, ' ');
+    const at = flat.indexOf(CHECKLIST);
+    assert.ok(at >= 0, `${name} states the checklist`);
+    assert.equal(flat.indexOf(LIMIT, at), at + CHECKLIST.length + 1, `${name} states the limit right after it`);
+  }
+});
+
+test('the planner discovers lookups, asks rather than assumes, and records the answer only after it returns', () => {
+  const step4 = PLANNER.slice(PLANNER.indexOf('## Step 4 — Detect What Exists'), PLANNER.indexOf('## Step 5 — Hand the Plan Back for Approval'));
+  const resolve = step4.slice(step4.indexOf('### Resolve Data Semantics'));
+  assert.ok(resolve.length > 0 && step4.indexOf('### Entity Detection') < step4.indexOf('### Resolve Data Semantics'), 'after Entity Detection, before Step 5');
+  assert.match(resolve, /get-lookup-metadata\.js" --env '<envUrl>' --tables/);
+  assert.match(resolve, /<working-dir>\/lookup-metadata\.json/);
+  assert.match(resolve, /never read a failure as "no candidates" or "one candidate"/);
+  const examples = [...resolve.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => JSON.parse(match[1]));
+  assert.equal(examples.length, 2);
+  assert.equal(examples[0].questions[0].options.filter((option) => option.default).length, 0, 'several candidates: no default');
+  assert.equal(examples[1].questions[0].options.length, 1);
+  assert.equal(examples[1].questions[0].options[0].default, true, 'a sole candidate is the one marked default');
+  assert.match(resolve, /only then write the settled assumption/);
+  assert.match(resolve, /plan approval never\s+answers a semantic question/);
+  assert.match(resolve, /Unattended default: <assumption id> \/ <question id> → <answer> \(<reason>\)/);
+  assert.match(resolve, /may only promote a `planned` lookup|promote each `planned` lookup/);
+});
+
+test('the planner previews Assumptions first and writes the same records at the plan\'s levels', () => {
+  const step5 = PLANNER.slice(PLANNER.indexOf('## Step 5 — Hand the Plan Back for Approval'), PLANNER.indexOf('## Step 6 — Write genpage-plan.md'));
+  const preview = /```\n(## Genpage Plan[\s\S]*?)\n```/.exec(step5)[1];
+  const order = ['### Assumptions', '### Pages (N total)', '### Data Semantics', '### Lookup Metadata', '### Data Strategy'].map((heading) => preview.indexOf(`\n${heading}\n`));
+  assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), `preview order: ${order}`);
+  const step6 = PLANNER.slice(PLANNER.indexOf('## Step 6 — Write genpage-plan.md'), PLANNER.indexOf('## Step 7 — Return Summary'));
+  assert.match(step6, /Write `## Assumptions` right after `## User Requirements`/);
+  assert.match(step6, /the records\s+the maker approved, unchanged/);
+  assert.match(step6, /`## User Requirements` the original request, byte for byte/);
+});
+
+test('the orchestrator verifies a new plan\'s records, reconciles planned lookups after provisioning, and gates generation on observed ones', () => {
+  const phase1 = SKILL.slice(SKILL.indexOf('### Phase 1: Plan'), SKILL.indexOf('#### 1a. Connector discovery'));
+  assert.match(phase1, /genpage-plan-provenance\.js" verify --plan '<working-dir>\/genpage-plan\.md' --approved '@<working-dir>\/\.approved-genpage-plan\.md' --require-assumptions/);
+  assert.match(phase1, /its `### Assumptions` first/);
+  assert.match(phase1, /never approve a plan while one is open/);
+  assert.match(phase1, /Only once every data-semantics question is answered, treat the plan as approved/);
+  assert.match(phase1, /Unattended default: <assumption id> \/ <question id> → <answer> \(<reason>\)/);
+  const reconcile = SKILL.slice(SKILL.indexOf('#### 2c. Reconcile planned lookups'), SKILL.indexOf('### Phase 3: App Creation/Selection'));
+  assert.match(reconcile, /get-lookup-metadata\.js" --env '<envUrl>' --tables/);
+  assert.match(reconcile, /Lookup reconciliation:/);
+  assert.match(reconcile, /verify [^\n]*--require-assumptions --lookup-metadata '<working-dir>\/lookup-metadata\.json'/);
+  assert.match(reconcile, /Do not\s+edit the plan yourself/);
+  const gate = SKILL.slice(SKILL.indexOf('#### 5a. Validate the plan before dispatch'), SKILL.indexOf('#### 5b. Single-page fast path'));
+  assert.match(gate, /verify [^\n]*--require-assumptions --require-observed-lookups --lookup-metadata '<working-dir>\/lookup-metadata\.json'/);
+});
+
+test('the page builder reads the records and consumes lookups only as validated pairs', () => {
+  const step1 = BUILDER.slice(BUILDER.indexOf('## Step 1 — Read the Plan Document'), BUILDER.indexOf('## Step 2 — Read RuntimeTypes.ts'));
+  assert.match(step1, /`#### Data semantics`\*\* and \*\*`#### Lookup metadata`/);
+  assert.match(step1, /add no unrecorded predicate, relationship or\s+roll-up/);
+  assert.match(step1, /stop and report the missing fact/);
+  const rules = BUILDER.slice(BUILDER.indexOf('### Mandatory Rules'), BUILDER.indexOf('### Localization'));
+  assert.match(rules, /Copy `normalizeLookupReference` unchanged from rules\.md/);
+  assert.match(rules, /`reference\.id` \(bare\)/);
+  assert.match(rules, /\*\*Traceability\*\*/);
+  assert.match(rules, /never `@odata\.bind`/, 'neighbour: the write rule stays');
+});

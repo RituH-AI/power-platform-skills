@@ -216,8 +216,8 @@ the log still shows what decided the run:
 | --- | --- | --- |
 | Recording the resolved mode | Nothing to record | Write the mode itself as `Unattended default: interaction mode → unattended (<reason>)` before the first gate. Record it with this marker, not as free prose such as `Interaction mode: unattended` — the evaluator keys on the marker, and prose forms are indistinguishable from an attended log that merely mentions the word (`Mode: unattended = false`, `not unattended`). |
 | Create new / edit existing (step 2) | `AskUserQuestion` | Whatever `$ARGUMENTS` states. With nothing stated, **create new** — the only additive choice. |
-| An agent returns `needs_input` (step 4) | Ask, then re-invoke | Re-invoke with the option the agent marked `"default": true`. If it marked none, **halt**. |
-| Plan approval (step 5) | `EnterPlanMode` / `ExitPlanMode` | Treat the plan as approved and continue to step 6, which still writes `genpage-plan.md` through the planner. The plan is recorded, just not presented. Log this gate as `Unattended default: plan approval → approved (<reason>)` — the evaluator looks for the plan/approval wording and `approved` on that one line, so a paraphrase such as `→ auto-approve` is read as a missing approval record. |
+| An agent returns `needs_input` (step 4) | Ask, then re-invoke | Re-invoke with the option the agent marked `"default": true`. If it marked none, **halt**. For the planner's data-semantics questions, record `Unattended default: <assumption id> / <question id> → <answer> (<reason>)` — the answer word for word, a reason that never contains the word "approved" — and pass the same line back to the planner for the assumption's `Default record`. |
+| Plan approval (step 5) | `EnterPlanMode` / `ExitPlanMode` | Only once every data-semantics question is answered, treat the plan as approved and continue to step 6, which still writes `genpage-plan.md` through the planner. The plan is recorded, just not presented. Log this gate as its own line, `Unattended default: plan approval → approved (<reason>)` — the evaluator reads the words right after the marker, `plan approval`, then the arrow and the whole word `approved`, so a paraphrase such as `→ auto-approve` is read as a missing approval record, and a semantic default that mentions approval never stands in for it. |
 | Browser verification (Phase 7) | Offer it | Skip it. |
 
 **Suppressing a prompt never authorizes destructive work.** Editing an existing
@@ -260,8 +260,13 @@ missing and stop, so the run can be re-driven with the decision supplied.
    bypass the `dataverse-operations` feature gate, the Custom API discovery rules or user decisions.
 4. If any agent returns `{ "action": "needs_input", … }`, ask its questions here
    with `AskUserQuestion`, record them in `workflow-log.md`, and re-invoke that
-   agent with the answers. Agents never prompt; they request.
-5. Present the plan with `EnterPlanMode` and get approval via `ExitPlanMode`.
+   agent with the answers. Agents never prompt; they request. The planner asks this way
+   which relationship or filter a request means when metadata leaves several candidates
+   (its Step 4, "Resolve Data Semantics"): pass each answer back with its question id and
+   everything the planner returned, including `<working-dir>/lookup-metadata.json`. Never
+   answer such a question for the maker, and never approve a plan while one is open.
+5. Present the plan with `EnterPlanMode` — its `### Assumptions` first, as the planner returns
+   it, so the maker sees what was assumed before the page list — and get approval via `ExitPlanMode`.
    On a revision request, re-invoke the planner with the requested revisions and
    present the revised plan again.
 6. **On approval, re-invoke `genpage-planner` with the approval outcome _plus
@@ -312,13 +317,16 @@ missing and stop, so the run can be re-driven with the decision supplied.
    If it exists, verify its provenance before Phase 2:
 
    ```powershell
-   node "${PLUGIN_ROOT}/scripts/genpage-plan-provenance.js" verify --plan '<working-dir>/genpage-plan.md' --approved '@<working-dir>/.approved-genpage-plan.md'
+   node "${PLUGIN_ROOT}/scripts/genpage-plan-provenance.js" verify --plan '<working-dir>/genpage-plan.md' --approved '@<working-dir>/.approved-genpage-plan.md' --require-assumptions
    ```
 
    Continue only when the JSON result has `"ok":true`, and record its `writtenHash`
-   in `workflow-log.md`. If the written plan targets other pages than the approved
+   (and `semanticsHash`) in `workflow-log.md`. If the written plan targets other pages than the approved
    plan named — an extra, missing or renamed page file — halt: downstream phases
-   would build pages the user did not approve.
+   would build pages the user did not approve. Halt too when its assumptions, data-semantics
+   decisions or lookup records differ from the approved ones, or are missing from either document
+   (`--require-assumptions`: a newly authored plan carries them all): the maker approved those
+   decisions, not just the file names. The result's `semanticProblems` lists each difference.
 
 #### 1a. Connector discovery is orchestrator-owned and never speculative
 
@@ -420,6 +428,9 @@ Pass a prompt that includes:
   or the literal `No custom API bindings.` when discovery was not needed
 - The Custom API upload file status: `<working-dir>/actions.json` exists and is
   a bare JSON array, or `no actions.json; omit --actions`
+- The answers to every earlier `needs_input` question, each with its question id (and, unattended,
+  its `Unattended default:` line), and the path of `<working-dir>/lookup-metadata.json` when the
+  planner saved one
 - The built-in operation contract, only when this run's builder wrote it: the full body of
   `<working-dir>/dataverse-operations.md` between `----- BEGIN/END DATAVERSE OPERATIONS -----`
   delimiters (copied verbatim into an optional `## Dataverse Operations` section right after
@@ -589,6 +600,29 @@ this loop, exactly as Phase 1 step 4 does:
 
 Repeat until it returns a completion rather than a request. Proceeding to Phase 3
 on a `needs_input` return silently drops the decision the user was asked to make.
+
+#### 2c. Reconcile planned lookups (when the plan records any)
+
+A lookup on a table this run creates is recorded `planned` in its page's `#### Lookup metadata` — there was no
+metadata to read before Phase 2. Once the tables exist, and before any page is generated, prove each one:
+
+```powershell
+node "${PLUGIN_ROOT}/scripts/get-lookup-metadata.js" --env '<envUrl>' --tables '<every source table with a recorded lookup>'
+```
+
+Save its one-line JSON answer as `<working-dir>/lookup-metadata.json` (it replaces the planning-time copy). Any
+non-zero exit means the read failed: report it and stop — a failed read is never "no targets". Then run the
+`prepare` command of Phase 1 again and re-invoke `genpage-planner` with `Lookup reconciliation:`, the path of
+that file, the approved plan body and everything it returned before. It may only promote a `planned` lookup to
+`observed` and add its measured paths; a different target set, column or use is a revised plan the maker
+approves again (Phase 1 step 5). Verify the rewritten plan against the same approved body, with the evidence:
+
+```powershell
+node "${PLUGIN_ROOT}/scripts/genpage-plan-provenance.js" verify --plan '<working-dir>/genpage-plan.md' --approved '@<working-dir>/.approved-genpage-plan.md' --require-assumptions --lookup-metadata '<working-dir>/lookup-metadata.json'
+```
+
+Continue only on `"ok":true`; on `"ok":false` halt and show the maker the `semanticProblems` it lists. Do not
+edit the plan yourself: the planner is its one author.
 
 ### Phase 3: App Creation/Selection
 
@@ -784,6 +818,17 @@ Before invoking any builders, verify:
   spelling. On any problem, halt and re-plan instead of rewriting filenames here: a renamed
   file is a page the user did not approve, and the provenance check compares page files.
   Duplicate filenames cause silent last-writer-wins data loss under parallel execution.
+- Every relationship and every server-side or client-side filter used in `## Per-Page Specifications` traces to the user's stated text in `## User Requirements` or a named `## Assumptions` entry. The builder introduces no unrecorded business predicate, relationship or roll-up.
+  Validation proves structure, ID resolution, quote presence and agreement with approved structured decisions. It does not prove natural-language entailment, judge materiality, or discover arbitrary contradictory prose. Those remain planner/reviewer responsibilities, supplemented by scenario-specific code checks.
+- **When the plan records any lookup** (a `#### Lookup metadata` table, not `None.`), every one is
+  `observed` and matches the saved metadata read before a page is generated:
+
+  ```powershell
+  node "${PLUGIN_ROOT}/scripts/genpage-plan-provenance.js" verify --plan '<working-dir>/genpage-plan.md' --approved '@<working-dir>/.approved-genpage-plan.md' --require-assumptions --require-observed-lookups --lookup-metadata '<working-dir>/lookup-metadata.json'
+  ```
+
+  Continue only on `"ok":true`. A lookup still `planned` means Phase 2c did not run; a mismatch
+  means the metadata changed since approval — halt and re-plan, never edit the records here.
 
 See `${PLUGIN_ROOT}/references/plan-schema.md` for the full contract.
 

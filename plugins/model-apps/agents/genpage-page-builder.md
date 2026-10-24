@@ -105,6 +105,14 @@ Locate and extract:
   styling* says. Keep the default tokens only for what it does not set.
 - The **Environment** section (languages for localization)
 - The **Relevant Samples** table (which sample to read for your page)
+- Your page's **`#### Data semantics`** and **`#### Lookup metadata`**, and the **`## Assumptions`** entries
+  they cite (when the plan has them). Implement exactly the relationships and filters they record — the
+  `Data Binding` and `Interactions` refer to them by id — and add no unrecorded predicate, relationship or
+  roll-up. Each lookup record gives the column's read property, its **complete** target set and the concrete
+  paths you may filter through. A plan without these sections is an older plan ("not recorded"): if your page
+  needs a target-dependent lookup action (filtering by a target, opening, retrieving or writing a
+  multi-target lookup's record) whose targets the plan does not record, stop and report the missing fact —
+  never guess the targets or take the first one.
 
 ## Step 2 — Read RuntimeTypes.ts (Data mode: dataverse only)
 
@@ -386,6 +394,8 @@ export default GeneratedComponent;
 - **Error handling** — all async `dataApi` calls wrapped in try-catch
 - **No telemetry by default** — never emit `props.appInsights` calls unless your dispatch says `Telemetry: enabled` **and** the maker asked to measure or track something. Absence of a request means zero telemetry, not "instrument the obvious things". See references/page-telemetry.md.
 - **Lookup fields** — read display names via `@OData.Community.Display.V1.FormattedValue`; *set* a lookup on create/update with `_<field>_value: "/logicalSingular(guid)"`, never `@odata.bind` (the DataAPI silently drops it → orphaned row). See rules.md DataAPI Rule 13.
+- **Lookup references** — a lookup's `_<field>_value` may be a bare GUID or `/<table>(<guid>)`. Copy `normalizeLookupReference` unchanged from rules.md → *Lookup references*, pass it the column's complete target set from the plan's `#### Lookup metadata`, and use only a resolved pair: `reference.id` (bare) for filters, `retrieveRow({ id })` and `entityId`, `reference.table` for the target. Filter a target through a typed path only when the plan records that concrete path; write the table the user selected, kept with its id (pitfall E). Never infer a table from a label, the first target or a navigation name.
+- **Traceability** — every relationship and every filter the page applies comes from the plan's `## User Requirements` or a recorded `## Assumptions` entry, as its `#### Data semantics` states; introduce no unrecorded business predicate, relationship or roll-up.
 - **All hooks above early returns** — every `useMemo`/`useState`/`useEffect`/`useCallback` must precede any loading/empty `return`, or detail pages crash with React error #310 on first open. See rules.md Critical Rule 19.
 - **Entity logical names** — singular lowercase (e.g., `"account"`)
 - **No placeholders** — no TODOs, no ellipses, no "implement later" comments

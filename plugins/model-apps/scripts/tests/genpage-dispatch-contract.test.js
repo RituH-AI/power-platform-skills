@@ -1128,3 +1128,25 @@ test('genpage stamps every page target before it is written, in both paths', () 
   assert.match(fastPath, /`<filename>` is the page's `File` value from the plan without its `\.tsx`\s+extension/, 'the single-page path says what <filename> is');
   assert.match(multi, /`<filename>` and `\[filename\]` are each page's `File` value from the\s+plan without its `\.tsx` extension/, 'and so does the multi-page path');
 });
+
+// The create flow's provenance gates use the semantic options, and only flags the script declares: an unknown flag is a usage
+// error, so a documented flag the script does not know would halt every run — and, before flags were declared, was dropped silently.
+test('every genpage-plan-provenance.js command the genpage flows document uses only flags the script declares', () => {
+  const script = fs.readFileSync(path.join(PLUGIN, 'scripts', 'genpage-plan-provenance.js'), 'utf8');
+  const declared = new Set([...script.matchAll(/^const (?:VALUE|BOOLEAN)_FLAGS = \[([^\]]*)\]/gm)]
+    .flatMap((match) => [...match[1].matchAll(/'([^']+)'/g)].map((name) => name[1])));
+  for (const flag of ['plan', 'approved', 'require-assumptions', 'require-observed-lookups', 'lookup-metadata']) assert.ok(declared.has(flag), `the script declares --${flag}`);
+  let commands = 0;
+  for (const file of [path.join(PLUGIN, 'skills', 'genpage', 'SKILL.md'), path.join(PLUGIN, 'skills', 'genpage', 'edit-flow.md')]) {
+    for (const command of readDoc(file).matchAll(/genpage-plan-provenance\.js"\s+(prepare|verify)([^\n`]*)/g)) {
+      commands += 1;
+      for (const flag of command[2].matchAll(/--([a-z-]+)/g)) assert.ok(declared.has(flag[1]), `${rel(file)}: --${flag[1]} is not a flag the script declares`);
+    }
+  }
+  assert.ok(commands >= 5, `expected the create and edit flows to document their provenance commands, found ${commands}`);
+  const skill = readDoc(path.join(PLUGIN, 'skills', 'genpage', 'SKILL.md'));
+  assert.match(skill, /verify [^\n]*--require-assumptions/, 'the create flow verifies a newly authored plan with its semantic records');
+  assert.match(skill, /verify [^\n]*--require-observed-lookups --lookup-metadata/, 'and gates generation on observed lookups');
+  const editFlow = readDoc(path.join(PLUGIN, 'skills', 'genpage', 'edit-flow.md'));
+  assert.doesNotMatch(editFlow, /--require-assumptions|--require-observed-lookups|--lookup-metadata/, 'neighbour: an edit plan keeps its own comparison');
+});
