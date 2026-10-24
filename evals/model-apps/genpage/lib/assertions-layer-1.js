@@ -33,6 +33,7 @@ const { blankLiterals } = require('../../../../plugins/model-apps/scripts/lib/so
 const { planTargets } = require('../../../../plugins/model-apps/scripts/genpage-plan-provenance.js');
 // The gate provision-entities.js puts its input through, so an input the plugin would refuse is never graded as written right.
 const { validateProvisionInput } = require('../../../../plugins/model-apps/scripts/lib/provision-input.js');
+const { writtenSemanticsProblems } = require('../../../../plugins/model-apps/scripts/lib/genpage-plan-semantics.js');
 
 function fail(reason) { return { status: 'fail', reason }; }
 function pass() { return { status: 'pass', reason: '' }; }
@@ -133,6 +134,15 @@ function isUnattendedLog(log) {
   );
 }
 
+// The unattended plan-approval record (skills/genpage/SKILL.md, unattended table), recognized by its PURPOSE — the words right
+// after the marker — so a semantic default on the same marker never stands in for it:
+//   Unattended default: plan approval → approved (unattended mode; all semantic questions resolved)
+//   - Unattended default: plan approval -> approved, including explicit optional packaging into ContosoPages.
+// Leading whitespace or a list bullet, either arrow (`→`, or the historical `->`), the whole word `approved`, then nothing, a
+// parenthesized reason or a comma tail. Not matched: `Unattended default: A1 / plan-status → Approved (…)` (an answer), a reason
+// that says "approved plan", `plan approval → auto-approve`.
+const PLAN_APPROVAL_RECORD = /^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?Unattended default:[ \t]*plan approval[ \t]*(?:→|->)[ \t]*approved(?:[ \t]*\(.*\)|,.*)?[ \t]*\.?[ \t]*\r?$/im;
+
 function entitiesNeedCreating(plan) {
   const section = planSection(plan, 'Entity Creation Required');
   if (!section) return false;
@@ -179,7 +189,12 @@ const REQUIRED_PLAN_SECTIONS = [
   'Per-Page Specifications',
 ];
 
-const OPTIONAL_PLAN_SECTIONS = new Set(['Dataverse Operations', 'Solution Packaging']);
+const OPTIONAL_PLAN_SECTIONS = new Set(['Assumptions', 'Dataverse Operations', 'Solution Packaging']);
+
+// The codes of the plan's semantic records (plugins/model-apps/scripts/lib/genpage-plan-semantics.js): a present Assumptions
+// section or per-page Data semantics / Lookup metadata block that the reader refuses. Phase 5a routes them like the page rules —
+// a plan that fails one must not reach the builders.
+const SEMANTIC_CODES = ['invalid-assumptions', 'unknown-assumption', 'missing-semantic-source', 'unmatched-requirement-quote', 'invalid-data-semantics', 'invalid-lookup-metadata'];
 
 const REQUIRED_PER_PAGE_FIELDS = [
   'File',
@@ -322,7 +337,7 @@ function validateEntityCreationSection(sectionText, errors) {
   }
 }
 
-function validateGenpagePlanSchema(plan) {
+function validateGenpagePlanSchema(plan, { requireSemantics = false } = {}) {
   const errors = [];
   if (!plan || typeof plan !== 'string') {
     return [schemaError('missing-plan', 'genpage-plan.md is empty or missing')];
@@ -350,9 +365,15 @@ function validateGenpagePlanSchema(plan) {
   // section is added before it — which is exactly how Custom API Bindings ended up expected after it.
   // Dataverse Operations is optional too, and sits right after Custom API Bindings, before Solution
   // Packaging; either is checked for order only when the plan has it, so a plan without them is unchanged.
+  // Assumptions is optional on read (an older plan has none: "not recorded") and sits right after User Requirements, spliced in
+  // by that name too — adding it only to the optional set would not do: the comparable filter keeps only expected titles, so a
+  // misplaced Assumptions would be dropped from the comparison instead of failing it.
   const packagingAt = REQUIRED_PLAN_SECTIONS.indexOf('Design Preferences');
+  const assumptionsAt = REQUIRED_PLAN_SECTIONS.indexOf('User Requirements') + 1;
   const expected = [
-    ...REQUIRED_PLAN_SECTIONS.slice(0, packagingAt),
+    ...REQUIRED_PLAN_SECTIONS.slice(0, assumptionsAt),
+    ...(observed.includes('Assumptions') ? ['Assumptions'] : []),
+    ...REQUIRED_PLAN_SECTIONS.slice(assumptionsAt, packagingAt),
     ...(observed.includes('Dataverse Operations') ? ['Dataverse Operations'] : []),
     ...(observed.includes('Solution Packaging') ? ['Solution Packaging'] : []),
     ...REQUIRED_PLAN_SECTIONS.slice(packagingAt),
@@ -445,6 +466,13 @@ function validateGenpagePlanSchema(plan) {
         errors.push(schemaError('extra-page-spec', `per-page subsection "### ${pageName}" has no matching ## Pages row`, { section: 'Per-Page Specifications', page: pageName }));
       }
     }
+  }
+
+  // The semantic records (## Assumptions; per page, #### Data semantics and #### Lookup metadata): validated whenever present, on any
+  // plan — an App Spec projection (`Mode: app-builder`) included, since a mode never waives malformed content — and required of every
+  // page only for a newly authored plan (`requireSemantics`). Absent on an older plan, they are "not recorded" and nothing more.
+  for (const found of writtenSemanticsProblems(plan, { require: requireSemantics })) {
+    errors.push(schemaError(found.code, found.message, { section: found.code === 'invalid-assumptions' ? 'Assumptions' : 'Per-Page Specifications' }));
   }
 
   return errors;
@@ -628,7 +656,11 @@ WORKFLOW_ASSERTIONS.set(
       // plan/approval context dead code: any `Unattended default:` line containing "approved" —
       // e.g. a solution-selection default — satisfied an assertion that claims to check PLAN
       // approval. The documented marker is `Unattended default: plan approval → approved (...)`.
-      if (!/Unattended default:[^\n]*(plan|approval)[^\n]*approved/i.test(log)) {
+      // Its successor (`plan` or `approval` anywhere before `approved`) was still too loose once runs
+      // record semantic defaults on the same marker: `Unattended default: A1 / plan-status → Approved
+      // (…)` answers a question, and a reason such as "planner default; approved plan" explains one.
+      // So the record is recognized by its own purpose, the words right after the marker.
+      if (!PLAN_APPROVAL_RECORD.test(log)) {
         return fail('unattended workflow-log does not record plan approval');
       }
       return pass();
@@ -2114,8 +2146,10 @@ PHASE_EXPECTATIONS.set(
     if (!fixture.genpagePlan) return fail('no genpage-plan.md');
     // The gate's observable outcome is what is graded: a plan that fails any Phase 5a rule must not
     // reach the builders. The rules are the plan-schema validator's (Pages table, page-file targets,
-    // one matching Per-Page Specifications subsection per row) plus the at-least-one-page rule.
-    const codes = new Set(['missing-pages-table', 'duplicate-page-file', 'invalid-page-file', 'missing-page-spec', 'extra-page-spec', 'page-file-mismatch']);
+    // one matching Per-Page Specifications subsection per row) plus the at-least-one-page rule — and
+    // the plan's semantic records, when it has them: a malformed Assumptions section, a decision whose
+    // source does not resolve, a quote the requirements do not hold or malformed lookup metadata.
+    const codes = new Set(['missing-pages-table', 'duplicate-page-file', 'invalid-page-file', 'missing-page-spec', 'extra-page-spec', 'page-file-mismatch', ...SEMANTIC_CODES]);
     const problems = validateGenpagePlanSchema(fixture.genpagePlan).filter((e) => codes.has(e.code)).map((e) => e.message);
     if (!pageRowsOf(fixture.genpagePlan).length) problems.unshift('plan has no pages');
     if (!problems.length) return pass();

@@ -1155,3 +1155,114 @@ test('solutions query: the documented multi-line form (bash `\\` or PowerShell b
   const unrelated = `${asked}node dataverse-request.js https://contoso.crm.dynamics.com GET 'WhoAmI'\n- solutions were discussed\n`;
   assert.equal(check({ fixture: fix({ workflowLog: unrelated }), eval: evalStub(8) }).status, 'fail');
 });
+
+// --- The plan's Assumptions section and per-page semantic records (references/plan-schema.md) ------------------------------------
+
+const GOOD_A1 = [
+  '### A1 — Initial-load caching',
+  '- Decision: De-duplicate and cache the initial list read.',
+  '- Alternatives considered: An empty form with no initial read; uncached loading.',
+  '- Evidence: default: this page loads on mount, so Critical Rule 15 applies.',
+  '- Resolution: planner-default',
+].join('\n');
+const withAssumptions = (body, plan = validPlan()) => plan.replace('## Working Directory', `## Assumptions\n\n${body}\n\n## Working Directory`);
+const SEMANTICS = [
+  '',
+  '#### Data semantics',
+  '',
+  '##### F1',
+  '- Kind: filter',
+  '- Definition: Cards match the account name containing the search text.',
+  '- Source: User Requirements',
+  '- Requirement quote: simple account page',
+  '',
+  '#### Lookup metadata',
+  '',
+  'None.',
+  '',
+].join('\n');
+const withSemantics = (plan, block = SEMANTICS) => `${plan.trimEnd()}\n${block}`;
+
+test('validateGenpagePlanSchema: a present but malformed Assumptions section fails invalid-assumptions; an absent one keeps the legacy pass', () => {
+  assert.deepEqual(validateGenpagePlanSchema(validPlan()), [], 'neighbour: a legacy plan without the section still passes');
+  for (const [label, body] of [
+    ['missing Resolution', GOOD_A1.replace(/\n- Resolution: planner-default/, '')],
+    ['duplicate id', `${GOOD_A1}\n\n${GOOD_A1}`],
+    ['unknown resolution', GOOD_A1.replace('planner-default', 'assumed')],
+    ['user-confirmed without Question/Answer', GOOD_A1.replace('planner-default', 'user-confirmed')],
+    ['evidence without a metadata:/sample:/default: prefix', GOOD_A1.replace('default: this page', 'this page')],
+  ]) {
+    const errors = validateGenpagePlanSchema(withAssumptions(body));
+    assert.ok(errors.some((error) => error.code === 'invalid-assumptions'), `${label}: ${JSON.stringify(errors)}`);
+  }
+  // Mode never waives malformed content: an App Spec projection with a malformed present section fails too.
+  const appBuilder = validPlan().replace('- Publisher Prefix: new', '- Mode: app-builder\n- Publisher Prefix: new');
+  assert.ok(validateGenpagePlanSchema(withAssumptions('### A1\n- Decision: x', appBuilder)).some((error) => error.code === 'invalid-assumptions'));
+});
+
+test('validateGenpagePlanSchema: Assumptions sits right after User Requirements, by name — misplaced is section-order', () => {
+  assert.deepEqual(validateGenpagePlanSchema(withAssumptions(GOOD_A1)), [], 'neighbour: a valid section in place');
+  assert.deepEqual(validateGenpagePlanSchema(withAssumptions('No assumptions.')), [], 'neighbour: the empty sentinel in place');
+  const misplaced = validPlan().replace('## Entity Creation Required', `## Assumptions\n\n${GOOD_A1}\n\n## Entity Creation Required`);
+  assert.ok(validateGenpagePlanSchema(misplaced).some((error) => error.code === 'section-order'), 'after Pages');
+  const first = validPlan().replace('## User Requirements', `## Assumptions\n\n${GOOD_A1}\n\n## User Requirements`);
+  assert.ok(validateGenpagePlanSchema(first).some((error) => error.code === 'section-order'), 'before User Requirements');
+  const late = validPlan().replace('## Plugin Root', `## Assumptions\n\n${GOOD_A1}\n\n## Plugin Root`);
+  assert.ok(validateGenpagePlanSchema(late).some((error) => error.code === 'section-order'), 'after Working Directory');
+  // The optional sections already placed by name keep their checks beside it.
+  const packaged = withAssumptions(GOOD_A1).replace('## Design Preferences', '## Solution Packaging\n- Package into solution: false\n\n## Design Preferences');
+  assert.deepEqual(validateGenpagePlanSchema(packaged).filter((error) => error.code === 'section-order'), []);
+});
+
+test('validateGenpagePlanSchema: present per-page semantic records are validated against Assumptions and the original requirements', () => {
+  assert.deepEqual(validateGenpagePlanSchema(withSemantics(withAssumptions(GOOD_A1))), [], 'neighbour: a complete record set passes');
+  const codes = (plan) => validateGenpagePlanSchema(plan).map((error) => error.code);
+  assert.deepEqual(codes(withSemantics(withAssumptions(GOOD_A1), SEMANTICS.replace('- Source: User Requirements\n- Requirement quote: simple account page', '- Source: A9'))), ['unknown-assumption']);
+  assert.deepEqual(codes(withSemantics(withAssumptions(GOOD_A1), SEMANTICS.replace('- Source: User Requirements\n', ''))), ['missing-semantic-source']);
+  assert.deepEqual(codes(withSemantics(withAssumptions(GOOD_A1), SEMANTICS.replace('simple account page', 'every account in the tenant'))), ['unmatched-requirement-quote']);
+  assert.ok(codes(withSemantics(withAssumptions(GOOD_A1), SEMANTICS.replace('None.', '| Table | Column |\n|---|---|\n| account | x |'))).every((code) => code === 'invalid-lookup-metadata'));
+  assert.deepEqual(codes(withSemantics(withAssumptions(GOOD_A1), SEMANTICS.replace('##### F1', '##### R1'))), ['invalid-data-semantics']);
+  // Required-new mode: a newly authored plan carries every part; an older plan is not asked to.
+  assert.deepEqual(validateGenpagePlanSchema(validPlan(), { requireSemantics: true }).map((error) => error.code), ['invalid-assumptions', 'invalid-data-semantics', 'invalid-lookup-metadata']);
+  assert.deepEqual(validateGenpagePlanSchema(withSemantics(withAssumptions('No assumptions.'), SEMANTICS.replace(/##### F1[\s\S]*?\n\n#### Lookup/, 'None.\n\n#### Lookup')), { requireSemantics: true }), []);
+});
+
+test('Phase 5a: a plan whose semantic records fail validation must not reach the builders', () => {
+  const check = PHASE_EXPECTATIONS.get('Phase 5a: Orchestrator validates the plan — at least one page, unique filenames, each page has a matching Per-Page Specifications subsection');
+  const built = { files: [{ name: 'account-overview.tsx', content: 'export default function P() { return null; }' }] };
+  assert.equal(check({ fixture: fix({ genpagePlan: withSemantics(withAssumptions(GOOD_A1)), ...built }), eval: evalStub() }).status, 'pass', 'neighbour: valid records');
+  for (const [label, plan] of [
+    ['malformed Assumptions', withSemantics(withAssumptions(GOOD_A1.replace('planner-default', 'assumed')))],
+    ['a dangling assumption', withSemantics(withAssumptions(GOOD_A1), SEMANTICS.replace('- Source: User Requirements\n- Requirement quote: simple account page', '- Source: A9'))],
+    ['a quote the requirements do not hold', withSemantics(withAssumptions(GOOD_A1), SEMANTICS.replace('simple account page', 'all accounts'))],
+    ['malformed lookup metadata', withSemantics(withAssumptions(GOOD_A1), SEMANTICS.replace('None.', 'Customer lookup, see metadata.'))],
+  ]) {
+    const result = check({ fixture: fix({ genpagePlan: plan, ...built }), eval: evalStub() });
+    assert.equal(result.status, 'fail', label);
+    assert.match(result.reason, /fails Phase 5a/, label);
+  }
+});
+
+// The plan-approval record is its own line: the words right after `Unattended default:` are `plan approval`, then an arrow and the
+// whole word `approved`. A semantic default — whose question, answer or reason may say "plan" or "approved" — never stands in for it.
+test('unattended plan approval is recognized only by its dedicated record, never by a semantic default that mentions approval', () => {
+  const check = WORKFLOW_ASSERTIONS.get('Phase 1 (Planner): The plan is presented via EnterPlanMode and user approval is requested');
+  const run = (log) => check({ fixture: fix({ workflowLog: log, genpagePlan: validPlan() }), eval: evalStub() });
+  for (const line of [
+    'Unattended default: plan approval → approved (unattended mode; all semantic questions resolved)',
+    'Unattended default: plan approval -> approved (--non-interactive flag)',
+    '- Unattended default: plan approval -> approved',
+    '  * Unattended default: plan approval → approved, including explicit optional packaging into ContosoPages.',
+  ]) {
+    assert.equal(run(`Unattended default: interaction mode → unattended (flag)\n${line}`).status, 'pass', line);
+  }
+  for (const line of [
+    'Unattended default: A1 / plan-status → Approved (the only status the request names)',
+    'Unattended default: A2 / opportunities-account-scope → Direct customer account only (planner default; approved plan)',
+    'Unattended default: solution selection → Default (approval not required; approved by default)',
+  ]) {
+    const result = run(`Unattended default: interaction mode → unattended (flag)\n${line}`);
+    assert.equal(result.status, 'fail', line);
+    assert.match(result.reason, /does not record plan approval/, line);
+  }
+});
