@@ -7,8 +7,9 @@
 // This is a FINITE, fail-closed grammar, not a control-flow proof. The source is read, never run (source-evidence.js):
 // a shape outside the grammar is reported as unverifiable, never passed or skipped. Accepted shapes, each with the
 // page's real code reachable from the canonical boundary wrapper:
-//   1. direct await — `await <dataApi>.<method>(…)` in a `try` of the SAME function, whose `catch` reports and stores
-//      the view (a narrow staleness guard — a cancelled flag, an unmounted ref, a request counter — may return first);
+//   1. direct await — `await <dataApi>.<method>(…)`, not chained, in a `try` of the SAME function, whose `catch` reports and
+//      stores the view in a statement of its own (only a staleness guard — a cancelled or unmounted flag set in a
+//      cleanup, a request counter, a context snapshot — may return first, or keep the report under its fresh condition);
 //   2. returned view — a named request helper catches/handles the failure and returns `{ error: view }`; every caller
 //      awaits it and stores the error in rendered state (one helper→caller edge, plus a recognized setter adapter);
 //   3. canonical cache — the data call roots a `.then/.finally` chain held by one binding (a `const`/`let` initializer,
@@ -152,30 +153,102 @@ function catchAfter(ctx, close) {
   return { param: clause[1] || null, open, close: groupEnd(ctx.mask, open) };
 }
 
-// A staleness guard reads only a cancellation flag (a `let` that starts false and is set true, as an effect's cleanup
-// does), a ref's `.current` (an unmounted flag, a request counter) or a const taken from one
-// (`const requestId = ++request.current`), joined by `!`, comparisons, `&&`/`||` and parentheses. A condition on page
-// data or state (`if (name) return;`) is not one: returning there would skip a live failure.
-function staleCondition(ctx, text) {
-  // A context snapshot: `<snapshot> !== <ref>.current`, the ref holding the context the page now shows (the record an
-  // approval panel belongs to) — a value set from page state, never a true/false latch.
-  const snapshot = new RegExp(`^\\s*(${IDENT})\\s*!==?\\s*(${IDENT})\\s*\\.\\s*current\\s*$`).exec(text);
-  if (snapshot && contextRef(ctx, snapshot[2])) return true;
-  const shape = new RegExp(`^[\\s!()]*(?:${IDENT}(?:\\.current)?)(?:[\\s()]*(?:===|!==|==|!=|&&|\\|\\|)[\\s!()]*(?:${IDENT}(?:\\.current)?))*[\\s()]*$`);
-  if (!shape.test(text)) return false;
-  return [...text.matchAll(new RegExp(`(${IDENT})(\\.current)?`, 'g'))].every(([, name, current]) => (current ? isRef(ctx, name) : staleName(ctx, name)));
+// ---------- staleness: what says an answer is no longer wanted ----------
+// A failure may go unreported only when nobody waits for it any more, and the guard that says so is read from a closed
+// set of terms, each tied to the one thing that makes it a staleness signal:
+//   - a request counter: `requestId !== <ref>.current`, the ref counted up for every request (`++<ref>.current`) and
+//     `requestId` taken from it (`const requestId = ++<ref>.current`);
+//   - a context snapshot: `<snapshot> !== <ref>.current`, the ref holding the context the page now shows — set from page
+//     state (`<ref>.current = recordId`), never true/false and never counted (the record an approval belongs to);
+//   - an unmounted flag: `!<ref>.current`, the ref set false only in an effect's cleanup (`return () => { … }`);
+//   - a cancelled flag: a `let` that starts false and is set true only in an effect's cleanup.
+// An early return needs a STALE condition — those terms joined by `||` — and a report kept under an `if` needs the FRESH
+// condition — the opposite terms (`requestId === <ref>.current`, `<ref>.current`, `!cancelled`) joined by `&&`. A latch
+// (`pending.current`, set before a call and reset in its `finally`), page data or state is no staleness signal: returning
+// on it, or reporting only under it, can skip a live failure. Anything else is refused.
+const isRef = (ctx, name) => new RegExp(`\\b(?:const|let)\\s+${escapeRe(name)}\\s*=\\s*(?:React\\s*\\.\\s*)?useRef\\b`).test(ctx.mask);
+// Every write to `<name>.current`: { at, op, value } — `++`/`--` (either side), `+=`-style or a plain `=` and its value.
+function refWrites(ctx, name) {
+  const id = escapeRe(name);
+  const out = [];
+  for (const m of ctx.mask.matchAll(new RegExp(`(?:\\+\\+|--)\\s*${id}\\s*\\.\\s*current\\b`, 'g'))) out.push({ at: m.index, op: 'count' });
+  for (const m of ctx.mask.matchAll(new RegExp(`(?<![\\w$.])${id}\\s*\\.\\s*current\\s*(\\+\\+|--|[-+*/%]=|=(?![=>]))\\s*([^;\\n]*)`, 'g'))) {
+    out.push({ at: m.index, op: m[1] === '=' ? 'set' : 'count', value: m[2].trim() });
+  }
+  return out;
 }
-// A ref that holds a context: assigned (`<ref>.current = <value>`) only values that are not true/false.
+// Inside a cleanup an effect returns: the innermost function is a parameterless arrow that is returned (`return () => …`)
+// or is the body of the effect's own arrow (`useEffect(() => () => …, […])`).
+function inCleanup(ctx, at) {
+  const fn = innermostFunction(ctx, at);
+  if (!fn) return false;
+  const arrow = /\(\s*\)\s*=>\s*$/.exec(ctx.mask.slice(0, fn.start));
+  if (!arrow) return false;
+  return /(?:\breturn|=>)\s*$/.test(ctx.mask.slice(0, arrow.index));
+}
+function counterRef(ctx, name, snapshot) {
+  return isRef(ctx, name) && refWrites(ctx, name).some((write) => write.op === 'count')
+    && new RegExp(`\\bconst\\s+${escapeRe(snapshot)}\\s*=\\s*\\+\\+\\s*${escapeRe(name)}\\s*\\.\\s*current\\b`).test(ctx.mask);
+}
 function contextRef(ctx, name) {
   if (!isRef(ctx, name)) return false;
-  const writes = [...ctx.mask.matchAll(new RegExp(`(?<![\\w$.])${escapeRe(name)}\\s*\\.\\s*current\\s*(?:\\+\\+|--|[-+]?=(?![=>]))\\s*([^;\\n]*)`, 'g'))];
-  return writes.length > 0 && writes.every((write) => !/^(?:true|false)\b/.test(write[1].trim()) && !/(?:\+\+|--|[-+]=)/.test(write[0]));
+  const writes = refWrites(ctx, name);
+  return writes.length > 0 && writes.every((write) => write.op === 'set' && !/^(?:true|false)\b/.test(write.value));
 }
-const isRef = (ctx, name) => new RegExp(`\\b(?:const|let)\\s+${escapeRe(name)}\\s*=\\s*(?:React\\s*\\.\\s*)?useRef\\b`).test(ctx.mask);
-function staleName(ctx, name) {
+function mountedRef(ctx, name) {
+  if (!isRef(ctx, name)) return false;
+  const writes = refWrites(ctx, name);
+  const cleared = writes.filter((write) => write.op === 'set' && /^false\b/.test(write.value));
+  return cleared.length > 0 && cleared.every((write) => inCleanup(ctx, write.at))
+    && writes.every((write) => write.op === 'set' && /^(?:true|false)\b/.test(write.value));
+}
+function cancelledFlag(ctx, name) {
   const id = escapeRe(name);
-  return (new RegExp(`\\b(?:let|var)\\s+${id}\\s*(?::\\s*boolean\\s*)?=\\s*false\\b`).test(ctx.mask) && new RegExp(`(?<![\\w$.])${id}\\s*=\\s*true\\b`).test(ctx.mask))
-    || new RegExp(`\\bconst\\s+${id}\\s*=\\s*(?:\\+\\+\\s*)?${IDENT}\\s*\\.\\s*current\\b`).test(ctx.mask);
+  if (!new RegExp(`\\b(?:let|var)\\s+${id}\\s*(?::\\s*boolean\\s*)?=\\s*false\\b`).test(ctx.mask)) return false;
+  const writes = [...ctx.mask.matchAll(new RegExp(`(?<![\\w$.])${id}\\s*=(?![=>])\\s*([^;\\n]*)`, 'g'))]
+    .filter((write) => !/\b(?:let|var)\s+$/.test(ctx.mask.slice(Math.max(0, write.index - 6), write.index)));
+  return writes.length > 0 && writes.every((write) => /^true\b/.test(write[1].trim()) && inCleanup(ctx, write.index));
+}
+// The terms of a guard condition joined by `joiner` (`||` or `&&`), each without its own parentheses; null when the
+// condition mixes in anything else.
+function guardTerms(text, joiner) {
+  let body = String(text).trim();
+  while (/^\(([\s\S]*)\)$/.test(body) && groupEnd(body, 0) === body.length - 1) body = body.slice(1, -1).trim();
+  const other = joiner === '||' ? '&&' : '||';
+  if (body.includes(other) || /[?:]/.test(body)) return null;
+  return body.split(joiner).map((term) => term.trim().replace(/^\((.*)\)$/, '$1').trim());
+}
+function staleTerm(ctx, term) {
+  let m = new RegExp(`^(${IDENT})\\s*!==?\\s*(${IDENT})\\s*\\.\\s*current$`).exec(term)
+    || new RegExp(`^(${IDENT})\\s*\\.\\s*current\\s*!==?\\s*(${IDENT})$`).exec(term);
+  if (m) {
+    const [snapshot, ref] = /\.\s*current/.test(term.split(/!==?/)[0]) ? [m[2], m[1]] : [m[1], m[2]];
+    return counterRef(ctx, ref, snapshot) || contextRef(ctx, ref);
+  }
+  if ((m = new RegExp(`^!\\s*(${IDENT})\\s*\\.\\s*current$`).exec(term))) return mountedRef(ctx, m[1]);
+  if ((m = new RegExp(`^(${IDENT})$`).exec(term))) return cancelledFlag(ctx, m[1]);
+  return false;
+}
+function freshTerm(ctx, term) {
+  let m = new RegExp(`^(${IDENT})\\s*===?\\s*(${IDENT})\\s*\\.\\s*current$`).exec(term)
+    || new RegExp(`^(${IDENT})\\s*\\.\\s*current\\s*===?\\s*(${IDENT})$`).exec(term);
+  if (m) {
+    const [snapshot, ref] = /\.\s*current/.test(term.split(/===?/)[0]) ? [m[2], m[1]] : [m[1], m[2]];
+    return counterRef(ctx, ref, snapshot) || contextRef(ctx, ref);
+  }
+  if ((m = new RegExp(`^(${IDENT})\\s*\\.\\s*current$`).exec(term))) return mountedRef(ctx, m[1]);
+  if ((m = new RegExp(`^!\\s*(${IDENT})$`).exec(term))) return cancelledFlag(ctx, m[1]);
+  return false;
+}
+// `if (<text>) return;` may skip a report only when <text> says the answer is stale.
+function staleCondition(ctx, text) {
+  const terms = guardTerms(text, '||');
+  return Boolean(terms && terms.length && terms.every((term) => staleTerm(ctx, term)));
+}
+// `if (<text>) <report>` may hold a report only when <text> says the answer is still wanted.
+function freshCondition(ctx, text) {
+  const terms = guardTerms(text, '&&');
+  return Boolean(terms && terms.length && terms.every((term) => freshTerm(ctx, term)));
 }
 
 // ---------- context ----------
@@ -276,6 +349,8 @@ function rendered(ctx, setter, pathParts) {
 //   { kind: 'variable', name, path }  — the initializer of a declaration (`const view = …`), or assigned to a `let`
 //   { kind: 'discarded' }             — an expression statement of its own
 //   { kind: 'unknown' }               — anything else
+// Each known destination also carries its `anchor`: where the statement that stores (or returns, or declares) the value
+// starts — the setter's or adapter's name, the declaration keyword, the assigned name or `return`.
 function destination(ctx, start, end, pathParts = []) {
   const { mask } = ctx;
   let before = start - 1;
@@ -288,7 +363,8 @@ function destination(ctx, start, end, pathParts = []) {
     const callee = new RegExp(`(${IDENT})\\s*$`).exec(mask.slice(0, before));
     if (callee && mask[after] === ')' && (ctx.states.has(callee[1]) || ctx.adapters.has(callee[1]))) {
       const adapter = ctx.adapters.get(callee[1]);
-      return adapter ? { kind: 'setter', setter: adapter.setter, path: [...adapter.path, ...pathParts] } : { kind: 'setter', setter: callee[1], path: pathParts };
+      return adapter ? { kind: 'setter', setter: adapter.setter, path: [...adapter.path, ...pathParts], anchor: callee.index }
+        : { kind: 'setter', setter: callee[1], path: pathParts, anchor: callee.index };
     }
     return { kind: 'unknown' };
   }
@@ -305,13 +381,14 @@ function destination(ctx, start, end, pathParts = []) {
   if (ch === ':' || ch === ',') return { kind: 'unknown' };
   if (ch === '=' && mask[before - 1] !== '=' && mask[before - 1] !== '!' && mask[before - 1] !== '>' && mask[before - 1] !== '<') {
     const decl = new RegExp(`\\b(?:const|let|var)\\s+(${IDENT})\\s*(?::[^=;]+)?$`).exec(mask.slice(0, before));
-    if (decl) return { kind: 'variable', name: decl[1], declared: true, at: start, path: pathParts };
+    if (decl) return { kind: 'variable', name: decl[1], declared: true, at: start, path: pathParts, anchor: decl.index };
     const assigned = new RegExp(`(?<![\\w$.])(${IDENT})\\s*$`).exec(mask.slice(0, before));
-    if (assigned) return { kind: 'variable', name: assigned[1], declared: false, at: start, path: pathParts };
+    if (assigned) return { kind: 'variable', name: assigned[1], declared: false, at: start, path: pathParts, anchor: assigned.index };
     return { kind: 'unknown' };
   }
-  if (/\breturn\s*$/.test(mask.slice(0, start))) return { kind: 'returned', at: start, path: pathParts };
-  if ((before < 0 || /[;{}]/.test(ch)) && /^(?:;|\}|$)/.test(mask.slice(after, after + 1) || '') && !pathParts.length) return { kind: 'discarded' };
+  const returned = /\breturn\s*$/.exec(mask.slice(0, start));
+  if (returned) return { kind: 'returned', at: start, path: pathParts, anchor: returned.index };
+  if ((before < 0 || /[;{}]/.test(ch)) && /^(?:;|\}|$)/.test(mask.slice(after, after + 1) || '') && !pathParts.length) return { kind: 'discarded', anchor: start };
   return { kind: 'unknown' };
 }
 
@@ -678,6 +755,11 @@ function dataCallFamilies(content) {
 // Family 1/2/4: an awaited call in a try of its own function, a catch that reports, and the result guards.
 function awaitedProblems(ctx, call, label) {
   const problems = [];
+  // `await dataApi.createRow(…).catch(() => undefined)`: whatever follows the request decides what is awaited, and a
+  // `.catch`, a two-argument `.then` or any other link can consume the rejection before the catch ever sees it.
+  if (/^\s*(?:\?\.|\.|\[)/.test(ctx.mask.slice(call.close + 1))) {
+    return [`${label}: the awaited request is chained (\`.catch\`, \`.then\`, …), so its rejection may never reach the catch (unverifiable)`];
+  }
   const tries = enclosingTries(ctx, call.at);
   const guarded = tries.map((entry) => ({ ...entry, handler: catchAfter(ctx, entry.close) })).find((entry) => entry.handler);
   if (!guarded) return [`${label}: awaited outside a try with a catch in its own function`];
@@ -686,55 +768,102 @@ function awaitedProblems(ctx, call, label) {
   return problems;
 }
 
-// A catch body reports on its live branch: only staleness guards may return first, and a report nested in an `if`
-// must sit under a staleness condition.
+// A catch body reports on its live path: only staleness guards may return first, and a report kept under an `if` sits
+// under the fresh condition.
 function catchProblems(ctx, handler, label) {
-  const body = { start: handler.open + 1, end: handler.close };
+  const body = { open: handler.open, start: handler.open + 1, end: handler.close };
   return liveReportProblems(ctx, body, label, 'catch');
+}
+
+// ---------- where a report runs ----------
+// A report proves something only if it runs whenever its failure does. It must be a statement of the failure path's own
+// body — the catch, a guard's block or a `.catch` handler — or the consequent of an `if (<fresh condition>)` written there;
+// the statement starts at the report's destination (the setter, the declaration of the view, `return`). A report inside a
+// function the body only defines, inside an expression (`false && …`, `c ? … : …`, a comma, `void`), in another block (an
+// inner `if`, a loop, `else`) or after a return that is not a staleness guard is not on that path.
+
+// The innermost `{` around `at` that opens a statement block, or null when `at` sits in parentheses or brackets first.
+function enclosingBlock(mask, at) {
+  let depth = 0;
+  for (let i = at - 1; i >= 0; i -= 1) {
+    const ch = mask[i];
+    if (')}]'.includes(ch)) depth += 1;
+    else if ('({['.includes(ch)) {
+      if (depth > 0) { depth -= 1; continue; }
+      return ch === '{' ? i : null;
+    }
+  }
+  return null;
+}
+// The `(` matching the `)` at `close`.
+function matchingOpen(mask, close) {
+  let depth = 0;
+  for (let i = close; i >= 0; i -= 1) {
+    if (mask[i] === ')') depth += 1;
+    else if (mask[i] === '(' && --depth === 0) return i;
+  }
+  return -1;
+}
+// The `if (…)` whose `)` is at `close`: { ifAt, open, close }, or null (a call, a loop header, an `else if`).
+function ifHead(mask, close) {
+  if (mask[close] !== ')') return null;
+  const open = matchingOpen(mask, close);
+  if (open < 0) return null;
+  const keyword = /\bif\s*$/.exec(mask.slice(0, open));
+  if (!keyword || /\belse\s*$/.test(mask.slice(0, keyword.index))) return null;
+  return { ifAt: keyword.index, open, close };
+}
+const previousToken = (mask, at) => { let i = at - 1; while (i >= 0 && /\s/.test(mask[i])) i -= 1; return i; };
+// Where the statement starting at `anchor` runs in `body` ({ open, start, end } of a block, or { start, end, expression }
+// of an arrow's expression body): 'top', { guard: [open, close] } for the consequent of an if at the top, or null.
+function placement(ctx, anchor, body) {
+  const { mask } = ctx;
+  if (body.expression) return anchor === body.start ? 'top' : null;
+  const atTop = (at) => enclosingBlock(mask, at) === body.open;
+  const prev = previousToken(mask, anchor);
+  if (prev >= 0 && ';{}'.includes(mask[prev])) {
+    if (atTop(anchor)) return 'top';
+    const block = enclosingBlock(mask, anchor);
+    const head = block === null ? null : ifHead(mask, previousToken(mask, block));
+    return head && atTop(head.ifAt) ? { guard: [head.open, head.close], ifAt: head.ifAt } : null;
+  }
+  const head = ifHead(mask, prev);
+  return head && atTop(head.ifAt) ? { guard: [head.open, head.close], ifAt: head.ifAt } : null;
+}
+
+// The first report that runs on the body's own path: { site, anchor, place } or { reason }.
+function liveReport(ctx, body) {
+  const own = innermostFunction(ctx, body.start + 1);
+  let reason = 'does not report through reportPageError';
+  for (const site of ctx.reportSites.filter((entry) => entry.at >= body.start && entry.at < body.end)) {
+    if (innermostFunction(ctx, site.at) !== own) { reason = 'reports only inside a function it defines and never runs on its path'; continue; }
+    const anchor = destination(ctx, site.at, site.close + 1).anchor;
+    const place = anchor === undefined ? null : placement(ctx, anchor, body);
+    if (!place) { reason = 'reports only inside an expression or another block that may not run — make the report a statement of its own'; continue; }
+    if (place.guard && !freshCondition(ctx, ctx.code.slice(place.guard[0] + 1, place.guard[1]))) { reason = 'reports only under a condition that is not a staleness guard'; continue; }
+    return { site, anchor, place };
+  }
+  return { reason };
 }
 
 function liveReportProblems(ctx, body, label, where) {
   const { mask, code } = ctx;
-  const report = ctx.reportSites.find((site) => site.at > body.start && site.at < body.end);
-  if (!report) return [`${label}: its ${where} does not report through reportPageError`];
+  const found = liveReport(ctx, body);
+  if (!found.site) return [`${label}: its ${where} ${found.reason}`];
   const problems = [];
-  let text = mask.slice(body.start, report.at);
+  // Before the report's statement runs, only an `if (<stale condition>) return;` may leave the body.
+  const until = found.place.guard ? found.place.ifAt : found.anchor;
+  let text = mask.slice(body.start, until);
   for (const guard of text.matchAll(/\bif\s*\(/g)) {
     const open = body.start + guard.index + guard[0].length - 1;
     const close = groupEnd(mask, open);
-    if (close > report.at) continue;
-    const condition = code.slice(open + 1, close);
     const consequent = /^\s*(?:return\s*;?|\{\s*return\s*;?\s*\})/.exec(mask.slice(close + 1));
-    if (consequent && !staleCondition(ctx, condition)) problems.push(`${label}: its ${where} returns before the report on a condition that is not a staleness guard`);
+    if (consequent && !staleCondition(ctx, code.slice(open + 1, close))) problems.push(`${label}: its ${where} returns before the report on a condition that is not a staleness guard`);
   }
   text = text.replace(/\bif\s*\([^)]*\)\s*(?:return\s*;?|\{\s*return\s*;?\s*\})/g, '');
-  // The report's own statement may be the return (`return { error: reportPageError(…) };`): that is not an early exit.
-  const statementStart = Math.max(text.lastIndexOf(';'), text.lastIndexOf('}'));
-  if (/^\s*return\b/.test(text.slice(statementStart + 1))) text = text.slice(0, statementStart + 1);
   if (/\breturn\b|\bthrow\b/.test(text)) problems.push(`${label}: its ${where} can return before the report`);
-  for (const guard of mask.slice(body.start, report.at).matchAll(/\bif\s*\(/g)) {
-    const open = body.start + guard.index + guard[0].length - 1;
-    const close = groupEnd(mask, open);
-    if (close > report.at) continue;
-    let then = close + 1;
-    while (/\s/.test(mask[then])) then += 1;
-    const thenEnd = mask[then] === '{' ? groupEnd(mask, then) : blockEndStatement(mask, then);
-    if (report.at > then && report.at < thenEnd && !staleCondition(ctx, code.slice(open + 1, close))) {
-      problems.push(`${label}: its ${where} reports only under a condition that is not a staleness guard`);
-    }
-  }
   return problems;
 }
-function blockEndStatement(mask, from) {
-  let depth = 0;
-  for (let i = from; i < mask.length; i += 1) {
-    if ('({['.includes(mask[i])) depth += 1;
-    else if (')}]'.includes(mask[i])) { if (depth === 0) return i; depth -= 1; }
-    else if (mask[i] === ';' && depth === 0) return i;
-  }
-  return mask.length;
-}
-
 // Family 4: the guards a returned result needs before its outputs or body are read.
 function envelopeProblems(ctx, call, guarded, label) {
   const { mask, code } = ctx;
@@ -764,8 +893,10 @@ function envelopeProblems(ctx, call, guarded, label) {
   const problems = [];
   const reports = (guard, kinds, what) => {
     if (!guard.flat) { problems.push(`${label}: the ${what} guard must be a block that reports and returns`); return; }
-    const site = ctx.reportSites.find((entry) => entry.at > guard.block.start && entry.at < guard.block.end);
-    if (!site) { problems.push(`${label}: the ${what} guard does not report through reportPageError before it returns`); return; }
+    // The guard's block is that failure's path: its report must run there, as a statement of the block.
+    const found = liveReport(ctx, { open: guard.block.start - 1, start: guard.block.start, end: guard.block.end });
+    if (!found.site) { problems.push(`${label}: the ${what} guard ${found.reason}`); return; }
+    const { site } = found;
     const kind = literalString(site.text(4) || '');
     if (!kinds.includes(kind)) problems.push(`${label}: the ${what} guard must report kind ${kinds.map((entry) => `'${entry}'`).join(' or ')}`);
     if (!/\breturn\b/.test(mask.slice(site.close, guard.block.end))) problems.push(`${label}: the ${what} guard must return after it reports`);
@@ -814,8 +945,15 @@ function settledProblems(ctx, call, label) {
   // The status literal is blanked in the mask, so the branch is read from the source, at code positions only.
   const branch = codeMatches(ctx, new RegExp(`\\bif\\s*\\(\\s*${escapeRe(item)}\\s*\\.\\s*status\\s*===\\s*(['"])rejected\\1\\s*\\)`, 'g'), declAt, scopeEnd)[0];
   if (!branch) return [`${label}: the allSettled item ${item} is never checked for 'rejected' and reported`];
-  const reported = ctx.reportSites.some((site) => site.at > branch.index && site.at < scopeEnd
-    && squash(site.text(3) || '') === `${item}.reason` && /^\s*(?:\{[^}]*|[^;{}]*)$/.test(mask.slice(branch.index + branch[0].length, site.at)));
+  // The report is the branch's own statement: right after `if (… === 'rejected')`, or the first statement of its block.
+  const closeParen = branch.index + branch[0].length - 1;
+  const reported = ctx.reportSites.some((site) => {
+    if (!(site.at > branch.index && site.at < scopeEnd) || squash(site.text(3) || '') !== `${item}.reason`) return false;
+    const anchor = destination(ctx, site.at, site.close + 1).anchor;
+    if (anchor === undefined) return false;
+    const prev = previousToken(mask, anchor);
+    return prev === closeParen || (mask[prev] === '{' && previousToken(mask, prev) === closeParen && enclosingBlock(mask, anchor) === prev);
+  });
   if (!reported) return [`${label}: the rejected branch of ${item} does not report ${item}.reason`];
   return [];
 }
@@ -878,7 +1016,7 @@ function cacheProblems(ctx, call, label) {
   const arrow = new RegExp(`^\\s*(?:\\(\\s*(?:${IDENT})?\\s*(?::[^)]*)?\\)|${IDENT})\\s*=>\\s*`).exec(mask.slice(handler.open + 1));
   if (!arrow) { problems.push(`${label}: the .catch of ${binding} must be an arrow function that reports`); return problems; }
   const bodyStart = handler.open + 1 + arrow[0].length;
-  const body = mask[bodyStart] === '{' ? { start: bodyStart + 1, end: groupEnd(mask, bodyStart) } : { start: bodyStart, end: handler.close };
+  const body = mask[bodyStart] === '{' ? { open: bodyStart, start: bodyStart + 1, end: groupEnd(mask, bodyStart) } : { start: bodyStart, end: handler.close, expression: true };
   problems.push(...liveReportProblems(ctx, body, label, `.catch of ${binding}`));
   const handlerText = mask.slice(body.start, body.end);
   if (/\]\s*=(?![=>])|\.\s*__[\w$]+\s*=(?![=>])|\.\s*set\s*\(/.test(handlerText)) problems.push(`${label}: the .catch of ${binding} writes the cache — a rejection is never cached as data`);

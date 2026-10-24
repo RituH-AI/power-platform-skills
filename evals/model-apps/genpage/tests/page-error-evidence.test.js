@@ -574,11 +574,53 @@ test('a discarded view, a view kept in state no PageErrorBar renders, and a retu
   refused(swap(FOUNDATION, "    } catch (error) {\n      setSave(", "    } catch (error) {\n      if (name) return;\n      setSave("), /before/, 'a return that is not a staleness guard comes before the report');
   // A narrow staleness guard may return first: the live branch still reports.
   const guarded = swap(swap(FOUNDATION, "    } catch (error) {\n      setSave(", "    } catch (error) {\n      if (!mounted.current) return;\n      setSave("),
-    '  const pending = React.useRef(false);\n', '  const pending = React.useRef(false);\n  const mounted = React.useRef(true);\n');
+    '  const pending = React.useRef(false);\n', '  const pending = React.useRef(false);\n  const mounted = React.useRef(true);\n  React.useEffect(() => () => { mounted.current = false; }, []);\n');
   assert.deepEqual(problems(guarded), []);
+  refused(swap(guarded, '  React.useEffect(() => () => { mounted.current = false; }, []);\n', ''), /not a staleness guard/, 'a "mounted" ref nothing ever clears');
   refused(swap(guarded, 'const mounted = React.useRef(true);', 'const [mounted] = React.useState({ current: true });'), /before/, 'a guard on state, not a ref');
   refused(swap(FOUNDATION, "      setSave({ saving: false, error: reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'write') });",
     "      if (name) setSave({ saving: false, error: reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'write') });"), /not a staleness guard/, 'a report only under a data condition');
+});
+
+test('a report counts only where its failure runs: not behind `&&` or `?:`, in a function never called, in an inner block, after a latch return or past a swallowed rejection', () => {
+  const report = "setSave({ saving: false, error: reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'write') });";
+  const indeterminate = "      if (res.indeterminate) { setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'indeterminate')); return; }";
+  const settled = "    if (accounts.status === 'rejected') error = reportPageError(PAGE_NAME, 'loadAccounts', undefined, accounts.reason, 'read');";
+  for (const [label, source, reason] of [
+    ['a report behind `false &&`', swap(FOUNDATION, report, `false && ${report}`), /expression or another block/],
+    ['a report in a conditional expression', swap(FOUNDATION, report, `name ? ${report.slice(0, -1)} : undefined;`), /expression or another block/],
+    ['a report in a function the catch defines and never calls', swap(FOUNDATION, report, `const ignored = () => { ${report} };`), /function it defines/],
+    ['a report in an inner block', swap(FOUNDATION, report, `{ ${report} }`), /expression or another block/],
+    ['a report under a data condition', swap(FOUNDATION, report, `if (name) { ${report} }`), /not a staleness guard/],
+    ['a return on the pending latch first', swap(FOUNDATION, report, `if (pending.current) return;\n      ${report}`), /not a staleness guard/],
+    ['a rejection swallowed before the catch', swap(FOUNDATION, "await dataApi.createRow('account', { name });", "await dataApi.createRow('account', { name }).catch(() => undefined);"), /chained/],
+    ['an indeterminate guard whose report never runs', swap(ACTION, indeterminate, "      if (res.indeterminate) { if (false) { setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'indeterminate')); } return; }"), /res\.indeterminate guard/],
+    ['a rejected item reported behind `void`', swap(GROUPED, settled, "    if (accounts.status === 'rejected') void (error = reportPageError(PAGE_NAME, 'loadAccounts', undefined, accounts.reason, 'read'));"), /rejected branch of accounts/],
+  ]) refused(source, reason, label);
+  // Fixture 27's order read, its report put behind `false &&`: the whole fixture fails the common assertion.
+  const fixture = fs.readFileSync(path.join(__dirname, '..', 'fixtures', '27-page-error-helper', 'order-approvals.tsx'), 'utf8');
+  const detail = "      setDetail({ order: null, loading: false, error: reportPageError(PAGE_NAME, 'loadOrder', undefined, failure, 'read', retryDetail) });";
+  const silent = swap(fixture, detail, `      false && ${detail.trim()}`);
+  assert.equal(gradePageErrors({ files: [{ path: '/fixtures/27-page-error-helper/order-approvals.tsx', name: 'order-approvals.tsx', content: silent }] }).status, 'fail');
+});
+
+test('staleness guards are read with their polarity: a request counter, an unmounted flag and a cancelled flag, never a latch or data', () => {
+  const counted = swap(swap(swap(FOUNDATION,
+    '  const pending = React.useRef(false);\n', '  const pending = React.useRef(false);\n  const request = React.useRef(0);\n'),
+    '    pending.current = true;\n', '    pending.current = true;\n    const requestId = ++request.current;\n'),
+    "    } catch (error) {\n      setSave(", "    } catch (error) {\n      if (requestId !== request.current) return;\n      setSave(");
+  assert.deepEqual(problems(counted), [], 'an older request returns before reporting');
+  refused(swap(counted, 'if (requestId !== request.current) return;', 'if (requestId === request.current) return;'), /not a staleness guard/, 'the current request returning instead');
+  const kept = swap(counted, "      if (requestId !== request.current) return;\n      setSave({ saving: false, error: reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'write') });",
+    "      if (requestId === request.current) setSave({ saving: false, error: reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'write') });");
+  assert.deepEqual(problems(kept), [], 'a report kept for the current request');
+  refused(swap(kept, 'if (requestId === request.current) setSave(', 'if (requestId !== request.current) setSave('), /not a staleness guard/, 'a report kept only for an older request');
+  refused(swap(counted, 'const requestId = ++request.current;', 'const requestId = request.current;'), /not a staleness guard/, 'a "request id" that is never counted');
+  // The double-submit latch is cleared in `finally`, not in a cleanup: it is no unmounted flag, whichever way it is read.
+  refused(swap(FOUNDATION, "    } catch (error) {\n      setSave(", "    } catch (error) {\n      if (!pending.current) return;\n      setSave("), /not a staleness guard/, 'the latch read as an unmounted flag');
+  // A cancelled flag starts false and turns true only in the effect's cleanup.
+  assert.deepEqual(problems(CACHE_LIST), [], 'the cached read and its cancelled flag');
+  refused(swap(CACHE_LIST, '    let cancelled = false;\n', '    let cancelled = false;\n    cancelled = true;\n'), /not a staleness guard/, 'a cancelled flag set outside the cleanup');
 });
 
 test('returned views: a caller that drops the result, a result kept where nothing renders it, a try without catch and a bare chain fail', () => {

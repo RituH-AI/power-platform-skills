@@ -1279,10 +1279,13 @@ reads that load together either go through named helpers that each catch, report
 around `Promise.all` hides every failure after the first.
 
 **What the eval check reads, and what it does not.** The page error check of the eval suite reads a page's
-source; it never runs it. It accepts a closed set of shapes — an awaited call in a `try` whose `catch`
-reports, a named helper that returns `{ error: view }` to a caller that stores it, the cached promise of
-`references/data-caching.md`, a guarded Custom API, built-in or connector result, the two grouped-read
-forms above — and refuses anything else as unverifiable, never as a pass. It requires this block's
+source; it never runs it. It accepts a closed set of shapes — an awaited call (not chained) in a `try` whose
+`catch` reports in a statement of its own, a named helper that returns `{ error: view }` to a caller that stores it,
+the cached promise of `references/data-caching.md`, a guarded Custom API, built-in or connector result, the two
+grouped-read forms above — and refuses anything else as unverifiable, never as a pass. Before a report, only a
+staleness guard may return — a request counter (`requestId !== request.current`), the context the page shows
+(`recordId !== approvalFor.current`), or an unmounted or cancelled flag cleared in an effect's cleanup; a
+double-submit latch or page data is not one. It requires this block's
 reporter line for line (comments, indentation and line endings aside; only the telemetry insertion may be
 added), a literal kind as the fifth argument, a view that reaches a rendered `PageErrorBar`, and the
 boundary wrapper. It does not read `loadMoreRows` (report its failure the same way all the same) or the
