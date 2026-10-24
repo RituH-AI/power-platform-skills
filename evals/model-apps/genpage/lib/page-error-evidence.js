@@ -103,7 +103,8 @@ function depthAt(mask, at) {
   return depth;
 }
 
-// The [start, end) ranges of the top-level arguments of the call whose `(` is at `open`.
+// The [start, end) ranges of the top-level arguments of the call whose `(` is at `open`. A trailing comma after the last
+// argument (`f(a, b,)`, valid since ES2017) passes no argument: the empty text after it is not one.
 function argRanges(mask, open) {
   const close = groupEnd(mask, open);
   const ranges = [];
@@ -112,7 +113,7 @@ function argRanges(mask, open) {
     if ('({['.includes(mask[i])) { i = groupEnd(mask, i); continue; }
     if (mask[i] === ',') { ranges.push([start, i]); start = i + 1; }
   }
-  if (mask.slice(start, close).trim() || ranges.length) ranges.push([start, close]);
+  if (mask.slice(start, close).trim()) ranges.push([start, close]);
   return { close, args: ranges.map(([a, b]) => trimRange(mask, a, b)) };
 }
 function trimRange(mask, a, b) {

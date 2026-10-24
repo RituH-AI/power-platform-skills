@@ -614,6 +614,27 @@ test('reporter calls: five arguments with a literal kind at index 4, retry only 
   refused(swap(BUILT_INS, "const view = reportPageError(PAGE_NAME, 'showIdentity', res.error?.code, res.error?.message, 'read');", "const view = reportPageError(PAGE_NAME, 'showIdentity', res.error?.code, res.error?.message, 'read', showIdentity);"), /built-in/, 'a built-in failure with a retry');
 });
 
+test('a trailing comma after the last argument passes no argument: five-, six- and seven-argument calls, on one line or one per line', () => {
+  const call = "reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'write')";
+  assert.deepEqual(problems(swap(FOUNDATION, call, "reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'write',)")), [], 'five, on one line');
+  assert.deepEqual(problems(swap(FOUNDATION, call, "reportPageError(\n        PAGE_NAME,\n        'createAccount',\n        undefined,\n        error,\n        'write',\n      )")), [], 'five, one per line');
+  assert.deepEqual(problems(swap(CACHE_LIST, "'read', retryLoad)", "'read', retryLoad,)")), [], 'six: a read and its retry');
+  assert.deepEqual(problems(swap(CACHE_LIST, "undefined, failure, 'read', retryLoad)", "undefined,\n            failure,\n            'read',\n            retryLoad,\n          )")), [], 'six, one per line');
+  const report = "const view = reportPageError(PAGE_NAME, 'showIdentity', res.error?.code, res.error?.message, 'read');";
+  for (const [label, seven] of [
+    ['seven, on one line', "const view = reportPageError(PAGE_NAME, 'showIdentity', res.error?.code, res.error?.message, 'read', undefined, appInsights,);"],
+    ['seven, one per line', "const view = reportPageError(\n        PAGE_NAME,\n        'showIdentity',\n        res.error?.code,\n        res.error?.message,\n        'read',\n        undefined,\n        appInsights,\n      );"],
+  ]) {
+    const authorized = swap(withTelemetry(BUILT_INS), report, seven);
+    assert.deepEqual(problems(authorized), [], label);
+    const spans = telemetrySafeSpans(authorized);
+    assert.equal(spans.length, 1, `${label}: the telemetry argument is still the one safe span`);
+    assert.equal(authorized.slice(spans[0].start, spans[0].end), 'appInsights', label);
+  }
+  // The comma is not a way past the rules: a write still offers no retry, and a sixth argument is still a retry.
+  refused(swap(FOUNDATION, call, "reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'write', createAccount,)"), /retry/, 'a write offering a retry, with a trailing comma');
+});
+
 test('the reporter is the canonical one, bound once, and the only code that sends an exception', () => {
   refused(swap(FOUNDATION, "    normalizedMessage = line.length > 300 ? line.slice(0, 299) + '\\u2026' : line;", '    normalizedMessage = line;'), /canonical/, 'an uncapped message');
   refused(swap(FOUNDATION, "{ code: normalizedCode, message: normalizedMessage });", '{ code: normalizedCode, message: normalizedMessage }, message);'), /canonical/, 'a reporter that logs the thrown value');
