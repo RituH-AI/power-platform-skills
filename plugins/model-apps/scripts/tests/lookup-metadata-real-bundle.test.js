@@ -20,7 +20,7 @@ const TARGETS = [{ LogicalName: 'customerid', Targets: ['account', 'contact'] },
 const DETAILS = 'SchemaName,ReferencedEntity,ReferencingAttribute,ReferencedAttribute,ReferencingEntityNavigationPropertyName';
 const NEXT = `${ENV}/api/data/v9.2/EntityDefinitions(LogicalName='opportunity')/ManyToOneRelationships?$select=${DETAILS}&$skiptoken=page2`;
 
-function transport({ lookupTargets = TARGETS, secondPage = { status: 200, body: { value: [
+function transport({ main = (body) => body, lookupTargets = TARGETS, secondPage = { status: 200, body: { value: [
   { SchemaName: 'opportunity_customer_contacts', ReferencedEntity: 'contact', ReferencingAttribute: 'customerid', ReferencedAttribute: 'contactid', ReferencingEntityNavigationPropertyName: 'customerid_contact' },
   { SchemaName: 'owner_opportunitys', ReferencedEntity: 'owner', ReferencingAttribute: 'ownerid', ReferencedAttribute: 'ownerid', ReferencingEntityNavigationPropertyName: 'ownerid' },
 ] } } } = {}) {
@@ -34,10 +34,10 @@ function transport({ lookupTargets = TARGETS, secondPage = { status: 200, body: 
     const [, table, sub = '', query = ''] = route;
     if (table !== 'opportunity') return { status: 404, headers: {}, body: { error: { code: '0x80060888', message: `Could not find entity ${table}` } } };
     if (sub === '') {
-      return { status: 200, headers: {}, body: {
+      return { status: 200, headers: {}, body: main({
         LogicalName: 'opportunity', SchemaName: 'Opportunity', DisplayName: label('Opportunity'), Description: label(''), EntitySetName: 'opportunities',
         IsCustomEntity: false, PrimaryNameAttribute: 'name', PrimaryIdAttribute: 'opportunityid', PrimaryImageAttribute: null, Attributes: ATTRIBUTES,
-      } };
+      }) };
     }
     if (sub === '/Attributes/Microsoft.Dynamics.CRM.LookupAttributeMetadata') return lookupTargets instanceof Object && !Array.isArray(lookupTargets) ? lookupTargets : { status: 200, headers: {}, body: { value: lookupTargets } };
     if (sub === '/ManyToOneRelationships' && query.includes('ReferencingEntityNavigationPropertyName')) {
@@ -72,6 +72,20 @@ test('REAL BUNDLE: the complete targets from the SDK\'s metadata read, the concr
   assert.deepEqual(owner.sharedPaths.map((entry) => entry.navigationProperty), ['ownerid']);
   assert.ok(http.reads.includes(decodeURIComponent(NEXT)), 'the second page was followed, through the absolute link');
   assert.ok(!http.reads.some((u) => /ManyToOneRelationships/.test(u) && /DisplayName|LocalizedLabels/.test(u.split('?')[1] || '')), 'the relationship reads are label-free');
+});
+
+test('REAL BUNDLE: an incomplete main metadata answer fails the whole discovery, never a smaller lookup inventory', async () => {
+  const drop = (key) => (body) => { const copy = { ...body }; delete copy[key]; return copy; };
+  for (const [label, main] of [
+    ['no Attributes expansion, which the SDK reads as []', drop('Attributes')],
+    ['no PrimaryIdAttribute, which the SDK reads as \'\'', drop('PrimaryIdAttribute')],
+    ['a first page of attributes with its continuation, which the SDK does not follow', (body) => ({ ...body,
+      Attributes: ATTRIBUTES.filter((entry) => !['customerid', 'ownerid'].includes(entry.LogicalName)),
+      'Attributes@odata.nextLink': `${ENV}/api/data/v9.2/EntityDefinitions(LogicalName='opportunity')/Attributes?$skiptoken=rest` })],
+  ]) {
+    const http = transport({ main });
+    await assert.rejects(readLookups(ENV, { tables: ['opportunity'] }, http), (err) => err.code === 'LOOKUP_METADATA_INCOMPLETE', label);
+  }
 });
 
 test('REAL BUNDLE: a refused targets read, a refused second page, or a missing table fails the whole discovery', async () => {

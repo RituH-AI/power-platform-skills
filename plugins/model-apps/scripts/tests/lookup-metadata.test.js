@@ -20,6 +20,7 @@ const OPPORTUNITY = {
   primaryIdAttribute: 'opportunityid',
   primaryNameAttribute: 'name',
   attributes: [
+    attribute('opportunityid', 'Uniqueidentifier'),
     attribute('name', 'String'),
     attribute('customerid', 'Customer', ['account', 'contact']),
     attribute('parentaccountid', 'Lookup', ['account']),
@@ -75,9 +76,24 @@ test('a navigation property two targets share, or a target reached twice, is sha
 
 test('a lookup whose targets the metadata did not state fails the read — it is never a lookup with no targets', () => {
   for (const targets of [undefined, [], [''], [7], ['sales orders']]) {
-    const metadata = { ...OPPORTUNITY, attributes: [attribute('customerid', 'Customer', targets)] };
+    const metadata = { ...OPPORTUNITY, attributes: OPPORTUNITY.attributes.map((entry) => (entry.logicalName === 'customerid' ? attribute('customerid', 'Customer', targets) : entry)) };
     assert.throws(() => tableLookups(metadata, ROWS), (err) => err.code === 'LOOKUP_METADATA_INCOMPLETE' && /customerid/.test(err.message), JSON.stringify(targets));
   }
+});
+
+test('an attribute inventory that cannot be complete fails the read: no primary id, or a relationship column it does not list', () => {
+  const without = (column) => ({ ...OPPORTUNITY, attributes: OPPORTUNITY.attributes.filter((entry) => entry.logicalName !== column) });
+  for (const [label, metadata] of [
+    ['an absent attribute inventory, which the SDK reads as []', { ...OPPORTUNITY, attributes: [] }],
+    ['no primary id column stated', { ...OPPORTUNITY, primaryIdAttribute: '' }],
+    ['a primary id column the inventory does not list', without('opportunityid')],
+    ['a Customer lookup its relationships name but the inventory does not list', without('customerid')],
+    ['an Owner lookup its relationship names but the inventory does not list', without('ownerid')],
+  ]) {
+    assert.throws(() => tableLookups(metadata, ROWS), (err) => err.code === 'LOOKUP_METADATA_INCOMPLETE', label);
+  }
+  // Neighbour: a table with no lookups and no relationships is a complete, empty answer.
+  assert.deepEqual(tableLookups({ ...OPPORTUNITY, attributes: [attribute('opportunityid', 'Uniqueidentifier'), attribute('name', 'String')] }, []).lookups, []);
 });
 
 function fakeSdk({ metadata = { opportunity: OPPORTUNITY }, pages } = {}) {

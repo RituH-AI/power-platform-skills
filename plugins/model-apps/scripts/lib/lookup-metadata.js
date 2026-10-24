@@ -14,8 +14,9 @@
 // the abstract `owner` table, which is in no lookup's targets), a navigation property two targets share, or a target reached twice.
 // Nothing here manufactures a path (`ownerid_team`, `ownerid_systemuser`) or splits a navigation name on `_` to find a table.
 //
-// Every failure is a failure of the whole read — a missing table, a lookup without targets, a refused or malformed relationship page
-// — so a caller never receives a shorter candidate list as if it were complete.
+// Every failure is a failure of the whole read — a missing table, a lookup without targets, an attribute inventory that cannot be
+// complete (no primary id column, or a relationship column it does not list), a refused or malformed relationship page — so a
+// caller never receives a shorter candidate list as if it were complete.
 
 const { readRelationshipsOf } = require('./relationship-metadata.js');
 
@@ -38,6 +39,22 @@ function lookupError(code, message) {
 function tableLookups(metadata, rows) {
   const table = String(metadata.logicalName || '').toLowerCase();
   const attributes = Array.isArray(metadata.attributes) ? metadata.attributes : [];
+  // The SDK cannot say its attribute inventory is complete: it maps an absent `Attributes` expansion to [] and a missing
+  // PrimaryIdAttribute to '', and it does not follow an `Attributes@odata.nextLink` continuation. So completeness is
+  // established here from what must be in it — the table's primary id column, and the referencing column of every
+  // ManyToOne relationship the separately paged relationship read returned (every lookup has one) — and a gap fails
+  // the whole read rather than becoming a shorter list a planner reads as "no lookup".
+  const inventory = new Set(attributes.filter(Boolean).map((attribute) => String(attribute.logicalName || '').toLowerCase()));
+  const primaryId = String(metadata.primaryIdAttribute || '').toLowerCase();
+  if (!LOGICAL_NAME.test(primaryId) || !inventory.has(primaryId)) {
+    throw lookupError('LOOKUP_METADATA_INCOMPLETE', `${table}: the metadata read did not state the table's primary id column among its attributes`);
+  }
+  for (const row of rows) {
+    const column = String(row.referencingAttribute || '').toLowerCase();
+    if (!inventory.has(column)) {
+      throw lookupError('LOOKUP_METADATA_INCOMPLETE', `${table}: relationship ${row.schemaName || '?'} references ${column || '?'}, which the attribute inventory does not list — an incomplete attribute read`);
+    }
+  }
   const lookups = [];
   for (const attribute of attributes) {
     if (!attribute || !LOOKUP_TYPES.has(attribute.attributeType)) continue;
@@ -70,7 +87,7 @@ function tableLookups(metadata, rows) {
   lookups.sort((a, b) => (a.column < b.column ? -1 : a.column > b.column ? 1 : 0));
   return {
     logicalName: table,
-    primaryIdAttribute: metadata.primaryIdAttribute || '',
+    primaryIdAttribute: primaryId,
     primaryNameAttribute: metadata.primaryNameAttribute || '',
     lookups,
   };
