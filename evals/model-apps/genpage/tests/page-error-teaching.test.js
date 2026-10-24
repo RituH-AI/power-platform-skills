@@ -203,3 +203,35 @@ test('negative controls: each example fails the contract when its failure path i
     assert.ok(found.some((problem) => reason.test(problem)), `${label}: ${JSON.stringify(found)}`);
   }
 });
+
+// ---------- the samples a builder is pointed at ----------
+
+const SAMPLES = path.join(PLUGIN, 'samples');
+const sampleFiles = () => fs.readdirSync(SAMPLES).filter((name) => name.endsWith('.tsx')).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+
+test('every sample page renders inside the boundary and routes its data failures through the canonical reporter', () => {
+  const files = sampleFiles();
+  assert.equal(files.length, 13, 'the thirteen complete sample pages');
+  for (const name of files) {
+    const source = fs.readFileSync(path.join(SAMPLES, name), 'utf8');
+    assert.deepEqual(pageErrorProblems(source), [], name);
+    parses(source, name);
+    for (const call of source.matchAll(/(?<!function\s)\breportPageError\(/g)) {
+      const args = callArguments(source, call.index + call[0].length - 1);
+      assert.ok(args.length >= 5 && /^(['"])(?:read|write|indeterminate|network|render)\1$/.test(args[4]), `${name}: reportPageError(${args.join(', ')})`);
+    }
+    // No sample still keeps a failure as a bare string or logs the thrown value.
+    assert.doesNotMatch(source, /error: string \| null|console\.error\([^)]*\berr\b/, `${name} keeps no string error state`);
+  }
+});
+
+test('the Custom API sample also passes the Custom API runtime check, its Action latched and both results guarded in order', () => {
+  const source = fs.readFileSync(path.join(SAMPLES, '13-custom-api-invocation.tsx'), 'utf8');
+  const bindings = [
+    { name: 'new_GetOrderSummary', isFunction: true, displayName: 'Order summary', parameterKinds: { OrderId: 'Guid' } },
+    { name: 'new_ApproveOrder', isFunction: false, boundEntityLogicalName: 'salesorder', displayName: 'Approve Order', parameterKinds: { Comment: 'String' } },
+  ];
+  assert.deepEqual(runtimeProblems(source, bindings, { new_GetOrderSummary: ['Total', 'Status'], new_ApproveOrder: ['NewStatus'] }, new Map()), []);
+  // Neither the effect nor anything else depends on dataApi or a shape derived from it (Rule 15).
+  assert.doesNotMatch(source, /\[\s*actionApi\b|\bdataApi\s*\]/, 'no dataApi-derived value in a dependency array');
+});
