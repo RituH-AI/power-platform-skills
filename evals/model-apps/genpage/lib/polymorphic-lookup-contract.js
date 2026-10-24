@@ -12,7 +12,9 @@
 //     block, compared after comments are blanked and each line trimmed (blank lines dropped, literal text exact);
 //   - a call `normalizeLookupReference(<row>, '<readProperty>', ['<target>', …])` whose literal targets are the lookup's COMPLETE
 //     target set, bound to a `const`, checked by `if (<n>.state !== 'resolved') return…` before its `.reference` is used, and at
-//     most aliased once more as `const <r> = <n>.reference;` (the "documented immutable alias");
+//     most aliased once more as `const <r> = <n>.reference;` (the "documented immutable alias"), and from then on read only
+//     through `.state`, `.reference`, `.table` and `.id` — a `const` binding does not stop `reference.table = 'account'`, so a
+//     written, computed or handed-on pair is refused;
 //   - a resolved reference's `.id` as a filter operand (`_<field>_value eq ${<r>.id}`), a `retrieveRow` id and a `navigateTo`
 //     entityId, with its `.table` as the table — or a literal table where the reference's table is PROVEN to be it: after an
 //     early `if (<r>.table !== '<table>') return…;` that is a statement of a block holding the use, or inside the block of
@@ -174,9 +176,52 @@ function normalizations(code, mask, lookups, problems) {
     const guarded = guard.exec(code);
     const names = [`${name}.reference`];
     for (const alias of mask.matchAll(new RegExp(`\\bconst\\s+(${IDENT})\\s*(?::[^=]+)?=\\s*${escapeRe(name)}\\s*\\.\\s*reference\\s*;`, 'g'))) names.push(alias[1]);
-    found.push({ name, lookup, at: match.index, guardAt: guarded ? guarded.index : -1, names, ...enclosingBlock(mask, match.index) });
+    const entry = { name, lookup, at: match.index, guardAt: guarded ? guarded.index : -1, names, ...enclosingBlock(mask, match.index) };
+    problems.push(...pairChangeProblems(mask, entry));
+    found.push(entry);
   }
   return found;
+}
+
+// The resolved pair is const only as a binding: `reference.table = 'account'` opens a contact's id as an account, and the
+// grader would still read it as the pair the normalizer returned. So once bound, the normalization and its alias are read only
+// through members — `<n>.state`, `<n>.reference` into its one `const` alias or straight to `.table` / `.id`, `<r>.table`,
+// `<r>.id` — never written (`=`, a compound assignment, `++`/`--`, `delete`), read computed, or handed on whole
+// (`Object.assign(reference, …)`, `f(reference)`), any of which may change the pair out of sight. A spread
+// (`{ ...reference }`) copies it and leaves the pair as it was.
+function pairChangeProblems(mask, entry) {
+  const problems = [];
+  const written = (at, end) => /(?:\bdelete|\+\+|--)\s*$/.test(mask.slice(Math.max(0, at - 12), at))
+    || /^\s*(?:(?:\*\*|<<|>>>?|\?\?|\|\||&&|[-+*/%&|^])?=(?![=>])|\+\+|--)/.test(mask.slice(end));
+  const chain = (at, length) => {
+    const segments = [];
+    let i = at + length;
+    for (let member = /^\s*(?:\?\.|\.)\s*([A-Za-z_$][\w$]*)/.exec(mask.slice(i)); member; member = /^\s*(?:\?\.|\.)\s*([A-Za-z_$][\w$]*)/.exec(mask.slice(i))) {
+      segments.push(member[1]);
+      i += member[0].length;
+    }
+    return { segments, end: i, computed: /^\s*(?:\?\.\s*)?\[/.test(mask.slice(i)) };
+  };
+  const mentions = (name) => [...mask.slice(entry.at, entry.scopeEnd).matchAll(new RegExp(`(?<![\\w$.])${escapeRe(name)}(?![\\w$])`, 'g'))]
+    .map((found) => entry.at + found.index)
+    // A property key of the same name (`{ reference: … }`) and the alias's own declaration are not reads of the pair.
+    .filter((at) => !(/[{,]\s*$/.test(mask.slice(Math.max(0, at - 40), at)) && /^\s*:(?!:)/.test(mask.slice(at + name.length)))
+      && !/\bconst\s+$/.test(mask.slice(Math.max(0, at - 12), at)));
+  const refuse = (holder, at) => problems.push(`${holder} is changed or handed on after the page normalizes it (it is read only through .state, .reference, .table and .id) — a resolved pair must stay the one the normalizer returned`);
+  for (const at of mentions(entry.name)) {
+    const { segments, end, computed } = chain(at, entry.name.length);
+    const alias = segments.length === 1 && segments[0] === 'reference'
+      && new RegExp(`\\bconst\\s+${IDENT}\\s*(?::[^=;]+)?=\\s*$`).test(mask.slice(Math.max(0, at - 80), at)) && /^\s*;/.test(mask.slice(end));
+    const read = (segments.length === 1 && segments[0] === 'state') || (segments.length === 2 && segments[0] === 'reference' && ['table', 'id'].includes(segments[1]));
+    if (computed || written(at, end) || !(alias || read)) { refuse(entry.name, at); break; }
+  }
+  for (const holder of entry.names.slice(1)) {
+    for (const at of mentions(holder)) {
+      const { segments, end, computed } = chain(at, holder.length);
+      if (computed || written(at, end) || !(segments.length === 1 && ['table', 'id'].includes(segments[0]))) { refuse(holder, at); break; }
+    }
+  }
+  return problems;
 }
 
 // The block a normalization is made in: { scopeStart, scopeEnd } of the innermost `{ … }` around `at` (the module when none). A

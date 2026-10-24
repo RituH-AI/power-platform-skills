@@ -163,6 +163,26 @@ test('a table check proves the target only when it dominates the use with the ri
     .some((problem) => /not the reference's own table/.test(problem)), 'an inverted guard before a fixed retrieveRow table');
 });
 
+test('the resolved pair stays the one the normalizer returned: a written, computed or handed-on pair is refused', () => {
+  const open = "    await Xrm.Navigation.navigateTo({ pageType: 'entityrecord', entityName: reference.table, entityId: reference.id });";
+  for (const [label, line] of [
+    ['its table overwritten', "    reference.table = 'account';"],
+    ['its id overwritten', "    reference.id = '00000000-0000-0000-0000-000000000000';"],
+    ['its table written computed', "    reference['table'] = 'account';"],
+    ['its table deleted', '    delete (reference as any).table;'],
+    ['filled through Object.assign', "    Object.assign(reference, { table: 'account' });"],
+    ['handed on whole', '    rewrite(reference);'],
+    ['the normalization\'s reference replaced', "    (normalized as any).reference = { table: 'account', id: reference.id };"],
+    ['the normalization\'s state written', "    (normalized as any).state = 'resolved';"],
+    ['the normalization handed on', '    rewrite(normalized);'],
+  ]) {
+    const found = lookupContractProblems(swap(PAGE, open, `${line}\n${open}`), SCENARIO);
+    assert.ok(found.some((problem) => /is changed or handed on after the page normalizes it/.test(problem)), `${label}: ${JSON.stringify(found)}`);
+  }
+  // Reads through members stay accepted.
+  assert.deepEqual(lookupContractProblems(swap(PAGE, open, `    const shown = \`\${reference.table}:\${reference.id}\`;\n    void shown;\n${open}`), SCENARIO), []);
+});
+
 test('without scenario lookup metadata nothing is graded as passing', () => {
   assert.deepEqual(lookupContractProblems(PAGE, { lookups: [] }), ['the scenario names no lookup metadata to grade against']);
 });
