@@ -1042,6 +1042,9 @@ renders it. The whole page renders inside one `PageErrorBoundary`.
 Copy the block below unchanged — the reporter, the error copy, the bar, the boundary and the
 default export — and set `PAGE_NAME` to the plan's display name for the page (a fixed literal,
 never the file name). `PageBody` is where the page itself lives: its hooks, state and handlers.
+Render each operation's `<PageErrorBar error={…} />` in the component's final returned JSX, outside any
+condition, ternary or list: the bar shows nothing until there is an error, and a bar that may not render
+cannot show one.
 `reportPageError(pageName, operation, code, message, kind, retry?, appInsights?)` takes five
 required arguments:
 

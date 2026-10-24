@@ -393,9 +393,9 @@ function PageBody(props: GeneratedComponentProps) {
         {accountView.label && !accountView.loading && <Text weight="semibold">{accountView.label}</Text>}
         {accountView.rows.map((row) => <Text key={row.opportunityid}>{row.name}</Text>)}
       </section>
+      <PageErrorBar error={change.error} />
       {change.opportunityId && (
         <section className={styles.panel} aria-label="Change customer">
-          <PageErrorBar error={change.error} />
           <Field label="New customer">
             <Dropdown
               placeholder="Pick a customer"

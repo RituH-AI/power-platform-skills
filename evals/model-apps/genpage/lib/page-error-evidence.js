@@ -36,9 +36,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { blankNonCodePreservingTemplateExpressions, commentRanges } = require('../../../../plugins/model-apps/scripts/lib/source-literals.js');
+const { blankNonCodePreservingTemplateExpressions } = require('../../../../plugins/model-apps/scripts/lib/source-literals.js');
 const { groupEnd, literalString, escapeRe, callSites, receiverIsDataApi, namedScopes, forwardedPageBodyOf } = require('./source-evidence.js');
 const { jsxElements, functionScopes, namedFunctions } = require('./tsx-structure.js');
+const { canonicalLines, depthAt, topLevelFunction, canonicalReporter, canonicalBars } = require('./page-error-canonical.js');
 
 const PAGE_ERROR_ASSERTION = 'Generated .tsx routes every supported dataApi failure through reportPageError and mounts PageErrorBoundary around PageBody';
 const LISTED_METHODS = ['queryTable', 'retrieveRow', 'createRow', 'updateRow', 'deleteRow', 'getChoices', 'queryConnectorTable',
@@ -46,63 +47,9 @@ const LISTED_METHODS = ['queryTable', 'retrieveRow', 'createRow', 'updateRow', '
 const KINDS = new Set(['read', 'write', 'indeterminate', 'network', 'render']);
 const BUILT_INS = new Set(['WhoAmI', 'RetrieveVersion']);
 const REPORTER = 'reportPageError';
-const RULES_PATH = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'model-apps', 'references', 'rules.md');
 const LEDGER_PATH = path.join(__dirname, 'page-error-allowlist.json');
 
-// ---------- the canonical reporter, read from the published rules ----------
-
-// A source's significant lines: comments blanked (the lexer's own ranges, so a `//` inside a string survives), each
-// line trimmed, empty lines dropped. Line breaks are KEPT: they decide automatic semicolon insertion (`return\nview`).
-function canonicalLines(text) {
-  const chars = String(text).replace(/\r\n/g, '\n').split('');
-  for (const { start, end } of commentRanges(chars.join(''))) for (let i = start; i < end; i += 1) if (chars[i] !== '\n') chars[i] = ' ';
-  return chars.join('').split('\n').map((line) => line.trim()).filter(Boolean);
-}
-
-// `function <name>(…) … { … }` declared at the top level of `code`, as [start, end) offsets; null when absent.
-function topLevelFunction(code, mask, name) {
-  for (const match of mask.matchAll(new RegExp(`\\bfunction\\s+${escapeRe(name)}\\s*\\(`, 'g'))) {
-    if (depthAt(mask, match.index) !== 0) continue;
-    const paramsOpen = match.index + match[0].length - 1;
-    const paramsEnd = groupEnd(mask, paramsOpen);
-    const bodyOpen = mask.indexOf('{', paramsEnd);
-    if (bodyOpen < 0) return null;
-    return { start: match.index, bodyOpen, end: groupEnd(mask, bodyOpen) + 1 };
-  }
-  return null;
-}
-
-let canonical = null;
-function canonicalReporter() {
-  if (canonical) return canonical;
-  const rules = fs.readFileSync(RULES_PATH, 'utf8').replace(/\r\n/g, '\n');
-  const start = rules.indexOf('\n### 2. Missing Error Handling\n');
-  if (start < 0) throw new Error('references/rules.md has no "Missing Error Handling" section');
-  const next = rules.indexOf('\n### ', start + 10);
-  const section = rules.slice(start, next < 0 ? rules.length : next);
-  const blocks = [...section.matchAll(/```tsx\n([\s\S]*?)\n```/g)].map((match) => match[1]);
-  const foundation = blocks.find((block) => /\bfunction reportPageError\(/.test(block));
-  const insertion = blocks.find((block) => /appInsights\?\.trackException\?\.\(/.test(block));
-  if (!foundation || !insertion) throw new Error('references/rules.md does not publish the canonical reporter and its telemetry insertion');
-  const range = topLevelFunction(foundation, blankNonCodePreservingTemplateExpressions(foundation), REPORTER);
-  const base = canonicalLines(foundation.slice(range.start, range.end));
-  const anchor = base.findIndex((line) => line.startsWith('console.error('));
-  const telemetry = [...base.slice(0, anchor + 1), ...canonicalLines(insertion), ...base.slice(anchor + 1)];
-  canonical = { base: base.join('\n'), telemetry: telemetry.join('\n') };
-  return canonical;
-}
-
 // ---------- small lexical helpers over the masked source ----------
-
-// How many brackets are open at `at`: 0 at the top level of the module.
-function depthAt(mask, at) {
-  let depth = 0;
-  for (let i = 0; i < at; i += 1) {
-    if ('({['.includes(mask[i])) depth += 1;
-    else if (')}]'.includes(mask[i])) depth -= 1;
-  }
-  return depth;
-}
 
 // The [start, end) ranges of the top-level arguments of the call whose `(` is at `open`. A trailing comma after the last
 // argument (`f(a, b,)`, valid since ES2017) passes no argument: the empty text after it is not one.
@@ -263,9 +210,43 @@ function context(code) {
     const { close, args } = argRanges(mask, open);
     return { at: site.at, open, close, args, text: (index) => (args[index] ? code.slice(args[index][0], args[index][1]) : undefined) };
   });
-  ctx.bars = jsxElements(mask, new Set(['PageErrorBar'])).map((element) => element.attrs.get('error')).filter((attr) => attr && attr.kind === 'expression')
+  // Only a bar that is shown whenever its component renders proves a stored view is seen (reachableBar).
+  ctx.barElements = jsxElements(mask, new Set(['PageErrorBar']));
+  ctx.bars = ctx.barElements.filter((element) => reachableBar(ctx, element)).map((element) => element.attrs.get('error'))
+    .filter((attr) => attr && attr.kind === 'expression')
     .map((attr) => squash(attr.value).replace(/(?:\?\?|\|\|)(?:null|undefined)$/, ''));
   return ctx;
+}
+
+// A <PageErrorBar> is shown whenever its component renders only when it sits in the component's final `return (…)` —
+// an unconditional statement of the body, with no unconditional return before it — and inside JSX elements only, never
+// in a `{…}` expression (a condition, a ternary, a map callback) that may leave it out. Render each bar there: it shows
+// nothing until there is an error. A bar anywhere else proves nothing about the state it names.
+function unconditionalStatement(mask, at, bodyOpen) {
+  if (enclosingBlock(mask, at) !== bodyOpen) return false;
+  const prev = previousToken(mask, at);
+  return !(mask[prev] === ')' && ifHead(mask, prev)) && !/\belse\s*$/.test(mask.slice(0, at));
+}
+function reachableBar(ctx, element) {
+  const { mask } = ctx;
+  const fn = innermostFunction(ctx, element.start);
+  const component = fn && ctx.named.find((entry) => entry.body.start === fn.start && entry.body.end === fn.end);
+  if (!component || depthAt(mask, component.start) !== 0 || mask[fn.start] !== '{') return false;
+  // The brackets still open between the body and the element: at most the `(` of `return (`.
+  const openers = [];
+  let depth = 0;
+  for (let i = element.start - 1; i > fn.start; i -= 1) {
+    if (')}]'.includes(mask[i])) depth += 1;
+    else if ('({['.includes(mask[i])) {
+      if (depth > 0) depth -= 1;
+      else openers.push(i);
+    }
+  }
+  if (openers.length > 1 || (openers.length === 1 && mask[openers[0]] !== '(')) return false;
+  const keyword = /\breturn\s*$/.exec(mask.slice(0, openers.length ? openers[0] : element.start));
+  if (!keyword || !unconditionalStatement(mask, keyword.index, fn.start)) return false;
+  return ![...mask.slice(fn.start + 1, keyword.index).matchAll(/\breturn\b/g)]
+    .some((match) => unconditionalStatement(mask, fn.start + 1 + match.index, fn.start));
 }
 
 // `const [x, setX] = (React.)useState…` → setter → { name, keys } where keys maps an object pattern's keys to locals.
@@ -416,7 +397,10 @@ function variableDestinations(ctx, variable, scopeEnd) {
     const tail = mask.slice(use.index + variable.name.length);
     if (/^\s*\.\s*(?:fallbackKey|message)\s*=(?!=)/.test(tail)) continue;
     if (/^\s*\.\s*(?:fallbackKey|message)\b/.test(tail)) continue;
-    if (/^\s*=(?!=)/.test(tail)) continue;
+    // Replaced by another report (each allSettled item that failed) is still a reported view; replaced by anything else
+    // (`view = null`), the stored value is no longer the one reportPageError returned.
+    if (/^\s*=(?!=)\s*reportPageError\s*\(/.test(tail)) continue;
+    if (/^\s*=(?!=)/.test(tail)) { out.push({ kind: 'overwritten', name: variable.name }); continue; }
     if (/^\s*:/.test(tail) && /[{,]\s*$/.test(mask.slice(0, use.index))) continue;
     out.push(destination(ctx, use.index, use.index + variable.name.length, variable.path));
   }
@@ -459,6 +443,7 @@ function followView(ctx, start, end, label) {
       return;
     }
     if (where.kind === 'discarded') { problems.push(`${label}: the view reportPageError returns is discarded`); return; }
+    if (where.kind === 'overwritten') { problems.push(`${label}: the view kept in ${where.name} is overwritten before it is stored (unverifiable)`); return; }
     problems.push(`${label}: the view reportPageError returns does not reach state a PageErrorBar renders (unverifiable)`);
   };
   visit(destination(ctx, start, end), 0);
@@ -1062,11 +1047,14 @@ function boundaryProblems(ctx) {
   }
   if (!new RegExp(`^(?:function\\s+translate\\s*\\(|const\\s+translate\\s*=)`, 'm').test(code)) problems.push('no top-level translate() for the error copy');
   if (ctx.reportSites.length && !pageNameDeclared(ctx)) problems.push('no single top-level PAGE_NAME string literal');
-  if (ctx.bars.length) {
+  if (ctx.barElements.length) {
+    // The bar is copied unchanged, like the reporter: a bar that returns early, hides the message or CALLS the retry
+    // while rendering (`onClick={error.retry()}` sends a request with no click) proves nothing about what is shown.
     const bar = topLevelFunction(code, mask, 'PageErrorBar');
-    const text = bar ? squash(code.slice(bar.start, bar.end)) : '';
-    if (!bar || !text.includes("if(!error)returnnull;") || !text.includes("<MessageBarintent='error'><MessageBarBody>{error.message||translate(error.fallbackKey)}</MessageBarBody>")) {
-      problems.push('PageErrorBar must be the canonical top-level bar: nothing without an error, else a MessageBar showing error.message or its translated fallback');
+    const lines = bar ? canonicalLines(code.slice(bar.start, bar.end)).join('\n') : '';
+    const declarations = mask.match(/\b(?:function|class|const|let|var)\s+PageErrorBar(?![\w$])/g) || [];
+    if (!bar || declarations.length !== 1 || !canonicalBars().includes(lines) || /(?<![\w$.])PageErrorBar\s*=(?![=>])/.test(mask)) {
+      problems.push('PageErrorBar must be the canonical top-level bar of references/rules.md, copied unchanged (a page that never offers a retry may leave out its retry part): nothing without an error, else a MessageBar showing error.message or its translated fallback, and the retry passed to its button, never called');
     }
   }
   return problems;

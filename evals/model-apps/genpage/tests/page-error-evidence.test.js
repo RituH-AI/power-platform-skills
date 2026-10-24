@@ -623,6 +623,30 @@ test('staleness guards are read with their polarity: a request counter, an unmou
   refused(swap(CACHE_LIST, '    let cancelled = false;\n', '    let cancelled = false;\n    cancelled = true;\n'), /not a staleness guard/, 'a cancelled flag set outside the cleanup');
 });
 
+test('a stored view reaches a bar that renders: not behind a condition, a ternary or a return, not overwritten first, and the bar is the canonical one that never calls its retry', () => {
+  const report = "setSave({ saving: false, error: reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'write') });";
+  const bar = '<PageErrorBar error={save.error} />';
+  const finalReturn = '  return (\n    <div>\n      <PageErrorBar';
+  for (const [label, source, reason] of [
+    ['a bar behind `false &&`', swap(FOUNDATION, bar, `{false && ${bar}}`), /never rendered/],
+    ['a bar under a state condition', swap(FOUNDATION, bar, `{save.saving && ${bar}}`), /never rendered/],
+    ['a bar in a ternary', swap(FOUNDATION, bar, `{name ? ${bar} : null}`), /never rendered/],
+    ['a bar after an unconditional return', swap(FOUNDATION, finalReturn, `  return null;\n${finalReturn}`), /never rendered/],
+    ['a bar that returns nothing first', swap(FOUNDATION, '  if (!error) return null;\n  return (', '  if (!error) return null;\n  return null;\n  return ('), /PageErrorBar must be the canonical/],
+    ['a bar that calls the retry while it renders', swap(FOUNDATION, '<Button onClick={error.retry}>', '<Button onClick={error.retry()}>'), /PageErrorBar must be the canonical/],
+    ['a reported view overwritten before it is stored', swap(FOUNDATION, report, "let view = reportPageError(PAGE_NAME, 'createAccount', undefined, error, 'write');\n      view = null;\n      setSave({ saving: false, error: view });"), /overwritten/],
+  ]) refused(source, reason, label);
+  // A return on a condition (a loading state) does not hide the final return, and the bar without its retry part is the
+  // documented form for a page that never offers a retry.
+  assert.deepEqual(problems(swap(FOUNDATION, finalReturn, `  if (save.saving) return <span>Saving…</span>;\n${finalReturn}`)), [], 'a conditional early return');
+  const plain = swap(FOUNDATION, "      {error.retry && (\n        <MessageBarActions>\n          <Button onClick={error.retry}>{translate('error.tryAgain')}</Button>\n        </MessageBarActions>\n      )}\n", '');
+  assert.deepEqual(problems(plain), [], 'the bar without its retry part');
+  // Fixture 27 with its bar calling the network retry on every render: the whole fixture fails the common assertion.
+  const fixture = fs.readFileSync(path.join(__dirname, '..', 'fixtures', '27-page-error-helper', 'order-approvals.tsx'), 'utf8');
+  const autoRetry = swap(fixture, '<Button onClick={error.retry}>', '<Button onClick={error.retry()}>');
+  assert.equal(gradePageErrors({ files: [{ path: '/fixtures/27-page-error-helper/order-approvals.tsx', name: 'order-approvals.tsx', content: autoRetry }] }).status, 'fail');
+});
+
 test('returned views: a caller that drops the result, a result kept where nothing renders it, a try without catch and a bare chain fail', () => {
   const kept = "      const view = await readIdentity(api);\n      if (mounted.current && requestId === identityRequest.current) setIdentityState({ pending: false, view });";
   refused(swap(BUILT_INS, kept, "      await readIdentity(api);\n      if (mounted.current && requestId === identityRequest.current) setIdentityState({ pending: false, view: {} });"), /discarded/, 'the helper result is dropped');

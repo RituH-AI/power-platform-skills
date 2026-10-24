@@ -342,6 +342,7 @@ function PageBody(props: GeneratedComponentProps) {
       )}
       <section className={styles.panel} aria-label="Selected order">
         <PageErrorBar error={detail.error} />
+        <PageErrorBar error={approval.error} />
         {detail.loading && <Spinner label="Loading the order" />}
         {detail.order && (
           <>
@@ -350,7 +351,6 @@ function PageBody(props: GeneratedComponentProps) {
             <Field label="Approval note">
               <Textarea value={note} onChange={(_, data) => setNote(data.value)} />
             </Field>
-            <PageErrorBar error={approval.error} />
             {approval.status && (
               <MessageBar intent="success">
                 <MessageBarBody>{`Approved. New status: ${approval.status}.`}</MessageBarBody>

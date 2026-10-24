@@ -427,7 +427,8 @@ export default GeneratedComponent;
   the operation one stable literal, the code `res.error?.code` or `undefined`, the message the caught
   `error` or `res.error?.message`, the kind a literal (`'read'` for a read or a rejected navigation,
   `'write'` for a write, `'indeterminate'` / `'network'` only for those Custom API results) — and the view
-  it returns goes into that operation's state in the same update, rendered by `PageErrorBar`. Retry only
+  it returns goes into that operation's state in the same update, rendered by `PageErrorBar` — placed in the
+  final returned JSX, outside any condition (it shows nothing until there is an error). Retry only
   a read or a Custom API `network` result, through a named function the user presses; never retry a write
   or an indeterminate result. A null lookup, zero rows or an absent optional value is not a failure.
   The page renders inside `PageErrorBoundary`. See rules.md Critical Rule 22 and *Missing Error Handling*.
