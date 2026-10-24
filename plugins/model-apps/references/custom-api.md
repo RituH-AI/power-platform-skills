@@ -227,6 +227,9 @@ A complete `PageBody` for a bound Action, built on the page error block of rules
 `PAGE_NAME`, `reportPageError`, `PageErrorBar`, the boundary and the default export). The handler is a
 named function inside `PageBody` because it closes over state; `setActionFailure` stores the view and
 `pending: false` in one update; `retryApprove` is passed, never called, and only for a `network` result.
+The approval belongs to the record it was started on: `approvalFor` holds the record the panel shows, a
+record change clears the panel — and with it any retry — and an answer that arrives after the page moved
+to another record is ignored, so a retry can only ever re-send the approval of the record on screen.
 
 ```typescript
 type ActionResult = { ok: boolean; indeterminate?: boolean; outputs?: Record<string, unknown>; error?: { message: string; code?: string } };
@@ -237,16 +240,24 @@ type ActionApi = {
 function PageBody(props: GeneratedComponentProps) {
   const { dataApi, pageInput } = props;
   const actionApi = dataApi as unknown as ActionApi;
+  const currentRecord = pageInput?.recordId ?? '';
   const [comment, setComment] = React.useState('');
   const [approval, setApproval] = React.useState<{ pending: boolean; status: string; error: PageErrorView | null }>({ pending: false, status: '', error: null });
   const pending = React.useRef(false);                          // double-submit latch
+  const approvalFor = React.useRef(currentRecord);              // the record the approval panel belongs to
+
+  // Another record starts a clean panel: the previous record's result, and its retry, are cleared.
+  React.useEffect(() => {
+    approvalFor.current = currentRecord;
+    setApproval({ pending: false, status: '', error: null });
+  }, [currentRecord]);
 
   function setActionFailure(view: PageErrorView) {
     setApproval({ pending: false, status: '', error: view });
   }
 
   function retryApprove() {
-    void approveOrder(pageInput?.recordId ?? '', comment);
+    if (currentRecord && currentRecord === approvalFor.current) void approveOrder(currentRecord, comment);   // only while this record is shown
   }
 
   async function approveOrder(recordId: string, note: string) {
@@ -260,6 +271,7 @@ function PageBody(props: GeneratedComponentProps) {
         parameters: { Comment: note },                           // types match parameterKinds
         boundTo: { entityName: 'salesorder', id: recordId },     // REQUIRED: entity-bound
       });
+      if (recordId !== approvalFor.current) return;              // the page moved on: not this record's answer
       if (res.indeterminate) { setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'indeterminate')); return; }
       if (res.error?.code === 'indeterminate') { setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'indeterminate')); return; }
       if (!res.ok && res.error?.code === 'network') { setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'network', retryApprove)); return; }
@@ -267,6 +279,7 @@ function PageBody(props: GeneratedComponentProps) {
       const status = res.outputs?.NewStatus;                      // read from outputs, never value
       setApproval({ pending: false, status: typeof status === 'string' ? status : '', error: null });
     } catch (error) {
+      if (recordId !== approvalFor.current) return;
       setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', undefined, error, 'write'));
     } finally {
       pending.current = false;
@@ -277,7 +290,7 @@ function PageBody(props: GeneratedComponentProps) {
     <div>
       <PageErrorBar error={approval.error} />
       <Input aria-label="Comment" value={comment} onChange={(_, data) => setComment(data.value)} />
-      <Button appearance="primary" disabled={approval.pending} onClick={() => void approveOrder(pageInput?.recordId ?? '', comment)}>Approve</Button>
+      <Button appearance="primary" disabled={approval.pending} onClick={() => void approveOrder(currentRecord, comment)}>Approve</Button>
       {approval.status && <Text>{approval.status}</Text>}
     </div>
   );

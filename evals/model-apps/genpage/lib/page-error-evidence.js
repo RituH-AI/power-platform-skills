@@ -156,9 +156,19 @@ function catchAfter(ctx, close) {
 // (`const requestId = ++request.current`), joined by `!`, comparisons, `&&`/`||` and parentheses. A condition on page
 // data or state (`if (name) return;`) is not one: returning there would skip a live failure.
 function staleCondition(ctx, text) {
+  // A context snapshot: `<snapshot> !== <ref>.current`, the ref holding the context the page now shows (the record an
+  // approval panel belongs to) — a value set from page state, never a true/false latch.
+  const snapshot = new RegExp(`^\\s*(${IDENT})\\s*!==?\\s*(${IDENT})\\s*\\.\\s*current\\s*$`).exec(text);
+  if (snapshot && contextRef(ctx, snapshot[2])) return true;
   const shape = new RegExp(`^[\\s!()]*(?:${IDENT}(?:\\.current)?)(?:[\\s()]*(?:===|!==|==|!=|&&|\\|\\|)[\\s!()]*(?:${IDENT}(?:\\.current)?))*[\\s()]*$`);
   if (!shape.test(text)) return false;
   return [...text.matchAll(new RegExp(`(${IDENT})(\\.current)?`, 'g'))].every(([, name, current]) => (current ? isRef(ctx, name) : staleName(ctx, name)));
+}
+// A ref that holds a context: assigned (`<ref>.current = <value>`) only values that are not true/false.
+function contextRef(ctx, name) {
+  if (!isRef(ctx, name)) return false;
+  const writes = [...ctx.mask.matchAll(new RegExp(`(?<![\\w$.])${escapeRe(name)}\\s*\\.\\s*current\\s*(?:\\+\\+|--|[-+]?=(?![=>]))\\s*([^;\\n]*)`, 'g'))];
+  return writes.length > 0 && writes.every((write) => !/^(?:true|false)\b/.test(write[1].trim()) && !/(?:\+\+|--|[-+]=)/.test(write[0]));
 }
 const isRef = (ctx, name) => new RegExp(`\\b(?:const|let)\\s+${escapeRe(name)}\\s*=\\s*(?:React\\s*\\.\\s*)?useRef\\b`).test(ctx.mask);
 function staleName(ctx, name) {

@@ -189,6 +189,8 @@ function PageBody(props: GeneratedComponentProps) {
   const [note, setNote] = React.useState('');
   const [approval, setApproval] = React.useState<{ submitting: boolean; status: string; error: PageErrorView | null }>({ submitting: false, status: '', error: null });
   const pending = React.useRef(false);
+  // The order the approval panel belongs to: its result and its retry are shown only for that order.
+  const approvalFor = React.useRef<string | null>(null);
 
   function retryLoad() {
     delete winAny[CACHE_KEY];
@@ -231,6 +233,12 @@ function PageBody(props: GeneratedComponentProps) {
   async function loadOrder(orderId: string) {
     const requestId = ++detailRequest.current;
     setSelectedId(orderId);
+    if (orderId !== approvalFor.current) {
+      // Another order starts a clean approval panel: the previous order's result, and its retry, are cleared.
+      approvalFor.current = orderId;
+      setApproval({ submitting: false, status: '', error: null });
+      setNote('');
+    }
     setDetail({ order: null, loading: true, error: null });
     try {
       const order = await dataApi.retrieveRow('salesorder', { id: orderId, select: ['salesorderid', 'name', 'totalamount', 'statuscode'] });
@@ -247,7 +255,8 @@ function PageBody(props: GeneratedComponentProps) {
   }
 
   function retryApprove() {
-    if (selectedId) void approveOrder(selectedId, note);
+    // Re-sends the approval of the order on screen, and only while it is still the one the panel shows.
+    if (selectedId && selectedId === approvalFor.current) void approveOrder(selectedId, note);
   }
 
   async function approveOrder(orderId: string, comment: string) {
@@ -261,6 +270,7 @@ function PageBody(props: GeneratedComponentProps) {
         parameters: { Comment: comment },
         boundTo: { entityName: 'salesorder', id: orderId },
       });
+      if (orderId !== approvalFor.current) return; // another order is on screen: not its answer
       if (res.indeterminate) { setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'indeterminate')); return; }
       if (res.error?.code === 'indeterminate') { setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'indeterminate')); return; }
       if (!res.ok && res.error?.code === 'network') { setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'network', retryApprove)); return; }
@@ -268,6 +278,7 @@ function PageBody(props: GeneratedComponentProps) {
       const newStatus = res.outputs?.NewStatus;
       setApproval({ submitting: false, status: typeof newStatus === 'string' ? newStatus : '', error: null });
     } catch (failure) {
+      if (orderId !== approvalFor.current) return;
       setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', undefined, failure, 'write'));
     } finally {
       pending.current = false;
@@ -319,7 +330,7 @@ function PageBody(props: GeneratedComponentProps) {
               <DataGridRow<OrderRow> key={item.salesorderid}>
                 {({ renderCell, columnId }) => (columnId === 'name' ? (
                   <DataGridCell>
-                    <Button appearance="transparent" onClick={() => void loadOrder(item.salesorderid)}>{item.name ?? '—'}</Button>
+                    <Button appearance="transparent" disabled={approval.submitting} onClick={() => void loadOrder(item.salesorderid)}>{item.name ?? '—'}</Button>
                   </DataGridCell>
                 ) : (
                   <DataGridCell>{renderCell(item)}</DataGridCell>

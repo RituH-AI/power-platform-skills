@@ -235,3 +235,198 @@ test('the Custom API sample also passes the Custom API runtime check, its Action
   // Neither the effect nor anything else depends on dataApi or a shape derived from it (Rule 15).
   assert.doesNotMatch(source, /\[\s*actionApi\b|\bdataApi\s*\]/, 'no dataApi-derived value in a dependency array');
 });
+
+// ---------- an action belongs to the record it was started on ----------
+// Sample 13, the custom-api.md Action page and fixture 27's page are transpiled and run against hook and element
+// stand-ins with deferred fake requests — no React and no browser: the handlers, state updates and effects run as written,
+// which is what decides where a result goes. The record on screen changes while an approval is pending, and after it has
+// failed: a result for the earlier record — its error and its retry — never appears on the later record, and a retry kept
+// from the earlier render sends nothing there. On the record it belongs to, the retry still re-sends that approval.
+function runnablePage(source, exportNames) {
+  typescript ||= loadVendoredTypeScript();
+  const { outputText } = typescript.transpileModule(`${source}\nexport { ${exportNames.join(', ')} };\n`, {
+    fileName: 'page.tsx',
+    compilerOptions: { module: typescript.ModuleKind.CommonJS, target: typescript.ScriptTarget.ES2020, jsx: typescript.JsxEmit.React, esModuleInterop: true },
+  });
+  const cells = [];
+  const effects = [];
+  let cursor = 0;
+  const React = {
+    Component: class { constructor(props) { this.props = props; } },
+    Fragment: 'Fragment',
+    createElement: (type, props, ...children) => ({ type, props: { ...(props || {}), children } }),
+    useState(initial) {
+      const index = cursor++;
+      if (!(index in cells)) cells[index] = typeof initial === 'function' ? initial() : initial;
+      return [cells[index], (next) => { cells[index] = typeof next === 'function' ? next(cells[index]) : next; }];
+    },
+    useRef(initial) {
+      const index = cursor++;
+      if (!(index in cells)) cells[index] = { current: initial };
+      return cells[index];
+    },
+    useEffect(effect, deps) {
+      const index = cursor++;
+      const prior = cells[index];
+      if (!prior || !deps || deps.some((value, i) => value !== prior.deps[i])) {
+        effects.push(() => { prior?.cleanup?.(); cells[index] = { deps, cleanup: effect() }; });
+      }
+    },
+  };
+  const fluent = new Proxy({ makeStyles: () => () => ({}), tokens: new Proxy({}, { get: (_, name) => String(name) }), createTableColumn: (column) => column },
+    { get: (target, name) => (name in target ? target[name] : String(name)) });
+  const icons = new Proxy({}, { get: (_, name) => String(name) });
+  const imports = { react: React, '@fluentui/react-components': fluent, '@fluentui/react-icons': icons, './RuntimeTypes': {} };
+  const module = { exports: {} };
+  new Function('require', 'module', 'exports', 'console', 'window', outputText)(
+    (name) => { assert.ok(name in imports, `unexpected import ${name}`); return imports[name]; },
+    module, module.exports, { error() {} }, {},
+  );
+  return {
+    ...module.exports,
+    render(props) { cursor = 0; return module.exports.PageBody(props); },
+    flush() { for (const effect of effects.splice(0)) effect(); },
+  };
+}
+// The elements of a rendered tree. A DataGrid's render-prop children are expanded the way the grid calls them: the body's
+// for each of the grid's items, a row's (header or body) for its name column.
+function elements(node, out = [], items = []) {
+  if (Array.isArray(node)) { for (const child of node) elements(child, out, items); return out; }
+  if (!node || typeof node !== 'object' || !node.type) return out;
+  out.push(node);
+  const rows = node.type === 'DataGrid' ? node.props.items || [] : items;
+  for (const child of [].concat(node.props.children ?? [])) {
+    if (typeof child !== 'function') { elements(child, out, rows); continue; }
+    if (node.type === 'DataGridBody') for (const item of rows) elements(child({ item }), out, rows);
+    else if (node.type === 'DataGridRow') elements(child({ renderCell: () => null, renderHeaderCell: () => null, columnId: 'name' }), out, rows);
+  }
+  return out;
+}
+const tick = () => new Promise(setImmediate);
+const approvalBar = (page, tree) => elements(tree).find((node) => node.type === page.PageErrorBar && node.props.error?.operation === 'approveOrder');
+const primaryButton = (tree) => elements(tree).find((node) => node.type === 'Button' && node.props.appearance === 'primary');
+// A dataApi whose Action requests wait until the test answers them, in order.
+function deferredActions() {
+  const requests = [];
+  const dataApi = {
+    executeFunction: async () => ({ ok: true, outputs: { Total: 1, Status: 'Pending' } }),
+    executeAction: (request) => new Promise((resolve) => { requests.push({ request, resolve }); }),
+  };
+  return { requests, dataApi };
+}
+const NETWORK = { ok: false, error: { code: 'network', message: 'The request did not leave the client' } };
+const A = '00000000-0000-4000-8000-00000000000a';
+const B = '00000000-0000-4000-8000-00000000000b';
+const RECORD_PAGES = {
+  'samples/13-custom-api-invocation.tsx': () => read('samples', '13-custom-api-invocation.tsx'),
+  'custom-api.md Action': () => PAGES['custom-api.md Action'],
+};
+
+test('a late answer for the record the page has left is not shown on the record now on screen, and offers it no retry', async () => {
+  for (const [label, source] of Object.entries(RECORD_PAGES)) {
+    const page = runnablePage(source(), ['PageBody', 'PageErrorBar']);
+    const { requests, dataApi } = deferredActions();
+    const props = (recordId) => ({ dataApi, pageInput: { entityName: 'salesorder', recordId } });
+    page.render(props(A));
+    page.flush();
+    await tick();
+    primaryButton(page.render(props(A))).props.onClick();
+    assert.equal(requests.length, 1, `${label}: the approval of A is sent`);
+    assert.equal(requests[0].request.boundTo.id, A, `${label}: bound to A`);
+    page.render(props(B));
+    page.flush();
+    await tick();
+    page.render(props(B));
+    requests[0].resolve(NETWORK);
+    await tick();
+    assert.equal(approvalBar(page, page.render(props(B))), undefined, `${label}: A's failure is not shown on B`);
+    assert.equal(requests.length, 1, `${label}: nothing more is sent`);
+  }
+});
+
+test('a failure shown for one record is cleared when the page moves to another, and its kept retry sends nothing there', async () => {
+  for (const [label, source] of Object.entries(RECORD_PAGES)) {
+    const page = runnablePage(source(), ['PageBody', 'PageErrorBar']);
+    const { requests, dataApi } = deferredActions();
+    const props = (recordId) => ({ dataApi, pageInput: { entityName: 'salesorder', recordId } });
+    page.render(props(A));
+    page.flush();
+    await tick();
+    primaryButton(page.render(props(A))).props.onClick();
+    requests[0].resolve(NETWORK);
+    await tick();
+    const shown = approvalBar(page, page.render(props(A)));
+    assert.equal(shown?.props.error.kind, 'network', `${label}: the network failure is shown on A`);
+    const keptRetry = shown.props.error.retry;
+    assert.equal(typeof keptRetry, 'function', `${label}: with its manual retry`);
+    page.render(props(B));
+    page.flush();
+    await tick();
+    assert.equal(approvalBar(page, page.render(props(B))), undefined, `${label}: B starts with a clean approval panel`);
+    keptRetry();
+    await tick();
+    assert.equal(requests.length, 1, `${label}: A's retry sends nothing while B is on screen`);
+    // Back on A, the panel is clean too, and a new approval of A goes out bound to A.
+    page.render(props(A));
+    page.flush();
+    await tick();
+    primaryButton(page.render(props(A))).props.onClick();
+    assert.equal(requests.length, 2, `${label}: a new approval is sent`);
+    assert.equal(requests[1].request.boundTo.id, A, `${label}: bound to the record on screen`);
+  }
+});
+
+test('on the record it belongs to, a network failure keeps its manual retry, and the retry re-sends that record\'s approval', async () => {
+  for (const [label, source] of Object.entries(RECORD_PAGES)) {
+    const page = runnablePage(source(), ['PageBody', 'PageErrorBar']);
+    const { requests, dataApi } = deferredActions();
+    const props = (recordId) => ({ dataApi, pageInput: { entityName: 'salesorder', recordId } });
+    page.render(props(A));
+    page.flush();
+    await tick();
+    primaryButton(page.render(props(A))).props.onClick();
+    requests[0].resolve({ ok: false, indeterminate: true, error: { code: 'indeterminate', message: 'timed out after sending' } });
+    await tick();
+    const indeterminate = approvalBar(page, page.render(props(A)));
+    assert.equal(indeterminate?.props.error.kind, 'indeterminate', `${label}: an indeterminate answer stays on its record`);
+    assert.equal(indeterminate.props.error.retry, undefined, `${label}: with no retry`);
+    primaryButton(page.render(props(A))).props.onClick();
+    requests[1].resolve(NETWORK);
+    await tick();
+    approvalBar(page, page.render(props(A))).props.error.retry();
+    await tick();
+    assert.equal(requests.length, 3, `${label}: the retry re-sends`);
+    assert.equal(requests[2].request.boundTo.id, A, `${label}: the approval of the record on screen`);
+  }
+});
+
+test('fixture 27 holds the selected order while an approval runs, and another order clears the approval and its retry', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'fixtures', '27-page-error-helper', 'order-approvals.tsx'), 'utf8');
+  const page = runnablePage(source, ['PageBody', 'PageErrorBar']);
+  const orders = [A, B].map((salesorderid, i) => ({ salesorderid, name: `Order ${i + 1}`, totalamount: 10, statuscode: 1 }));
+  const { requests, dataApi } = deferredActions();
+  Object.assign(dataApi, {
+    queryTable: async () => ({ rows: orders }),
+    retrieveRow: async (table, { id }) => orders.find((order) => order.salesorderid === id),
+  });
+  const props = { dataApi, pageInput: {} };
+  const orderButton = (tree, name) => elements(tree).find((node) => node.type === 'Button' && node.props.appearance === 'transparent' && [].concat(node.props.children).includes(name));
+  page.render(props);
+  page.flush();
+  await tick();
+  orderButton(page.render(props), 'Order 1').props.onClick();
+  await tick();
+  primaryButton(page.render(props)).props.onClick();
+  assert.equal(requests[0].request.boundTo.id, A, 'the approval of order 1 is sent');
+  assert.equal(orderButton(page.render(props), 'Order 2').props.disabled, true, 'another order cannot be selected while it runs');
+  requests[0].resolve(NETWORK);
+  await tick();
+  const keptRetry = approvalBar(page, page.render(props))?.props.error.retry;
+  assert.equal(typeof keptRetry, 'function', 'order 1 shows its network failure with a retry');
+  orderButton(page.render(props), 'Order 2').props.onClick();
+  await tick();
+  assert.equal(approvalBar(page, page.render(props)), undefined, 'order 2 starts with a clean approval panel');
+  keptRetry();
+  await tick();
+  assert.equal(requests.length, 1, 'order 1\'s retry sends nothing while order 2 is on screen');
+});

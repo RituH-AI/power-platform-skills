@@ -144,6 +144,8 @@ class PageErrorBoundary extends React.Component<
 //     guard needed — and a stale answer for an earlier record is ignored
 //   - An entity-bound ACTION (executeAction) with boundTo from the record the page is on, and a
 //     double-submit latch so a mutating call can't fire twice
+//   - The approval belongs to the record it was started on: when the page moves to another record
+//     its result and its retry are cleared, and a late answer for the earlier record is ignored
 //   - Result handling per the contract, in order: res.indeterminate, then an `indeterminate`
 //     code (never retried), then `network` (a manual "Try again"), then any other failure — each
 //     reported through reportPageError and shown by PageErrorBar before res.outputs is read
@@ -234,6 +236,10 @@ function PageBody(props: GeneratedComponentProps) {
     const [reason, setReason] = useState<string>('');
     const [approval, setApproval] = useState<{ submitting: boolean; status: string; error: PageErrorView | null }>({ submitting: false, status: '', error: null });
     const pending = useRef(false); // double-submit latch: set before the call, reset in finally
+    // The record the approval panel belongs to. An approval's result — and the retry it carries — is shown only
+    // for the record it was started on: another record clears the panel, and a late answer for the record the
+    // page has left is ignored, so nothing on this record can approve a record the maker is not looking at.
+    const approvalFor = useRef(recordId);
 
     function setSummaryFailure(view: PageErrorView) {
         setSummaryState({ summary: null, loading: false, error: view });
@@ -248,7 +254,8 @@ function PageBody(props: GeneratedComponentProps) {
     }
 
     function retryApprove() {
-        if (recordId) void approve(recordId, reason);
+        // Re-sends this record's approval, and only while the page still shows this record.
+        if (recordId && recordId === approvalFor.current) void approve(recordId, reason);
     }
 
     // FUNCTION: the plan records it as a read, so it may run on mount and whenever the record changes.
@@ -288,6 +295,8 @@ function PageBody(props: GeneratedComponentProps) {
                 parameters: { Comment: note },
                 boundTo: { entityName: 'salesorder', id: orderId },
             });
+            // The page moved to another record while this ran: the answer is not that record's to show.
+            if (orderId !== approvalFor.current) return;
             // Never auto-retry an indeterminate result — the server may have committed it.
             if (res.indeterminate) { setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'indeterminate')); return; }
             if (res.error?.code === 'indeterminate') { setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'indeterminate')); return; }
@@ -297,11 +306,19 @@ function PageBody(props: GeneratedComponentProps) {
             const newStatus = res.outputs?.NewStatus;
             setApproval({ submitting: false, status: typeof newStatus === 'string' ? newStatus : '', error: null });
         } catch (error) {
+            if (orderId !== approvalFor.current) return;
             setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', undefined, error, 'write'));
         } finally {
             pending.current = false; // never leave the latch stuck
         }
     }
+
+    useEffect(() => {
+        // A new record starts a clean approval panel: the previous record's result, and its retry, go. An
+        // approval still running for that record keeps the latch until it answers; its answer is ignored.
+        approvalFor.current = recordId;
+        setApproval({ submitting: false, status: '', error: null });
+    }, [recordId]);
 
     useEffect(() => {
         if (!canReadSummary || !recordId) return;

@@ -647,9 +647,11 @@ equals that table; for a `(Global)` row, omit `boundTo` entirely.
 const actionApi = dataApi as unknown as { executeAction?: (request: { name: string; parameters?: Record<string, unknown>; boundTo?: { entityName: string; id: string } }) => Promise<{ ok: boolean; indeterminate?: boolean; outputs?: Record<string, unknown>; error?: { message: string; code?: string } }>; };
 if (typeof actionApi.executeAction !== 'function' || pending.current) { return; } // presence-check + double-submit guard
 pending.current = true;
+const recordId = pageInput.recordId;                 // the record this approval is for
 setApproval({ pending: true, status: '', error: null });
 try {
-  const res = await actionApi.executeAction({ name: 'new_ApproveOrder', parameters: { Comment: comment, Amount: amount }, boundTo: { entityName: pageInput.entityName, id: pageInput.recordId } });
+  const res = await actionApi.executeAction({ name: 'new_ApproveOrder', parameters: { Comment: comment, Amount: amount }, boundTo: { entityName: pageInput.entityName, id: recordId } });
+  if (recordId !== approvalFor.current) return;      // the page moved to another record: not its answer
   if (res.indeterminate) { setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'indeterminate')); return; }
   if (res.error?.code === 'indeterminate') { setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'indeterminate')); return; }
   if (!res.ok && res.error?.code === 'network') { setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'network', retryApprove)); return; }
@@ -657,12 +659,16 @@ try {
   const status = res.outputs?.NewStatus;
   setApproval({ pending: false, status: typeof status === 'string' ? status : '', error: null });
 } catch (error) {
+  if (recordId !== approvalFor.current) return;
   setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', undefined, error, 'write'));
 } finally { pending.current = false; }
 ```
 
 `setActionFailure(view)` stores the view and `pending: false` in one update; `retryApprove` calls the
-handler again when the user presses "Try again". custom-api.md has the whole `PageBody`.
+handler again when the user presses "Try again". The approval belongs to the record it was started on:
+`approvalFor` (a ref) holds the record the panel shows, a record change clears the approval state — its
+error and its retry — and an answer that arrives after the page moved on is ignored, so `retryApprove`
+re-sends only while that same record is shown. custom-api.md has the whole `PageBody`.
 
 ### Built-in Dataverse operations (WhoAmI, RetrieveVersion)
 
