@@ -587,3 +587,31 @@ export default function P() {
   return null;
 }`).status, 'skip');
 });
+// ---------- Eval 27: the page error contract on the shapes it exists for ----------
+
+const ORDER_APPROVALS = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'fixtures', '27-page-error-helper', 'order-approvals.tsx'), 'utf8').replace(/\r\n/g, '\n');
+const SCENARIO_27 = 'Phase 5: The page reports its cached read, awaited read and Custom API Action failures through reportPageError (both indeterminate forms before network before any other failure, a rejection as a write) into rendered error bars inside PageErrorBoundary';
+const grade27 = (content) => PHASE5_EXPECTATIONS.get(SCENARIO_27)({ files: [f('order-approvals.tsx', content)], eval: evalStub(27) });
+const variant27 = (from, to) => {
+  assert.ok(ORDER_APPROVALS.includes(from), `the fixture page holds: ${from}`);
+  return ORDER_APPROVALS.replace(from, to);
+};
+
+test('eval 27: the fixture page passes the page error contract and makes each call in the shape it is about', () => {
+  assert.deepEqual(grade27(ORDER_APPROVALS), { status: 'pass', reason: '' });
+  assert.equal(ASSERTIONS.get('Generated .tsx routes every supported dataApi failure through reportPageError and mounts PageErrorBoundary around PageBody')({ files: [f('order-approvals.tsx', ORDER_APPROVALS)] }).status, 'pass');
+});
+
+test('eval 27: a page that passes the contract without making the call it exercises, or reports the Action out of order, fails', () => {
+  for (const [label, source, reason] of [
+    // No list read at all: the contract has nothing to grade there, so the scenario must refuse it.
+    ['no cached list read', variant27("      inflight = dataApi\n        .queryTable('salesorder', { select: ['salesorderid', 'name', 'totalamount', 'statuscode'], orderBy: 'name asc', pageSize: 50 })\n", "      inflight = Promise.resolve({ rows: [] as OrderRow[] })\n"), /no queryTable as a list read held by the canonical cached promise/],
+    ['a rejected Action reported as a read', variant27("      setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', undefined, failure, 'write'));", "      setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', undefined, failure, 'read'));"), /not indeterminate, indeterminate, network, write and a rejected write/],
+    ['a skipped network check', variant27("      if (!res.ok && res.error?.code === 'network') { setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'network', retryApprove)); return; }\n", ''), /not indeterminate, indeterminate, network, write/],
+    ['no boundary', variant27('  <PageErrorBoundary>\n    <PageBody {...props} />\n  </PageErrorBoundary>', '  <PageBody {...props} />'), /does not mount PageErrorBoundary/],
+  ]) {
+    const result = grade27(source);
+    assert.equal(result.status, 'fail', label);
+    assert.match(result.reason, reason, `${label}: ${result.reason}`);
+  }
+});

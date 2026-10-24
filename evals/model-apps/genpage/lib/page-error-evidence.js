@@ -644,6 +644,26 @@ function dataCallProblems(ctx) {
   return problems;
 }
 
+// Which accepted shape each listed data call of a page takes — 'awaited' (families 1 and 4, a returned view included),
+// 'cache' (family 3), 'settled' (family 5b), or 'unrelated' (a local object, out of scope) — read the way
+// dataCallProblems reads them, so a scenario can require the shapes it is meant to exercise as well as their success:
+// a page that passes because it never makes the call proves nothing about it. A call no shape takes is 'unverifiable'.
+// [{ method, family, builtIn }] in source order; [] when the page is not gradeable.
+function dataCallFamilies(content) {
+  let ctx;
+  try { ctx = context(String(content ?? '')); } catch { return []; }
+  return dataCalls(ctx).map((call) => {
+    const shape = (family) => ({ method: call.method, family, builtIn: call.builtIn });
+    if (!call.receiver) return shape('unverifiable');
+    if (!receiverIsDataApi(ctx.mask, ctx.scopes, call.receiver, call.at)) return shape(unrelatedLocal(ctx, call.receiver) ? 'unrelated' : 'unverifiable');
+    const before = ctx.mask.slice(0, call.receiverAt);
+    if (/\bawait\s*$/.test(before)) return shape(awaitedProblems(ctx, call, call.method).length ? 'unverifiable' : 'awaited');
+    if (groupedBinding(ctx, call.at, 'allSettled')) return shape(settledProblems(ctx, call, call.method).length ? 'unverifiable' : 'settled');
+    const cache = cacheProblems(ctx, call, call.method);
+    return shape(cache && !cache.length ? 'cache' : 'unverifiable');
+  });
+}
+
 // Family 1/2/4: an awaited call in a try of its own function, a catch that reports, and the result guards.
 function awaitedProblems(ctx, call, label) {
   const problems = [];
@@ -998,7 +1018,7 @@ function gradePageErrors({ files }) {
 
 module.exports = {
   PAGE_ERROR_ASSERTION, LISTED_METHODS,
-  pageErrorProblems, telemetrySafeSpans, gradePageErrors, pageErrorFingerprint, exemption,
+  pageErrorProblems, telemetrySafeSpans, gradePageErrors, pageErrorFingerprint, exemption, dataCallFamilies,
   // The lexical helpers the lookup contract (polymorphic-lookup-contract.js) compares its own canonical block with.
   canonicalLines, topLevelFunction, argRanges,
 };

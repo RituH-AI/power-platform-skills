@@ -90,7 +90,7 @@ Two rules for evidence files:
 
 ## Current state
 
-This directory has **33 fixtures, 37 top-level TSX files and 25 represented
+This directory has **34 fixtures, 38 top-level TSX files and 26 represented
 prompt IDs**. All are green under both runners. Directories listed in
 `contracts.json` are historical contract-1 evidence; every other directory is a
 current contract-2 synthetic. Registered prompts with no fixture:
@@ -133,6 +133,7 @@ of step with the fixtures.
 | `16-account-list/` | 16 | Current synthetic | green | Minimal single list page over an existing table; code-only, no solution question or auth gate |
 | `1-account-cards-verified-columns/` | 1 | Current synthetic | green | Account card gallery over an existing table; keeps the RuntimeTypes.ts it was written against, so every column its dataApi call names is checked against the schema |
 | `7-job-candidates-verified-columns/` | 7 | Current synthetic | green | Two new related tables (cr_jobrequisition, cr_candidate with a lookup and a status choice), auth gate, dependency-ordered provisioning, `$parent`/match sample data; keeps the RuntimeTypes.ts it generated, so the page's columns are checked against the schema |
+| `27-page-error-helper/` | 27 | Current synthetic | green | The page error contract: a cached list read, an awaited record read and a Custom API Action report every failure through the canonical reporter into rendered error bars, inside the boundary; a newly authored plan with its assumptions, verified against the approved preview with `--require-assumptions` |
 
 Historical captures remain compatibility/parser evidence, not proof of today's
 file transport, binding preservation or full skill compliance. Their current

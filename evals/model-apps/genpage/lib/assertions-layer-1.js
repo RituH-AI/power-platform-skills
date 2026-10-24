@@ -30,10 +30,13 @@ const { columnProblems } = require('./column-contract.js');
 const { escapeRe } = require('./source-evidence.js');
 const evidence = require('./expectation-evidence.js');
 const { blankLiterals } = require('../../../../plugins/model-apps/scripts/lib/source-literals.js');
-const { planTargets } = require('../../../../plugins/model-apps/scripts/genpage-plan-provenance.js');
+const { planTargets, sha256 } = require('../../../../plugins/model-apps/scripts/genpage-plan-provenance.js');
 // The gate provision-entities.js puts its input through, so an input the plugin would refuse is never graded as written right.
 const { validateProvisionInput } = require('../../../../plugins/model-apps/scripts/lib/provision-input.js');
-const { writtenSemanticsProblems } = require('../../../../plugins/model-apps/scripts/lib/genpage-plan-semantics.js');
+const {
+  writtenSemanticsProblems, readWrittenSemantics, readPreviewSemantics, requiredContractProblems, compareSemantics, semanticRecord,
+  lookupEvidenceProblems,
+} = require('../../../../plugins/model-apps/scripts/lib/genpage-plan-semantics.js');
 
 function fail(reason) { return { status: 'fail', reason }; }
 function pass() { return { status: 'pass', reason: '' }; }
@@ -3575,6 +3578,63 @@ PHASE_EXPECTATIONS.set(
     return calls.some((c) => c.sources.includes('account')) ? pass() : fail('genpage.js types was not run for account');
   }
 );
+
+// --- Evals 26 and 27: a newly authored plan's semantic records ----------------------------------
+// A plan written today carries ## Assumptions and, per page, #### Data semantics and #### Lookup metadata (references/plan-schema.md);
+// older stored plans do not, and eval 16's exact-heading list stays as it was. These scenarios grade the new contract directly:
+// the written plan in required mode, the approved preview the run saved (manifest `semantics.approvedPlan`), the two compared
+// field by field the way genpage-plan-provenance.js compares them, and the run's own --require-assumptions verification, whose
+// semanticsHash must be the hash of THIS plan's records. Nothing here is skipped for a missing artifact: a fixture that lost its
+// preview, its records or its verification fails.
+
+// The successful lookup metadata read a scenario declares (manifest `semantics.lookupMetadata`), parsed; null when it declares none.
+function declaredLookupEvidence(fixture) {
+  const name = fixture.manifest?.semantics?.lookupMetadata;
+  if (!name) return null;
+  const text = fixture.artifacts?.[name];
+  if (typeof text !== 'string') return { declaredMissing: name };
+  try { return JSON.parse(text); } catch { return { unreadable: name }; }
+}
+
+function newContractProblems(fixture, { requireObservedLookups = false } = {}) {
+  const plan = fixture.genpagePlan;
+  if (!plan) return ['genpage-plan.md not present in fixture'];
+  const problems = validateGenpagePlanSchema(plan, { requireSemantics: true }).map((error) => `genpage-plan.md: ${error.message}`);
+  const previewName = fixture.manifest?.semantics?.approvedPlan;
+  const preview = previewName ? fixture.artifacts?.[previewName] : undefined;
+  if (typeof preview !== 'string') return [...problems, 'the fixture does not carry the approved preview the run verified (fixture.json semantics.approvedPlan)'];
+  const targets = planTargets(plan, { kind: 'create' })?.targets || [];
+  const previewRead = readPreviewSemantics(preview);
+  const writtenRead = readWrittenSemantics(plan);
+  problems.push(...previewRead.problems.map((p) => `the approved preview: ${p.message}`));
+  problems.push(...requiredContractProblems(previewRead, targets, 'the approved preview').map((p) => p.message));
+  const evidence = declaredLookupEvidence(fixture);
+  if (evidence && (evidence.declaredMissing || evidence.unreadable)) problems.push(`the declared lookup metadata ${evidence.declaredMissing || evidence.unreadable} is missing or not JSON`);
+  const promotions = Boolean(evidence && evidence.ok === true);
+  problems.push(...compareSemantics(previewRead, writtenRead, { promotions }).map((p) => `the written plan differs from the approved preview: ${p}`));
+  if (promotions) problems.push(...lookupEvidenceProblems(writtenRead, evidence).map((p) => p.message));
+  const verifies = commandCalls(fixture, PROVENANCE_VERIFY).filter((verify) => /(?:^|\s)--require-assumptions(?=\s|$|['"`])/.test(verify.call.command));
+  if (!verifies.length) problems.push('provenance was never verified with --require-assumptions');
+  const hash = sha256(JSON.stringify(semanticRecord(writtenRead)));
+  for (const verify of verifies) {
+    const result = resultObject(verify.call);
+    if (result?.ok !== true) problems.push(`${verify.call.id || verify.call.command}: the --require-assumptions verification did not pass`);
+    else if (result.semanticsHash !== hash) problems.push(`${verify.call.id || verify.call.command}: its semanticsHash is not the hash of this plan's records`);
+  }
+  if (requireObservedLookups) {
+    const gate = verifies.filter((verify) => /--require-observed-lookups\b/.test(verify.call.command) && /--lookup-metadata\b/.test(verify.call.command));
+    if (!gate.length) problems.push('generation was not gated by a verification with --require-observed-lookups --lookup-metadata');
+    const generated = workflowCalls(fixture).findIndex((call) => isGeneration(call));
+    const gatedAt = gate.length ? workflowCalls(fixture).indexOf(gate[gate.length - 1].call) : -1;
+    if (gate.length && generated >= 0 && gatedAt > generated) problems.push('the observed-lookups verification ran after the page was generated');
+  }
+  return problems;
+}
+
+const NEW_CONTRACT = 'Phase 1 (Planner): The newly authored plan records its assumptions and every page\'s data semantics and lookup metadata, the approved preview carries the same records, and provenance is verified with --require-assumptions';
+PHASE_EXPECTATIONS.set(NEW_CONTRACT, ({ fixture }) => resultOf(newContractProblems(fixture, {
+  requireObservedLookups: Boolean(fixture.manifest?.semantics?.lookupMetadata),
+})));
 
 // --- Eval 3: an app with no pages ---------------------------------------------------------------------
 

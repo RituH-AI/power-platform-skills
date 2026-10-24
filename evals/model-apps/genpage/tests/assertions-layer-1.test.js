@@ -1266,3 +1266,40 @@ test('unattended plan approval is recognized only by its dedicated record, never
     assert.match(result.reason, /does not record plan approval/, line);
   }
 });
+
+// ---------- a newly authored plan's semantic records (evals 26 and 27) ----------
+
+const NEW_CONTRACT = "Phase 1 (Planner): The newly authored plan records its assumptions and every page's data semantics and lookup metadata, the approved preview carries the same records, and provenance is verified with --require-assumptions";
+const { loadFixtures } = require('../lib/fixture-loader.js');
+const scenarioFixture = (id) => {
+  const found = loadFixtures(path.join(__dirname, '..', 'fixtures')).find((fixture) => fixture.id === id);
+  assert.ok(found, `fixture ${id} exists`);
+  return found;
+};
+const gradeNewContract = (fixture) => PHASE_EXPECTATIONS.get(NEW_CONTRACT)({ fixture, eval: { id: fixture.id } });
+
+test('a newly authored plan passes with its records, the same approved preview and a --require-assumptions verification of exactly those records', () => {
+  const fixture = scenarioFixture(27);
+  assert.deepEqual(gradeNewContract(fixture), { status: 'pass', reason: '' });
+});
+
+test('a newly authored plan without its records, preview or matching verification fails — it never skips', () => {
+  const base = scenarioFixture(27);
+  const variant = (change) => {
+    const copy = structuredClone({ ...base, files: [] });
+    change(copy);
+    return gradeNewContract(copy);
+  };
+  for (const [label, change, reason] of [
+    ['no ## Assumptions in the written plan', (f) => { f.genpagePlan = f.genpagePlan.replace(/\n## Assumptions\n[\s\S]*?\n## Working Directory\n/, '\n## Working Directory\n'); }, /Assumptions/],
+    ['no Data semantics for the page', (f) => { f.genpagePlan = f.genpagePlan.replace('#### Data semantics\nNone.\n\n', ''); }, /Data semantics/],
+    ['no approved preview declared', (f) => { delete f.manifest.semantics; }, /approved preview/],
+    ['an assumption the preview never showed', (f) => { f.genpagePlan = f.genpagePlan.replace('- Resolution: planner-default\n\n### A2', '- Resolution: planner-default\n\n### A3 — Extra\n- Decision: Hide archived orders.\n- Alternatives considered: Show them.\n- Evidence: default: none stated.\n- Resolution: planner-default\n\n### A2'); }, /differs from the approved preview/],
+    ['a verification whose hash is another plan\'s', (f) => { for (const event of f.events) if (event.result?.semanticsHash) event.result.semanticsHash = '0'.repeat(64); }, /semanticsHash is not the hash/],
+    ['a verification that failed', (f) => { for (const event of f.events) if (event.result?.semanticsHash) event.result.ok = false; }, /did not pass/],
+  ]) {
+    const result = variant(change);
+    assert.equal(result.status, 'fail', label);
+    assert.match(result.reason, reason, `${label}: ${result.reason}`);
+  }
+});

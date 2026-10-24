@@ -104,6 +104,7 @@ Layers 1 and 2 are automated. Layer 3 is human judgment by design — visual qua
 - Unsized Fluent icons only (e.g., `AddRegular`, not `Add24Regular`)
 - Every icon name in `@fluentui/react-icons` imports appears in `references/verified-icons.txt`
 - A `try`/`catch` marker for Dataverse awaits (not proof that every await is enclosed)
+- The page error contract (`references/rules.md` Critical Rule 22, `lib/page-error-evidence.js`): every listed DataAPI call takes one accepted shape — awaited in a `try` whose `catch` reports, a named helper returning `{ error }` to a caller that stores it, the canonical cached promise, a guarded Custom API, built-in or connector result, `Promise.all` over reporting helpers or a checked `allSettled` tuple — and reports through the page's `reportPageError`, which must be the canonical one line for line, with a literal kind as its fifth argument, into state a `PageErrorBar` renders; the default export mounts `PageErrorBoundary` around `PageBody`. It is a finite, fail-closed grammar, not a control-flow proof: an unrecognized shape fails as unverifiable, and `loadMoreRows` and the synchronous `setPageOutput` are outside it. Root pages only. A page captured before the contract is a compatibility SKIP only while its source is byte-for-byte the captured one (`lib/page-error-allowlist.json`: fixture-relative path and SHA-256 of the text with CRLF converted to LF); a changed page, a new path and the contract's own fixtures (26, 27) are always graded
 - No `TODO`/`FIXME`/`...` placeholders
 - Lookup fields use `@OData.Community.Display.V1.FormattedValue` annotations
 - `<DataGrid>` usage imports `createTableColumn` + configures `columnSizingOptions` or `resizableColumns`
@@ -152,10 +153,10 @@ still refuse lookup provenance.
 All eval definitions live in `evals.json` alongside this file. The file contains:
 
 - `common_workflow_assertions`: **18** registered workflow checks, each passed or explicitly skipped when inapplicable.
-- `common_code_assertions`: **21** registered code checks.
-- `evals`: **25** prompt definitions, each with `id`, `tier`, `prompt`, `data`, and per-eval `expectations`.
+- `common_code_assertions`: **22** registered code checks.
+- `evals`: **26** prompt definitions, each with `id`, `tier`, `prompt`, `data`, and per-eval `expectations`.
 
-The `data` field specifies scenario assumptions for a manual capture or constructed fixture. The offline harness does not provide responses to `AskUserQuestion` or verify every recorded answer. The corpus contains **33 fixture directories / 37 top-level TSX files**, representing 25 prompt IDs. IDs **none** have no fixture — every registered prompt is executed.
+The `data` field specifies scenario assumptions for a manual capture or constructed fixture. The offline harness does not provide responses to `AskUserQuestion` or verify every recorded answer. The corpus contains **34 fixture directories / 38 top-level TSX files**, representing 26 prompt IDs. IDs **none** have no fixture — every registered prompt is executed.
 
 ### Enumerating registered and unmatched checks
 
@@ -213,7 +214,7 @@ Each eval in `evals.json` has a `tier` field for selective execution.
 | Tier | Count | When to run | Eval IDs |
 |------|------|-------------|----------|
 | `smoke` | 5 | **Every PR** that touches the skill, agents, rules, or evals | 1, 2, 3, 16, 17 |
-| `full` | 17 | Nightly or pre-release; covers core workflows | 4, 5, 6, 7, 8, 9, 11, 13, 15, 18–25 |
+| `full` | 18 | Nightly or pre-release; covers core workflows | 4, 5, 6, 7, 8, 9, 11, 13, 15, 18–25, 27 |
 | `stress` | 3 | With full suite; edge cases (auth blockers, plan revisions, filename collisions) | 10, 12, 14 |
 
 **Recommended cadence:**
@@ -280,6 +281,7 @@ The suite ships both kinds:
 | 12 | `12-account-plan-revision` (current plan revision) | — |
 | 14 | `14-account-list-edit-collision` (current filename collision) | — |
 | 16 | `16-account-list` (current minimal existing-table page) | — |
+| 27 | `27-page-error-helper` (current page error contract: cached read, awaited read and a Custom API Action; a newly authored plan with its assumptions) | — |
 
 The mix gives:
 - A **green baseline** to catch runner regressions (synthetics)
@@ -292,7 +294,7 @@ The mix gives:
 
 `fixtures/contracts.json` explicitly labels the 13 existing directories as historical contract 1, without rewriting captured content. Raw PAC transport, legacy navigation spelling and missing transport/read-back artifacts are **not** certified as current compliant. Contract 2 uses a per-directory `fixture.json` and `tool-results.json`: one ordered record per command with its own result, plus `artifacts` listing the exact files to load. Artifact paths must stay inside the fixture and be plain files.
 
-The first seven contract-2 fixtures exercise these current contracts:
+These contract-2 fixtures exercise the current contracts below:
 
 | Fixture | Evidence/check | Negative control in scorer tests |
 |---------|----------------|----------------------------------|
@@ -303,6 +305,7 @@ The first seven contract-2 fixtures exercise these current contracts:
 | `23-worker-completeness` | Failed production gate, fresh regeneration, then upload | Valid export plus unfinished statement, stale/missing write or upload before acceptance |
 | `24-custom-api-lifecycle` | Discovery, bare actions, runtime and config stages | Invented kind/name/parameter, wrong method/bound record, unsafe response or lost bindings |
 | `25-solution-package` | Explicit page IDs, dynamic types, app-first writes and read-back | Omitted page/wrong solution/type/order; invalid ID writes; partial failure reported as success |
+| `27-page-error-helper` | The page error contract on a cached read, an awaited read and a Custom API Action (both indeterminate forms, then network, then any failure); a newly authored plan whose records equal the approved preview's, verified with `--require-assumptions` | Reporter not canonical or bypassed, a guard skipped or out of order, a view never rendered, no boundary; a plan verified without `--require-assumptions` or a preview whose assumption differs |
 
 Expected refusals are green **only when the recorded refusal contract is satisfied**. The refusal fixtures of evals 10 and 21, and `3-edit-no-pages-stop`, legitimately contain no generated TSX; Layer 2 grades their failed gate and absence of generation/mutations rather than manufacturing a page. A refusal declares its stage in `fixture.json` (`refusal.stage`): `auth` and `discovery` stop at a failed check-auth.js or list-connections.js result, and `edit-pages` at an app whose `genpage.js list` succeeded with no page to offer — the user is told so and nothing is downloaded, planned or uploaded after the first such listing (a later read does not reset it), and the edit phases that would follow the page choice skip for that run. Fixture 23's rejected snapshot is nested evidence; the top-level page is the accepted regeneration. Expected-failure mutations live in unit tests, never unexplained red corpus directories.
 
@@ -326,7 +329,7 @@ Exit codes:
 
 ```bash
 node run-layer-1.js --tier smoke    # 8 stored fixtures, 5 prompt definitions
-node run-layer-1.js --tier full     # 19 stored fixtures, 17 prompt definitions
+node run-layer-1.js --tier full     # 20 stored fixtures, 18 prompt definitions
 node run-layer-1.js --tier stress   # 6 stored fixtures, 3 prompt definitions
 ```
 
