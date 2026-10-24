@@ -3719,6 +3719,7 @@ function semanticInteractionProblems(fixture) {
       } else if (entry.source === 'unattended-default') {
         resolution = 'unattended-default';
         if (ask.defaults.length !== 1 || ask.defaults[0] !== entry.selected) problems.push(`${where}: an unattended run may take only the one option the planner marked as the default`);
+        if (!isUnattendedLog(log)) problems.push(`${where}: an attended run asks the maker; it never takes the default`);
       } else problems.push(`${where}: source must be AskUserQuestion or unattended-default`);
       for (const [label, read] of documents) {
         if (!read) { problems.push(`${where}: the fixture does not declare the approved preview (fixture.json semantics.approvedPlan)`); continue; }

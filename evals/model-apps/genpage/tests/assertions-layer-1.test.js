@@ -1408,3 +1408,34 @@ test('eval 26: generation waits for a passing --require-observed-lookups verific
     ['the lookup metadata declaration removed', (f) => { delete f.manifest.semantics.lookupMetadata; }, /semantics\.lookupMetadata/],
   ]);
 });
+
+test('eval 26: an unattended run that takes the one option the planner marked, hands it back and records it as an unattended default passes — and fails without its record', () => {
+  const RECORD = 'Unattended default: A1 / opportunities-account-scope → Direct customer account only (the request names the direct customer and metadata leaves one matching path)';
+  const unattended = (change = () => {}) => variant26((f) => {
+    event26(f, 'planner-discovery').result.questions[0].options = [{ label: 'Direct customer account only', description: 'The request names the direct customer.', default: true }];
+    event26(f, 'planner-answers').command = 'Task genpage-planner (answers: opportunities-account-scope → Direct customer account only; app → Sales Hub)';
+    interactions26(f, () => [
+      { type: 'needs_input', event: 'planner-discovery', question: 'opportunities-account-scope', options: ['Direct customer account only'], defaults: ['Direct customer account only'] },
+      { type: 'answer', event: 'planner-answers', question: 'opportunities-account-scope', selected: 'Direct customer account only', source: 'unattended-default' },
+      { type: 'approval', preview: 'approved-plan.md', outcome: 'approved', source: 'unattended-default' },
+    ]);
+    const settle = (text) => text.replace('- Resolution: user-confirmed\n- Question: opportunities-account-scope\n- Answer: Direct customer\n',
+      `- Resolution: unattended-default\n- Question: opportunities-account-scope\n- Answer: Direct customer account only\n- Default record: ${RECORD}\n`);
+    f.genpagePlan = settle(f.genpagePlan);
+    f.artifacts['approved-plan.md'] = settle(f.artifacts['approved-plan.md']);
+    f.workflowLog = f.workflowLog
+      .replace('- AskUserQuestion: Which opportunities should this account show? → Direct customer\n', `- ${RECORD}\n`)
+      .replace('- ExitPlanMode → user approved the plan without changes\n', '- Unattended default: plan approval → approved (unattended mode; all semantic questions resolved)\n');
+    change(f);
+  });
+  assert.deepEqual(grade(SEMANTIC_QUESTION, unattended()), { status: 'pass', reason: '' });
+  for (const [label, change, reason] of [
+    ['the default record missing from the log', (f) => { f.workflowLog = f.workflowLog.replace(`- ${RECORD}\n`, ''); }, /does not hold A1's Default record/],
+    ['no plan-approval record', (f) => { f.workflowLog = f.workflowLog.replace('- Unattended default: plan approval → approved (unattended mode; all semantic questions resolved)\n', ''); }, /no unattended plan-approval record/],
+    ['an answer recorded as user-confirmed', (f) => { f.genpagePlan = f.genpagePlan.replace('- Resolution: unattended-default', '- Resolution: user-confirmed').replace(`- Default record: ${RECORD}\n`, ''); }, /records A1 as user-confirmed, not unattended-default/],
+  ]) {
+    const result = grade(SEMANTIC_QUESTION, unattended(change));
+    assert.equal(result.status, 'fail', label);
+    assert.match(result.reason, reason, `${label}: ${result.reason}`);
+  }
+});
