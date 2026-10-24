@@ -963,33 +963,64 @@ test('known limit: a mapped type whose key type is in parentheses, inside a pare
   }
 });
 
-// A computed key that starts with a regular expression holds an expression, so its braces are a function type's parameters, which take the function type's own `=>`,
-// and a leading `|` of that function type's return type is a type's.
-test('a computed key that starts with a regular expression is read as an expression, as TypeScript reads it', () => {
+// Known limit, pinned as it is (AGENTS.md, "TSX source lexer — known limits"): a computed key that starts with a regular expression is taken for no expression, although
+// TypeScript and Babel read one — a fail-closed reading, kept on purpose. A function type whose parameter has such a key reads as a parenthesised type, its `=>` as the
+// arrow and a leading `|` of its own return type as no body, so the page is refused although both parsers parse it, sync and async; by the same reading a write cut
+// right after such a function type is accepted (TypeScript refuses it, and so does the page compile). Reading the key as an expression would accept such a page
+// whatever its regular expression's flags are, and Babel refuses an unknown, repeated or clashing flag that TypeScript's parser takes (its checker refuses it).
+// [what, page]
+const REGEX_KEY_PAGES = [
+  ['a computed key that starts with a regular expression', 'export default <T,>(p: T): ({ [/key/.source]: value }: Record<string, T>) => | typeof value | null => () => null;\n'],
+  ['the same, async', 'export default async <T,>(p: T): ({ [/key/.source]: value }: Record<string, T>) => | typeof value | null => () => null;\n'],
+  ['a regular expression with flags and an index', 'export default <T,>(p: T): ({ [/k/gi[0]]: value }: Record<string, T>) => | T | null => () => null;\n'],
+];
+// [what, flags]: flags Babel refuses and TypeScript's parser takes.
+const REGEX_KEY_BAD_FLAGS = [['an unknown flag', 'x'], ['a repeated flag', 'gg'], ['`u` with `v`', 'uv'], ['an upper-case flag', 'G'], ['a letter beyond ASCII', 'ü']];
+
+test('known limit: a computed key that starts with a regular expression is no expression to the gate, whatever its flags', () => {
   const ts = loadTypescriptOracle();
+  const babel = loadBabelOracle();
   const parses = (code) => ts.createSourceFile('page.tsx', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX).parseDiagnostics.length === 0;
-  const regexKey = '<T,>(p: T): ({ [/key/.source]: value }: Record<string, T>) =>';
-  for (const [what, code] of [
-    ['a computed key that starts with a regular expression', `export default ${regexKey} | typeof value | null => () => null;\n`],
-    ['the same, async', `export default async ${regexKey} | typeof value | null => () => null;\n`],
-    ['a regular expression with flags and an index', 'export default <T,>(p: T): ({ [/k/gi[0]]: value }: Record<string, T>) => | T | null => () => null;\n'],
+  const babelParses = (code) => {
+    try {
+      babel.parse(code, { sourceType: 'module', plugins: ['jsx', 'typescript'] });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  for (const [what, code] of REGEX_KEY_PAGES) {
+    assert.equal(hasDefaultExport(code), false, `${what}: refused, a known limit: ${JSON.stringify(code)}`);
+    assert.match(pageStructureProblems(code).join('\n'), /no complete default export/, what);
+    if (ts) assert.equal(parses(code), true, `TypeScript parses ${JSON.stringify(code)}`);
+    if (babel) assert.equal(babelParses(code), true, `Babel parses ${JSON.stringify(code)}`);
+  }
+  for (const [what, flags] of REGEX_KEY_BAD_FLAGS) {
+    const code = `export default <T,>(p: T): ({ [/k/${flags}.source]: v }: R) => | T | null => () => null;\n`;
+    assert.equal(hasDefaultExport(code), false, `${what}: refused: ${JSON.stringify(code)}`);
+    if (ts) assert.equal(parses(code), true, `TypeScript's parser takes ${JSON.stringify(code)}`);
+    if (babel) assert.equal(babelParses(code), false, `Babel refuses ${JSON.stringify(code)}`);
+  }
+  // By the same reading a page cut right after such a function type, or whose arrow the function type takes, is accepted, as it always was; TypeScript refuses it.
+  for (const code of ['export default <T,>(p: T): ({ [/k/]: v }) => T', 'export default <T,>(p: T): ({ [/k/]: v }) => p;\n', 'export default <T,>(p: T): ({ [K in /k/]: v }) => p;\n']) {
+    assert.equal(hasDefaultExport(code), true, `accepted, a known limit: ${JSON.stringify(code)}`);
+    if (ts) assert.equal(parses(code), false, `TypeScript refuses ${JSON.stringify(code)}`);
+  }
+  // The rewrites: no leading `|`, the key written as a string, a type alias for the function type; and an arrow without type parameters keeps its reading.
+  for (const code of [
+    'export default <T,>(p: T): ({ [/key/.source]: value }: Record<string, T>) => typeof value | null => () => null;\n',
+    'export default <T,>(p: T): ({ ["key"]: value }: Record<string, T>) => | typeof value | null => () => null;\n',
+    'type Pick1<T> = (pair: Record<string, T>) => | T | null;\nexport default <T,>(p: T): Pick1<T> => () => null;\n',
+    'export default (p: T): ({ [/key/.source]: value }: Record<string, T>) => | typeof value | null => () => null;\n',
   ]) {
-    assert.equal(hasDefaultExport(code), true, `${what}: ${JSON.stringify(code)}`);
-    assert.deepStrictEqual(pageStructureProblems(code), [], what);
+    assert.deepStrictEqual(pageStructureProblems(code), [], code);
     if (ts) assert.equal(parses(code), true, `TypeScript parses ${JSON.stringify(code)}`);
   }
-  // The cut right after a function type with a regular expression key is refused.
-  const cut = 'export default <T,>(p: T): ({ [/k/]: v }) => T';
-  assert.equal(hasDefaultExport(cut), false, cut);
-  if (ts) assert.equal(parses(cut), false, `TypeScript refuses ${JSON.stringify(cut)}`);
   // A group that holds an expression is one, as TypeScript reads it: these are function types that take the arrow, refused here and by TypeScript.
-  const grouped = ['(a + b)', 'keyof(T)', '/k/', 'K in /k/'].map((key) => `export default <T,>(p: T): ({ [${key}]: v }) => p;\n`);
-  for (const code of grouped) {
+  for (const code of ['(a + b)', 'keyof(T)'].map((key) => `export default <T,>(p: T): ({ [${key}]: v }) => p;\n`)) {
     assert.equal(hasDefaultExport(code), false, code);
     if (ts) assert.equal(parses(code), false, `TypeScript refuses ${JSON.stringify(code)}`);
   }
-  // An arrow without type parameters keeps its reading.
-  assert.deepStrictEqual(pageStructureProblems('export default (p: T): ({ [/key/.source]: value }: Record<string, T>) => | typeof value | null => () => null;\n'), []);
 });
 
 // With the TypeScript parser oracle set (and Babel's, where set): across the key types a page writes — each in no, one and two pairs of parentheses, in a tuple, in an
@@ -1056,8 +1087,8 @@ test('`await` in the key of a parenthesised mapped type leaves the braces a bind
       }
     }
   }
-  // A `/` after `await` divides, to TypeScript, where `await` is a name — the lexer took it for a regex, and guessed: no regex is read as the key's operand there, and the
-  // page is refused, as TypeScript refuses it.
+  // A `/` after `await` divides, to TypeScript, where `await` is a name, and the page is refused, as TypeScript refuses it (the gate reads no regular expression as a
+  // key's operand: the known limit above).
   for (const modifier of ['', 'async ']) {
     const code = `export default ${modifier}<T,>(p: T): ({ [K in await /r/]: boolean }) => | T | U => null as never;\n`;
     assert.equal(hasDefaultExport(code), false, code);

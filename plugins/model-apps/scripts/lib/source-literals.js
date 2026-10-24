@@ -4317,8 +4317,6 @@ const TYPE_START_KEYWORDS = new Set([...PRIMITIVE_TYPES, 'readonly', 'unique', '
 // How deep the reading of a return type goes — a level per function type in a return type, conditional type in a branch or prefix operator — before it refuses the return type
 // rather than recurse further: far deeper than any page, and far short of the stack.
 const RETURN_TYPE_DEPTH = 200;
-// The blanked body of a regular expression and its closing slash, read from right after its opening one (returnTypeEnd: a computed key's operand).
-const REGEX_BODY = / +\//y;
 
 // Where a return type ends: the index just past it in `src` (blanked code) when it starts after the colon at `from`, or -1 where TypeScript's parser reports an error before it
 // ends, or the text ends first. The arrow's `=>` is the first token after its return type, and a return type may hold an `=>` of its own at its own level — `(p): (x: T) => T => …`,
@@ -4460,12 +4458,14 @@ function returnTypeEnd(src, from, options = {}) {
   // opened, or a word right after an operand (`keyof` is a name in an expression, and `T` follows it), ends the reading. So `({ [key: string]: T }) => …` holds a
   // parenthesised type and the arrow, where `({ [key]: v }) => …` and `({ [K in T]: v }) => …` (`K in T` is an expression) hold a function type's parameters. The
   // expression is read only as far as that needs — operands, prefix and binary operators, `?` and `:`, member access, calls, indexes, `!`, type arguments where they close and
-  // what follows can follow them (canFollowTypeArgumentsInExpression), and a type after `as` or `satisfies` — and what it does not know (an arrow, `function`, JSX)
-  // is taken for no expression: a type then, never a function type's parameters, so the reading can let a page TypeScript refuses through but never refuse one it parses.
-  // A group in it counts as an operand, whatever it holds: `K in (keyof T)` reads as an expression, so `({ [K in (keyof T)]: boolean })` reads as a function type's
-  // parameters, where TypeScript reads a parenthesised mapped type — a known limit, refused on purpose (AGENTS.md, "TSX source lexer — known limits"). A regular
-  // expression is an operand (parsePrimaryExpression rescans a `/` where an operand starts: reScanSlashToken), so `[/key/.source]` holds an expression — but not right
-  // after `await`, which TypeScript reads as a name in a type, and the `/` after it as a division.
+  // what follows can follow them (canFollowTypeArgumentsInExpression), and a type after `as` or `satisfies` — and what it does not know (an arrow, `function`, a regex, JSX)
+  // is taken for no expression: a type then, never a function type's parameters.
+  // Two readings here part from TypeScript's on purpose, rare known limits (AGENTS.md, "TSX source lexer — known limits"; pinned in source-literals.test.js): a group
+  // counts as an operand whatever it holds, so `K in (keyof T)` reads as an expression and `({ [K in (keyof T)]: boolean })` as a function type's parameters, where
+  // TypeScript reads a parenthesised mapped type; and a key that starts with a regular expression (`[/key/.source]`) is taken for no expression, where TypeScript reads
+  // one. Reading either as TypeScript does would turn a refusal into an acceptance on the strength of tokens this reading does not check as the parsers do — an escaped
+  // keyword, a legacy octal number or a string escape in the mapped type, a regular expression's flags (Babel refuses an unknown or repeated one that TypeScript's parser
+  // takes) — and a page either parser refuses would pass.
   const computedKeyIsExpression = (open) => {
     const close = typeGroupEnd(src, open);
     if (close === -1) return false;
@@ -4476,29 +4476,17 @@ function returnTypeEnd(src, from, options = {}) {
     let k = open + 1;
     let operand = false;
     let questions = 0;
-    // Whether the prefix operator just read was `await`.
-    let afterAwait = false;
     for (;;) {
       const token = at(k);
       if (token.start >= close - 1) return token.start === close - 1 && operand && questions === 0;
       const word = token.kind === 'word' ? token.text : null;
       if (!operand) {
-        const awaited = afterAwait;
-        afterAwait = word === 'await';
-        // A prefix operator, then an operand: a name or a keyword that is a value, a literal, a regular expression, or a group (a parenthesised expression, an array,
-        // an object).
+        // A prefix operator, then an operand: a name or a keyword that is a value, a literal, or a group (a parenthesised expression, an array, an object).
         if (['!', '~', '+', '-', '++', '--'].includes(token.kind) || ['typeof', 'void', 'delete', 'await', 'new'].includes(word)) k = token.end;
         else if (word !== null && (!(RESERVED_WORDS.has(word) || word === 'const') || ['this', 'null', 'true', 'false', 'super'].includes(word))) { operand = true; k = token.end; }
         else if (token.kind === 'number' || token.kind === 'string' || token.kind === 'template') { operand = true; k = token.end; }
         else if (token.kind === '(' || token.kind === '[' || token.kind === '{') { k = groupEnd(token); operand = true; if (k === -1) return false; }
-        else if (token.kind === '/' && !awaited) {
-          // A regular expression: the blanking keeps its two slashes and its flags and blanks its body, which no line break ends (regexCloses), so the next `/` on its
-          // line, after nothing but blanks, closes it. A `/` that the lexer read as the division operator leaves code between them, and is not read.
-          REGEX_BODY.lastIndex = token.end;
-          if (!REGEX_BODY.exec(src)) return false;
-          operand = true;
-          k = regexFlagsEnd(src, REGEX_BODY.lastIndex);
-        } else return false;
+        else return false;
       } else if (token.kind === '.' || token.kind === '?.') {
         // A member, or after `?.` a call or an index (read next).
         const name = at(token.end);
