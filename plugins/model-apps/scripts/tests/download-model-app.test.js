@@ -3010,6 +3010,20 @@ test('duplicate PLAIN labels are still typed (they are a warning, not an error)'
   assert.strictEqual(e.columns.find((c) => c.schemaName === 'pp_status').type, 'Choice');
 });
 
+test('the untyped-column warning names a label clash as the cause where that is it, and words every other column as before', () => {
+  const { untypedColumnWarnings } = require('../download-model-app.js');
+  const before = 'WARNING: 1 column(s) were captured WITHOUT a type (pp_t.pp_unread) — most likely Choice/MultiChoice columns whose option set could not be read. Rebuilding this spec into an environment that already has the table is unaffected, but rebuilding into a FRESH environment would create them as single-line Text. Add the type and options[] (or a globalChoice reference) by hand before a cross-environment rebuild.\n';
+  assert.deepStrictEqual(untypedColumnWarnings(['pp_t.pp_unread']), [before], 'no clash: the warning it always was');
+  assert.deepStrictEqual(untypedColumnWarnings([]), []);
+  const clashes = new Map([['pp_t.pp_status', "'Open' names options[0] and options[1]"]]);
+  const lines = untypedColumnWarnings(['pp_t.pp_status', 'pp_t.pp_unread'], clashes);
+  assert.strictEqual(lines.length, 2);
+  assert.strictEqual(lines[0], before, 'the column the clash does not explain keeps its own warning');
+  assert.match(lines[1], /^WARNING: 1 Choice\/MultiChoice column\(s\) were captured WITHOUT a type because one text names two of their options \(pp_t\.pp_status: 'Open' names options\[0\] and options\[1\]\) and their two labels differ in at least one language/);
+  assert.match(lines[1], /Their option sets were read/);
+  assert.doesNotMatch(lines[1], /could not be read/);
+});
+
 test('a MultiChoice survives an unusable option label - untyped and NAMED, never dropped', async () => {
   // Reported by adversarial review. A MultiSelectPicklist is `Virtual`, so before this the ONLY
   // thing keeping it in columns[] was a successfully PARSED option set. An unusable label made

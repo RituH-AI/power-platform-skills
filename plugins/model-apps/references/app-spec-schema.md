@@ -312,10 +312,12 @@ An `entities[].localizedLabels` key is therefore **not** a supported shape.
 choosing a Choice option, or `personas[].jobs[].surfaces[]` naming a screen — **any** of its
 languages resolves to the same artifact. One option, one value, several names. So one text must not
 name two options of a column: validation **refuses** it when you cannot see it on the line — one of the
-two is a label of several languages, or they are in different languages (`"Open"` beside
-`{ "3082": "Open" }`) — and **warns** when you can: two equal plain strings, or two equal one-language
-maps of the same language (`{ "1036": "Ouvert" }` twice). Dataverse allows that duplicate; a reference
-to the text resolves to the first of the two.
+two is a label of several languages the other does not match in every language, or they are in different
+languages (`"Open"` beside `{ "3082": "Open" }`) — and **warns** when you can: two equal plain strings, or
+two identical localized labels, the same text in each of the same languages (`{ "1036": "Ouvert" }` twice,
+or `{ "1033": "Abierto", "3082": "Abierto" }` twice — how Dataverse holds two options labelled "Abierto" in
+Spanish on an English environment: it fills the base language in with the same text). Dataverse allows
+that duplicate; a reference to the text resolves to the first of the two.
 
 **Round-trip.** `download-model-app` reconstructs localized labels from Dataverse: a table, plural,
 column, lookup, alternate key or option labelled in several languages comes back as a map. One labelled
@@ -329,10 +331,13 @@ environment that does not have it stops at the start of its data model and names
 instead. Every plain label in a downloaded spec is in the authoring language, as its navigation titles
 are: a rebuild into an environment whose base language is another writes them in that one, unless the
 spec pins `languageCode` or the build is given `--language-code`. Two Choice options a maker labelled with
-the same text keep their language when it is one language (two equal one-language maps, a duplicate
-validation warns about); when the text is in two languages — an English `"Open"` on one option, a Spanish
-`"Open"` on another — the spec can hold those two options only as plain strings, so they alone are written
-that way, and the download warns that their labels could not keep their language. A lookup that sets no
+the same text keep their labels, and the column its type, when the two labels are identical in every language
+they hold (a duplicate validation warns about) — the way Dataverse holds them; when the text is in two
+languages — an English `"Open"` on one option, a Spanish `"Open"` on another — the spec can hold those two
+options only as plain strings, so they alone are written that way, and the download warns that their labels
+could not keep their language. A clash the spec cannot hold at all — two labels of several languages that
+differ in some language, so which option the text means depends on the language — leaves the column without
+a type, and the download's warning names the clash. A lookup that sets no
 label is labelled like the table it points at (see `lookup.displayName` below), so the download leaves a
 lookup's label out only when that label is the lookup's own, language for language: an English `"Contact"`
 on a lookup to a table labelled only in French `"Contact"` is written out. The download emits

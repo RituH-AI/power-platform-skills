@@ -11,7 +11,11 @@
 //   * two options sharing their text in ONE language keep it (a duplicate the validator warns about, as it does two plain strings), and
 //     so does every other option;
 //   * two options sharing their text in DIFFERENT languages are the only ones written as plain strings — the only shape the spec takes
-//     for them — and the download names each label that loses its language; every other option keeps its own.
+//     for them — and the download names each label that loses its language; every other option keeps its own;
+//   * two options labelled alike as Dataverse holds them — it fills the base language in with the same text, so each label holds two
+//     languages, identically — keep the column typed and both labels (it was captured untyped);
+//   * a text two options hold in different languages still leaves the column untyped, and the warning says so — not that the option set
+//     could not be read, which stays the warning for an option set that really was not read.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
@@ -40,31 +44,57 @@ const ran = (step, label) => {
   return step;
 };
 const options = (org) => org.metadata.tables.get('contoso_item').Attributes.get('contoso_stage').OptionSet.Options;
-const held = (org) => options(org).map((o) => o.Label.LocalizedLabels.map((l) => `${l.LanguageCode}:${l.Label}`).join(' '));
+// What an environment holds of the column's options, `<LCID>:<text>` per language each holds — or, where a rebuild made the column
+// without its type, what it made instead.
+const held = (org) => {
+  const column = org.metadata.tables.get('contoso_item').Attributes.get('contoso_stage');
+  if (!column.OptionSet) return [`a ${column.AttributeType} column, with no options`];
+  return options(org).map((o) => o.Label.LocalizedLabels.map((l) => `${l.LanguageCode}:${l.Label}`).join(' '));
+};
 
-// The source with the column built, its second option relabelled as a maker can in the designer (Dataverse allows a label two options
-// share), the spec a download of it writes, and what a fresh environment holds after a rebuild of that spec.
-async function roundTrip(secondOption) {
+// A Label as the platform stores one: `[1033, 'Abierto'], [3082, 'Abierto']` is held in those two languages.
+const labelled = (...pairs) => ({ LocalizedLabels: pairs.map(([LanguageCode, Label]) => ({ Label, LanguageCode, IsManaged: false })), UserLocalizedLabel: null });
+const relabelSecond = (lcid, text) => (held) => { held[1].Label = labelled([lcid, text]); };
+
+// The source with the column built, its options relabelled as a maker can in the designer (`relabel` gets the stored options; Dataverse
+// allows a label two options share), and the spec a download of it writes. `refuseOptionSets` answers the download's option-set read with
+// a 503, as a service that is down for a moment does.
+async function downloaded(relabel, { refuseOptionSets = false } = {}) {
   const org = createLifecycleOrg(LANGUAGES);
+  const state = { refuse: false };
+  const request = async (req) => {
+    const url = decodeURIComponent(String(req.url));
+    if (state.refuse && req.method === 'GET' && url.includes('/Microsoft.Dynamics.CRM.PicklistAttributeMetadata') && url.includes('OptionSet')) {
+      return { statusCode: 503, headers: { 'content-type': 'application/json; odata.metadata=minimal' }, body: JSON.stringify({ error: { code: '0x80040216', message: 'The service is unavailable.' } }) };
+    }
+    return org.request(req);
+  };
   const root = makeTempDir('option-label-language-');
-  const harness = createLifecycleHarness(org, root);
+  const harness = createLifecycleHarness({ ...org, request }, root);
   const build = ran(await harness.measure(() => harness.build(spec)), 'the source build');
   assert.equal(build.value.result.ok, true, JSON.stringify(build.value.result.errors));
-  options(org)[1].Label = { LocalizedLabels: [{ Label: secondOption.text, LanguageCode: secondOption.lcid, IsManaged: false }], UserLocalizedLabel: null };
+  if (relabel) relabel(options(org));
+  state.refuse = refuseOptionSets;
   const download = ran(await harness.measure(() => harness.download(appUniqueName(spec), path.join(root, 'download'))), 'the download');
   assert.equal(download.value.emitted.ok, true, JSON.stringify(download.value.emitted));
   const got = download.value.spec;
   assert.deepEqual(validateAppSpec(got, { profile: 'plan', reconstructed: true }).errors, []);
-  const fresh = createLifecycleOrg(LANGUAGES);
-  const target = createLifecycleHarness(fresh, path.join(root, 'fresh'));
-  const rebuild = ran(await target.measure(() => target.build(got)), 'the fresh build');
-  assert.equal(rebuild.value.result.ok, true, JSON.stringify(rebuild.value.result.errors));
   const column = got.entities[0].columns.find((c) => c.schemaName === 'contoso_stage');
-  return { source: held(org), column, warnings: download.value.stderr.split('\n').filter((line) => line.startsWith('WARNING: ')), fresh: held(fresh) };
+  return { root, spec: got, source: held(org), column, warnings: download.value.stderr.split('\n').filter((line) => line.startsWith('WARNING: ')) };
+}
+
+// The same, and what a fresh environment holds after a rebuild of the downloaded spec.
+async function roundTrip(relabel) {
+  const trip = await downloaded(relabel);
+  const fresh = createLifecycleOrg(LANGUAGES);
+  const target = createLifecycleHarness(fresh, path.join(trip.root, 'fresh'));
+  const rebuild = ran(await target.measure(() => target.build(trip.spec)), 'the fresh build');
+  assert.equal(rebuild.value.result.ok, true, JSON.stringify(rebuild.value.result.errors));
+  return { ...trip, fresh: held(fresh) };
 }
 
 test('option label language: two options sharing their text in one language keep it through download and rebuild, and so does every other option', async () => {
-  const trip = await roundTrip({ text: 'Ouvert', lcid: 1036 });
+  const trip = await roundTrip(relabelSecond(1036, 'Ouvert'));
   assert.deepEqual(trip.source, ['1036:Ouvert', '1036:Ouvert', '3082:Cerrado']);
   assert.deepEqual(trip.column.options, [{ 1036: 'Ouvert' }, { 1036: 'Ouvert' }, { 3082: 'Cerrado' }]);
   assert.equal(trip.column.type, 'Choice');
@@ -74,7 +104,7 @@ test('option label language: two options sharing their text in one language keep
 });
 
 test('option label language: two options sharing their text in different languages lose only their own language, and the download names each', async () => {
-  const trip = await roundTrip({ text: 'Ouvert', lcid: 3082 });
+  const trip = await roundTrip(relabelSecond(3082, 'Ouvert'));
   assert.deepEqual(trip.source, ['1036:Ouvert', '3082:Ouvert', '3082:Cerrado']);
   assert.deepEqual(trip.column.options, ['Ouvert', 'Ouvert', { 3082: 'Cerrado' }]);
   assert.equal(trip.column.type, 'Choice');
@@ -83,4 +113,46 @@ test('option label language: two options sharing their text in different languag
   assert.ok(lost, JSON.stringify(trip.warnings));
   assert.match(lost, /contoso_item\.contoso_stage options\[0\] 'Ouvert' \(1036\), contoso_item\.contoso_stage options\[1\] 'Ouvert' \(3082\)/);
   assert.doesNotMatch(lost, /Cerrado/);
+});
+
+// MEASURED: Dataverse fills the environment's base language in, with the same text, when a label is created in another language only.
+// Two options created as Spanish "Abierto" on an English-base environment are therefore held as 1033 "Abierto" + 3082 "Abierto" each —
+// identical in every language they hold. A download captured such a column WITHOUT a type and blamed an option set it had read, so a
+// rebuild into a fresh environment would have made it a single-line text column.
+const asHeld = (held) => {
+  held[0].Label = labelled([1033, 'Abierto'], [3082, 'Abierto']);
+  held[1].Label = labelled([1033, 'Abierto'], [3082, 'Abierto']);
+  held[2].Label = labelled([1033, 'Cerrado'], [3082, 'Cerrado']);
+};
+
+test('option label language: two options labelled alike as Dataverse holds them — the base language filled in — keep the column typed, its options and both languages', async () => {
+  const trip = await roundTrip(asHeld);
+  assert.deepEqual(trip.source, ['1033:Abierto 3082:Abierto', '1033:Abierto 3082:Abierto', '1033:Cerrado 3082:Cerrado']);
+  assert.deepEqual(trip.fresh, trip.source, 'a fresh environment holds the options the source holds');
+  assert.equal(trip.column.type, 'Choice');
+  assert.deepEqual(trip.column.options, [{ 1033: 'Abierto', 3082: 'Abierto' }, { 1033: 'Abierto', 3082: 'Abierto' }, { 1033: 'Cerrado', 3082: 'Cerrado' }]);
+  assert.equal(trip.warnings.filter((w) => /'Abierto' names BOTH options\[0\] and options\[1\]/.test(w)).length, 1, `the duplicate is reported once: ${JSON.stringify(trip.warnings)}`);
+  assert.equal(trip.warnings.some((w) => /WITHOUT a type/.test(w)), false, 'the column is not reported untyped');
+});
+
+test('option label language: a text two options hold in different languages still leaves the column untyped, and the warning names the clash, not the read', async () => {
+  const trip = await downloaded((held) => {
+    held[0].Label = labelled([1033, 'Open'], [3082, 'Abierto']);
+    held[1].Label = labelled([1033, 'Abierto'], [3082, 'Cerrado']);
+    held[2].Label = labelled([1033, 'Pending'], [3082, 'Pendiente']);
+  });
+  assert.deepEqual([trip.column.type, trip.column.options], [undefined, undefined], 'which option "Abierto" means depends on the language: the spec cannot hold it');
+  const untyped = trip.warnings.filter((w) => /WITHOUT a type/.test(w));
+  assert.equal(untyped.length, 1, JSON.stringify(trip.warnings));
+  assert.match(untyped[0], /because one text names two of their options \(contoso_item\.contoso_stage: 'Abierto' names options\[0\] and options\[1\]\)/);
+  assert.match(untyped[0], /Their option sets were read/);
+  assert.doesNotMatch(untyped[0], /could not be read/);
+});
+
+test('option label language: an option set that could not be read still leaves the column untyped, with the read named', async () => {
+  const trip = await downloaded(asHeld, { refuseOptionSets: true });
+  assert.deepEqual([trip.column.type, trip.column.options], [undefined, undefined]);
+  assert.ok(trip.warnings.some((w) => /^WARNING: the Choice\/MultiChoice option-set read failed for 1 table\(s\) \(contoso_item \(HTTP 503\)\)/.test(w)), JSON.stringify(trip.warnings));
+  assert.ok(trip.warnings.some((w) => /^WARNING: 1 column\(s\) were captured WITHOUT a type \(contoso_item\.contoso_stage\) — most likely Choice\/MultiChoice columns whose option set could not be read\./.test(w)), JSON.stringify(trip.warnings));
+  assert.equal(trip.warnings.some((w) => /names two of their options/.test(w)), false, 'no clash is claimed for an option set that was not read');
 });

@@ -1320,35 +1320,43 @@ function labelAliases(value) {
 // side is a LOCALIZED label — that is the case the author cannot see by reading the line, and the
 // only one severe enough to fail a spec that provisioned correctly before this rule existed.
 //
-// One localized shape is NOT hidden: two labels that each hold ONE language, the SAME one —
+// One localized shape is NOT hidden: two labels that are IDENTICAL — the same text in each of the
+// same languages, whether one language or several:
 //   [ { "1036": "Ouvert" }, { "1036": "Ouvert" } ]
-// A one-entry map shows its only text on the line as a plain string does, so this is the duplicate
-// `["Ouvert", "Ouvert"]` is, in one stated language, and it is reported the same way (a warning).
-// It is the shape a download writes for two options a maker labelled alike in a language other than
-// its authoring one, which Dataverse allows; refusing it made the download write them as plain
-// strings, which a rebuild labels in another language. A one-entry map beside a plain string, or
-// beside one of another language, still names two options in two languages, and stays hidden.
+//   [ { "1033": "Abierto", "3082": "Abierto" }, { "1033": "Abierto", "3082": "Abierto" } ]
+// The two lines read alike, so this is the duplicate `["Ouvert", "Ouvert"]` is, in stated languages,
+// and it is reported the same way (a warning). It is what a download finds for two options a maker
+// labelled alike, which Dataverse allows: in one language other than the download's authoring one,
+// or — as Dataverse holds them, MEASURED — in two, because it fills the environment's base language
+// in with the same text when a label is created in another language only. Refusing it made the
+// download write the labels as plain strings, which a rebuild labels in another language, or leave
+// the column untyped, which a rebuild into a fresh environment makes a text column. A map beside a
+// plain string, or beside a map that differs from it in any language, still names two options in a
+// way the line does not show, and stays hidden.
+//
+// One clash per text: a label that holds one text in several languages names it once.
 function ambiguousChoiceAliases(options) {
-  const seen = new Map(); // alias -> { index, localized, only }
+  const list = options || [];
+  const seen = new Map(); // alias -> { index, localized }
   const clashes = [];
-  (options || []).forEach((label, i) => {
+  list.forEach((label, i) => {
     const localized = isLocalizedLabelMap(label);
-    const only = soleLabelLanguage(label);
-    for (const alias of labelAliases(label)) {
+    for (const alias of new Set(labelAliases(label))) {
       const prior = seen.get(alias);
-      if (prior && prior.index !== i) clashes.push({ alias, first: prior.index, second: i, hidden: (localized || prior.localized) && !(only !== null && only === prior.only) });
-      else if (!prior) seen.set(alias, { index: i, localized, only });
+      if (prior && prior.index !== i) clashes.push({ alias, first: prior.index, second: i, hidden: (localized || prior.localized) && !identicalLocalizedLabels(label, list[prior.index]) });
+      else if (!prior) seen.set(alias, { index: i, localized });
     }
   });
   return clashes;
 }
 
-// The LCID of a localized label that holds exactly one language, or null for anything else (a plain
-// string, a map of several languages, a map whose one key is not a canonical LCID).
-function soleLabelLanguage(label) {
-  if (!isLocalizedLabelMap(label) || Object.keys(label).length !== 1) return null;
-  const lcids = localizedLabelLcids(label);
-  return lcids.length === 1 ? lcids[0] : null;
+// Are two labels the same LOCALIZED label: both maps, keyed by the same canonical LCIDs, with the same
+// text at each? A map with a key that is no canonical LCID is never the same (validateLabel refuses it).
+function identicalLocalizedLabels(a, b) {
+  if (!isLocalizedLabelMap(a) || !isLocalizedLabelMap(b)) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length || localizedLabelLcids(a).length !== keys.length) return false;
+  return keys.every((k) => Object.prototype.hasOwnProperty.call(b, k) && a[k] === b[k]);
 }
 
 // Reject a LOCALIZED label on a global choice. AB#6686428.

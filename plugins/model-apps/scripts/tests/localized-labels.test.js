@@ -287,8 +287,9 @@ test('labelAliases is the one rule both sample data and surfaces use', () => {
 
 // --- a text two options share ---------------------------------------------------------------------
 // A label naming two options is an ERROR when the author cannot see it on the line (a localized label hides the text among its
-// languages) and a WARNING when they can (two plain strings: Dataverse allows the duplicate and earlier specs built with one). A map
-// with ONE language shows its only text on the line as a plain string does, so two of them in the same language are the visible case.
+// languages) and a WARNING when they can (two plain strings: Dataverse allows the duplicate and earlier specs built with one). Two
+// IDENTICAL localized labels — the same text in each of the same languages, one language or several — read alike on the line too, so
+// they are the visible case.
 const optionsWarningsAndErrors = (options) => {
   const s = base();
   s.entities[0].columns = [{ schemaName: 'contoso_stage', type: 'Choice', options }];
@@ -312,11 +313,27 @@ test('two options sharing their text in DIFFERENT languages, or hidden in a labe
     [{ 1036: 'Ouvert' }, 'Ouvert'],
     [{ 1036: 'Ouvert' }, { 1036: 'Ouvert' }, 'Ouvert'],
     [{ 1036: 'Ouvert' }, { 1033: 'Open', 1036: 'Ouvert' }],
+    [{ 1033: 'Abierto', 3082: 'Abierto' }, { 1033: 'Abierto' }],
+    [{ 1033: 'Abierto', 3082: 'Abierto' }, { 1033: 'Abierto', 3082: 'Cerrado' }],
+    [{ 1033: 'Abierto', 3082: 'Abierto' }, { 1033: 'Abierto', 3082: 'Abierto' }, { 1033: 'Open', 3082: 'Abierto' }],
   ]) {
     const got = optionsWarningsAndErrors(options);
     assert.strictEqual(got.errors.length > 0, true, `${JSON.stringify(options)} must be refused: ${JSON.stringify(got)}`);
     assert.match(got.errors[0], /not visible on the line/);
   }
+});
+
+test('two options whose labels are IDENTICAL in several languages — as Dataverse holds two options labelled alike — warn, once per text', () => {
+  // MEASURED: Dataverse fills the environment's base language in, with the same text, when a label is created in another language
+  // only — so two options labelled "Abierto" in Spanish are held as { 1033: "Abierto", 3082: "Abierto" } each. The two lines read
+  // alike: a duplicate the author can see, like two equal plain strings, not a text hidden among the languages of one of them.
+  const filled = optionsWarningsAndErrors([{ 1033: 'Abierto', 3082: 'Abierto' }, { 1033: 'Abierto', 3082: 'Abierto' }, { 1033: 'Cerrado', 3082: 'Cerrado' }]);
+  assert.deepStrictEqual(filled.errors, []);
+  assert.strictEqual(filled.warnings.length, 1, `one warning for the one text, not one per language: ${JSON.stringify(filled.warnings)}`);
+  assert.match(filled.warnings[0], /'Abierto' names BOTH options\[0\] and options\[1\].*resolves to options\[0\]/);
+  const translated = optionsWarningsAndErrors([{ 1033: 'Open', 3082: 'Abierto' }, { 1033: 'Open', 3082: 'Abierto' }]);
+  assert.deepStrictEqual(translated.errors, []);
+  assert.deepStrictEqual(translated.warnings.map((w) => /'(\w+)' names BOTH/.exec(w)[1]).sort(), ['Abierto', 'Open'], 'each text the two share is named');
 });
 
 test('a surface named in EITHER language resolves', () => {
@@ -520,6 +537,36 @@ test('an option sharing its text with an option in ANOTHER language is the only 
   const untypedLost = [];
   const untyped = entityFromMetadata(meta, 'contoso_pedido', { languageCode: 1033, languageLost: untypedLost }).columns.find((c) => c.schemaName === 'contoso_estado');
   assert.deepStrictEqual([untyped.type, untyped.options, untypedLost], [undefined, undefined, []]);
+});
+
+test('two options labelled alike as Dataverse holds them — the base language filled in, so two languages each — keep the column typed and both labels', () => {
+  // MEASURED: two options created as Spanish "Abierto" on an English-base environment are held as 1033 "Abierto" + 3082 "Abierto" each.
+  // The two labels are identical in every language they hold, a duplicate the validator warns about: the column keeps its type and
+  // options, where it used to be captured untyped — and blamed on an option set that had been read.
+  const meta = spanishOnlyTable();
+  const both = (text) => dvLabel([[1033, text], [3082, text]]);
+  meta.attributes.find((a) => a.logicalName === 'contoso_estado').optionSet.options = [both('Abierto'), both('Abierto'), both('Cerrado')];
+  const languageLost = [];
+  const labelClashes = [];
+  const e = entityFromMetadata(meta, 'contoso_pedido', { languageCode: 1033, languageLost, labelClashes });
+  const estado = e.columns.find((c) => c.schemaName === 'contoso_estado');
+  assert.strictEqual(estado.type, 'Choice');
+  assert.deepStrictEqual(estado.options, [{ 1033: 'Abierto', 3082: 'Abierto' }, { 1033: 'Abierto', 3082: 'Abierto' }, { 1033: 'Cerrado', 3082: 'Cerrado' }]);
+  assert.deepStrictEqual([languageLost, labelClashes], [[], []]);
+  const checked = validateAppSpec(asSpec(e), { profile: 'plan', reconstructed: true });
+  assert.deepStrictEqual(checked.errors, []);
+  assert.strictEqual(checked.warnings.filter((w) => /'Abierto' names BOTH options\[0\] and options\[1\]/.test(w)).length, 1, JSON.stringify(checked.warnings));
+});
+
+test('a column left untyped because one text names two of its options in different languages is reported with the clash', () => {
+  // "Abierto" is option 0 in Spanish and option 1 in English: not visible on the line, so the spec cannot hold the column's options
+  // and it is left untyped, as before — but the clash, not an unreadable option set, is what the download now reports.
+  const meta = spanishOnlyTable();
+  meta.attributes.find((a) => a.logicalName === 'contoso_estado').optionSet.options = [dvLabel([[1033, 'Open'], [3082, 'Abierto']]), dvLabel([[1033, 'Abierto'], [3082, 'Cerrado']])];
+  const labelClashes = [];
+  const estado = entityFromMetadata(meta, 'contoso_pedido', { languageCode: 1033, labelClashes }).columns.find((c) => c.schemaName === 'contoso_estado');
+  assert.deepStrictEqual([estado.type, estado.options], [undefined, undefined]);
+  assert.deepStrictEqual(labelClashes, [{ table: 'contoso_pedido', column: 'contoso_estado', clashes: [{ alias: 'Abierto', first: 0, second: 1 }] }]);
 });
 
 test('a metadata read that returned no labels falls back to the SDK display name', () => {

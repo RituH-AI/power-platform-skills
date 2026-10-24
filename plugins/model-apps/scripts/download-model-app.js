@@ -1948,13 +1948,36 @@ function untypedColumnNames(entities) {
   return out;
 }
 
+// The warnings for the columns captured WITHOUT a type (`untyped`, untypedColumnNames). `clashes` maps
+// the ones left untyped because one text names two of their options in a way the App Spec refuses
+// (entityFromMetadata's `labelClashes`) to that clash, e.g.
+//   "contoso_item.contoso_stage" -> "'Abierto' names options[0] and options[1]"
+// Their option sets WERE read, so they are named with the clash: the warning for every other column
+// says the likeliest cause is an option set that could not be read, which sent a maker to download
+// again — and a download made again captures a clash the same way. Every other column keeps that
+// warning word for word. Returns the lines to write, each ending in a newline.
+function untypedColumnWarnings(untyped, clashes = new Map()) {
+  const lines = [];
+  const unexplained = untyped.filter((name) => !clashes.has(name));
+  const clashed = untyped.filter((name) => clashes.has(name));
+  if (unexplained.length) {
+    lines.push(`WARNING: ${unexplained.length} column(s) were captured WITHOUT a type (${unexplained.join(', ')}) — most likely Choice/MultiChoice columns whose option set could not be read. Rebuilding this spec into an environment that already has the table is unaffected, but rebuilding into a FRESH environment would create them as single-line Text. Add the type and options[] (or a globalChoice reference) by hand before a cross-environment rebuild.\n`);
+  }
+  if (clashed.length) {
+    lines.push(`WARNING: ${clashed.length} Choice/MultiChoice column(s) were captured WITHOUT a type because one text names two of their options (${clashed.map((name) => `${name}: ${clashes.get(name)}`).join('; ')}) and their two labels differ in at least one language, so the line does not show which option the text means and the App Spec refuses it. Their option sets were read: a download made again captures them the same way. Rebuilding this spec into an environment that already has the table is unaffected, but rebuilding into a FRESH environment would create them as single-line Text. Rename one of those options in Maker and download again, or add the type and options[] by hand before a cross-environment rebuild.\n`);
+  }
+  return lines;
+}
+
 // `unexpressible`, when given, is an array this fills with the attributes left out because the App Spec has no type for them although
 // nothing shows they were not authored (`{ table, column, typeName }`), so the caller can name them (see the end of the filter).
 // `incomplete`, when given, is filled with the File and Image columns written without detail an answered read should have carried
 // (`{ table, column, type, missing }`, missingMediaDetail), so the caller can name those too.
 // `languageLost`, when given, is filled with the inline Choice option labels written without the one language they hold
 // (`{ table, column, option, label, languageCode }`, see the option screen below), so the caller can name them.
-function entityFromMetadata(meta, logical, { unexpressible, incomplete, schemaOmissions = [], languageCode, languageLost } = {}) {
+// `labelClashes`, when given, is filled with the Choice columns left untyped because one text names two of their options in a way
+// the App Spec refuses (`{ table, column, clashes: [{ alias, first, second }] }`, the same screen), so the caller names the clash.
+function entityFromMetadata(meta, logical, { unexpressible, incomplete, schemaOmissions = [], languageCode, languageLost, labelClashes } = {}) {
   const primary = meta && (meta.primaryNameAttribute || meta.primaryNameLogicalName);
   const attrs = Array.isArray(meta && meta.attributes) ? meta.attributes : (Array.isArray(meta && meta.Attributes) ? meta.Attributes : []);
   const primaryLower = String(primary || '').toLowerCase();
@@ -2120,10 +2143,14 @@ function entityFromMetadata(meta, logical, { unexpressible, incomplete, schemaOm
     // `runDownload` validates before writing and returns on failure, so emitting such a set aborted
     // the ENTIRE app's download, and `--allow-lossy-download` does not bypass that gate. Refusing to
     // type just this column falls back to the untyped warning that already exists for an unreadable
-    // label, which is what the download did before types were carried at all.
+    // label, which is what the download did before types were carried at all — named with the clash
+    // (`labelClashes`), because this option set WAS read.
     //
     // The shared `ambiguousChoiceAliases` is reused rather than reimplemented, so this screen and
-    // the validator can never disagree about what "ambiguous" means.
+    // the validator can never disagree about what "ambiguous" means. Two options labelled alike are not
+    // ambiguous in its sense when their labels are identical in every language they hold — the shape
+    // Dataverse stores for them (it fills the base language in with the same text) — so such a column
+    // keeps its type and options, with the duplicate warning the validator gives two equal plain strings.
     //
     // Options held in one language other than the authoring one come back as one-entry LCID maps
     // (labelFromDataverse). Two of them sharing their text in the SAME language are a duplicate the
@@ -2133,8 +2160,8 @@ function entityFromMetadata(meta, logical, { unexpressible, incomplete, schemaOm
     // the one-entry maps of such a collision are written as the plain strings an earlier download wrote
     // (a visible duplicate, which the validator only warns about), and each is reported in `languageLost`,
     // because a rebuild labels it in the language it resolves rather than its own; every other option
-    // keeps its language. A collision involving a label of several languages has no plain-string form:
-    // the column is left untyped, as before.
+    // keeps its language. A collision involving a label of several languages that is not identical to the
+    // other has no plain-string form: the column is left untyped, as before, and the clash is reported.
     const inlineLabels = (lcid) => optionSet.options.map((l) => localizedSpecLabel(l, lcid));
     const hiddenCollision = (options) => ambiguousChoiceAliases(options).some((c) => c.hidden);
     let inlineOptions = optionSet && !(optionSet.isGlobal && optionSet.name) ? inlineLabels(languageCode) : null;
@@ -2161,6 +2188,9 @@ function entityFromMetadata(meta, logical, { unexpressible, incomplete, schemaOm
         ? { globalChoice: usableOptionSet.name }
         : { options: inlineOptions });
     if (schemaName && Array.isArray(languageLost)) for (const l of lostLanguages) languageLost.push({ table: logical, column: schemaName, ...l });
+    if (inlineIsAmbiguous && schemaName && Array.isArray(labelClashes)) {
+      labelClashes.push({ table: logical, column: schemaName, clashes: ambiguousChoiceAliases(inlineOptions).filter((c) => c.hidden).map(({ alias, first, second }) => ({ alias, first, second })) });
+    }
     if ((specType === 'File' || specType === 'Image') && schemaName && Array.isArray(incomplete)) {
       const missing = missingMediaDetail(meta, a, specType);
       if (missing.length) incomplete.push({ table: logical, column: schemaName, type: specType, missing });
@@ -3111,6 +3141,9 @@ async function runDownload({ sdk, genpage, outDir, appId, appUnique, allowLossy 
   const unexpressibleColumns = [];
   // Choice option labels written without the one language they hold (entityFromMetadata's `languageLost`), of the tables the spec keeps.
   const optionLanguageLosses = [];
+  // Choice columns left untyped because one text names two of their options (entityFromMetadata's `labelClashes`), of the tables the
+  // spec keeps: `<table>.<column>` -> the clash, which untypedColumnWarnings names in place of an unreadable option set.
+  const labelClashColumns = new Map();
   // Shared option sets bound by a downloaded column, keyed by lower-cased name so a set used by
   // several tables is declared once.
   const globalChoiceDecls = new Map();
@@ -3122,6 +3155,7 @@ async function runDownload({ sdk, genpage, outDir, appId, appUnique, allowLossy 
     const shortOf = [];
     const schemaOmissions = [];
     const lostLabels = [];
+    const clashedColumns = [];
     // A metadata READ failure is not the same as metadata that reports no primary name, and it must
     // not be swallowed: a 429/503 on a sitemap table used to drop it silently, leaving its subarea
     // behind so validation later complained about a "sitemap subArea references unknown entity" —
@@ -3134,7 +3168,7 @@ async function runDownload({ sdk, genpage, outDir, appId, appUnique, allowLossy 
       if (meta && meta.optionSetReadFailed) optionSetReadFailures.set(logical, meta.optionSetReadFailed);
       for (const [type, reason] of Object.entries((meta && meta.mediaReadFailures) || {})) if (mediaReadFailures[type]) mediaReadFailures[type].set(logical, reason);
       collectGlobalChoices(meta, globalChoiceDecls);
-      e = entityFromMetadata(meta, logical, { unexpressible: leftOut, incomplete: shortOf, schemaOmissions, languageCode, languageLost: lostLabels });
+      e = entityFromMetadata(meta, logical, { unexpressible: leftOut, incomplete: shortOf, schemaOmissions, languageCode, languageLost: lostLabels, labelClashes: clashedColumns });
       if (meta && typeof meta.IconVectorName === 'string' && meta.IconVectorName.trim()) tableVectorIcons.set(logical, meta.IconVectorName);
       const missingSchema = [...((meta && meta.schemaReadFailures) || []), ...schemaOmissions];
       if (missingSchema.length) schemaReadFailures.set(logical, missingSchema.join('; '));
@@ -3161,6 +3195,9 @@ async function runDownload({ sdk, genpage, outDir, appId, appUnique, allowLossy 
     for (const c of leftOut) unexpressibleColumns.push(`${e.schemaName}.${c.column} (${c.typeName})`);
     for (const c of shortOf) incompleteMediaColumns.push({ name: `${e.schemaName}.${c.column}`, missing: c.missing });
     for (const l of lostLabels) optionLanguageLosses.push(`${e.schemaName}.${l.column} options[${l.option}] '${l.label}' (${l.languageCode})`);
+    for (const c of clashedColumns) {
+      labelClashColumns.set(`${e.schemaName}.${c.column}`, c.clashes.map((x) => `'${x.alias}' names options[${x.first}] and options[${x.second}]`).join(', '));
+    }
   }
   const withReason = (list) => list.map((l) => (metadataErrors.has(l) ? `${l} (metadata read failed: ${metadataErrors.get(l)})` : l)).join(', ');
   if (noPrimaryName.length) {
@@ -3208,11 +3245,10 @@ async function runDownload({ sdk, genpage, outDir, appId, appUnique, allowLossy 
   // the read did not return (see the failure warning above), or an attribute type the spec cannot
   // declare. Rebuilding into an org that ALREADY has the table reuses the column and this is inert;
   // rebuilding into a FRESH org creates it as Text, because the data-model phase falls back to
-  // `c.type || 'Text'`. That silent downgrade is why this is announced by name.
+  // `c.type || 'Text'`. That silent downgrade is why this is announced by name — and with its cause
+  // where the download knows it: one text naming two of its options (untypedColumnWarnings).
   const untyped = untypedColumnNames(entities);
-  if (untyped.length) {
-    process.stderr.write(`WARNING: ${untyped.length} column(s) were captured WITHOUT a type (${untyped.join(', ')}) — most likely Choice/MultiChoice columns whose option set could not be read. Rebuilding this spec into an environment that already has the table is unaffected, but rebuilding into a FRESH environment would create them as single-line Text. Add the type and options[] (or a globalChoice reference) by hand before a cross-environment rebuild.\n`);
-  }
+  for (const line of untypedColumnWarnings(untyped, labelClashColumns)) process.stderr.write(line);
   // A File or Image column whose read failed is still in the spec, typed, but without what that read carries — so a rebuild into a
   // FRESH environment makes it at the build's default size (and an image not asked to be the table's primary one) instead of as it is
   // here. Said per READ, with the reason, as the option-set failure is: the read is what is re-runnable, and the File read failing
@@ -3710,4 +3746,4 @@ if (require.main === module) {
   main().catch((err) => emitResult(false, err));
 }
 
-module.exports = { untypedColumnNames, collectGlobalChoices, finalizeGlobalChoices, roundTrippedAware, isRoleRestrictedFormXml, notRoundTrippedSummary, notRoundTrippedWarning, relationshipsSkippedWarning, labelFromDataverse, columnDisplayName, resolveAppId, collectSitemap, appComponentEntities, parseDownloadedPages, pageBindingsReport, pageBindingsNote, readPreviousPageKeys, assignPageKeys, missingDownloads, entityFromMetadata, readEntityWithDescriptions, readDescriptionInventory, readAppShellSettings, iconWebResources, readDashboards, readRelationships, droppedSubareaCount, recoverAppSolution, runDownload, preserveAuthoredLanguageCode, makeDownloadSdk, compareText, main };
+module.exports = { untypedColumnNames, untypedColumnWarnings, collectGlobalChoices, finalizeGlobalChoices, roundTrippedAware, isRoleRestrictedFormXml, notRoundTrippedSummary, notRoundTrippedWarning, relationshipsSkippedWarning, labelFromDataverse, columnDisplayName, resolveAppId, collectSitemap, appComponentEntities, parseDownloadedPages, pageBindingsReport, pageBindingsNote, readPreviousPageKeys, assignPageKeys, missingDownloads, entityFromMetadata, readEntityWithDescriptions, readDescriptionInventory, readAppShellSettings, iconWebResources, readDashboards, readRelationships, droppedSubareaCount, recoverAppSolution, runDownload, preserveAuthoredLanguageCode, makeDownloadSdk, compareText, main };

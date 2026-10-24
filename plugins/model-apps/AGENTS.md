@@ -1121,9 +1121,11 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   label), and anything that resolves an author's reference BY label text must go through
   `labelAliases()` so a reference written in any provisioned language matches. One text naming two
   options of a column (`ambiguousChoiceAliases()`) is an error when the author cannot see it on the line
-  (one side is a label of several languages, or the two are in different languages) and a warning when
-  they can — two equal plain strings, or two equal one-language maps of the SAME language, the shape a
-  download writes for two options a maker labelled alike in a language other than its authoring one. All three live in
+  (one side is a label of several languages that the other does not match in every language, or the two
+  are in different languages) and a warning when they can — two equal plain strings, or two IDENTICAL
+  localized labels (the same text in each of the same languages), the shape a download finds for two
+  options a maker labelled alike: Dataverse fills the base language in with the same text when a label is
+  created in another language only (measured), so they hold two languages each. All three live in
   `app-spec.js`; `references/localization.md` is about generated **page** code, a separate concern.
   Guarded by `scripts/tests/lcid-real-bundle.test.js`, which drives the REAL vendored bundle — a mock
   would keep passing against a bundle that ignored the option.
@@ -1609,12 +1611,15 @@ the pipeline and delegates each script's **behavioral spec** to the entries belo
   rebuild gives a lookup that sets none, as before, **and** that label is the same in every language — the parent's
   downloaded label, or a stock parent's label in the authoring language (the one the build reads): an English
   "Contact" on a lookup to a table labelled only in French "Contact" is carried, in English, where leaving it out
-  rebuilt it in French (`download-lookup-label-language-real-bundle.test.js`). Two inline options sharing one such
-  label in ONE language keep it — two equal one-entry maps of one language are a duplicate the validator warns about,
-  as it does two equal plain strings (`ambiguousChoiceAliases`); options sharing their text in two languages (an
+  rebuilt it in French (`download-lookup-label-language-real-bundle.test.js`). Two inline options a maker labelled
+  alike keep their labels and the column its type when the two labels are identical in every language they hold —
+  as Dataverse holds them (with the base language filled in), and as two equal one-entry maps of one language are —
+  a duplicate the validator warns about, as it does two equal plain strings (`ambiguousChoiceAliases`); options sharing their text in two languages (an
   English "Open" and a Spanish "Open") can be held only as plain strings, so those options alone are written so and a
-  WARNING names each label that loses its language, every other option keeping its own; a collision involving a label
-  of several languages still leaves the column untyped (`download-option-label-language-real-bundle.test.js`).
+  WARNING names each label that loses its language, every other option keeping its own; any other collision involving
+  a label of several languages still leaves the column untyped, and the untyped-column WARNING names the clash
+  (`'Abierto' names options[0] and options[1]` — the option set WAS read) where it blamed an unreadable option set
+  (`download-option-label-language-real-bundle.test.js`).
   Global-choice labels stay plain strings (the spec refuses a localized one).
   The fetched SDK navigation must agree with the selected current XML's full target multiset:
   entities, generative pages, URLs, dashboards and custom pages, including repeated shortcuts.
