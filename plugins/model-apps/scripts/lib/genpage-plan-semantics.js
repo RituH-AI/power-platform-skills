@@ -9,8 +9,8 @@
 //   - Decision: …                                      - Decision: …
 //   ## Per-Page Specifications                         ### Data Semantics
 //   ### <Page Name>          (its - **File:** names    #### <page file>
-//   #### Data semantics       the page)                ##### R1
-//   ##### R1                                           ### Lookup Metadata
+//   #### Data semantics       the page)                ##### R<n> or F<n>
+//   ##### R<n> or F<n>                                 ### Lookup Metadata
 //   #### Lookup metadata                               #### <page file>
 //   | Table | Column | Read property | Targets | Used by | Metadata state |
 //
@@ -264,7 +264,7 @@ const isDelimiter = (cells) => cells.length > 0 && cells.every((cell) => /^:?-{3
 // `### Lookup Metadata`), exactly the shape references/plan-schema.md documents:
 //   | Table | Column | Read property | Targets | Used by | Metadata state |
 //   |-------|--------|---------------|---------|---------|----------------|
-//   | opportunity | customerid | _customerid_value | account, contact | R1, F1, F2; customer navigation | observed |
+//   | opportunity | customerid | _customerid_value | account, contact | R<n>, F<n>; customer navigation | observed |
 //
 //   | Table | Column | Target | Navigation property | Referenced key |
 //   |-------|--------|--------|---------------------|----------------|
