@@ -186,17 +186,18 @@ in a filter, on a timer or on mount — and never hand its handler or helper to 
 (`setTimeout(showIdentity, 0)`), to a `ref` or to a child component: only the button's
 `onClick` names it.
 
+The block below is the page's `PageBody` with its two request helpers. It is built on the page
+error block of rules.md → *Missing Error Handling*, copied unchanged — `PAGE_NAME`,
+`reportPageError`, `PageErrorBar`, the boundary and the error copy, whose `error.builtin*` keys
+hold the fixed sentences this page shows.
+
 ```tsx
-type BuiltInResult = { ok: boolean; outputs?: Record<string, unknown>; error?: { message?: string; status?: number } };
+type BuiltInResult = { ok: boolean; outputs?: Record<string, unknown>; error?: { message?: string; code?: string; status?: number } };
 type BuiltInApi = { executeFunction?: (request: { name: string }) => Promise<BuiltInResult> };
-type IdentityView = { identity?: { userId: string; businessUnitId: string; organizationId: string }; message?: string };
-type VersionView = { version?: string; message?: string };
+type IdentityView = { identity?: { userId: string; businessUnitId: string; organizationId: string }; error?: PageErrorView };
+type VersionView = { version?: string; error?: PageErrorView };
 
 const GUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-const UNEXPECTED = 'The operation returned an unexpected response. No result was displayed.';
-const UNAVAILABLE = 'The selected operation is unavailable in this environment or player. No fallback was attempted.';
-const FAILED = 'The operation failed. No result was displayed.';
-const UNSUPPORTED = 'This page player cannot call built-in Dataverse operations.';
 
 // An output only when it is the object's OWN string property.
 function ownString(outputs: Record<string, unknown>, field: string): string | undefined {
@@ -205,93 +206,144 @@ function ownString(outputs: Record<string, unknown>, field: string): string | un
 }
 
 async function readIdentity(api: BuiltInApi): Promise<IdentityView> {
-  if (typeof api.executeFunction !== 'function') return { message: UNSUPPORTED };
-  const res = await api.executeFunction({ name: 'WhoAmI' });
-  if (res.ok !== true) {
-    return { message: res.error?.status === 404 ? UNAVAILABLE : res.error?.message || FAILED };
+  if (typeof api.executeFunction !== 'function') {
+    const view = reportPageError(PAGE_NAME, 'showIdentity', undefined, 'executeFunction is not available in this player', 'read');
+    view.fallbackKey = 'error.builtinUnsupported';
+    view.message = '';
+    return { error: view };
   }
-  const outputs = res.outputs;
-  if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) return { message: UNEXPECTED };
-  const userId = ownString(outputs, 'UserId');
-  const businessUnitId = ownString(outputs, 'BusinessUnitId');
-  const organizationId = ownString(outputs, 'OrganizationId');
-  if (![userId, businessUnitId, organizationId].every((id) => typeof id === 'string' && GUID.test(id))) return { message: UNEXPECTED };
-  return { identity: { userId: userId as string, businessUnitId: businessUnitId as string, organizationId: organizationId as string } };
+  try {
+    const res = await api.executeFunction({ name: 'WhoAmI' });
+    if (res.ok !== true) {
+      const view = reportPageError(PAGE_NAME, 'showIdentity', res.error?.code, res.error?.message, 'read');
+      const unavailable = typeof res.error?.status === 'number' && res.error.status === 404;
+      view.fallbackKey = unavailable ? 'error.builtinUnavailable' : 'error.builtinFailed';
+      view.message = unavailable ? '' : view.message;
+      return { error: view };
+    }
+    const outputs = res.outputs;
+    if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) {
+      const view = reportPageError(PAGE_NAME, 'showIdentity', undefined, 'WhoAmI returned no output object', 'read');
+      view.fallbackKey = 'error.builtinUnexpected';
+      view.message = '';
+      return { error: view };
+    }
+    const userId = ownString(outputs, 'UserId');
+    const businessUnitId = ownString(outputs, 'BusinessUnitId');
+    const organizationId = ownString(outputs, 'OrganizationId');
+    if (![userId, businessUnitId, organizationId].every((id) => typeof id === 'string' && GUID.test(id))) {
+      const view = reportPageError(PAGE_NAME, 'showIdentity', undefined, 'WhoAmI returned an unexpected identity', 'read');
+      view.fallbackKey = 'error.builtinUnexpected';
+      view.message = '';
+      return { error: view };
+    }
+    return { identity: { userId: userId as string, businessUnitId: businessUnitId as string, organizationId: organizationId as string } };
+  } catch (error) {
+    const view = reportPageError(PAGE_NAME, 'showIdentity', undefined, error, 'read');
+    view.fallbackKey = 'error.builtinFailed';
+    view.message = '';
+    return { error: view };
+  }
 }
 
 async function readVersion(api: BuiltInApi): Promise<VersionView> {
-  if (typeof api.executeFunction !== 'function') return { message: UNSUPPORTED };
-  const res = await api.executeFunction({ name: 'RetrieveVersion' });
-  if (res.ok !== true) {
-    return { message: res.error?.status === 404 ? UNAVAILABLE : res.error?.message || FAILED };
+  if (typeof api.executeFunction !== 'function') {
+    const view = reportPageError(PAGE_NAME, 'showVersion', undefined, 'executeFunction is not available in this player', 'read');
+    view.fallbackKey = 'error.builtinUnsupported';
+    view.message = '';
+    return { error: view };
   }
-  const outputs = res.outputs;
-  if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) return { message: UNEXPECTED };
-  const version = ownString(outputs, 'Version');
-  if (!version || version.length > 128) return { message: UNEXPECTED };
-  return { version };
+  try {
+    const res = await api.executeFunction({ name: 'RetrieveVersion' });
+    if (res.ok !== true) {
+      const view = reportPageError(PAGE_NAME, 'showVersion', res.error?.code, res.error?.message, 'read');
+      const unavailable = typeof res.error?.status === 'number' && res.error.status === 404;
+      view.fallbackKey = unavailable ? 'error.builtinUnavailable' : 'error.builtinFailed';
+      view.message = unavailable ? '' : view.message;
+      return { error: view };
+    }
+    const outputs = res.outputs;
+    if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) {
+      const view = reportPageError(PAGE_NAME, 'showVersion', undefined, 'RetrieveVersion returned no output object', 'read');
+      view.fallbackKey = 'error.builtinUnexpected';
+      view.message = '';
+      return { error: view };
+    }
+    const version = ownString(outputs, 'Version');
+    if (!version || version.length > 128) {
+      const view = reportPageError(PAGE_NAME, 'showVersion', undefined, 'RetrieveVersion returned an unexpected version', 'read');
+      view.fallbackKey = 'error.builtinUnexpected';
+      view.message = '';
+      return { error: view };
+    }
+    return { version };
+  } catch (error) {
+    const view = reportPageError(PAGE_NAME, 'showVersion', undefined, error, 'read');
+    view.fallbackKey = 'error.builtinFailed';
+    view.message = '';
+    return { error: view };
+  }
 }
 
-const GeneratedComponent = (props: GeneratedComponentProps) => {
-  const { dataApi } = props;
+function PageBody(props: GeneratedComponentProps) {
+  const { dataApi, pageInput } = props;
+  void pageInput;
   const api = dataApi as unknown as BuiltInApi;
   const mounted = React.useRef(true);
   React.useEffect(() => () => { mounted.current = false; }, []);
 
-  const [identity, setIdentity] = React.useState<IdentityView>({});
-  const [identityPending, setIdentityPending] = React.useState(false);
+  const [identityState, setIdentityState] = React.useState<{ pending: boolean; view: IdentityView }>({ pending: false, view: {} });
   const identityRequest = React.useRef(0);
   const showIdentity = async () => {
-    if (identityPending) return;
+    if (identityState.pending) return;
     const requestId = ++identityRequest.current;
-    setIdentity({});
-    setIdentityPending(true);
+    setIdentityState({ pending: true, view: {} });
     try {
       const view = await readIdentity(api);
-      if (mounted.current && requestId === identityRequest.current) setIdentity(view);
-    } catch {
-      if (mounted.current && requestId === identityRequest.current) setIdentity({ message: FAILED });
-    } finally {
-      if (mounted.current && requestId === identityRequest.current) setIdentityPending(false);
+      if (mounted.current && requestId === identityRequest.current) setIdentityState({ pending: false, view });
+    } catch (error) {
+      if (mounted.current && requestId === identityRequest.current) setIdentityState({ pending: false, view: { error: reportPageError(PAGE_NAME, 'showIdentity', undefined, error, 'read') } });
     }
   };
 
-  const [version, setVersion] = React.useState<VersionView>({});
-  const [versionPending, setVersionPending] = React.useState(false);
+  const [versionState, setVersionState] = React.useState<{ pending: boolean; view: VersionView }>({ pending: false, view: {} });
   const versionRequest = React.useRef(0);
   const showVersion = async () => {
-    if (versionPending) return;
+    if (versionState.pending) return;
     const requestId = ++versionRequest.current;
-    setVersion({});
-    setVersionPending(true);
+    setVersionState({ pending: true, view: {} });
     try {
       const view = await readVersion(api);
-      if (mounted.current && requestId === versionRequest.current) setVersion(view);
-    } catch {
-      if (mounted.current && requestId === versionRequest.current) setVersion({ message: FAILED });
-    } finally {
-      if (mounted.current && requestId === versionRequest.current) setVersionPending(false);
+      if (mounted.current && requestId === versionRequest.current) setVersionState({ pending: false, view });
+    } catch (error) {
+      if (mounted.current && requestId === versionRequest.current) setVersionState({ pending: false, view: { error: reportPageError(PAGE_NAME, 'showVersion', undefined, error, 'read') } });
     }
   };
 
   return (
     <div>
-      <Button disabled={identityPending} onClick={() => void showIdentity()}>Show my Dataverse identity</Button>
-      {identity.message && <Text>{identity.message}</Text>}
-      {identity.identity && (
+      <Button disabled={identityState.pending} onClick={() => void showIdentity()}>Show my Dataverse identity</Button>
+      <PageErrorBar error={identityState.view.error ?? null} />
+      {identityState.view.identity && (
         <div>
-          <Text>Dataverse user id: {identity.identity.userId}</Text>
-          <Text>Business unit id: {identity.identity.businessUnitId}</Text>
-          <Text>Organization id: {identity.identity.organizationId}</Text>
+          <Text>Dataverse user id: {identityState.view.identity.userId}</Text>
+          <Text>Business unit id: {identityState.view.identity.businessUnitId}</Text>
+          <Text>Organization id: {identityState.view.identity.organizationId}</Text>
           <Text>The organization id is not an Entra tenant id.</Text>
         </div>
       )}
-      <Button disabled={versionPending} onClick={() => void showVersion()}>Show the Dataverse server version</Button>
-      {version.message && <Text>{version.message}</Text>}
-      {version.version && <Text>Server version: {version.version}</Text>}
+      <Button disabled={versionState.pending} onClick={() => void showVersion()}>Show the Dataverse server version</Button>
+      <PageErrorBar error={versionState.view.error ?? null} />
+      {versionState.view.version && <Text>Server version: {versionState.view.version}</Text>}
     </div>
   );
-};
+}
+
+const GeneratedComponent = (props: GeneratedComponentProps) => (
+  <PageErrorBoundary>
+    <PageBody {...props} />
+  </PageErrorBoundary>
+);
 export default GeneratedComponent;
 ```
 
@@ -300,34 +352,38 @@ What the pattern holds, in this order:
 1. The request is exactly `{ name: 'WhoAmI' }` or `{ name: 'RetrieveVersion' }`: no
    `parameters`, no `boundTo`, the unqualified name, on the page's own `dataApi` after a
    presence check that **returns** — a player without `executeFunction` sends nothing and gets
-   no second transport, raw URL or token.
-2. A result whose `ok` is not `true` shows the sanitized `error.message`, or a fixed fallback,
-   and returns **before** `res.outputs` is read; a failed result that happens to carry
-   output-shaped data shows none of it. An **actual** HTTP 404 on the result (a numeric
-   `status` of 404) says `The selected operation is unavailable in this environment or player.
-   No fallback was attempted.` and keeps the binding; a status is never read out of the
-   message's words, and no message suggests deploying a Custom API. The current model-driven
-   player passes no HTTP status to the page: a 404, a 403, a 429 and a network failure all
-   arrive as its own sanitized message, so in practice the page shows that message and cannot
-   tell an unavailable operation from a refused one.
+   no second transport, raw URL or token; it shows `This page player cannot call built-in
+   Dataverse operations.`
+2. A result whose `ok` is not `true` is reported — `reportPageError(PAGE_NAME, '<operation>',
+   res.error?.code, res.error?.message, 'read')`, a read with **no retry** — and the helper returns
+   that view as `{ error }` **before** `res.outputs` is read; a failed result that happens to carry
+   output-shaped data shows none of it, and the result itself is never handed to the reporter. The
+   bar shows the sanitized `error.message`, or the fixed `The operation failed. No result was
+   displayed.` An **actual** HTTP 404 on the result (a numeric `status` of 404) shows `The selected
+   operation is unavailable in this environment or player. No fallback was attempted.` and keeps the
+   binding; a status is never read out of the message's words, and no message suggests deploying a
+   Custom API. The current model-driven player passes no HTTP status to the page: a 404, a 403, a 429
+   and a network failure all arrive as its own sanitized message, so in practice the page shows that
+   message and cannot tell an unavailable operation from a refused one.
 3. Only then `res.outputs` — a non-null object that is not an array (an empty or 204 answer is
    `{}`) — and only through own-property reads. Never the result root, `res.value`, `res.body`
    or fault details; never a spread, an iteration or `JSON.stringify` of it; any other property
    is ignored.
 4. All or nothing: WhoAmI shows its three identifiers only when every one is an own string
    matching the GUID pattern (no UUID-version check); RetrieveVersion shows `Version` only when
-   it is an own string of 1 to 128 characters. Anything else shows `The operation returned an
-   unexpected response. No result was displayed.`
-5. A rejected promise is caught and shows bounded guidance, never a stack. A timeout or a
+   it is an own string of 1 to 128 characters. Anything else is reported with a fixed diagnostic —
+   never the outputs — and shows `The operation returned an unexpected response. No result was
+   displayed.`
+5. A rejected promise is caught — in the helper, and again in the handler — and reported as a read
+   with no retry; it shows bounded guidance, never a stack. A timeout or a
    `network` code is **not** proof the request never left the client or was cancelled, and the
    host does not cancel a timed-out GET: the pending button is disabled, which is not a claim
    that the request stopped. The page never retries — a retry is the user's next click. The
    current player's own transport can re-send a request once after a connection reset, so a
    click that failed may still have reached the service (both operations only read).
-6. Each operation has its own pending state and request counter: a new click clears that
-   operation's previous result, a stale or unmounted answer is ignored, and the other
-   operation's button stays usable.
-
+6. Each operation has its own pending state, request counter and error view: a new click clears
+   that operation's previous result and error, a stale or unmounted answer is ignored, and the other
+   operation's button, result and error stay as they are.
 Labels are "Dataverse user id", "Business unit id" and "Organization id", with the line "The
 organization id is not an Entra tenant id." A version is an opaque string, not a feature test.
 
@@ -342,6 +398,13 @@ source. Binding WhoAmI is not permission to call it for analytics. Results stay 
 memory, and the same holds for everything that keeps them — the state the page renders from, a
 ref, a variable derived from either — wherever the page uses it: at render, in an effect or in
 another handler.
+
+A failure is the one thing of a built-in call that is logged: `reportPageError` logs the host's
+bounded error code and sanitized message, never the result or an identifier. Only when the maker
+asked to report failures and the dispatch says `Telemetry: enabled` may the page pass its
+`props.appInsights` to that reporter as the seventh argument of these read reports
+(`references/page-telemetry.md`); the reporter then sends a fixed `<operation> failed` error and a
+recognized code — nothing of the result.
 
 ## Download and rebuild
 

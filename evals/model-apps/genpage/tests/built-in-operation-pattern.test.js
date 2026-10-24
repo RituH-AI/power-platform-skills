@@ -14,17 +14,27 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { builtInRuntimeProblems } = require('../lib/action-binding-union.js');
 const { customApiProblems } = require('../lib/custom-api-contract.js');
+const { pageErrorProblems } = require('../lib/page-error-evidence.js');
 const { PHASE_EXPECTATIONS } = require('../lib/assertions-layer-1.js');
 const { PHASE5_EXPECTATIONS } = require('../lib/assertions-layer-2.js');
 const { getDataverseOperationCatalogue } = require('../../../../plugins/model-apps/scripts/lib/dataverse-operations.js');
 
-const DOC = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'model-apps', 'references', 'dataverse-operations.md');
+const REFERENCES = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'model-apps', 'references');
+const DOC = path.join(REFERENCES, 'dataverse-operations.md');
+// The document shows the page's helpers, PageBody and boundary wrapper; the rest of the page is the page error block
+// references/rules.md publishes ("Missing Error Handling") — copied unchanged, up to its own example PageBody — which supplies
+// PAGE_NAME, reportPageError, PageErrorBar, PageErrorBoundary and the error copy holding the fixed built-in sentences. The
+// complete page is what is graded, so the built-in checks and the page error contract read the same source.
 const REFERENCE = (() => {
   const text = fs.readFileSync(DOC, 'utf8').replace(/\r\n/g, '\n');
   const section = text.slice(text.indexOf('\n## Generated call\n'));
   const block = /```tsx\n([\s\S]*?)\n```/.exec(section);
   assert.ok(block, 'the reference document holds the generated call');
-  return `${block[1]}\n`;
+  const rules = fs.readFileSync(path.join(REFERENCES, 'rules.md'), 'utf8').replace(/\r\n/g, '\n');
+  const errors = rules.slice(rules.indexOf('\n### 2. Missing Error Handling\n'), rules.indexOf('\n### 3. '));
+  const foundation = [...errors.matchAll(/```tsx\n([\s\S]*?)\n```/g)].map((match) => match[1]).find((code) => /\bfunction reportPageError\(/.test(code));
+  assert.ok(foundation, 'rules.md publishes the canonical page error block');
+  return `${foundation.slice(0, foundation.indexOf('function PageBody('))}${block[1]}\n`;
 })();
 const BOTH = ['WhoAmI', 'RetrieveVersion'];
 const problems = (source, names = BOTH) => builtInRuntimeProblems(source, names);
@@ -35,10 +45,11 @@ function mutated(find, replace) {
   return REFERENCE.replace(find, replace);
 }
 
-test('the reference pattern of the document passes, for each operation alone and for both', () => {
+test('the reference pattern of the document passes, for each operation alone and for both — and as a complete page, the page error contract', () => {
   assert.deepStrictEqual(problems(REFERENCE), []);
   assert.deepStrictEqual(problems(REFERENCE, ['WhoAmI']), []);
   assert.deepStrictEqual(problems(REFERENCE, ['RetrieveVersion']), []);
+  assert.deepStrictEqual(pageErrorProblems(REFERENCE), []);
 });
 
 test('a call that is not the user\'s — on mount, at render, on a timer, in a memo, or a retry of itself — fails', () => {
@@ -46,9 +57,9 @@ test('a call that is not the user\'s — on mount, at render, on a timer, in a m
     ['an effect calls it', mutated('React.useEffect(() => () => { mounted.current = false; }, []);', 'React.useEffect(() => { void showIdentity(); return () => { mounted.current = false; }; }, []);'), /effect, a memo or a timer/],
     ['an effect calls the helper', mutated('React.useEffect(() => () => { mounted.current = false; }, []);', 'React.useEffect(() => { void readIdentity(api); return () => { mounted.current = false; }; }, []);'), /effect, a memo or a timer/],
     ['the render calls it', mutated('  return (\n    <div>', '  void readVersion(api);\n  return (\n    <div>'), /while the page renders/],
-    ['a timer calls it', mutated('    if (identityPending) return;', '    if (identityPending) return;\n    setTimeout(() => void readIdentity(api), 0);'), /effect, a memo or a timer/],
+    ['a timer calls it', mutated('    if (identityState.pending) return;', '    if (identityState.pending) return;\n    setTimeout(() => void readIdentity(api), 0);'), /effect, a memo or a timer/],
     ['a memo calls it', mutated('  const identityRequest = React.useRef(0);', '  const identityRequest = React.useRef(0);\n  React.useMemo(() => readIdentity(api), [api]);'), /effect, a memo or a timer/],
-    ['it retries itself', mutated("    return { message: res.error?.status === 404 ? UNAVAILABLE : res.error?.message || FAILED };\n  }\n  const outputs = res.outputs;\n  if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) return { message: UNEXPECTED };\n  const userId", "    return readIdentity(api);\n  }\n  const outputs = res.outputs;\n  if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) return { message: UNEXPECTED };\n  const userId"), /calls itself/],
+    ['it retries itself', mutated("      const view = reportPageError(PAGE_NAME, 'showIdentity', res.error?.code, res.error?.message, 'read');", "      if (res.error?.code === 'network') return readIdentity(api);\n      const view = reportPageError(PAGE_NAME, 'showIdentity', res.error?.code, res.error?.message, 'read');"), /calls itself/],
     ['no button reaches it', mutated('onClick={() => void showVersion()}', 'title="version"'), /not reached from a button/],
   ]) {
     const found = problems(source);
@@ -56,18 +67,22 @@ test('a call that is not the user\'s — on mount, at render, on a timer, in a m
   }
 });
 
+// The identity guard of readIdentity, and its object check: one block each that reports the unexpected shape and returns.
+const IDENTITY_GUARD = "    if (![userId, businessUnitId, organizationId].every((id) => typeof id === 'string' && GUID.test(id))) {\n      const view = reportPageError(PAGE_NAME, 'showIdentity', undefined, 'WhoAmI returned an unexpected identity', 'read');\n      view.fallbackKey = 'error.builtinUnexpected';\n      view.message = '';\n      return { error: view };\n    }\n";
+const IDENTITY_OBJECT_CHECK = "    if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) {\n      const view = reportPageError(PAGE_NAME, 'showIdentity', undefined, 'WhoAmI returned no output object', 'read');\n      view.fallbackKey = 'error.builtinUnexpected';\n      view.message = '';\n      return { error: view };\n    }\n    const userId";
+
 test('outputs are read only after the success check, through own-property reads of a checked object, and shown all or nothing', () => {
   for (const [label, source, reason] of [
-    ['a partial identity', mutated('  if (![userId, businessUnitId, organizationId].every((id) => typeof id === \'string\' && GUID.test(id))) return { message: UNEXPECTED };\n', '  if (!userId || !GUID.test(userId)) return { message: UNEXPECTED };\n'), /all or none/],
-    ['the identity is never tested', mutated('  if (![userId, businessUnitId, organizationId].every((id) => typeof id === \'string\' && GUID.test(id))) return { message: UNEXPECTED };\n', ''), /all or none/],
-    ['no object check (an empty or 204 answer)', mutated("  if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) return { message: UNEXPECTED };\n  const userId", '  const userId'), /non-null, non-array object/],
+    ['a partial identity', mutated("    if (![userId, businessUnitId, organizationId].every((id) => typeof id === 'string' && GUID.test(id))) {", '    if (!userId || !GUID.test(userId)) {'), /all or none/],
+    ['the identity is never tested', mutated(IDENTITY_GUARD, ''), /all or none/],
+    ['no object check (an empty or 204 answer)', mutated(IDENTITY_OBJECT_CHECK, '    const userId'), /non-null, non-array object/],
     ['a member read', mutated("const userId = ownString(outputs, 'UserId');", 'const userId = outputs.UserId as string | undefined;'), /as a member/],
     ['a destructured read', mutated("const version = ownString(outputs, 'Version');", 'const { Version: version } = outputs as { Version?: string };'), /as a member/],
     ['a read from the result root', mutated("const userId = ownString(outputs, 'UserId');", "const userId = (res as unknown as { UserId?: string }).UserId ?? ownString(outputs, 'UserId');"), /from the result root/],
     ['a spread of outputs', mutated('  return { version };', '  return { version, ...outputs };'), /spread, iterated or serialized/],
     ['a serialized result', mutated('  return { version };', '  return { version: JSON.stringify(res.outputs) };'), /spread, iterated or serialized/],
-    ['an unbounded Version', mutated('  if (!version || version.length > 128) return { message: UNEXPECTED };', '  if (!version) return { message: UNEXPECTED };'), /1 to 128 characters/],
-    ['an empty Version shown', mutated('  if (!version || version.length > 128) return { message: UNEXPECTED };', '  if (version === undefined || version.length > 128) return { message: UNEXPECTED };'), /1 to 128 characters/],
+    ['an unbounded Version', mutated('    if (!version || version.length > 128) {', '    if (!version) {'), /1 to 128 characters/],
+    ['an empty Version shown', mutated('    if (!version || version.length > 128) {', '    if (version === undefined || version.length > 128) {'), /1 to 128 characters/],
     ['no unexpected-shape sentence', REFERENCE.replace('The operation returned an unexpected response. No result was displayed.', 'Something went wrong.'), /unexpected shape must say/],
   ]) {
     const found = problems(source);
@@ -77,8 +92,8 @@ test('outputs are read only after the success check, through own-property reads 
 
 test('a failure shows only sanitized text: no stack, no status read out of the message, no advice to deploy a Custom API', () => {
   for (const [label, source, reason] of [
-    ['a stack', mutated('      if (mounted.current && requestId === identityRequest.current) setIdentity({ message: FAILED });', '      if (mounted.current && requestId === identityRequest.current) setIdentity({ message: String((error as Error).stack) });').replace('    } catch {\n      if (mounted.current && requestId === identityRequest.current) setIdentity({ message: String', '    } catch (error) {\n      if (mounted.current && requestId === identityRequest.current) setIdentity({ message: String'), /stack/],
-    ['a status from the words', mutated("    return { message: res.error?.status === 404 ? UNAVAILABLE : res.error?.message || FAILED };\n  }\n  const outputs = res.outputs;\n  if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) return { message: UNEXPECTED };\n  const version", "    return { message: res.error?.message?.includes('404') ? UNAVAILABLE : res.error?.message || FAILED };\n  }\n  const outputs = res.outputs;\n  if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) return { message: UNEXPECTED };\n  const version"), /message's words/],
+    ['a stack', mutated("    view.fallbackKey = 'error.builtinFailed';\n    view.message = '';\n    return { error: view };\n  }\n}\n\nasync function readVersion(", "    view.fallbackKey = 'error.builtinFailed';\n    view.message = String((error as Error).stack);\n    return { error: view };\n  }\n}\n\nasync function readVersion("), /stack/],
+    ['a status from the words', mutated("const unavailable = typeof res.error?.status === 'number' && res.error.status === 404;", "const unavailable = res.error?.message?.includes('404') === true;"), /message's words/],
     ['a 404 that says to deploy', REFERENCE.replace('The selected operation is unavailable in this environment or player. No fallback was attempted.', 'The selected operation is unavailable. Deploy the Custom API first.'), /deploy a Custom API/],
   ]) {
     const found = problems(source);
@@ -90,7 +105,7 @@ test('the request is exactly { name }, and a failed presence check returns befor
   for (const [label, source, reason] of [
     ['parameters', mutated("api.executeFunction({ name: 'WhoAmI' })", "api.executeFunction({ name: 'WhoAmI', parameters: {} })"), /exactly \{ name \}/],
     ['boundTo', mutated("api.executeFunction({ name: 'RetrieveVersion' })", "api.executeFunction({ name: 'RetrieveVersion', boundTo: { entityName: 'organization', id: 'x' } })"), /exactly \{ name \}/],
-    ['a presence check that does not return', mutated("  if (typeof api.executeFunction !== 'function') return { message: UNSUPPORTED };\n  const res = await api.executeFunction({ name: 'WhoAmI' });", "  if (typeof api.executeFunction !== 'function') console.warn(UNSUPPORTED);\n  const res = await api.executeFunction({ name: 'WhoAmI' });"), /return before any request/],
+    ['a presence check that does not return', mutated("  if (typeof api.executeFunction !== 'function') {\n    const view = reportPageError(PAGE_NAME, 'showIdentity'", "  if (typeof api.executeFunction !== 'function') console.warn('unsupported');\n  {\n    const view = reportPageError(PAGE_NAME, 'showIdentity'"), /return before any request/],
   ]) {
     const found = problems(source);
     assert.ok(found.some((p) => reason.test(p)), `${label}: ${JSON.stringify(found)}`);
@@ -99,10 +114,14 @@ test('the request is exactly { name }, and a failed presence check returns befor
 
 test('each button is disabled while its own call is pending, ignores a stale answer, catches a rejection, and nothing of the result is logged or kept', () => {
   for (const [label, source, reason] of [
-    ['no disabled button', mutated('<Button disabled={identityPending} onClick={() => void showIdentity()}>', '<Button onClick={() => void showIdentity()}>'), /not disabled while the call is pending/],
-    ['one pending state for both', mutated('<Button disabled={versionPending} onClick={() => void showVersion()}>', '<Button disabled={identityPending} onClick={() => void showVersion()}>'), /pending state of its own/],
-    ['no stale-request guard', mutated('      if (mounted.current && requestId === identityRequest.current) setIdentity(view);', '      if (mounted.current) setIdentity(view);').replace('    const requestId = ++identityRequest.current;\n    setIdentity({});', '    setIdentity({});').replace('      if (mounted.current && requestId === identityRequest.current) setIdentity({ message: FAILED });', '      if (mounted.current) setIdentity({ message: FAILED });').replace('      if (mounted.current && requestId === identityRequest.current) setIdentityPending(false);', '      if (mounted.current) setIdentityPending(false);'), /stale request/],
-    ['no catch', mutated('    } catch {\n      if (mounted.current && requestId === versionRequest.current) setVersion({ message: FAILED });\n    } finally {', '    } finally {'), /not caught/],
+    ['no disabled button', mutated('<Button disabled={identityState.pending} onClick={() => void showIdentity()}>', '<Button onClick={() => void showIdentity()}>'), /not disabled while the call is pending/],
+    ['one pending state for both', mutated('<Button disabled={versionState.pending} onClick={() => void showVersion()}>', '<Button disabled={identityState.pending} onClick={() => void showVersion()}>'), /pending state of its own/],
+    ['no stale-request guard', mutated('      if (mounted.current && requestId === identityRequest.current) setIdentityState({ pending: false, view });', '      if (mounted.current) setIdentityState({ pending: false, view });')
+      .replace('    const requestId = ++identityRequest.current;\n    setIdentityState({ pending: true, view: {} });', '    setIdentityState({ pending: true, view: {} });')
+      .replace("      if (mounted.current && requestId === identityRequest.current) setIdentityState({ pending: false, view: { error: reportPageError(PAGE_NAME, 'showIdentity', undefined, error, 'read') } });", "      if (mounted.current) setIdentityState({ pending: false, view: { error: reportPageError(PAGE_NAME, 'showIdentity', undefined, error, 'read') } });"), /stale request/],
+    // Both catches go: the request helper's own and the handler's.
+    ['no catch', mutated("    } catch (error) {\n      if (mounted.current && requestId === versionRequest.current) setVersionState({ pending: false, view: { error: reportPageError(PAGE_NAME, 'showVersion', undefined, error, 'read') } });\n    }\n  };", '    } finally {\n    }\n  };')
+      .replace("  } catch (error) {\n    const view = reportPageError(PAGE_NAME, 'showVersion', undefined, error, 'read');\n    view.fallbackKey = 'error.builtinFailed';\n    view.message = '';\n    return { error: view };\n  }\n}", '  } finally {\n  }\n}'), /not caught/],
     ['a logged result', mutated('      const view = await readIdentity(api);', '      const view = await readIdentity(api);\n      console.log(view);'), /logged, stored, copied or sent/],
     ['a stored result', mutated('  return { version };', '  localStorage.setItem(\'version\', version);\n  return { version };'), /logged, stored, copied or sent/],
   ]) {
@@ -200,7 +219,7 @@ test('a built-in-only lifecycle with the reference page passes the Phase 5 evalu
     const result = map.get(RULE)({ fixture: good, files: good.files, eval: { id: 24 } });
     assert.equal(result.status, 'pass', `layer ${layer}: ${result.reason}`);
   }
-  const early = mutated("  if (res.ok !== true) {\n    return { message: res.error?.status === 404 ? UNAVAILABLE : res.error?.message || FAILED };\n  }\n  const outputs = res.outputs;\n  if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) return { message: UNEXPECTED };\n  const version", "  const outputs = res.outputs;\n  if (res.ok !== true) {\n    return { message: res.error?.status === 404 ? UNAVAILABLE : res.error?.message || FAILED };\n  }\n  if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) return { message: UNEXPECTED };\n  const version");
+  const early = mutated("    const res = await api.executeFunction({ name: 'RetrieveVersion' });\n    if (res.ok !== true) {", "    const res = await api.executeFunction({ name: 'RetrieveVersion' });\n    const early = res.outputs;\n    if (res.ok !== true) {");
   const bad = fixture(early);
   const result = PHASE_EXPECTATIONS.get(RULE)({ fixture: bad, files: bad.files, eval: { id: 24 } });
   assert.equal(result.status, 'fail');
@@ -288,8 +307,8 @@ test('a handler or helper handed to an effect, a timer, a frame, a microtask, a 
     ['the effect callback itself', atRender('  React.useEffect(showIdentity as unknown as () => void, []);'), /^WhoAmI: handed to an effect, a memo or a timer/],
     ['an interval of the helper', atRender('  React.useEffect(() => { const id = setInterval(readVersion, 60000, api); return () => clearInterval(id); }, []);'), /^RetrieveVersion: handed to an effect, a memo or a timer/],
     ['an alias handed to a timer', atRender('  const run = showIdentity;\n  React.useEffect(() => { const timer = setTimeout(run, 0); return () => clearTimeout(timer); }, []);'), /^WhoAmI: handed to an effect, a memo or a timer/],
-    ['a ref callback', mutated('      {identity.message && <Text>', '      <div ref={showIdentity as unknown as React.Ref<HTMLDivElement>} />\n      {identity.message && <Text>'), /^WhoAmI: showIdentity is handed somewhere other than its button's onClick/],
-    ['a child component', mutated('      {version.message && <Text>', '      <Watcher onReady={showVersion} />\n      {version.message && <Text>'), /^RetrieveVersion: showVersion is handed somewhere other than its button's onClick/],
+    ['a ref callback', mutated('      <PageErrorBar error={identityState.view.error ?? null} />', '      <div ref={showIdentity as unknown as React.Ref<HTMLDivElement>} />\n      <PageErrorBar error={identityState.view.error ?? null} />'), /^WhoAmI: showIdentity is handed somewhere other than its button's onClick/],
+    ['a child component', mutated('      <PageErrorBar error={versionState.view.error ?? null} />', '      <Watcher onReady={showVersion} />\n      <PageErrorBar error={versionState.view.error ?? null} />'), /^RetrieveVersion: showVersion is handed somewhere other than its button's onClick/],
     ['a subscription, not a rename', atRender('  const unsubscribe = subscribeToRefresh(showIdentity);'), /^WhoAmI: showIdentity is handed somewhere other than its button's onClick/],
     ['a memo factory with a type argument', atRender('  React.useMemo<Promise<void>>(showVersion, []);'), /^RetrieveVersion: handed to an effect, a memo or a timer/],
   ]) {
@@ -310,26 +329,26 @@ test('a handler or helper handed to an effect, a timer, a frame, a microtask, a 
 });
 
 // ── The result after the helper returns it ──────────────────────────────────────────────────────────────────────────────────────────
-// The handler stores the helper's answer in state (`setIdentity(view)`), and the page renders that state. Nothing kept from the result — the
-// state, a ref it is written to, a variable initialized from either — may reach a log, storage, the clipboard, a URL, telemetry or the network,
-// wherever on the page that happens: at render, in an effect, in another handler. A sink that carries none of it (telemetry of something else, a
-// log of the pending flag, a same-named variable in another function) is not the operation's business.
+// The handler stores the helper's answer in state (`setIdentityState({ pending: false, view })`), and the page renders that state. Nothing kept
+// from the result — the state, a ref it is written to, a variable initialized from either — may reach a log, storage, the clipboard, a URL,
+// telemetry or the network, wherever on the page that happens: at render, in an effect, in another handler. A sink that carries none of it
+// (telemetry of something else, a log of the request counter, a same-named variable in another function) is not the operation's business.
 test('a value kept from the result — in state, a ref or a variable — logged, stored, copied, put in a URL or sent anywhere on the page fails in both layers', () => {
   const lastIdentity = (sink) => mutated('  const identityRequest = React.useRef(0);', '  const identityRequest = React.useRef(0);\n  const lastIdentity = React.useRef<IdentityView>({});')
-    .replace('setIdentity(view);\n', 'setIdentity(view);\n      lastIdentity.current = view;\n')
+    .replace('setIdentityState({ pending: false, view });\n', 'setIdentityState({ pending: false, view });\n      lastIdentity.current = view;\n')
     .replace(BEFORE_RENDER, `${sink}\n${BEFORE_RENDER}`);
   for (const [label, source, reason] of [
-    ['the identity state logged at render', atRender('  console.log(identity.identity);'), /^WhoAmI: a value kept from its result \(identity\) must not be logged, stored, copied or sent/],
-    ['the version logged by an effect', atRender('  React.useEffect(() => { if (version.version) console.info(version.version); }, [version]);'), /^RetrieveVersion: a value kept from its result \(version\)/],
-    ['the identity state stored', atRender("  React.useEffect(() => { localStorage.setItem('me', JSON.stringify(identity)); }, [identity]);"), /^WhoAmI: a value kept from its result \(identity\)/],
-    ['a variable derived from the version, sent to telemetry', atRender("  const shown = version.version;\n  React.useEffect(() => { appInsights.trackEvent({ name: 'Version', properties: { shown } }); }, [shown]);"), /^RetrieveVersion: a value kept from its result \(shown\)/],
-    ['the user id put in the URL', atRender("  React.useEffect(() => { if (identity.identity) history.replaceState(null, '', `?user=${identity.identity.userId}`); }, [identity]);"), /^WhoAmI: a value kept from its result \(identity\)/],
-    ['the version sent with fetch', atRender("  React.useEffect(() => { if (version.version) void fetch('/log', { method: 'POST', body: version.version }); }, [version]);"), /^RetrieveVersion: a value kept from its result \(version\)/],
-    ['a copy button of its own', mutated('      {identity.message && <Text>', "      <Button onClick={() => void navigator.clipboard.writeText(identity.identity?.userId ?? '')}>Copy</Button>\n      {identity.message && <Text>"), /^WhoAmI: a value kept from its result \(identity\)/],
+    ['the identity state logged at render', atRender('  console.log(identityState.view.identity);'), /^WhoAmI: a value kept from its result \(identityState\) must not be logged, stored, copied or sent/],
+    ['the version logged by an effect', atRender('  React.useEffect(() => { if (versionState.view.version) console.info(versionState.view.version); }, [versionState]);'), /^RetrieveVersion: a value kept from its result \(versionState\)/],
+    ['the identity state stored', atRender("  React.useEffect(() => { localStorage.setItem('me', JSON.stringify(identityState)); }, [identityState]);"), /^WhoAmI: a value kept from its result \(identityState\)/],
+    ['a variable derived from the version, sent to telemetry', atRender("  const shown = versionState.view.version;\n  React.useEffect(() => { appInsights.trackEvent({ name: 'Version', properties: { shown } }); }, [shown]);"), /^RetrieveVersion: a value kept from its result \(shown\)/],
+    ['the user id put in the URL', atRender("  React.useEffect(() => { if (identityState.view.identity) history.replaceState(null, '', `?user=${identityState.view.identity.userId}`); }, [identityState]);"), /^WhoAmI: a value kept from its result \(identityState\)/],
+    ['the version sent with fetch', atRender("  React.useEffect(() => { if (versionState.view.version) void fetch('/log', { method: 'POST', body: versionState.view.version }); }, [versionState]);"), /^RetrieveVersion: a value kept from its result \(versionState\)/],
+    ['a copy button of its own', mutated('      <PageErrorBar error={identityState.view.error ?? null} />', "      <Button onClick={() => void navigator.clipboard.writeText(identityState.view.identity?.userId ?? '')}>Copy</Button>\n      <PageErrorBar error={identityState.view.error ?? null} />"), /^WhoAmI: a value kept from its result \(identityState\)/],
     ['a ref written from the result, logged at render', lastIdentity('  console.log(lastIdentity.current);'), /^WhoAmI: a value kept from its result \(lastIdentity\)/],
-    ['a module variable assigned the result, logged by an effect', mutated('setVersion(view);\n', 'setVersion(view);\n      lastVersion = view;\n')
+    ['a module variable assigned the result, logged by an effect', mutated('setVersionState({ pending: false, view });\n', 'setVersionState({ pending: false, view });\n      lastVersion = view;\n')
       .replace('const GeneratedComponent', 'let lastVersion: VersionView | undefined;\n\nconst GeneratedComponent')
-      .replace(BEFORE_RENDER, `  React.useEffect(() => { console.log(lastVersion); }, [version]);\n${BEFORE_RENDER}`), /^RetrieveVersion: a value kept from its result \(lastVersion\)/],
+      .replace(BEFORE_RENDER, `  React.useEffect(() => { console.log(lastVersion); }, [versionState]);\n${BEFORE_RENDER}`), /^RetrieveVersion: a value kept from its result \(lastVersion\)/],
   ]) {
     const found = problems(source);
     assert.ok(found.some((p) => reason.test(p)), `${label}: ${JSON.stringify(found)}`);
@@ -337,7 +356,7 @@ test('a value kept from the result — in state, a ref or a variable — logged,
   }
   for (const [label, source] of [
     ['telemetry of something else', atRender("  React.useEffect(() => { appInsights.trackEvent({ name: 'PageViewed', properties: { identity: 'not-recorded' } }); }, []);")],
-    ['a log of the pending flag', atRender("  console.debug('identity pending', identityPending);")],
+    ['a log of the request counter', atRender("  console.debug('identity requests', identityRequest.current);")],
     ['same-named variables in another function', mutated('async function readVersion(', 'function logRows(view: unknown[]) { const res = view.length; console.log(view.length, res); }\n\nasync function readVersion(')],
     ['a constant named like the button attribute', atRender("  const onClick = 'tracked';\n  console.debug('button', onClick);")],
   ]) {

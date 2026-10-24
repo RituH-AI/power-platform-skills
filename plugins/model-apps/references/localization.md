@@ -138,6 +138,12 @@ const isRtlLocale = (code: string): boolean => {
 
 Retrieve these columns: `uilanguageid`, `localeid`, `decimalsymbol`, `numberseparator`, `currencysymbol`, `dateformatstring`, `dateseparator`.
 
+A failed read is reported through the page's `reportPageError` (rules.md → *Missing Error
+Handling*) as a `'read'` and shown in the page's `PageErrorBar` — never logged as the thrown value.
+The page still renders: the formatting helpers below fall back to the browser's locale. The block
+below is a complete `PageBody` on the page error block; the language resolver, the dictionary and
+`translate` above stay top level.
+
 ```typescript
 // Cache user settings on `window` + de-dupe the host double-mount so we retrieve
 // them once (see references/data-caching.md). Keyed globally — settings are
@@ -146,42 +152,57 @@ const winAny = window as unknown as Record<string, unknown>;
 const SETTINGS_KEY = "__ppUserSettings";
 const SETTINGS_INFLIGHT = "__ppUserSettingsInflight";
 
-const [userSettings, setUserSettings] = React.useState<any>(
-  () => (winAny[SETTINGS_KEY] as any) ?? null,
-);
-const dataReady = !!dataApi;   // never depend on `dataApi` itself — see Rule 15
+function PageBody(props: GeneratedComponentProps) {
+  const { dataApi, pageInput } = props;
+  void pageInput;
+  const language = React.useMemo(() => resolvePageLanguage(), []);
+  const [{ userSettings, settingsError }, setSettings] = React.useState<{ userSettings: any; settingsError: PageErrorView | null }>(
+    () => ({ userSettings: (winAny[SETTINGS_KEY] as any) ?? null, settingsError: null }),
+  );
+  const dataReady = !!dataApi;   // never depend on `dataApi` itself — see Rule 15
 
-React.useEffect(() => {
-  if (!dataReady) return;
-  if (winAny[SETTINGS_KEY] !== undefined) { setUserSettings(winAny[SETTINGS_KEY]); return; }
-  const currentUserId = (typeof Xrm !== "undefined" &&
-    Xrm.Utility?.getGlobalContext()?.userSettings?.userId)
-    ?.replace("{", "").replace("}", "");
-  if (!currentUserId) return;
-  let cancelled = false;
+  React.useEffect(() => {
+    if (!dataReady) return;
+    if (winAny[SETTINGS_KEY] !== undefined) {
+      if (userSettings !== winAny[SETTINGS_KEY]) setSettings({ userSettings: winAny[SETTINGS_KEY], settingsError: null });
+      return;
+    }
+    const currentUserId = (typeof Xrm !== "undefined" &&
+      Xrm.Utility?.getGlobalContext()?.userSettings?.userId)
+      ?.replace("{", "").replace("}", "");
+    if (!currentUserId) return;
+    let cancelled = false;
 
-  // Share one in-flight fetch across the two host mounts.
-  let pending = winAny[SETTINGS_INFLIGHT] as Promise<any> | undefined;
-  if (!pending) {
-    pending = dataApi.retrieveRow("usersettings" as any, {
-      id: currentUserId,
-      select: ["uilanguageid", "localeid", "decimalsymbol", "numberseparator",
-               "currencysymbol", "dateformatstring", "dateseparator"] as any,
-    })
-      .then((settings: any) => { winAny[SETTINGS_KEY] = settings; return settings; })
-      .finally(() => { if (winAny[SETTINGS_INFLIGHT] === pending) delete winAny[SETTINGS_INFLIGHT]; });
-    winAny[SETTINGS_INFLIGHT] = pending;
-  }
-  pending
-    .then((settings: any) => { if (!cancelled) setUserSettings(settings); })
-    .catch((error: any) => { if (!cancelled) console.error("Failed to fetch user settings", error); });
+    // Share one in-flight fetch across the two host mounts.
+    let pending = winAny[SETTINGS_INFLIGHT] as Promise<any> | undefined;
+    if (!pending) {
+      pending = dataApi.retrieveRow("usersettings" as any, {
+        id: currentUserId,
+        select: ["uilanguageid", "localeid", "decimalsymbol", "numberseparator",
+                 "currencysymbol", "dateformatstring", "dateseparator"] as any,
+      })
+        .then((settings: any) => { winAny[SETTINGS_KEY] = settings; return settings; })
+        .finally(() => { if (winAny[SETTINGS_INFLIGHT] === pending) delete winAny[SETTINGS_INFLIGHT]; });
+      winAny[SETTINGS_INFLIGHT] = pending;
+    }
+    pending
+      .then((settings: any) => { if (!cancelled) setSettings({ userSettings: settings, settingsError: null }); })
+      // Reported once, never the thrown value; a failure is never cached as settings.
+      .catch((error: unknown) => { if (!cancelled) setSettings({ userSettings: null, settingsError: reportPageError(PAGE_NAME, "loadUserSettings", undefined, error, "read") }); });
 
-  return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [dataReady]);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataReady]);
+
+  return (
+    <div dir={language.isRtl ? "rtl" : "ltr"}>
+      <PageErrorBar error={settingsError} />
+      <Text>{translate("title")}</Text>
+    </div>
+  );
+}
 ```
-
-Provide formatting helpers that use these settings. **NEVER hardcode date formats or currency symbols.**
+Provide formatting helpers that use these settings, inside `PageBody` beside the settings state. **NEVER hardcode date formats or currency symbols.**
 
 **CRITICAL rules for formatting:**
 - Do NOT use `Intl.NumberFormat` with a hardcoded currency code as the primary formatter — always use the helpers below that read from `usersettings`.
