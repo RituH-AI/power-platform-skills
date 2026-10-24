@@ -681,6 +681,35 @@ test('a planned lookup becomes observed only with successful lookup metadata evi
   assert.match(stillPlanned.error, /planned/);
 });
 
+test('evidence that is read is validated whatever its value: JSON null is not "no evidence", and never passes an observed plan', () => {
+  const dir = makeTempDir('genpage-plan-null-evidence-');
+  // Already observed in both documents: nothing to promote, so only the evidence check can refuse it.
+  const observed = (content, options = {}) => verifyPlanProvenance({ planPath: tmpPlan(semWritten()), approvedPlan: semPreview(),
+    lookupMetadataPath: evidenceFile(dir, content), ...options });
+  assert.equal(observed(LOOKUP_EVIDENCE, { requireObservedLookups: true, requireAssumptions: true }).ok, true, 'neighbour: matching evidence');
+  for (const content of ['null', 'false', '0', '[]', '"ok"', '{}']) {
+    const result = observed(content, { requireObservedLookups: true, requireAssumptions: true });
+    assert.equal(result.ok, false, `${content}: refused`);
+    assert.match(result.error, /not a successful get-lookup-metadata\.js answer/, content);
+    assert.equal(observed(content).ok, false, `${content}: refused without the other flags too`);
+  }
+  // Nor does it authorize a promotion.
+  const promoted = verifyPlanProvenance({ planPath: tmpPlan(semWritten()), approvedPlan: semPreview({ lookups: SEM_LOOKUPS('planned') }),
+    lookupMetadataPath: evidenceFile(dir, 'null') });
+  assert.equal(promoted.ok, false);
+  // Fixture 26's own approved preview and written plan, both already observed, with a file holding only `null`.
+  const fixture = path.join(__dirname, '..', '..', '..', '..', 'evals', 'model-apps', 'genpage', 'fixtures', '26-customer-lookup');
+  const fixturePlan = tmpPlan(fs.readFileSync(path.join(fixture, 'genpage-plan.md'), 'utf8'));
+  const approved = fs.readFileSync(path.join(fixture, 'approved-plan.md'), 'utf8');
+  const withEvidence = verifyPlanProvenance({ planPath: fixturePlan, approvedPlan: approved, requireAssumptions: true,
+    requireObservedLookups: true, lookupMetadataPath: path.join(fixture, 'lookup-metadata.json') });
+  assert.equal(withEvidence.ok, true, `neighbour: fixture 26 with its own evidence: ${withEvidence.error}`);
+  const fixtureResult = verifyPlanProvenance({ planPath: fixturePlan, approvedPlan: approved, requireAssumptions: true,
+    requireObservedLookups: true, lookupMetadataPath: evidenceFile(dir, 'null') });
+  assert.equal(fixtureResult.ok, false, 'fixture 26 with null evidence');
+  assert.match(fixtureResult.error, /not a successful get-lookup-metadata\.js answer/);
+});
+
 test('the CLI takes the semantic options as declared flags and refuses an unknown or misspelled one', () => {
   const { spawnSync } = require('node:child_process');
   const script = path.join(__dirname, '..', 'genpage-plan-provenance.js');

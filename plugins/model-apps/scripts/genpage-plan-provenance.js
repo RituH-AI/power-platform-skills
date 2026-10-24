@@ -291,26 +291,37 @@ function createSemanticsProblems({ approvedPlan, written, targets, requireAssump
     problems.push(...requiredContractProblems(approvedRead, targets, 'the approved plan').map((p) => p.message));
     problems.push(...requiredContractProblems(writtenRead, targets, 'the written plan').map((p) => p.message));
   }
-  let evidence = null;
+  // "Read" and "valid" are kept apart from the value: a file holding JSON `null` (or `false`, `0`, `[]`) was read and is
+  // validated like any other answer — it is not "no evidence supplied". Only evidence that validated authorizes a
+  // `planned` → `observed` promotion, and --require-observed-lookups needs exactly that, not merely a path.
+  let evidence;
+  let evidenceRead = false;
+  let evidenceValid = false;
   if (lookupMetadataPath) {
     try {
       const file = path.resolve(lookupMetadataPath);
       if (!fs.lstatSync(file).isFile()) throw new Error(`${file} is not a regular file (a link, junction or folder)`);
       evidence = JSON.parse(fs.readFileSync(file, 'utf8'));
+      evidenceRead = true;
     } catch (e) {
       problems.push(`could not read the lookup metadata evidence: ${e.message}`);
     }
-    if (evidence !== null) problems.push(...lookupEvidenceProblems(writtenRead, evidence).map((p) => p.message));
+    if (evidenceRead) {
+      const evidenceProblems = lookupEvidenceProblems(writtenRead, evidence).map((p) => p.message);
+      problems.push(...evidenceProblems);
+      evidenceValid = evidenceProblems.length === 0;
+    }
   }
   if (requireObservedLookups) {
     if (!lookupMetadataPath) problems.push('--require-observed-lookups needs --lookup-metadata <path>: the successful lookup metadata read');
+    else if (!evidenceValid) problems.push('--require-observed-lookups needs lookup metadata evidence that is a successful get-lookup-metadata.js answer every observed lookup matches');
     for (const [file, page] of writtenRead.pages) {
       for (const row of page.lookups && !page.lookups.sentinel ? page.lookups.rows.values() : []) {
         if (row.state !== 'observed') problems.push(`${file} ${row.table}.${row.column} is still planned: read its metadata after provisioning and reconcile the plan before generation`);
       }
     }
   }
-  problems.push(...compareSemantics(approvedRead, writtenRead, { promotions: evidence !== null && evidence.ok === true }));
+  problems.push(...compareSemantics(approvedRead, writtenRead, { promotions: evidenceValid }));
   const contract = hasSemanticContract(approvedRead) || hasSemanticContract(writtenRead);
   return { problems, hash: contract ? sha256(JSON.stringify(semanticRecord(writtenRead))) : null };
 }
