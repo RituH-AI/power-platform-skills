@@ -150,7 +150,7 @@ function parameterMatches(value, kind, prefix) {
 function existingRecordId(value, prefix, call) {
   if (literalString(value) !== null) return false;
   return (/^[\w$]+$/.test(value) && parameterMatches(value, 'Guid', prefix))
-    || Boolean(call && stringRecordMemberIsInput(call.mask, call.scopes, value, call.start));
+    || Boolean(call && stringRecordMemberIsInput(call.mask, call.scopes, value, call.start, call.code));
 }
 
 function lookupParameterProblems(parameters, lookups, operation, prefix, call) {
@@ -200,7 +200,7 @@ function runtimeProblems(code, bindings, declaredOutputs, lookupMetadata, author
     const prefixMask = call.mask.slice(call.scope.start, call.start);
     const post = code.slice(call.end + 1, call.scope.end);
     const postMask = call.mask.slice(call.end + 1, call.scope.end);
-    if (!receiverIsDataApi(call.mask, call.scopes, call.receiver, call.start)) {
+    if (!receiverIsDataApi(call.mask, call.scopes, call.receiver, call.start, call.code)) {
       problems.push(`${name}: ${call.method} is called on ${call.receiver || 'an expression'}, which is not the page's dataApi prop`);
     }
     // The presence check must test the same object the call uses; a check on another object proves nothing.

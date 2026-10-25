@@ -534,7 +534,7 @@ function assertKnownApiReceivers(code) {
   const calls = actionCalls(code);
   assert.ok(calls.length > 0);
   for (const call of calls) {
-    assert.equal(receiverIsDataApi(call.mask, call.scopes, call.receiver, call.start), true,
+    assert.equal(receiverIsDataApi(call.mask, call.scopes, call.receiver, call.start, call.code), true,
       `${call.scope.name}: record-value evidence must not change the shared dataApi receiver proof`);
   }
 }
