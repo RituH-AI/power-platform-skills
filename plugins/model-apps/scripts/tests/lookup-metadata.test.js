@@ -92,6 +92,23 @@ test('an attribute inventory that cannot be complete fails the read: no primary 
   ]) {
     assert.throws(() => tableLookups(metadata, ROWS), (err) => err.code === 'LOOKUP_METADATA_INCOMPLETE', label);
   }
+  // A relationship column the read does not classify, or classifies against its Targets, is incomplete — never "not a lookup".
+  const typed = (column, attributeType, targets) => ({ ...OPPORTUNITY, attributes: OPPORTUNITY.attributes
+    .map((entry) => (entry.logicalName === column ? { logicalName: column, ...(attributeType === undefined ? {} : { attributeType }), ...(targets ? { targets } : {}) } : entry)) });
+  for (const [label, metadata] of [
+    ['a Customer lookup whose type the read did not state (the SDK says Unknown)', typed('customerid', 'Unknown', ['account', 'contact'])],
+    ['a lookup with no type at all', typed('customerid', undefined, ['account', 'contact'])],
+    ['an unclassified column with no Targets either', typed('customerid', 'Unknown')],
+    ['a type that is not a name', typed('parentaccountid', 7, ['account'])],
+    ['a String column with lookup targets', typed('customerid', 'String', ['account', 'contact'])],
+  ]) {
+    assert.throws(() => tableLookups(metadata, ROWS), (err) => err.code === 'LOOKUP_METADATA_INCOMPLETE', label);
+  }
+  // A known non-lookup relationship column without Targets, and a party list with its Targets, stay out of the lookups as before.
+  const withExtra = { ...OPPORTUNITY, attributes: [...OPPORTUNITY.attributes, attribute('requiredattendees', 'PartyList', ['contact'])] };
+  const extraRows = [...ROWS, relationship('opportunity_owneridtype', 'account', 'owneridtype', 'accountid', 'owneridtype_account'),
+    relationship('opportunity_attendees', 'contact', 'requiredattendees', 'contactid', 'requiredattendees_contact')];
+  assert.deepEqual(tableLookups(withExtra, extraRows).lookups.map((lookup) => lookup.column), ['customerid', 'ownerid', 'parentaccountid']);
   // Neighbour: a table with no lookups and no relationships is a complete, empty answer.
   assert.deepEqual(tableLookups({ ...OPPORTUNITY, attributes: [attribute('opportunityid', 'Uniqueidentifier'), attribute('name', 'String')] }, []).lookups, []);
 });

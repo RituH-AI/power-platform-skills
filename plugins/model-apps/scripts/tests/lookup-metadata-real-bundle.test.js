@@ -88,6 +88,18 @@ test('REAL BUNDLE: an incomplete main metadata answer fails the whole discovery,
   }
 });
 
+test('REAL BUNDLE: a relationship column the read does not classify, or classifies against its Targets, fails the whole discovery', async () => {
+  const retype = (change) => (body) => ({ ...body, Attributes: ATTRIBUTES.map((entry) => (entry.LogicalName === 'customerid' ? change({ ...entry }) : entry)) });
+  const untyped = retype((entry) => { delete entry.AttributeType; return entry; });
+  for (const [label, options] of [
+    ['the Customer attribute without its AttributeType, which the SDK reads as Unknown', { main: untyped }],
+    ['the same, and the Targets cast silent about it', { main: untyped, lookupTargets: TARGETS.filter((entry) => entry.LogicalName !== 'customerid') }],
+    ['the Customer attribute typed String while the cast states its Targets', { main: retype((entry) => ({ ...entry, AttributeType: 'String' })) }],
+  ]) {
+    await assert.rejects(readLookups(ENV, { tables: ['opportunity'] }, transport(options)), (err) => err.code === 'LOOKUP_METADATA_INCOMPLETE', label);
+  }
+});
+
 test('REAL BUNDLE: a refused targets read, a refused second page, or a missing table fails the whole discovery', async () => {
   for (const [label, options, tables, code] of [
     ['the SDK\'s targets read refused', { lookupTargets: { status: 503, headers: {}, body: { error: { code: '0x80040216', message: 'Service unavailable.' } } } }, ['opportunity'], 'LOOKUP_METADATA_INCOMPLETE'],

@@ -15,14 +15,22 @@
 // Nothing here manufactures a path (`ownerid_team`, `ownerid_systemuser`) or splits a navigation name on `_` to find a table.
 //
 // Every failure is a failure of the whole read — a missing table, a lookup without targets, an attribute inventory that cannot be
-// complete (no primary id column, or a relationship column it does not list), a refused or malformed relationship page — so a
-// caller never receives a shorter candidate list as if it were complete.
+// complete (no primary id column, or a relationship column it does not list or does not classify), a refused or malformed
+// relationship page — so a caller never receives a shorter candidate list as if it were complete.
 
 const { readRelationshipsOf } = require('./relationship-metadata.js');
 
 // The attribute types that are lookups (AttributeTypeCode names, as the SDK projects them).
 // https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/attributetypecode
 const LOOKUP_TYPES = new Set(['Lookup', 'Customer', 'Owner']);
+// Every AttributeTypeCode name a metadata read can state (same page). The SDK projects a missing raw AttributeType as 'Unknown',
+// which is none of them, so a column it names must not be read as "not a lookup".
+const ATTRIBUTE_TYPES = new Set(['BigInt', 'Boolean', 'CalendarRules', 'Customer', 'DateTime', 'Decimal', 'Double', 'EntityName',
+  'Integer', 'Lookup', 'ManagedProperty', 'Memo', 'Money', 'Owner', 'PartyList', 'Picklist', 'State', 'Status', 'String',
+  'Uniqueidentifier', 'Virtual']);
+// The types whose metadata is a LookupAttributeMetadata and so may carry Targets: the three lookups, and a party list (not a
+// lookup this reader lists). Targets on any other type contradict its classification.
+const TARGET_TYPES = new Set([...LOOKUP_TYPES, 'PartyList']);
 const LOGICAL_NAME = /^[a-z_][a-z0-9_]*$/;
 
 function lookupError(code, message) {
@@ -49,10 +57,22 @@ function tableLookups(metadata, rows) {
   if (!LOGICAL_NAME.test(primaryId) || !inventory.has(primaryId)) {
     throw lookupError('LOOKUP_METADATA_INCOMPLETE', `${table}: the metadata read did not state the table's primary id column among its attributes`);
   }
+  // A relationship column is classified, too: an unknown or malformed type (the SDK's 'Unknown' for a missing AttributeType),
+  // or Targets on a type that cannot carry them, is an incomplete answer — never a column silently left out as "not a lookup".
+  // A known non-lookup type without Targets is kept out of the lookups as before.
+  const byColumn = new Map(attributes.filter(Boolean).map((attribute) => [String(attribute.logicalName || '').toLowerCase(), attribute]));
   for (const row of rows) {
     const column = String(row.referencingAttribute || '').toLowerCase();
     if (!inventory.has(column)) {
       throw lookupError('LOOKUP_METADATA_INCOMPLETE', `${table}: relationship ${row.schemaName || '?'} references ${column || '?'}, which the attribute inventory does not list — an incomplete attribute read`);
+    }
+    const attribute = byColumn.get(column);
+    const type = attribute.attributeType;
+    if (typeof type !== 'string' || !ATTRIBUTE_TYPES.has(type)) {
+      throw lookupError('LOOKUP_METADATA_INCOMPLETE', `${table}.${column}: relationship ${row.schemaName || '?'} references it, but the metadata read did not classify it (attribute type ${JSON.stringify(type ?? null)})`);
+    }
+    if (!TARGET_TYPES.has(type) && Array.isArray(attribute.targets) && attribute.targets.length) {
+      throw lookupError('LOOKUP_METADATA_INCOMPLETE', `${table}.${column}: the metadata read classifies it as ${type}, yet states lookup targets for it`);
     }
   }
   const lookups = [];
