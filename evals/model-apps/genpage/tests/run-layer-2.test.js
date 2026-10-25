@@ -25,22 +25,6 @@ function runRunner(args, nodeArgs = []) {
   return { code: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
-// Every page renders inside the page error boundary (references/rules.md, Critical Rule 22), and the common assertion
-// grades every page that is not an unchanged pre-contract capture. The small pages these tests write are therefore put on
-// the canonical block — cut from rules.md, never retyped — around the component each test is about:
-// `const GeneratedComponent = (props) => { … };` becomes `function PageBody(props) { … }` and the boundary wrapper.
-const RULES = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'plugins', 'model-apps', 'references', 'rules.md'), 'utf8').replace(/\r\n/g, '\n');
-const ERRORS = RULES.slice(RULES.indexOf('\n### 2. Missing Error Handling\n'), RULES.indexOf('\n### 3. '));
-const FOUNDATION = [...ERRORS.matchAll(/```tsx\n([\s\S]*?)\n```/g)].map((match) => match[1]).find((block) => /\bfunction reportPageError\(/.test(block));
-const BLOCK = FOUNDATION.slice(FOUNDATION.indexOf('type PageErrorKind'), FOUNDATION.indexOf('function PageBody('));
-function bounded(page) {
-  const head = 'const GeneratedComponent = (props) => {';
-  const tail = /\};\s*\nexport default GeneratedComponent;\s*$/;
-  assert.ok(page.includes(head) && tail.test(page), 'the test page declares the component the helper wraps');
-  return page.replace(head, `${BLOCK}\nfunction PageBody(props) {`)
-    .replace(tail, '}\n\nconst GeneratedComponent = (props) => (\n  <PageErrorBoundary>\n    <PageBody {...props} />\n  </PageErrorBoundary>\n);\n\nexport default GeneratedComponent;');
-}
-
 // ---------- end-to-end: green-path fixture ----------
 
 test('runner: exits 0 when fixture passes all assertions', () => {
@@ -48,7 +32,7 @@ test('runner: exits 0 when fixture passes all assertions', () => {
   try {
     // Minimal v2.1-compliant single-file mock page.
     writeFixture(root, '2-mock-clean', {
-      'page.tsx': bounded(`import { makeStyles, tokens } from '@fluentui/react-components';
+      'page.tsx': `import { makeStyles, tokens } from '@fluentui/react-components';
 const useStyles = makeStyles({ root: { padding: tokens.spacingHorizontalM } });
 const data = [{ a: 1, b: 'x' }, { a: 2, b: 'y' }];
 const GeneratedComponent = (props) => {
@@ -57,7 +41,7 @@ const GeneratedComponent = (props) => {
   const styles = useStyles();
   return <div className={styles.root}>{data.length}</div>;
 };
-export default GeneratedComponent;`),
+export default GeneratedComponent;`,
     });
     const { code } = runRunner(['--fixtures', root, '--eval', '2']);
     assert.equal(code, 0);
@@ -112,18 +96,18 @@ test('runner: --tier smoke filters to smoke evals only', () => {
   try {
     // eval 2 is smoke; eval 4 is full
     writeFixture(root, '2-smoke', {
-      'page.tsx': bounded(`import { makeStyles } from '@fluentui/react-components';
+      'page.tsx': `import { makeStyles } from '@fluentui/react-components';
 const useStyles = makeStyles({ r: {} });
 const data = [{ a: 1 }, { a: 2 }];
 const GeneratedComponent = (props) => { const { pageInput } = props; void pageInput; return <div/>; };
-export default GeneratedComponent;`),
+export default GeneratedComponent;`,
     });
     writeFixture(root, '4-full', {
-      'page.tsx': bounded(`import { makeStyles } from '@fluentui/react-components';
+      'page.tsx': `import { makeStyles } from '@fluentui/react-components';
 const useStyles = makeStyles({ r: {} });
 const data = [{ a: 1 }, { a: 2 }];
 const GeneratedComponent = (props) => { const { pageInput } = props; void pageInput; return <div/>; };
-export default GeneratedComponent;`),
+export default GeneratedComponent;`,
     });
     const { code, stdout } = runRunner(['--fixtures', root, '--tier', 'smoke']);
     assert.equal(code, 0);
@@ -140,11 +124,11 @@ test('runner: --eval <id> runs only that eval id', () => {
   const root = mkTempFixturesDir();
   try {
     writeFixture(root, '2-x', {
-      'page.tsx': bounded(`import { makeStyles } from '@fluentui/react-components';
+      'page.tsx': `import { makeStyles } from '@fluentui/react-components';
 const useStyles = makeStyles({ r: {} });
 const data = [{ a: 1 }, { a: 2 }];
 const GeneratedComponent = (props) => { const { pageInput } = props; void pageInput; return <div/>; };
-export default GeneratedComponent;`),
+export default GeneratedComponent;`,
     });
     writeFixture(root, '4-y', {
       'page.tsx': `// won't be selected`,
@@ -173,11 +157,11 @@ test('runner: skips folders without numeric prefix', () => {
   try {
     writeFixture(root, 'not-a-fixture', { 'page.tsx': `export default x;` });
     writeFixture(root, '2-valid', {
-      'page.tsx': bounded(`import { makeStyles } from '@fluentui/react-components';
+      'page.tsx': `import { makeStyles } from '@fluentui/react-components';
 const useStyles = makeStyles({ r: {} });
 const data = [{ a: 1 }, { a: 2 }];
 const GeneratedComponent = (props) => { const { pageInput } = props; void pageInput; return <div/>; };
-export default GeneratedComponent;`),
+export default GeneratedComponent;`,
     });
     const { code, stdout } = runRunner(['--fixtures', root]);
     assert.equal(code, 0);
@@ -194,11 +178,11 @@ test('runner: emits TAP version 13 header and aggregate counts', () => {
   const root = mkTempFixturesDir();
   try {
     writeFixture(root, '2-x', {
-      'page.tsx': bounded(`import { makeStyles } from '@fluentui/react-components';
+      'page.tsx': `import { makeStyles } from '@fluentui/react-components';
 const useStyles = makeStyles({ r: {} });
 const data = [{ a: 1 }, { a: 2 }];
 const GeneratedComponent = (props) => { const { pageInput } = props; void pageInput; return <div/>; };
-export default GeneratedComponent;`),
+export default GeneratedComponent;`,
     });
     const { stdout } = runRunner(['--fixtures', root]);
     assert.match(stdout, /^TAP version 13/m);
@@ -218,11 +202,11 @@ test('fixture-loader: excludes RuntimeTypes.ts from check', () => {
   const root = mkTempFixturesDir();
   try {
     writeFixture(root, '2-rt-test', {
-      'page.tsx': bounded(`import { makeStyles } from '@fluentui/react-components';
+      'page.tsx': `import { makeStyles } from '@fluentui/react-components';
 const useStyles = makeStyles({ r: {} });
 const data = [{ a: 1 }, { a: 2 }];
 const GeneratedComponent = (props) => { const { pageInput } = props; void pageInput; return <div/>; };
-export default GeneratedComponent;`),
+export default GeneratedComponent;`,
       'RuntimeTypes.tsx': `// This file should be excluded from checks - it has TODO`,
     });
     const { code, stdout } = runRunner(['--fixtures', root, '--eval', '2']);
@@ -238,7 +222,7 @@ test('runner: the registered Phase-5b column checker executes and can fail the r
   const root = mkTempFixturesDir();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeFixture(root, '1-phase-5b', {
-    'page.tsx': bounded(`import { makeStyles } from '@fluentui/react-components';
+    'page.tsx': `import { makeStyles } from '@fluentui/react-components';
 const useStyles = makeStyles({ root: {} });
 const data = [{ name: 'First' }, { name: 'Second' }];
 const GeneratedComponent = (props) => {
@@ -247,7 +231,7 @@ const GeneratedComponent = (props) => {
   const styles = useStyles();
   return <div className={styles.root}>{data.length}</div>;
 };
-export default GeneratedComponent;`),
+export default GeneratedComponent;`,
   });
   const args = ['--fixtures', root, '--eval', '1'];
   const green = runRunner(args);
@@ -297,50 +281,4 @@ test('runner routing and lookup functions expose every registered phase check', 
   assert.equal(code.isPhase5Expectation('Edit Phase 5: not routed by this layer'), false);
   assert.equal(workflow.getExpectationCheck('Phase 1: unregistered'), undefined);
   assert.equal(code.getExpectationCheck('Phase 1: unregistered'), undefined);
-});
-
-// ---------- the page error contract: real callbacks, real exit statuses ----------
-
-const FIXTURES = path.join(__dirname, '..', 'fixtures');
-const PAGE_ERROR = 'Generated .tsx routes every supported dataApi failure through reportPageError and mounts PageErrorBoundary around PageBody';
-const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-test('runner: a page that is no unchanged pre-contract capture is graded by the page error contract, and one without the boundary fails the run', (t) => {
-  const root = mkTempFixturesDir();
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeFixture(root, '2-unbounded', {
-    'page.tsx': `import { makeStyles } from '@fluentui/react-components';
-const useStyles = makeStyles({ r: {} });
-const data = [{ a: 1 }, { a: 2 }];
-const GeneratedComponent = (props) => { const { pageInput } = props; void pageInput; return <div/>; };
-export default GeneratedComponent;`,
-  });
-  const { code, stdout } = runRunner(['--fixtures', root, '--eval', '2']);
-  assert.equal(code, 1, stdout);
-  assert.match(stdout, new RegExp(`not ok \\d+ - ${escape(PAGE_ERROR)}`));
-  assert.match(stdout, /no top-level function reportPageError/);
-});
-
-test('runner: fixture 27 is graded by the real callbacks, and a copy whose Action skips a guard fails with exit 1', (t) => {
-  const green = runRunner(['--eval', '27']);
-  assert.equal(green.code, 0, green.stdout + green.stderr);
-  const scenario = 'Phase 5: The page reports its cached read, awaited read and Custom API Action failures through reportPageError';
-  for (const text of [PAGE_ERROR, scenario]) {
-    const line = green.stdout.split('\n').find((entry) => entry.includes(text));
-    assert.ok(line && /^\s*ok \d+ - /.test(line) && !/# SKIP/.test(line), `graded and passing, not skipped: ${line}`);
-  }
-  const root = mkTempFixturesDir();
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const copy = path.join(root, '27-page-error-helper');
-  fs.cpSync(path.join(FIXTURES, '27-page-error-helper'), copy, { recursive: true });
-  const page = path.join(copy, 'order-approvals.tsx');
-  const guard = "      if (res.error?.code === 'indeterminate') { setApprovalFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'indeterminate')); return; }\n";
-  const source = fs.readFileSync(page, 'utf8').replace(/\r\n/g, '\n');
-  assert.ok(source.includes(guard), 'the fixture page checks the code-only indeterminate result');
-  fs.writeFileSync(page, source.replace(guard, ''));
-  const red = runRunner(['--fixtures', root, '--eval', '27']);
-  assert.equal(red.code, 1, red.stdout);
-  assert.match(red.stdout, new RegExp(`not ok \\d+ - ${escape(PAGE_ERROR)}`));
-  assert.match(red.stdout, new RegExp(`not ok \\d+ - ${escape(scenario)}`));
-  assert.match(red.stdout, /res\.error\?\.code === 'indeterminate'/);
 });

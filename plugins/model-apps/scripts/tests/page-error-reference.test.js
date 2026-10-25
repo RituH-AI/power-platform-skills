@@ -1,9 +1,8 @@
 'use strict';
 // The page error contract's canonical code, as references/rules.md publishes it ("Missing Error Handling"): the one
 // reporter every failed data operation goes through, the English error copy, the error bar, the render boundary and the
-// default-export wrapper. A generated page copies that block, and the page error evaluator
-// (evals/model-apps/genpage/lib/page-error-evidence.js) holds a page's reporter to it, so these tests run the block's
-// ACTUAL source rather than a restatement of it: it is transpiled with the TypeScript the plugin vendors (the compile the
+// default-export wrapper. A generated page copies that block, so these tests run the block's ACTUAL source rather than
+// a restatement of it: it is transpiled with the TypeScript the plugin vendors (the compile the
 // SDK applies to a page — a transpile, so this is not a type check) and evaluated against a stand-in React that only
 // builds element objects. Nothing here renders through real React; the element trees are inspected as data.
 const test = require('node:test');
@@ -330,9 +329,9 @@ test('Critical Rule 22 states the one error contract, and Rule 3 makes the bound
   assert.match(rule3, /The one exception is a single top-level React class, `PageErrorBoundary` \(Rule 22\)/);
   assert.match(rule3, /Event handlers and loaders that close over a component's state stay inside that component/);
   assert.match(rule3, /No new library or runtime dependency/);
-  // The section the rule points at states what the eval check reads and what it does not.
+  // The section the rule points at states what the eval check reads and what it does not: today, nothing.
   assert.match(squashed(MISSING_ERROR_HANDLING), /What the eval check reads, and what it does not\./);
-  assert.match(squashed(MISSING_ERROR_HANDLING), /It does not read `loadMoreRows`/);
+  assert.match(squashed(MISSING_ERROR_HANDLING), /The eval suite does not grade a page's error handling yet/);
 });
 
 test('rules.md Component Structure and both builder templates mount PageBody inside the boundary', () => {

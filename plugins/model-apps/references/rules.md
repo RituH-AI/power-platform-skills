@@ -1282,26 +1282,11 @@ reads that load together either go through named helpers that each catch, report
 `status === 'rejected'` branch that reports each item's `reason` before the one update. A single `catch`
 around `Promise.all` hides every failure after the first.
 
-**What the eval check reads, and what it does not.** The page error check of the eval suite reads a page's
-source; it never runs it. It accepts a closed set of shapes — an awaited call (not chained) in a `try` whose
-`catch` reports in a statement of its own, a named helper that returns `{ error: view }` to a caller that stores it,
-the cached promise of `references/data-caching.md`, a guarded Custom API, built-in or connector result, the two
-grouped-read forms above — and refuses anything else as unverifiable, never as a pass. Before a report, only a
-staleness guard may return — a request counter (`requestId !== request.current`), the context the page shows
-(`recordId !== approvalFor.current`), or an unmounted or cancelled flag cleared in an effect's cleanup; a
-double-submit latch or page data is not one. It requires this block's
-reporter line for line (comments, indentation and line endings aside; only the telemetry insertion may be
-added), a code and message that are the caught value or the `error` of the result an awaited call
-returned, left unchanged (not reassigned, written, aliased or handed on first), a literal kind as the
-fifth argument that matches what failed (a rejected `createRow`,
-`updateRow`, `deleteRow` or `executeAction` is `'write'`; `'network'` only in a Custom API result's
-network check after both indeterminate checks; `'indeterminate'` only in those two checks; `'render'` only
-in the boundary), a view that reaches a rendered `PageErrorBar`, the boundary class copied unchanged (a
-second `render()` overrides the first) and the boundary wrapper. Whether a
-Function or a connector operation is a read is the plan's, so a `'read'` there passes but the grade names
-it as not scored. It does not read `loadMoreRows` (report its failure the same way all the same) or the
-synchronous `setPageOutput`, it does not prove that a request is current or that a retry is safe, and it
-cannot tell whether the maker asked for telemetry.
+**What the eval check reads, and what it does not.** The eval suite does not grade a page's error handling
+yet: no check proves that every failure of a page reaches `reportPageError`, that the view it returns reaches a
+rendered `PageErrorBar`, that a request is current, or that a retry is safe. Write each page to this section
+as it stands — the block copied unchanged, each report a statement of its failure path's own block, a literal
+kind that matches what failed — including `loadMoreRows` failures.
 
 ### 3. Inline Styles Instead of makeStyles
 Use `makeStyles` with tokens.

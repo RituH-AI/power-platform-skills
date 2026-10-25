@@ -35,7 +35,6 @@
     "Generated .tsx uses Fluent UI icons in unsized form (e.g., `AddRegular`, not `Add24Regular`)",
     "Every named import from `@fluentui/react-icons` in the generated .tsx appears in references/verified-icons.txt — no hallucinated icon names",
     "Generated .tsx wraps async `dataApi` calls in try-catch (Dataverse pages only)",
-    "Generated .tsx routes every supported dataApi failure through reportPageError and mounts PageErrorBoundary around PageBody",
     "Generated .tsx does NOT include any `TODO`, `FIXME`, ellipsis placeholders, or incomplete function bodies",
     "Generated .tsx for lookup display names uses `@OData.Community.Display.V1.FormattedValue` annotations, not lookup-name fields in $select",
     "For DataGrids, generated .tsx imports `createTableColumn` from `@fluentui/react-components` and configures column sizing (columnSizingOptions or resizableColumns)",
@@ -605,8 +604,7 @@
         "declared_outputs": { "cnt_ApproveOrder": ["NewStatus"] }
       },
       "expectations": [
-        "Phase 1 (Planner): The newly authored plan records its assumptions and every page's data semantics and lookup metadata, the approved preview carries the same records, and provenance is verified with --require-assumptions",
-        "Phase 5: The page reports its cached read, awaited read and Custom API Action failures through reportPageError (both indeterminate forms before network before any other failure, a rejection as a write) into rendered error bars inside PageErrorBoundary"
+        "Phase 1 (Planner): The newly authored plan records its assumptions and every page's data semantics and lookup metadata, the approved preview carries the same records, and provenance is verified with --require-assumptions"
       ]
     }
   ]

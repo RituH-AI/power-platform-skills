@@ -473,6 +473,6 @@ function nestedDefinitionProblems(content) {
 module.exports = {
   sourceView, jsxElements, jsxTextRuns, declarationSource, matchingClose, patternNames,
   namedFunctions, nestedDefinitionProblems, withoutComments,
-  // The page error evaluator (page-error-evidence.js) reads function scopes through this reader instead of a second one.
+  // Exported so that a check needing a page's function scopes reads them through this reader instead of a second one.
   functionScopes,
 };

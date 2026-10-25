@@ -1,17 +1,16 @@
 'use strict';
-// The teaching examples a page builder copies, graded by the evaluators a generated page meets. Each reference shows a
-// whole PageBody (and its top-level helpers) built on the page error block references/rules.md publishes ("Missing Error
-// Handling"); here that block — copied unchanged up to its own example PageBody — and the document's code are put together
-// into the complete page a builder would write, and that page must pass the page error contract
-// (lib/page-error-evidence.js) and, for a Custom API, the runtime check of lib/custom-api-contract.js. The built-in
-// operations' generated call is graded the same way in built-in-operation-pattern.test.js. A document that drifts back to
-// a try/catch that sets a string, logs the thrown value or calls trackException itself fails here, not in a generated page.
-// Each page is also transpiled with the TypeScript the plugin vendors — a syntax check, not a type check.
+// The teaching examples a page builder copies. Each reference shows a whole PageBody (and its top-level helpers) built on
+// the page error block references/rules.md publishes ("Missing Error Handling"); here that block — copied unchanged up to
+// its own example PageBody — and the document's code are put together into the complete page a builder would write, which
+// must transpile with the TypeScript the plugin vendors (a syntax check, not a type check) and, for a Custom API, pass the
+// runtime check of lib/custom-api-contract.js. The built-in operations' generated call is graded the same way in
+// built-in-operation-pattern.test.js. A document that drifts back to a try/catch that sets a string, logs the thrown value
+// or calls trackException itself fails here. Whether a page's failures all reach its reporter is not graded (EVAL_GUIDE.md);
+// the approval tests at the end run the examples' own code.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { pageErrorProblems } = require('../lib/page-error-evidence.js');
 const { runtimeProblems } = require('../lib/custom-api-contract.js');
 const { loadVendoredTypeScript } = require('../../../../plugins/model-apps/scripts/lib/typescript-compiler.js');
 
@@ -50,10 +49,6 @@ function parses(source, label) {
   assert.deepEqual((diagnostics || []).map((entry) => typescript.flattenDiagnosticMessageText(entry.messageText, '\n')), [], `${label} parses`);
 }
 // One textual change; a change that does not apply is a broken test, never a pass.
-function swap(source, from, to) {
-  assert.ok(source.includes(from), `the example holds: ${from}`);
-  return source.replace(from, to);
-}
 
 const DOCS = {
   caching: read('references', 'data-caching.md'),
@@ -83,11 +78,10 @@ const PAGES = {
   'page-telemetry.md failed-save report': TELEMETRY_SAVE && complete(TELEMETRY_SAVE, withTelemetry(PREFIX)),
 };
 
-test('each reference shows a complete PageBody, and each passes the page error contract as a whole page', () => {
+test('each reference shows a complete PageBody built on the page error block, and each whole page parses', () => {
   assert.ok(FOUNDATION, 'rules.md publishes the canonical page error block');
   for (const [label, page] of Object.entries(PAGES)) {
     assert.ok(page, `${label}: the reference shows a whole PageBody built on the page error block`);
-    assert.deepEqual(pageErrorProblems(page), [], label);
     parses(page, label);
   }
 });
@@ -178,43 +172,16 @@ test('the documents no longer teach a bare try/catch error string or a logged th
   }
 });
 
-test('negative controls: each example fails the contract when its failure path is taken away', () => {
-  const problems = (source) => pageErrorProblems(source);
-  for (const [label, source, reason] of [
-    ['a list read whose catch stores a string', swap(PAGES['data-caching.md Pattern 1 (list)'],
-      'error: reportPageError(PAGE_NAME, "loadRecords", undefined, failure, "read", retryLoad) }',
-      'error: null }'), /does not report through reportPageError/],
-    ['an Action that skips the code-only indeterminate result', swap(PAGES['custom-api.md Action'],
-      "      if (res.error?.code === 'indeterminate') { setActionFailure(reportPageError(PAGE_NAME, 'approveOrder', res.error?.code, res.error?.message, 'indeterminate')); return; }\n",
-      ''), /res\.error\?\.code === 'indeterminate'/],
-    ['an operation response read before ok is checked', swap(PAGES['connectors.md REST operation'],
-      "      if (!response.ok) { setWeather({ weather: null, error: reportPageError(PAGE_NAME, 'loadWeather', undefined, undefined, 'read', retryWeather) }); return; }\n",
-      ''), /response is not checked/],
-    ['a settings read that logs the error instead', swap(PAGES['localization.md usersettings read'],
-      'setSettings({ userSettings: null, settingsError: reportPageError(PAGE_NAME, "loadUserSettings", undefined, error, "read") })',
-      'console.error("settings", error)'), /does not report through reportPageError/],
-    ['a page that calls trackException itself', swap(PAGES['page-telemetry.md failed-save report'],
-      "            setSave({ saving: false, error: reportPageError(PAGE_NAME, 'saveOrder', undefined, error, 'write', undefined, appInsights) });",
-      "            (appInsights as any)?.trackException?.(error);\n            setSave({ saving: false, error: reportPageError(PAGE_NAME, 'saveOrder', undefined, error, 'write', undefined, appInsights) });"), /only reportPageError may call trackException/],
-    ['a write that offers a retry', swap(PAGES['custom-api.md Action'],
-      "res.error?.message, 'write')); return; }", "res.error?.message, 'write', retryApprove)); return; }"), /a write failure never offers a retry/],
-  ]) {
-    const found = problems(source);
-    assert.ok(found.some((problem) => reason.test(problem)), `${label}: ${JSON.stringify(found)}`);
-  }
-});
-
 // ---------- the samples a builder is pointed at ----------
 
 const SAMPLES = path.join(PLUGIN, 'samples');
 const sampleFiles = () => fs.readdirSync(SAMPLES).filter((name) => name.endsWith('.tsx')).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
 
-test('every sample page renders inside the boundary and routes its data failures through the canonical reporter', () => {
+test('every sample page parses, and each of its reports has the five required arguments and a literal kind', () => {
   const files = sampleFiles();
   assert.equal(files.length, 13, 'the thirteen complete sample pages');
   for (const name of files) {
     const source = fs.readFileSync(path.join(SAMPLES, name), 'utf8');
-    assert.deepEqual(pageErrorProblems(source), [], name);
     parses(source, name);
     for (const call of source.matchAll(/(?<!function\s)\breportPageError\(/g)) {
       const args = callArguments(source, call.index + call[0].length - 1);

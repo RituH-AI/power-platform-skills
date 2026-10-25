@@ -14,7 +14,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { builtInRuntimeProblems } = require('../lib/action-binding-union.js');
 const { customApiProblems } = require('../lib/custom-api-contract.js');
-const { pageErrorProblems } = require('../lib/page-error-evidence.js');
 const { PHASE_EXPECTATIONS } = require('../lib/assertions-layer-1.js');
 const { PHASE5_EXPECTATIONS } = require('../lib/assertions-layer-2.js');
 const { getDataverseOperationCatalogue } = require('../../../../plugins/model-apps/scripts/lib/dataverse-operations.js');
@@ -24,7 +23,7 @@ const DOC = path.join(REFERENCES, 'dataverse-operations.md');
 // The document shows the page's helpers, PageBody and boundary wrapper; the rest of the page is the page error block
 // references/rules.md publishes ("Missing Error Handling") — copied unchanged, up to its own example PageBody — which supplies
 // PAGE_NAME, reportPageError, PageErrorBar, PageErrorBoundary and the error copy holding the fixed built-in sentences. The
-// complete page is what is graded, so the built-in checks and the page error contract read the same source.
+// complete page is what the built-in checks read.
 const REFERENCE = (() => {
   const text = fs.readFileSync(DOC, 'utf8').replace(/\r\n/g, '\n');
   const section = text.slice(text.indexOf('\n## Generated call\n'));
@@ -45,11 +44,10 @@ function mutated(find, replace) {
   return REFERENCE.replace(find, replace);
 }
 
-test('the reference pattern of the document passes, for each operation alone and for both — and as a complete page, the page error contract', () => {
+test('the reference pattern of the document passes, for each operation alone and for both', () => {
   assert.deepStrictEqual(problems(REFERENCE), []);
   assert.deepStrictEqual(problems(REFERENCE, ['WhoAmI']), []);
   assert.deepStrictEqual(problems(REFERENCE, ['RetrieveVersion']), []);
-  assert.deepStrictEqual(pageErrorProblems(REFERENCE), []);
 });
 
 test('a call that is not the user\'s — on mount, at render, on a timer, in a memo, or a retry of itself — fails', () => {

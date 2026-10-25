@@ -105,7 +105,7 @@ Layers 1 and 2 are automated. Layer 3 is human judgment by design — visual qua
 - Unsized Fluent icons only (e.g., `AddRegular`, not `Add24Regular`)
 - Every icon name in `@fluentui/react-icons` imports appears in `references/verified-icons.txt`
 - A `try`/`catch` marker for Dataverse awaits (not proof that every await is enclosed)
-- The page error contract (`references/rules.md` Critical Rule 22, `lib/page-error-evidence.js`): every listed DataAPI call takes one accepted shape — awaited in a `try` whose `catch` reports, a named helper returning `{ error }` to a caller that stores it, the canonical cached promise, a guarded Custom API, built-in or connector result, `Promise.all` over reporting helpers or a checked `allSettled` tuple — and reports through the page's `reportPageError`, which must be the canonical one line for line, with a literal kind as its fifth argument, into state a `PageErrorBar` renders; the default export mounts `PageErrorBoundary` around `PageBody`. It is a finite, fail-closed grammar, not a control-flow proof: an unrecognized shape fails as unverifiable, and `loadMoreRows` and the synchronous `setPageOutput` are outside it. Root pages only. A page captured before the contract is a compatibility SKIP only while its source is byte-for-byte the captured one (`lib/page-error-allowlist.json`: fixture-relative path and SHA-256 of the text with CRLF converted to LF); a changed page, a new path and the contract's own fixtures (26, 27) are always graded
+- Whether every failure reaches the page's reporter is not graded yet: no check proves that each DataAPI failure of a page goes through `reportPageError` into a rendered `PageErrorBar` inside `PageErrorBoundary` (`references/rules.md` Critical Rule 22)
 - No `TODO`/`FIXME`/`...` placeholders
 - Lookup fields use `@OData.Community.Display.V1.FormattedValue` annotations
 - `<DataGrid>` usage imports `createTableColumn` + configures `columnSizingOptions` or `resizableColumns`
@@ -154,7 +154,7 @@ still refuse lookup provenance.
 All eval definitions live in `evals.json` alongside this file. The file contains:
 
 - `common_workflow_assertions`: **18** registered workflow checks, each passed or explicitly skipped when inapplicable.
-- `common_code_assertions`: **22** registered code checks.
+- `common_code_assertions`: **21** registered code checks.
 - `evals`: **27** prompt definitions, each with `id`, `tier`, `prompt`, `data`, and per-eval `expectations`.
 
 The `data` field specifies scenario assumptions for a manual capture or constructed fixture. The offline harness does not provide responses to `AskUserQuestion` or verify every recorded answer. The corpus contains **35 fixture directories / 39 top-level TSX files**, representing 27 prompt IDs. IDs **none** have no fixture — every registered prompt is executed.
@@ -283,7 +283,7 @@ The suite ships both kinds:
 | 14 | `14-account-list-edit-collision` (current filename collision) | — |
 | 16 | `16-account-list` (current minimal existing-table page) | — |
 | 26 | `26-customer-lookup` (current: an answered account-scope question and the lookup metadata read behind the plan's records; its page normalizes a Customer lookup, which is not graded) | — |
-| 27 | `27-page-error-helper` (current page error contract: cached read, awaited read and a Custom API Action; a newly authored plan with its assumptions) | — |
+| 27 | `27-page-error-helper` (current: a newly authored plan with its assumptions; its page follows the page error teaching on a cached read, an awaited read and a Custom API Action, which is not graded) | — |
 
 The mix gives:
 - A **green baseline** to catch runner regressions (synthetics)
@@ -308,7 +308,7 @@ These contract-2 fixtures exercise the current contracts below:
 | `24-custom-api-lifecycle` | Discovery, bare actions, runtime and config stages | Invented kind/name/parameter, wrong method/bound record, unsafe response or lost bindings |
 | `25-solution-package` | Explicit page IDs, dynamic types, app-first writes and read-back | Omitted page/wrong solution/type/order; invalid ID writes; partial failure reported as success |
 | `26-customer-lookup` | An attended run that asks which opportunities "this account" means (no default) and records the answer as a user-confirmed assumption before approval; lookup records built from the saved `get-lookup-metadata.js` read and gated with `--require-observed-lookups`; `lookup-rows.json` holds synthetic customer values with the state the published normalizer gives each (the page's lookup code is not graded) | A pre-settled default, a missing or unrecorded answer, an approval before the answer; a metadata read that is not the saved file or comes after approval, incomplete targets, a lookup left planned, a one-target type, a gate after generation |
-| `27-page-error-helper` | The page error contract on a cached read, an awaited read and a Custom API Action (both indeterminate forms, then network, then any failure); a newly authored plan whose records equal the approved preview's, verified with `--require-assumptions` | Reporter not canonical or bypassed, a guard skipped or out of order, a view never rendered, no boundary; a plan verified without `--require-assumptions` or a preview whose assumption differs |
+| `27-page-error-helper` | A newly authored plan whose records equal the approved preview's, verified with `--require-assumptions`; its page follows the page error teaching (not graded) | A plan verified without `--require-assumptions` or a preview whose assumption differs |
 
 Expected refusals are green **only when the recorded refusal contract is satisfied**. The refusal fixtures of evals 10 and 21, and `3-edit-no-pages-stop`, legitimately contain no generated TSX; Layer 2 grades their failed gate and absence of generation/mutations rather than manufacturing a page. A refusal declares its stage in `fixture.json` (`refusal.stage`): `auth` and `discovery` stop at a failed check-auth.js or list-connections.js result, and `edit-pages` at an app whose `genpage.js list` succeeded with no page to offer — the user is told so and nothing is downloaded, planned or uploaded after the first such listing (a later read does not reset it), and the edit phases that would follow the page choice skip for that run. Fixture 23's rejected snapshot is nested evidence; the top-level page is the accepted regeneration. Expected-failure mutations live in unit tests, never unexplained red corpus directories.
 

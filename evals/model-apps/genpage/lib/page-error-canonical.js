@@ -1,10 +1,10 @@
 'use strict';
 // The canonical page error block of references/rules.md ("Missing Error Handling"), read once and kept as canonical
-// lines — comments blanked, each line trimmed, empty lines dropped, line breaks kept: the reporter and its documented
-// telemetry insertion, PageErrorBar and its documented no-retry form, PageErrorBoundary and its documented
-// `extends Component<…>` form and telemetry hand-off. The page error evaluator (page-error-evidence.js) compares a page's
-// copies with these, and so does the boundary-wrapper proof of source-evidence.js: a wrapper whose boundary is not this
-// class may hand PageBody anything, so it must not prove where the page's dataApi comes from.
+// lines — comments blanked, each line trimmed, empty lines dropped, line breaks kept: here PageErrorBoundary and its
+// documented `extends Component<…>` form and telemetry hand-off. The boundary-wrapper proof of source-evidence.js compares
+// a page's boundary with these: a wrapper whose boundary is not this class may hand PageBody anything, so it must not prove
+// where the page's dataApi comes from. polymorphic-lookup-contract.js reads its canonical normalizer with the same line and
+// top-level-function readers. Whether a page's failures reach its reporter is not graded (EVAL_GUIDE.md).
 //
 // This module requires nothing from the evaluator modules (source-evidence.js requires it), so either can load first.
 
@@ -14,7 +14,6 @@ const { blankNonCodePreservingTemplateExpressions, commentRanges } = require('..
 
 const RULES_PATH = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'model-apps', 'references', 'rules.md');
 const REPORTER = 'reportPageError';
-const BAR = 'PageErrorBar';
 const BOUNDARY = 'PageErrorBoundary';
 
 // A source's significant lines: comments blanked (the lexer's own ranges, so a `//` inside a string survives), each
@@ -93,38 +92,9 @@ function ruleBlocks() {
   const section = rules.slice(start, next < 0 ? rules.length : next);
   const all = [...section.matchAll(/```tsx\n([\s\S]*?)\n```/g)].map((match) => match[1]);
   const foundation = all.find((block) => new RegExp(`\\bfunction ${REPORTER}\\(`).test(block));
-  const insertion = all.find((block) => /appInsights\?\.trackException\?\.\(/.test(block));
-  if (!foundation || !insertion) throw new Error('references/rules.md does not publish the canonical page error block and its telemetry insertion');
-  blocks = { foundation, insertion, mask: blankNonCodePreservingTemplateExpressions(foundation) };
+  if (!foundation) throw new Error('references/rules.md does not publish the canonical page error block');
+  blocks = { foundation, mask: blankNonCodePreservingTemplateExpressions(foundation) };
   return blocks;
-}
-
-let reporter = null;
-// The reporter: { base, telemetry } (the telemetry insertion right after its console.error line).
-function canonicalReporter() {
-  if (reporter) return reporter;
-  const { foundation, insertion, mask } = ruleBlocks();
-  const range = topLevelFunction(foundation, mask, REPORTER);
-  const base = canonicalLines(foundation.slice(range.start, range.end));
-  const anchor = base.findIndex((line) => line.startsWith('console.error('));
-  const telemetry = [...base.slice(0, anchor + 1), ...canonicalLines(insertion), ...base.slice(anchor + 1)];
-  reporter = { base: base.join('\n'), telemetry: telemetry.join('\n') };
-  return reporter;
-}
-
-let bar = null;
-// PageErrorBar: [with its retry action, without it] ("On a page where no operation passes a retry, leave out the bar's
-// `error.retry` part").
-function canonicalBars() {
-  if (bar) return bar;
-  const { foundation, mask } = ruleBlocks();
-  const range = topLevelFunction(foundation, mask, BAR);
-  const lines = canonicalLines(foundation.slice(range.start, range.end));
-  const from = lines.indexOf('{error.retry && (');
-  const to = lines.indexOf(')}', from);
-  if (from < 0 || to < 0) throw new Error('references/rules.md PageErrorBar has no retry part');
-  bar = [lines.join('\n'), [...lines.slice(0, from), ...lines.slice(to + 1)].join('\n')];
-  return bar;
 }
 
 let boundary = null;
@@ -165,6 +135,6 @@ function transparentBoundary(mask) {
 }
 
 module.exports = {
-  canonicalLines, closeOf, depthAt, topLevelFunction, topLevelClass, canonicalReporter, canonicalBars, canonicalBoundaries,
+  canonicalLines, closeOf, depthAt, topLevelFunction, topLevelClass, canonicalBoundaries,
   transparentBoundary,
 };

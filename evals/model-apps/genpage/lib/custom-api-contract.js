@@ -348,6 +348,7 @@ function customApiProblems(fixture) {
   return problems;
 }
 
-// runtimeProblems is exported for the complete reference tests of the page error contract, which grade a whole
-// Action page with exactly the check the lifecycle scorer applies (page-error-evidence.test.js).
+// runtimeProblems is exported for the tests that grade whole reference pages — the teaching documents' Custom API pages
+// (tests/page-error-teaching.test.js) and the boundary wrapper's proof (tests/source-evidence.test.js) — with exactly the
+// check the lifecycle scorer applies.
 module.exports = { customApiProblems, gradeCustomApi, runtimeProblems };

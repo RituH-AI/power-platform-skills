@@ -5675,19 +5675,19 @@ layers are automated (TAP v13 runners); Layer 3 is manual.
   are not told apart, so the environment a write is compared with its gate by is the call's last `--env`; the
   phase expectations count a call once and read its text, not its `argv`. `tests/script-verbs.test.js` pins
   the reading and these limits.
-- **The page error and plan-record contracts are graded from shared modules, never copies; lookup use in page code is not graded.**
-  `lib/page-error-evidence.js` is the common assertion "routes every supported dataApi failure through
-  reportPageError and mounts PageErrorBoundary around PageBody" (Critical Rule 22): a finite, fail-closed grammar
-  whose oracle is the canonical page error block of `references/rules.md`, with `lib/page-error-allowlist.json` the
-  ledger of historical pages that SKIP only while their source is byte-for-byte the captured one.
+- **The plan-record contracts are graded from shared modules, never copies; page error handling and lookup use in
+  page code are not graded.** Whether every failure of a page reaches its reporter (Critical Rule 22) is not graded:
+  the evaluator that graded it was withdrawn because its proofs matched names instead of lexical scope and could pass
+  pages whose failures never reach a rendered error. The boundary wrapper's provenance proof (`lib/source-evidence.js`,
+  `lib/page-error-canonical.js`) stays, failing closed.
   `lib/polymorphic-lookup-contract.js` only reads the canonical normalizer of rules.md "Lookup references" (Critical
   Rule 23) and checks a copy of it; what a page does with a lookup is not graded — the grammar that graded it was
   withdrawn because its table-check and unchanged-pair proofs could pass a page that opens a contact as an account.
   `lib/column-contract.js` can read a typed `<navigation>/<column>` path whole with a run's lookup metadata as context;
   no registered check passes it that context now. The plan's records are read by the plugin's own
   `scripts/lib/genpage-plan-semantics.js`. Fixture 26 (an answered account-scope question and the lookup metadata
-  behind its plan) and fixture 27 (the page error contract on a cached read, an awaited read
-  and a Custom API Action) are the current scenarios; their declared evidence (`fixture.json` `semantics`) is
+  behind its plan) and fixture 27 (a newly authored plan with its assumptions; its page follows the page error
+  teaching) are the current scenarios; their declared evidence (`fixture.json` `semantics`) is
   required, so a missing artifact fails rather than skips.
 
 Run on every PR that touches the skill, agents, rules, or evals:

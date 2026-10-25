@@ -589,8 +589,8 @@ function receiverIsDataApi(mask, scopes, expr, at) {
 }
 
 // The PageBody the canonical page error wrapper forwards the page props to (forwardedPageBody), or null when the
-// default export is not exactly that wrapper. The page error evaluator (page-error-evidence.js) asks this, so the
-// boundary it requires and the props the receiver proofs trust are the same proof.
+// default export is not exactly that wrapper. The built-in check (action-binding-union.js) asks this for where a page
+// renders, so its render roots and the props the receiver proofs trust are the same proof.
 function forwardedPageBodyOf(code) {
   const mask = blankNonCodePreservingTemplateExpressions(code);
   const scopes = namedScopes(mask);

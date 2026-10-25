@@ -161,9 +161,9 @@ test('eval 5: components and utilities are top level; handlers that close over s
 };`), []);
 });
 
-// The page error evaluator (lib/page-error-evidence.js) reads function scopes through this export rather than keeping a
-// second scope reader. A missing export must fail here, by name — never surface later as a TypeError a caller turns into
-// a skip — and exporting it changes nothing about the top-level check above.
+// A check that needs a page's function scopes reads them through this export rather than keeping a second scope reader.
+// A missing export must fail here, by name — never surface later as a TypeError a caller turns into a skip — and
+// exporting it changes nothing about the top-level check above.
 test('tsx-structure exports its function scope reader, and the top-level check is unchanged by it', () => {
   const structure = require('../lib/tsx-structure.js');
   assert.equal(typeof structure.functionScopes, 'function', 'functionScopes is exported');

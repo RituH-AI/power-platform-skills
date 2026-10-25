@@ -1070,9 +1070,9 @@ test('before-page download source: recorded destination forms preserve the corre
   }
 });
 
-// The complete reference tests of the page error contract (page-error-evidence.test.js) assemble a full Action page and
-// grade it with the same runtime check the lifecycle scorer applies. That check must be importable by name: a missing
-// export fails here, never as a TypeError a caller could turn into a skip.
+// The reference-page tests (page-error-teaching.test.js, source-evidence.test.js) assemble a full Action page and grade it
+// with the same runtime check the lifecycle scorer applies. That check must be importable by name: a missing export fails
+// here, never as a TypeError a caller could turn into a skip.
 test('runtimeProblems is exported, and it is the check the lifecycle scorer applies', () => {
   const { runtimeProblems } = require('../lib/custom-api-contract.js');
   assert.equal(typeof runtimeProblems, 'function', 'runtimeProblems is exported');

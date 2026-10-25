@@ -24,7 +24,6 @@ const { planSection, parseMarkdownRows } = require('./plan-evidence.js');
 const { isGeneration, isUpload, resultObject } = require('./workflow-evidence.js');
 const { uploadChoiceLines, consumedChoice } = require('./upload-contract.js');
 const { actionCalls, groupEnd, literalString, escapeRe, callSites, expressionEnd, forwardedPageBodyOf } = require('./source-evidence.js');
-const { telemetrySafeSpans } = require('./page-error-evidence.js');
 const { blankNonCodePreservingTemplateExpressions } = require('../../../../plugins/model-apps/scripts/lib/source-literals.js');
 
 const SECTION = 'Dataverse Operations';
@@ -225,13 +224,6 @@ const SINKS = new RegExp(LEAK_SOURCE, 'g');
 // Where a call is not a user's: an effect, a memo, a timer, a frame or a microtask (a hook's type argument list, `useMemo<string>(…)`, included).
 const NOT_A_USER = /\b(?:useEffect|useLayoutEffect|useInsertionEffect|useMemo|setTimeout|setInterval|requestAnimationFrame|queueMicrotask)\s*(?:<(?:[^<>()]|<[^<>()]*>)*>\s*)?\(/g;
 
-// The text with each { start, end } span replaced by spaces, so every offset still points where it did.
-function blankSpans(text, spans) {
-  let out = text;
-  for (const { start, end } of spans) out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
-  return out;
-}
-
 // The `if (…)` guards of a text that end in a return: [{ condition }], the condition as raw text.
 function returningGuards(text, mask) {
   const guards = [];
@@ -406,15 +398,6 @@ function builtInRuntimeProblems(code, names) {
   let calls;
   try { calls = actionCalls(code); } catch (error) { return [`built-in operation calls are not gradeable (${error.message})`]; }
   const mask = blankNonCodePreservingTemplateExpressions(code);
-  // The one exception to "nothing of a built-in call reaches telemetry": a maker-authorized failure report that hands the page's own
-  // `appInsights` prop to the verified canonical reporter as its seventh argument. That reporter sends only the bounded code and a fixed
-  // `<operation> failed` text, never the message or the result (references/rules.md "Missing Error Handling"), and
-  // page-error-evidence.js telemetrySafeSpans returns such an argument only when the reporter is the canonical one, unchanged, and the
-  // call reports the host's own error fields or a caught error as a read with no retry. Exactly those argument spans are blanked for
-  // the two LEAKS tests of the helper and its handlers below; every other sink — a direct trackException, an identity handed to the
-  // report, a retry beside it, an altered reporter — is still found.
-  // A page this reader cannot follow gets no exception (the spans are then empty): failing closed, the old refusal stands.
-  const leakMask = blankSpans(mask, (() => { try { return telemetrySafeSpans(code); } catch { return []; } })());
   const decls = functionDeclarations(mask);
   const exported = /\bexport\s+default\s+(?:async\s+)?(?:function\s+)?([A-Za-z_$][\w$]*)/.exec(mask)?.[1];
   // Where the page renders: the default export, and — under the canonical boundary wrapper, whose default export only renders
@@ -525,7 +508,7 @@ function builtInRuntimeProblems(code, names) {
         problems.push(`${at}: the handler does not ignore a stale request (a .current counter incremented before the call and compared after it)`);
       }
       if (!/\bcatch\b/.test(handlerText + prefix + post)) problems.push(`${at}: a rejected call is not caught`);
-      if (LEAKS.test(leakMask.slice(helper.start, helper.end)) || LEAKS.test(handlers.map((h) => leakMask.slice(h.start, h.end)).join('\n'))) {
+      if (LEAKS.test(mask.slice(helper.start, helper.end)) || LEAKS.test(handlers.map((h) => mask.slice(h.start, h.end)).join('\n'))) {
         problems.push(`${at}: the result must not be logged, stored, copied or sent`);
       }
       // …nor anything that keeps it, wherever the page uses that: the state rendered from it, a ref, a variable — at render, in an effect, in

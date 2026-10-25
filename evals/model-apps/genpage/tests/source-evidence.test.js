@@ -325,8 +325,7 @@ test('anything but the exact forwarding shape leaves PageBody\u2019s props unpro
   const run = helper('client', 'client');
   const refused = {
     // `PageBody(props)` in the render is an ordinary named call, which the existing proof follows because it does pass the
-    // page props on; the page error evaluator refuses that page as a boundary that wraps no rendered body
-    // (page-error-evidence.test.js). Called with anything else, it proves nothing.
+    // page props on. Called with anything else, it proves nothing.
     'PageBody evaluated in the render with other props': run + body(DESTRUCTURED) + wrapper('<PageErrorBoundary>{PageBody(mockProps)}</PageErrorBoundary>'),
     'an extra child prop': run + body(DESTRUCTURED) + wrapper('<PageErrorBoundary><PageBody {...props} dataApi={mockApi} /></PageErrorBoundary>'),
     'another spread source': run + body(DESTRUCTURED) + wrapper('<PageErrorBoundary><PageBody {...mockProps} /></PageErrorBoundary>'),
@@ -361,4 +360,47 @@ export default GeneratedComponent;
 `,
   };
   for (const [label, code] of Object.entries(refused)) assert.equal(receiverOk(code), false, label);
+});
+
+// ---------- the boundary wrapper's proof on a whole page (fixture 27) ----------
+// Only the documented boundary class lets PageBody's props be the page props: a PageErrorBoundary function, or a class of
+// that name changed after it was copied, can hand PageBody another object — so neither proves a receiver, and the Custom API
+// runtime check (which reads receivers through this proof) refuses the page.
+test('only the documented boundary class proves where PageBody\'s dataApi comes from: a function or an altered class of that name proves nothing', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { forwardedPageBodyOf } = require('../lib/source-evidence.js');
+  const { runtimeProblems } = require('../lib/custom-api-contract.js');
+  const fixture = fs.readFileSync(path.join(__dirname, '..', 'fixtures', '27-page-error-helper', 'order-approvals.tsx'), 'utf8').replace(/\r\n/g, '\n');
+  const counterfeit = "{ dataApi: { executeAction: async () => ({ ok: true, outputs: { NewStatus: 'counterfeit' } }) } }";
+  const classStart = fixture.indexOf('class PageErrorBoundary extends');
+  const classEnd = fixture.indexOf('\n}\n', fixture.indexOf('  public render(): React.ReactNode {', classStart)) + 2;
+  const cases = [
+    ['a PageErrorBoundary function that clones its child with another dataApi', fixture.slice(0, classStart)
+      + `function PageErrorBoundary(props: { children: React.ReactElement }) {\n  return React.cloneElement(props.children, ${counterfeit});\n}`
+      + fixture.slice(classEnd)],
+    ['the canonical class with a second render() that clones its child', fixture.slice(0, classEnd - 2)
+      + `\n  public render(): React.ReactNode {\n    return React.cloneElement(this.props.children as React.ReactElement, ${counterfeit});\n  }\n`
+      + fixture.slice(classEnd - 2)],
+    ['the canonical class patched after its declaration', fixture.slice(0, classEnd)
+      + `\nPageErrorBoundary.prototype.render = function render() { return React.cloneElement(this.props.children, ${counterfeit}); };\n`
+      + fixture.slice(classEnd)],
+    ['a page that binds React itself', fixture.slice(0, classStart) + 'const React = { Component: class {} } as any;\n' + fixture.slice(classStart)],
+  ];
+  const approve = (source) => actionCalls(source).filter((call) => call.fields.get('name') === "'cnt_ApproveOrder'");
+  assert.ok(forwardedPageBodyOf(fixture), 'the fixture itself is forwarded');
+  assert.deepEqual(approve(fixture).map((call) => receiverIsDataApi(call.mask, call.scopes, call.receiver, call.start)), [true]);
+  const bindings = [{ name: 'cnt_ApproveOrder', isFunction: false, displayName: 'Approve Order', boundEntityLogicalName: 'salesorder', parameterKinds: { Comment: 'String' } }];
+  assert.deepEqual(runtimeProblems(fixture, bindings, { cnt_ApproveOrder: ['NewStatus'] }, new Map()), []);
+  for (const [label, source] of cases) {
+    assert.equal(forwardedPageBodyOf(source), null, `${label}: no forwarding proof`);
+    const calls = approve(source);
+    assert.ok(calls.length >= 1, `${label}: the Action call is still read`);
+    assert.ok(calls.every((call) => !receiverIsDataApi(call.mask, call.scopes, call.receiver, call.start)), `${label}: its receiver is not proven to be the page dataApi`);
+    assert.ok(runtimeProblems(source, bindings, { cnt_ApproveOrder: ['NewStatus'] }, new Map()).some((problem) => /not the page's dataApi prop/.test(problem)), `${label}: the Custom API check refuses it`);
+  }
+  // String contents aside, the class is compared as documented: a translated fallback key still forwards.
+  const renamed = fixture.replace("translate('error.render')", "translate('error.renderx')");
+  assert.notEqual(renamed, fixture);
+  assert.ok(forwardedPageBodyOf(renamed), 'a string does not decide what the boundary forwards');
 });

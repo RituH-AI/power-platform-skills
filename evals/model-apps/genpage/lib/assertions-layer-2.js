@@ -32,7 +32,6 @@ const {
 } = require('./page-checks.js');
 const { nestedDefinitionProblems } = require('./tsx-structure.js');
 const { columnProblems } = require('./column-contract.js');
-const { PAGE_ERROR_ASSERTION, gradePageErrors, pageErrorProblems, dataCallFamilies } = require('./page-error-evidence.js');
 
 let _verifiedIcons = null;
 function getVerifiedIcons() {
@@ -294,12 +293,6 @@ ASSERTIONS.set(
     return offender ? fail(`${offender.name}: awaits dataApi but lacks try/catch`) : pass();
   }
 );
-
-// references/rules.md Critical Rule 22 ("Missing Error Handling"): lib/page-error-evidence.js is the one evaluator, shared
-// with any Layer-1 expectation that needs the same answer. It grades a fixture's ROOT pages only; a page captured before the
-// contract and unchanged since is a compatibility SKIP (page-error-allowlist.json), never a pass, and the contract's own
-// fixtures (26, 27) are always graded.
-ASSERTIONS.set(PAGE_ERROR_ASSERTION, gradePageErrors);
 
 ASSERTIONS.set(
   'Generated .tsx does NOT include any `TODO`, `FIXME`, ellipsis placeholders, or incomplete function bodies',
@@ -915,40 +908,6 @@ PHASE5_EXPECTATIONS.set(
   ({ files }) => {
     const offender = files.find((f) => /\bonDrop\b/.test(f.content) && !/dataApi\.updateRow/.test(f.content));
     return offender ? fail(`${offender.name}: onDrop without dataApi.updateRow`) : pass();
-  }
-);
-
-// --- Eval 27: the page error contract on the shapes it exists for ------------------------------
-// The common assertion passes a page that makes no data call at all. This scenario's page must ALSO make the calls the
-// contract is about, each in the shape it is taught in: the list read held by the canonical cached promise
-// (data-caching.md), the selected record's read awaited in a try, and the Custom API Action awaited with its result
-// guards (custom-api.md) — the evaluator itself then proves each one reports, in order, into a rendered PageErrorBar.
-const SCENARIO_CALLS = [
-  { method: 'queryTable', family: 'cache', what: 'a list read held by the canonical cached promise' },
-  { method: 'retrieveRow', family: 'awaited', what: 'a record read awaited in a try that reports' },
-  { method: 'executeAction', family: 'awaited', what: 'a Custom API Action awaited with its result guards' },
-];
-PHASE5_EXPECTATIONS.set(
-  'Phase 5: The page reports its cached read, awaited read and Custom API Action failures through reportPageError (both indeterminate forms before network before any other failure, a rejection as a write) into rendered error bars inside PageErrorBoundary',
-  ({ files }) => {
-    if (files.length !== 1) return fail(`the scenario has one page; the fixture has ${files.length}`);
-    const [page] = files;
-    const problems = pageErrorProblems(page.content);
-    if (problems.length) return fail(`${page.name}: ${problems[0]}`);
-    const families = dataCallFamilies(page.content);
-    for (const wanted of SCENARIO_CALLS) {
-      if (!families.some((call) => call.method === wanted.method && call.family === wanted.family)) {
-        return fail(`${page.name}: no ${wanted.method} as ${wanted.what}`);
-      }
-    }
-    // A rejected Action is a write with no retry, and only a network result offers one.
-    const reports = [...page.content.matchAll(/reportPageError\(PAGE_NAME,\s*'(\w+)',[^;]*?,\s*'(read|write|indeterminate|network)'(\s*,\s*(\w+))?\s*\)/g)]
-      .map((match) => ({ operation: match[1], kind: match[2], retry: match[4] || null }));
-    const action = reports.filter((report) => report.operation === 'approveOrder');
-    const kinds = action.map((report) => report.kind).join(',');
-    if (kinds !== 'indeterminate,indeterminate,network,write,write') return fail(`${page.name}: the Action reports ${kinds || 'nothing'}, not indeterminate, indeterminate, network, write and a rejected write`);
-    if (action.some((report) => report.retry && report.kind !== 'network')) return fail(`${page.name}: only the Action's network result may offer a retry`);
-    return pass();
   }
 );
 
