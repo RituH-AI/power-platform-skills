@@ -15,8 +15,8 @@ The bundled SDK is unchanged (power-platform-ux a3443479).
   selection and called only from a button; `list-dataverse-operations.js` does not check the environment.
 - **Plans keep what you asked for apart from what the planner assumed** (`## Assumptions`, shown first at approval) and ask
   when a relationship or filter is unclear (#671).
-- **Lookups to more than one table** (Customer, Owner, Regarding): plans record each lookup's targets, and pages normalize bare or
-  table-qualified values and keep the actual target (#672).
+- **Lookups to more than one table** (Customer, Owner, Regarding): plans record each lookup's targets; pages normalize bare or
+  table-qualified values (#672).
 - **Pages report errors one way**: one reporter, a localized Fluent message bar and a render boundary; manual retry only for safe
   reads (#674).
 
@@ -27,6 +27,7 @@ The bundled SDK is unchanged (power-platform-ux a3443479).
 - **Rebuilds and downloads tell built-in operations apart from Custom APIs.**
 - **A style you ask for replaces the default look** (AB#6320143).
 - **`primaryAttribute` refuses a key the build does not read**, naming the key it meant.
+- **Verify fails when an owned web resource's deployed content differs or is missing**; rebuilds report it without overwriting.
 
 ### Fixed
 
@@ -34,9 +35,9 @@ The bundled SDK is unchanged (power-platform-ux a3443479).
   inputs another page accepts (AB#6247727).
 - An app with no tables downloads and builds; a one-language label keeps its language; options labelled alike keep their column's
   type; the loss report names command-bar buttons.
-- A rebuild says when a web resource's deployed content differs; the entity-builder writes Choice options as labels.
-- The page check reads more valid pages. Teardown still deletes a generative page a form embeds (now documented).
-- Evals: a fixture with nothing graded is not counted as passed; the label check reads comments and character references.
+- The entity-builder writes Choice options as labels.
+- The page check reads more valid pages; teardown still deletes a page a form embeds (now documented).
+- Evals: an ungraded fixture is not counted as passed; the label check reads comments and character references.
 ## [2.19.0]
 
 The bundled SDK is unchanged (power-platform-ux a3443479, as in 2.18.0).

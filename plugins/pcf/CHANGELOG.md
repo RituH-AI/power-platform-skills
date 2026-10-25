@@ -15,6 +15,7 @@ First preview release: ships the `/pcf:pcf` skill, matrix-pinned templates and r
 
 - The bundled SDK is the one model-apps 2.18.0 ships (power-platform-ux a3443479), beside model-apps 2.18.0's HTTP client; the SDK no longer carries its PCF control registration, which this plugin never called. What changed in them — a web resource's published content read back, an app's sitemap found by its component, a publish sent once — is in requests this plugin does not make: it only reads through them and publishes through PAC, so what it does is unchanged.
 - The PCF guide explains why calls after an early-return guard or in an `else` branch are reported, and shows the positive guard block to use instead.
+- An optional call with type arguments that is handed a context member, such as `factory?.<T>(context.device).captureImage()`, is now reported as a Pages call even when the factory returns its own object; call it without `?.` or keep the result in a local first.
 
 ### Fixed
 
