@@ -103,6 +103,7 @@ const messageOf = (error) => String((error && error.message) || error);
 // (`…(LogicalName='account')/Attributes/…`), from another path, or for a table nobody asked for (one a lookup column points at) is something else — a column read that raced a change, a proxy, a table the caller
 // cannot see — and is left as the SDK's own error, as is any other status.
 // See: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/query-metadata-web-api (a table's definition is read at EntityDefinitions(LogicalName='…'))
+// The lookup discovery (lib/lookup-metadata.js) tells a missing table with it too: GENPAGE_TABLE_NOT_FOUND here, LOOKUP_TABLE_NOT_FOUND there.
 function missingTableOf(error, askedFor) {
   if (!error || error.statusCode !== 404 || typeof error.url !== 'string') return null;
   const named = /\/EntityDefinitions\(LogicalName='([A-Za-z0-9_]+)'\)(?:\?|$)/.exec(error.url);
@@ -1932,4 +1933,5 @@ async function appsNaming(sdk, pageId) {
 module.exports = {
   makeGenpageSdk, unescapePacName, suppliedButBlank, sourceText, dataSourcesOf, promptTranscript, configJson, pageFolderFiles,
   genPagesOfSiteMap, entityTablesOfSiteMap, writeOutcome, PRE_WRITE_REFUSALS, genpageError, holdsWhatWasSent, describeDivergence, contentFingerprint, watchThrottles, GUID_RE,
+  missingTableOf,
 };

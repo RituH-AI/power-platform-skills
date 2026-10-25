@@ -19,6 +19,7 @@
 // relationship page — so a caller never receives a shorter candidate list as if it were complete.
 
 const { readRelationshipsOf } = require('./relationship-metadata.js');
+const { missingTableOf } = require('./genpage-sdk.js');
 
 // The attribute types that are lookups (AttributeTypeCode names, as the SDK projects them).
 // https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/attributetypecode
@@ -126,7 +127,21 @@ async function readLookupMetadata(sdk, tables) {
   for (const name of tables) {
     const table = String(name).toLowerCase();
     if (!LOGICAL_NAME.test(table)) throw lookupError('LOOKUP_TABLE_NAME_INVALID', `'${name}' is not a table logical name`);
-    const metadata = await sdk.fetchEntityMetadata(table);
+    let metadata;
+    try {
+      metadata = await sdk.fetchEntityMetadata(table);
+    } catch (err) {
+      // The SDK's own read of the table is the first request made for it, so a table the environment does not have fails THERE, before the
+      // relationship read below could say so. Dataverse answers that read (measured live)
+      //   GET …/api/data/v9.0/EntityDefinitions(LogicalName='opportunity')?$select=…&$expand=Attributes(…)
+      //   404 {"error":{"code":"0x80060888","message":"EntityMetadata With Id = LogicalName='opportunity' does not exist."}}
+      // and the SDK throws that as its ConnectionError — code CONNECTION_ERROR, which points a planner at sign-in, not at the table's name.
+      // Only a 404 of that read, for this table, is the table's absence (missingTableOf reads the error's statusCode and url, never the
+      // platform's words, as `genpage.js types` does); any other failure — another status, a request below the table, a transport failure
+      // or a missing token (the SDK's statusCode 0) — keeps the SDK's own code.
+      if (missingTableOf(err, [table]) === null) throw err;
+      throw lookupError('LOOKUP_TABLE_NOT_FOUND', `${table}: the environment has no table with this logical name — ${err.message}`);
+    }
     if (!metadata || String(metadata.logicalName || '').toLowerCase() !== table || !Array.isArray(metadata.attributes)) {
       throw lookupError('LOOKUP_METADATA_INCOMPLETE', `${table}: the metadata read did not answer for this table`);
     }

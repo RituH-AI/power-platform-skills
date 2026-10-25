@@ -159,6 +159,30 @@ test('any failed or incomplete part fails the whole discovery, with a code', asy
   }
 });
 
+// The SDK's ConnectionError, as its own read of a table throws it (the real bundle is driven in lookup-metadata-real-bundle.test.js):
+//   code CONNECTION_ERROR, statusCode the answer's (0 for a transport failure, such as no token), url the request's, and the message
+//   `HTTP 404 from <url>: EntityMetadata With Id = LogicalName='nosuch' does not exist.`
+const tableRead = (table) => `${ENV}/api/data/v9.0/EntityDefinitions(LogicalName='${table}')?$select=LogicalName,PrimaryIdAttribute&$expand=Attributes($select=LogicalName)`;
+const sdkHttpError = (statusCode, url, words = 'Refused.') => Object.assign(new Error(statusCode ? `HTTP ${statusCode} from ${url}: ${words}` : `Transport failure reaching ${url}: ${words}`), { code: 'CONNECTION_ERROR', statusCode, url });
+
+test('a 404 of the SDK\'s own read of a table names the table missing; every other SDK failure keeps its own code', async () => {
+  const missing = sdkHttpError(404, tableRead('nosuch'), "EntityMetadata With Id = LogicalName='nosuch' does not exist.");
+  for (const [label, metadata, tables, code] of [
+    ['the table\'s own read answers 404', { nosuch: missing }, ['nosuch'], 'LOOKUP_TABLE_NOT_FOUND'],
+    ['the second table\'s own read answers 404, after the first was read', { opportunity: OPPORTUNITY, nosuch: missing }, ['opportunity', 'nosuch'], 'LOOKUP_TABLE_NOT_FOUND'],
+    ['the table\'s own read refused with another status', { opportunity: sdkHttpError(403, tableRead('opportunity')) }, ['opportunity'], 'CONNECTION_ERROR'],
+    ['no token, so nothing was sent', { opportunity: sdkHttpError(0, tableRead('opportunity'), "Failed to get Azure CLI token. Run 'az login' first.") }, ['opportunity'], 'CONNECTION_ERROR'],
+    ['a 404 of a read below the table', { opportunity: sdkHttpError(404, `${ENV}/api/data/v9.0/EntityDefinitions(LogicalName='opportunity')/Attributes/Microsoft.Dynamics.CRM.LookupAttributeMetadata?$select=LogicalName,Targets`) }, ['opportunity'], 'CONNECTION_ERROR'],
+    ['a 404 of another table\'s read', { opportunity: sdkHttpError(404, tableRead('account')) }, ['opportunity'], 'CONNECTION_ERROR'],
+  ]) {
+    const sdk = fakeSdk({ metadata });
+    await assert.rejects(readLookupMetadata(sdk, tables), (err) => err.code === code, label);
+    assert.equal(sdk.reads.at(-1), `metadata ${tables.at(-1)}`, `${label}: nothing is read after the failed table read`);
+  }
+  await assert.rejects(readLookupMetadata(fakeSdk({ metadata: { nosuch: missing } }), ['nosuch']),
+    (err) => err.message === `nosuch: the environment has no table with this logical name — ${missing.message}`);
+});
+
 // --- the command line, through main(), with the SDK stubbed (lib/throwaway-sdk.js's own lifecycle) ---------------------------------
 
 async function run(argv, sdk = fakeSdk()) {
@@ -233,4 +257,20 @@ test('a complete read prints one ASCII JSON answer; a failed one exits 1 with it
   assert.deepEqual(Object.keys(failed.emitted[0].payload).sort(), ['code', 'error', 'ok']);
   assert.equal(failed.emitted[0].payload.code, 'LOOKUP_TABLE_NOT_FOUND');
   assert.equal(fs.existsSync(failed.workspaceDir), false);
+});
+
+test('a table the SDK\'s own read finds missing prints LOOKUP_TABLE_NOT_FOUND with no tables and exits 1; another refusal of that read prints CONNECTION_ERROR', async () => {
+  const fs = require('node:fs');
+  const missing = await run(['--env', ENV, '--tables', 'opportunity'], fakeSdk({ metadata: { opportunity: sdkHttpError(404, tableRead('opportunity'), "EntityMetadata With Id = LogicalName='opportunity' does not exist.") } }));
+  assert.equal(missing.exitCode, 1);
+  assert.equal(missing.emitted.length, 1);
+  assert.deepEqual(missing.emitted[0].options, { ascii: true });
+  assert.deepEqual(Object.keys(missing.emitted[0].payload).sort(), ['code', 'error', 'ok']);
+  assert.equal(missing.emitted[0].payload.ok, false);
+  assert.equal(missing.emitted[0].payload.code, 'LOOKUP_TABLE_NOT_FOUND');
+  assert.match(missing.emitted[0].payload.error, /^opportunity: the environment has no table with this logical name — HTTP 404 from https:\/\/contoso\.crm\.dynamics\.com\/api\/data\/v9\.0\/EntityDefinitions\(LogicalName='opportunity'\)\?/);
+  assert.equal(fs.existsSync(missing.workspaceDir), false);
+  const refused = await run(['--env', ENV, '--tables', 'opportunity'], fakeSdk({ metadata: { opportunity: sdkHttpError(503, tableRead('opportunity'), 'Service unavailable.') } }));
+  assert.equal(refused.exitCode, 1);
+  assert.deepEqual(refused.emitted[0].payload, { ok: false, error: `HTTP 503 from ${tableRead('opportunity')}: Service unavailable.`, code: 'CONNECTION_ERROR' });
 });

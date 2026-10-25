@@ -20,8 +20,8 @@
 //                                   "relationship": "opportunity_customer_accounts" }, … ],
 //                      "sharedPaths": [] }, … ] } ] }
 //   A failed or incomplete read: { "ok": false, "error": "<message>", "code": "<code>" } on stdout and the message on stderr, exit 1 —
-//   never an empty or shorter candidate list. Codes: LOOKUP_TABLE_NOT_FOUND, LOOKUP_METADATA_INCOMPLETE, LOOKUP_RELATIONSHIPS_UNREADABLE,
-//   or the SDK's own (CONNECTION_ERROR when the Azure CLI cannot give a token).
+//   never an empty or shorter candidate list. Codes: LOOKUP_TABLE_NOT_FOUND (the environment has no table of that name), LOOKUP_METADATA_INCOMPLETE,
+//   LOOKUP_RELATIONSHIPS_UNREADABLE, or the SDK's own (CONNECTION_ERROR for any other refused request, and when the Azure CLI cannot give a token).
 //
 // Exit codes: 0 read; 1 usage error (stderr names the flag and the usage, stdout stays empty) or a failure to read.
 
