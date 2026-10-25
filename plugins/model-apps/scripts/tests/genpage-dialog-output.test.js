@@ -17,7 +17,9 @@ const { griffelStyleProblems } = require('../lib/griffel-styles.js');
 const { extractNavTargets, navMalformedRefs, strayPageRefs } = require('../lib/pageref-resolver.js');
 const { pageStructureProblems } = require('../lib/page-structure.js');
 
-const RULES = fs.readFileSync(path.join(__dirname, '..', '..', 'references', 'rules.md'), 'utf8');
+// rules.md is read with its line ends normalized: a Windows checkout gives it CRLF (git's core.autocrlf), and the snippets are found by LF patterns — the section's
+// end, the code fences — and joined into a page line by line.
+const RULES = fs.readFileSync(path.join(__dirname, '..', '..', 'references', 'rules.md'), 'utf8').replace(/\r\n/g, '\n');
 const SECTION = '### Dialog output (`setPageOutput`)';
 
 // The globals a page's types touch, in place of lib.d.ts (`noLib`): the ones the compiler itself needs, and those the generated types and the snippets name.
@@ -124,15 +126,19 @@ test('a page written with the pattern passes the checks every page upload makes 
     '};',
     'export default GeneratedComponent;',
   ].join('\n');
-  assert.deepEqual(pageStructureProblems(page), [], 'the structural gate the page of a worker and a promoted page pass');
-  assert.deepEqual(griffelStyleProblems(page).problems, [], 'the Griffel check');
-  assert.deepEqual(navMalformedRefs(page), [], 'no malformed navigation reference');
-  assert.deepEqual(strayPageRefs(page), [], 'no PAGEREF_ token');
-  assert.deepEqual(extractNavTargets(page), [], 'navigateBack is no navigation to another page');
   const ts = loadVendoredTypeScript();
-  const out = ts.transpileModule(page, { reportDiagnostics: true, compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2017, module: ts.ModuleKind.CommonJS } });
-  assert.deepEqual((out.diagnostics || []).map((d) => ts.flattenDiagnosticMessageText(d.messageText, ' ')), []);
-  assert.match(out.outputText, /setPageOutput/);
+  // A page saved on Windows can hold CRLF line ends, and an upload checks the file as it is (genpage-upload.js decodes it and changes no line end), so the same page
+  // written so passes the same checks.
+  for (const [ends, text] of [['LF', page], ['CRLF', page.replace(/\n/g, '\r\n')]]) {
+    assert.deepEqual(pageStructureProblems(text), [], `${ends}: the structural gate the page of a worker and a promoted page pass`);
+    assert.deepEqual(griffelStyleProblems(text).problems, [], `${ends}: the Griffel check`);
+    assert.deepEqual(navMalformedRefs(text), [], `${ends}: no malformed navigation reference`);
+    assert.deepEqual(strayPageRefs(text), [], `${ends}: no PAGEREF_ token`);
+    assert.deepEqual(extractNavTargets(text), [], `${ends}: navigateBack is no navigation to another page`);
+    const out = ts.transpileModule(text, { reportDiagnostics: true, compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2017, module: ts.ModuleKind.CommonJS } });
+    assert.deepEqual((out.diagnostics || []).map((d) => ts.flattenDiagnosticMessageText(d.messageText, ' ')), [], ends);
+    assert.match(out.outputText, /setPageOutput/, ends);
+  }
 });
 
 test('rules.md says what the method does and does not do: synchronous and void, it does not close the dialog, and a dialog closed without it returns undefined', () => {

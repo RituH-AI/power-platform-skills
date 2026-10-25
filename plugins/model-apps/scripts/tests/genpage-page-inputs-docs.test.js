@@ -17,7 +17,9 @@ const { pageFolderFiles } = require('../lib/genpage-sdk.js');
 const { buildManifest } = require('../lib/page-manifest.js');
 
 const PLUGIN = path.join(__dirname, '..', '..');
-const read = (...parts) => fs.readFileSync(path.join(PLUGIN, ...parts), 'utf8');
+// Every document is read with its line ends normalized: a Windows checkout gives it CRLF (git's core.autocrlf), and the command and the example are found by LF
+// patterns — the code fences, the subsection's end — and the example is split into lines.
+const read = (...parts) => fs.readFileSync(path.join(PLUGIN, ...parts), 'utf8').replace(/\r\n/g, '\n');
 const RULES = read('references', 'rules.md');
 const flat = (text) => text.replace(/\s+/g, ' ');
 

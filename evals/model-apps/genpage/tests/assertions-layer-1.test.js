@@ -1277,6 +1277,16 @@ const scenarioFixture = (id) => {
   return found;
 };
 const gradeNewContract = (fixture) => PHASE_EXPECTATIONS.get(NEW_CONTRACT)({ fixture, eval: { id: fixture.id } });
+// A Windows checkout gives a fixture's text files CRLF line ends (git's core.autocrlf), and the graders read them as they are. A variant below
+// writes its lines with `\n`; `edit` and `asIn` write each `\n` as the line end the fixture's text really has, so a variant is graded in the
+// checkout's own bytes, and `edit` fails when its text is not there: a change that finds nothing would grade the fixture itself, not a variant.
+// `from` may also be a pattern, written with `\r?\n` so that it matches either line end.
+const asIn = (text, lines) => lines.replace(/\r?\n/g, text.includes('\r\n') ? '\r\n' : '\n');
+const edit = (text, from, to) => {
+  const find = typeof from === 'string' ? asIn(text, from) : from;
+  assert.ok(typeof find === 'string' ? text.includes(find) : text.search(find) >= 0, `the fixture's text has ${JSON.stringify(String(find))}`);
+  return text.replace(find, () => asIn(text, to));
+};
 
 test('a newly authored plan passes with its records, the same approved preview and a --require-assumptions verification of exactly those records', () => {
   const fixture = scenarioFixture(27);
@@ -1291,10 +1301,10 @@ test('a newly authored plan without its records, preview or matching verificatio
     return gradeNewContract(copy);
   };
   for (const [label, change, reason] of [
-    ['no ## Assumptions in the written plan', (f) => { f.genpagePlan = f.genpagePlan.replace(/\n## Assumptions\n[\s\S]*?\n## Working Directory\n/, '\n## Working Directory\n'); }, /Assumptions/],
-    ['no Data semantics for the page', (f) => { f.genpagePlan = f.genpagePlan.replace('#### Data semantics\nNone.\n\n', ''); }, /Data semantics/],
+    ['no ## Assumptions in the written plan', (f) => { f.genpagePlan = edit(f.genpagePlan, /\r?\n## Assumptions\r?\n[\s\S]*?\r?\n## Working Directory\r?\n/, '\n## Working Directory\n'); }, /Assumptions/],
+    ['no Data semantics for the page', (f) => { f.genpagePlan = edit(f.genpagePlan, '#### Data semantics\nNone.\n\n', ''); }, /Data semantics/],
     ['no approved preview declared', (f) => { delete f.manifest.semantics; }, /approved preview/],
-    ['an assumption the preview never showed', (f) => { f.genpagePlan = f.genpagePlan.replace('- Resolution: planner-default\n\n### A2', '- Resolution: planner-default\n\n### A3 — Extra\n- Decision: Hide archived orders.\n- Alternatives considered: Show them.\n- Evidence: default: none stated.\n- Resolution: planner-default\n\n### A2'); }, /differs from the approved preview/],
+    ['an assumption the preview never showed', (f) => { f.genpagePlan = edit(f.genpagePlan, '- Resolution: planner-default\n\n### A2', '- Resolution: planner-default\n\n### A3 — Extra\n- Decision: Hide archived orders.\n- Alternatives considered: Show them.\n- Evidence: default: none stated.\n- Resolution: planner-default\n\n### A2'); }, /differs from the approved preview/],
     ['a verification whose hash is another plan\'s', (f) => { for (const event of f.events) if (event.result?.semanticsHash) event.result.semanticsHash = '0'.repeat(64); }, /semanticsHash is not the hash/],
     ['a verification that failed', (f) => { for (const event of f.events) if (event.result?.semanticsHash) event.result.ok = false; }, /did not pass/],
   ]) {
@@ -1341,6 +1351,35 @@ test('eval 26: the answered question, the lookup metadata read, the typed lookup
   }
 });
 
+// The graders read a fixture as the checkout gives it — CRLF line ends on Windows, LF elsewhere — so both scenarios are graded here in each,
+// whichever this checkout gave them: every text the loader read from a file is written with those line ends (the manifest and the events are
+// parsed JSON, with no line ends of their own). Both pass in each, and a variant whose change spans lines fails in each.
+test('eval 26 and 27: the graders give the same verdicts to a fixture with LF and with CRLF line ends', () => {
+  const withLineEnds = (fixture, eol) => {
+    const copy = structuredClone(fixture);
+    const ends = (text) => (typeof text === 'string' ? text.replace(/\r?\n/g, eol) : text);
+    for (const key of ['workflowLog', 'genpagePlan', 'genpageEditPlan', 'runtimeTypes', 'entityCreationLog']) copy[key] = ends(copy[key]);
+    for (const name of Object.keys(copy.artifacts)) copy.artifacts[name] = ends(copy.artifacts[name]);
+    for (const file of copy.files) file.content = ends(file.content);
+    return copy;
+  };
+  const [base26, base27] = [scenarioFixture(26), scenarioFixture(27)];
+  for (const [ends, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
+    const fixture = withLineEnds(base26, eol);
+    assert.equal(fixture.genpagePlan.includes('\r\n'), eol === '\r\n', `${ends}: the plan is written with ${ends} line ends`);
+    for (const text of [SEMANTIC_QUESTION, LOOKUP_DISCOVERY, NEW_CONTRACT, LOOKUP_TYPES, OBSERVED_GATE]) {
+      assert.deepEqual(grade(text, fixture), { status: 'pass', reason: '' }, `${ends}: ${text}`);
+    }
+    assert.deepEqual(gradeNewContract(withLineEnds(base27, eol)), { status: 'pass', reason: '' }, `${ends}: eval 27`);
+    const unasked = withLineEnds(base26, eol);
+    unasked.workflowLog = edit(unasked.workflowLog, '- AskUserQuestion: Which opportunities should this account show? → Direct customer\n', '');
+    assert.equal(grade(SEMANTIC_QUESTION, unasked).status, 'fail', `${ends}: the question never asked`);
+    const unrecorded = withLineEnds(base27, eol);
+    unrecorded.genpagePlan = edit(unrecorded.genpagePlan, /\r?\n## Assumptions\r?\n[\s\S]*?\r?\n## Working Directory\r?\n/, '\n## Working Directory\n');
+    assert.equal(gradeNewContract(unrecorded).status, 'fail', `${ends}: no assumptions in the written plan`);
+  }
+});
+
 test('eval 26: a question that was not asked, answered, handed back, recorded or approved in that order fails — it never skips', () => {
   const SCOPE_LINE = '- AskUserQuestion: Which opportunities should this account show? → Direct customer\n';
   assertFails26(SEMANTIC_QUESTION, [
@@ -1353,14 +1392,14 @@ test('eval 26: a question that was not asked, answered, handed back, recorded or
     }, /several candidates carries no default/],
     ['the options differ from the planner\'s', (f) => interactions26(f, (entries) => { entries[0].options = ['Direct customer']; return entries; }), /not the ones the planner returned/],
     ['an answer that is not an option', (f) => interactions26(f, (entries) => { entries[1].selected = 'Every account'; return entries; }), /not one of the options/],
-    ['no AskUserQuestion for it in the log', (f) => { f.workflowLog = f.workflowLog.replace(SCOPE_LINE, ''); }, /AskUserQuestion: Which opportunities should this account show\? → Direct customer/],
-    ['the plan approved before the question was asked', (f) => { f.workflowLog = f.workflowLog.replace(SCOPE_LINE, '') + '\n' + SCOPE_LINE; }, /approved before the question was answered/],
+    ['no AskUserQuestion for it in the log', (f) => { f.workflowLog = edit(f.workflowLog, SCOPE_LINE, ''); }, /AskUserQuestion: Which opportunities should this account show\? → Direct customer/],
+    ['the plan approved before the question was asked', (f) => { f.workflowLog = edit(f.workflowLog, SCOPE_LINE, '') + asIn(f.workflowLog, `\n${SCOPE_LINE}`); }, /approved before the question was answered/],
     ['an unattended default for a question with no default', (f) => interactions26(f, (entries) => { entries[1].source = 'unattended-default'; return entries; }), /only the one option the planner marked/],
     ['the answer never handed back to the planner', (f) => interactions26(f, (entries) => { entries[1].event = 'planner-discovery'; return entries; }), /no planner event after the question carries its answer/],
     ['a re-invocation that does not carry the answer', (f) => { event26(f, 'planner-answers').command = 'Task genpage-planner (answers: app → Sales Hub)'; }, /does not hand back opportunities-account-scope → Direct customer/],
     ['the written plan records another answer', (f) => { f.genpagePlan = f.genpagePlan.replace('- Answer: Direct customer', '- Answer: Parent account'); }, /the written plan records A1's Answer as "Parent account"/],
     ['the preview records another answer', (f) => { f.artifacts['approved-plan.md'] = f.artifacts['approved-plan.md'].replace('- Answer: Direct customer', '- Answer: Customer plus contacts'); }, /the approved preview records A1's Answer/],
-    ['no Assumptions in the written plan', (f) => { f.genpagePlan = f.genpagePlan.replace(/\n## Assumptions\n[\s\S]*?\n## Working Directory\n/, '\n## Working Directory\n'); }, /the written plan records no assumption answering opportunities-account-scope/],
+    ['no Assumptions in the written plan', (f) => { f.genpagePlan = edit(f.genpagePlan, /\r?\n## Assumptions\r?\n[\s\S]*?\r?\n## Working Directory\r?\n/, '\n## Working Directory\n'); }, /the written plan records no assumption answering opportunities-account-scope/],
     ['the preview saved before the answer reached the planner', (f) => moveEvent26(f, 'save-approved', 'planner-discovery'), /saved before the answer reached the planner/],
     ['an approval of another preview', (f) => interactions26(f, (entries) => { entries[2].preview = 'genpage-plan.md'; return entries; }), /not the approved preview the fixture declares/],
   ]);
@@ -1391,8 +1430,8 @@ test('eval 26: RuntimeTypes.ts must be generated for the table and type the look
   assertFails26(LOOKUP_TYPES, [
     ['RuntimeTypes.ts not captured', (f) => { f.runtimeTypes = null; }, /RuntimeTypes.ts was not captured/],
     ['types not generated for opportunity', (f) => { f.events = f.events.filter((event) => event.id !== 'generate-types'); }, /genpage.js types was not run for opportunity/],
-    ['a one-target type', (f) => { f.runtimeTypes = f.runtimeTypes.replace(' | `/contact(${string})`,\n    readonly customeridname', ',\n    readonly customeridname'); }, /types opportunity._customerid_value as account, the plan records account, contact/],
-    ['the read property not declared', (f) => { f.runtimeTypes = f.runtimeTypes.replace(/^ {4}_customerid_value:.*\n/m, ''); }, /does not declare opportunity._customerid_value/],
+    ['a one-target type', (f) => { f.runtimeTypes = edit(f.runtimeTypes, ' | `/contact(${string})`,\n    readonly customeridname', ',\n    readonly customeridname'); }, /types opportunity._customerid_value as account, the plan records account, contact/],
+    ['the read property not declared', (f) => { f.runtimeTypes = edit(f.runtimeTypes, /^ {4}_customerid_value:.*\r?\n/m, ''); }, /does not declare opportunity._customerid_value/],
   ]);
 });
 
@@ -1419,28 +1458,27 @@ test('eval 26: an unattended run that takes the one option the planner marked, h
       { type: 'answer', event: 'planner-answers', question: 'opportunities-account-scope', selected: 'Direct customer account only', source: 'unattended-default' },
       { type: 'approval', preview: 'approved-plan.md', outcome: 'approved', source: 'unattended-default' },
     ]);
-    const settle = (text) => text.replace('- Resolution: user-confirmed\n- Question: opportunities-account-scope\n- Answer: Direct customer\n',
+    const settle = (text) => edit(text, '- Resolution: user-confirmed\n- Question: opportunities-account-scope\n- Answer: Direct customer\n',
       `- Resolution: unattended-default\n- Question: opportunities-account-scope\n- Answer: Direct customer account only\n- Default record: ${RECORD}\n`);
     f.genpagePlan = settle(f.genpagePlan);
     f.artifacts['approved-plan.md'] = settle(f.artifacts['approved-plan.md']);
-    f.workflowLog = f.workflowLog
-      .replace('- AskUserQuestion: Which opportunities should this account show? → Direct customer\n', `- ${RECORD}\n`)
-      .replace('- ExitPlanMode → user approved the plan without changes\n', '- Unattended default: plan approval → approved (unattended mode; all semantic questions resolved)\n');
+    f.workflowLog = edit(edit(f.workflowLog, '- AskUserQuestion: Which opportunities should this account show? → Direct customer\n', `- ${RECORD}\n`),
+      '- ExitPlanMode → user approved the plan without changes\n', '- Unattended default: plan approval → approved (unattended mode; all semantic questions resolved)\n');
     change(f);
   });
   assert.deepEqual(grade(SEMANTIC_QUESTION, unattended()), { status: 'pass', reason: '' });
   for (const [label, change, reason] of [
-    ['the default record missing from the log', (f) => { f.workflowLog = f.workflowLog.replace(`- ${RECORD}\n`, ''); }, /does not hold A1's Default record/],
-    ['no plan-approval record', (f) => { f.workflowLog = f.workflowLog.replace('- Unattended default: plan approval → approved (unattended mode; all semantic questions resolved)\n', ''); }, /no unattended plan-approval record/],
+    ['the default record missing from the log', (f) => { f.workflowLog = edit(f.workflowLog, `- ${RECORD}\n`, ''); }, /does not hold A1's Default record/],
+    ['no plan-approval record', (f) => { f.workflowLog = edit(f.workflowLog, '- Unattended default: plan approval → approved (unattended mode; all semantic questions resolved)\n', ''); }, /no unattended plan-approval record/],
     // The interaction artifact still lists the approval last; only the log says it came first.
     ['the plan approved in the log before its default was recorded', (f) => {
       const approval = '- Unattended default: plan approval → approved (unattended mode; all semantic questions resolved)\n';
-      f.workflowLog = approval + f.workflowLog.replace(approval, '');
+      f.workflowLog = asIn(f.workflowLog, approval) + edit(f.workflowLog, approval, '');
     }, /approved before its unattended default was recorded/],
     ['a second approval record after an early one', (f) => {
-      f.workflowLog = '- Unattended default: plan approval -> approved\n' + f.workflowLog;
+      f.workflowLog = asIn(f.workflowLog, '- Unattended default: plan approval -> approved\n') + f.workflowLog;
     }, /approved before its unattended default was recorded/],
-    ['an answer recorded as user-confirmed', (f) => { f.genpagePlan = f.genpagePlan.replace('- Resolution: unattended-default', '- Resolution: user-confirmed').replace(`- Default record: ${RECORD}\n`, ''); }, /records A1 as user-confirmed, not unattended-default/],
+    ['an answer recorded as user-confirmed', (f) => { f.genpagePlan = edit(edit(f.genpagePlan, '- Resolution: unattended-default', '- Resolution: user-confirmed'), `- Default record: ${RECORD}\n`, ''); }, /records A1 as user-confirmed, not unattended-default/],
   ]) {
     const result = grade(SEMANTIC_QUESTION, unattended(change));
     assert.equal(result.status, 'fail', label);
