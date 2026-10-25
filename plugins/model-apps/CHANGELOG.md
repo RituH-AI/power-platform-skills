@@ -7,32 +7,36 @@ evidence and trade-offs behind a change live in its PR, in `docs/`, or in the li
 
 ## [2.20.0]
 
-The bundled SDK is unchanged (power-platform-ux a3443479). `/genpage` can offer two built-in Dataverse operations as button-only
-page calls.
+The bundled SDK is unchanged (power-platform-ux a3443479).
 
 ### Added
 
-- **`/genpage` can offer WhoAmI and RetrieveVersion** (flag `dataverse-operations`, off by default;
-  `GENPAGE_ENABLE_DATAVERSE_OPERATIONS=1` enables it for a run), bound only by an explicit maker selection and called only from a
-  button; a plan can carry an optional `## Dataverse Operations` section.
-- `scripts/list-dataverse-operations.js` lists them from a fixed catalogue: the environment, the page player and the user's
-  permissions are not checked, so a first click can answer 404.
-- **An edit keeps built-in operation bindings unless the maker removes or clears them**; adding or replacing one stops, writing
-  nothing, while the flag is off, and clearing every binding needs the maker's explicit choice. Turning the flag off strips no binding.
+- **`/genpage` can offer WhoAmI and RetrieveVersion** (flag `dataverse-operations`, off by default), bound only by explicit
+  selection and called only from a button; `list-dataverse-operations.js` does not check the environment.
+- **Plans keep what you asked for apart from what the planner assumed** (`## Assumptions`, shown first at approval) and ask
+  when a relationship or filter is unclear (#671).
+- **Lookups to more than one table** (Customer, Owner, Regarding): plans record each lookup's targets, and pages normalize bare or
+  table-qualified values and keep the actual target (#672).
+- **Pages report errors one way**: one reporter, a localized Fluent message bar and a render boundary; manual retry only for safe
+  reads (#674).
 
 ### Changed
 
-- **A rebuild and a download tell WhoAmI and RetrieveVersion apart from Custom APIs**, whatever the flag says: a rebuild reports
-  them not checked, not missing, and a download lists them under `pageBindings.neededInTarget.dataverseOperations`, with nothing to
-  deploy.
-- **The genpage evals grade built-in operation authoring**: the plan section, the flag gate, the clear choice and the
-  button-only pattern.
+- **Custom API support has no feature flag**; `GENPAGE_ENABLE_CUSTOM_API` is ignored.
+- **An edit asks before clearing built-in bindings, ahead of planning**, and a create that adds none stops offering them.
+- **Rebuilds and downloads tell built-in operations apart from Custom APIs.**
+- **A style you ask for replaces the default look** (AB#6320143).
+- **`primaryAttribute` refuses a key the build does not read**, naming the key it meant.
 
 ### Fixed
 
-- **An eval fixture with nothing graded is reported unscored, not passed** (`# SKIP no expectation graded`,
-  `# unscored fixtures U`); exit status unchanged.
-
+- `/genpage` adds pages to the solution you chose (AB#6443257), documents `setPageOutput` (AB#6757591) and finds the
+  inputs another page accepts (AB#6247727).
+- An app with no tables downloads and builds; a one-language label keeps its language; options labelled alike keep their column's
+  type; the loss report names command-bar buttons.
+- A rebuild says when a web resource's deployed content differs; the entity-builder writes Choice options as labels.
+- The page check reads more valid pages. Teardown still deletes a generative page a form embeds (now documented).
+- Evals: a fixture with nothing graded is not counted as passed; the label check reads comments and character references.
 ## [2.19.0]
 
 The bundled SDK is unchanged (power-platform-ux a3443479, as in 2.18.0).
