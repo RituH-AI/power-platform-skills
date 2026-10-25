@@ -344,26 +344,3 @@ test('runner: fixture 27 is graded by the real callbacks, and a copy whose Actio
   assert.match(red.stdout, new RegExp(`not ok \\d+ - ${escape(scenario)}`));
   assert.match(red.stdout, /res\.error\?\.code === 'indeterminate'/);
 });
-
-test('runner: fixture 26 grades its page against the saved lookup metadata, and a copy whose list keeps only account customers fails with exit 1', (t) => {
-  const green = runRunner(['--eval', '26']);
-  assert.equal(green.code, 0, green.stdout + green.stderr);
-  const scenario = 'Phase 5: The page normalizes every customer with the canonical lookup normalizer and its complete targets';
-  for (const text of [PAGE_ERROR, scenario]) {
-    const line = green.stdout.split('\n').find((entry) => entry.includes(text));
-    assert.ok(line && /^\s*ok \d+ - /.test(line) && !/# SKIP/.test(line), `graded and passing, not skipped: ${line}`);
-  }
-  const root = mkTempFixturesDir();
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const copy = path.join(root, '26-customer-lookup');
-  fs.cpSync(path.join(FIXTURES, '26-customer-lookup'), copy, { recursive: true });
-  const page = path.join(copy, 'customer-lookup.tsx');
-  const source = fs.readFileSync(page, 'utf8').replace(/\r\n/g, '\n');
-  const everyCustomer = "filter: '_customerid_value ne null'";
-  assert.ok(source.includes(everyCustomer), 'the fixture page lists every customer of either table');
-  fs.writeFileSync(page, source.replace(everyCustomer, "filter: 'customerid_account/accountid ne null'"));
-  const red = runRunner(['--fixtures', root, '--eval', '26']);
-  assert.equal(red.code, 1, red.stdout);
-  assert.match(red.stdout, /not ok \d+ - Phase 5: The page normalizes every customer/);
-  assert.match(red.stdout, /does not keep every customer of either table/);
-});

@@ -33,8 +33,6 @@ const {
 const { nestedDefinitionProblems } = require('./tsx-structure.js');
 const { columnProblems } = require('./column-contract.js');
 const { PAGE_ERROR_ASSERTION, gradePageErrors, pageErrorProblems, dataCallFamilies } = require('./page-error-evidence.js');
-const { lookupContractProblems, evidenceLookups } = require('./polymorphic-lookup-contract.js');
-const { groupEnd } = require('./source-evidence.js');
 
 let _verifiedIcons = null;
 function getVerifiedIcons() {
@@ -951,99 +949,6 @@ PHASE5_EXPECTATIONS.set(
     if (kinds !== 'indeterminate,indeterminate,network,write,write') return fail(`${page.name}: the Action reports ${kinds || 'nothing'}, not indeterminate, indeterminate, network, write and a rejected write`);
     if (action.some((report) => report.retry && report.kind !== 'network')) return fail(`${page.name}: only the Action's network result may offer a retry`);
     return pass();
-  }
-);
-
-// --- Eval 26: lookup identities in the page ------------------------------------------------------------
-// lib/polymorphic-lookup-contract.js proves that whatever the page does with a lookup it does through the canonical normalizer and
-// the lookup's complete targets, graded against the metadata read the run saved. It does not decide which views a page offers;
-// this scenario's approved plan does, and each view is required here: every customer of either table (the all-customers filter
-// `_customerid_value ne null`, never one target's path compared with null), a search of the LOADED rows that says so (the
-// planner's search-scope default: no name search through one target's path), an account's opportunities through the verified
-// customerid_account path by a resolved reference's id (the maker's answer: the direct customer), the customer opened in its own
-// table and changed to the picked table, each choice keyed by table and id so that equal names and one GUID in two tables stay
-// two choices, and each failure reported with its kind: reads as read, the write as a write with no retry. The list read is the
-// canonical cached promise and the account read is awaited, so a rejection is never cached.
-
-// The named functions of a page (`function x(` and `async function x(`): [{ start, end }] of each body, outermost first.
-function functionBodies(code, mask) {
-  const bodies = [];
-  for (const match of mask.matchAll(/\bfunction\s+[A-Za-z_$][\w$]*\s*\(/g)) {
-    try {
-      const paramsEnd = groupEnd(mask, match.index + match[0].length - 1);
-      const open = mask.indexOf('{', paramsEnd);
-      if (open < 0) continue;
-      bodies.push({ start: open, end: groupEnd(mask, open) + 1 });
-    } catch { /* an unbalanced function is graded elsewhere (the completeness gate) */ }
-  }
-  return bodies;
-}
-
-// The smallest named function whose body holds `pattern`: the operation's own handler, not the PageBody around it.
-function innermostWith(code, bodies, pattern) {
-  return bodies.filter((body) => pattern.test(code.slice(body.start, body.end)))
-    .sort((a, b) => (a.end - a.start) - (b.end - b.start))[0] || null;
-}
-
-function customerScenarioProblems(content) {
-  const code = String(content ?? '');
-  let mask;
-  try { mask = blankLiterals(code); } catch (error) { return [`the page could not be read (${error.message})`]; }
-  const problems = [];
-  const families = dataCallFamilies(code);
-  if (!/\bnormalizeLookupReference\(\s*\w+\s*,\s*'_customerid_value'\s*,\s*\[\s*'account'\s*,\s*'contact'\s*\]\s*\)/.test(code)) {
-    problems.push("no customer is normalized with normalizeLookupReference(<row>, '_customerid_value', ['account', 'contact'])");
-  }
-  if (!/\bdataApi\s*\.\s*queryTable\(\s*'opportunity'\s*,\s*\{[^}]*\bfilter:\s*'_customerid_value ne null'/.test(code)) {
-    problems.push("the opportunity list does not keep every customer of either table (filter '_customerid_value ne null')");
-  }
-  if (/\bcustomerid_(?:account|contact)\/\w+\s+(?:ne|eq)\s+null\b/.test(code)) problems.push('a filter keeps the customers of one table only (a typed path compared with null)');
-  if (/\bcustomerid_(?:account\/(?!accountid\b)|contact\/(?!contactid\b))\w+/.test(code)) problems.push('a filter reads a column of one target through its path — a name search of one table, not of every customer');
-  if (!families.some((call) => call.method === 'queryTable' && call.family === 'cache')) problems.push('the list read is not held by the canonical cached promise');
-  const searchBox = /<SearchBox\b[\s\S]*?\/>/.exec(code);
-  if (!searchBox || !/\baria-label="[^"]*\bloaded\b[^"]*"/i.test(searchBox[0])) problems.push('the customer search is not labelled as a search of the loaded rows');
-  if (!/`customerid_account\/accountid eq \$\{\s*\w+\.id\s*\}`/.test(code)) problems.push("no account view filters customerid_account/accountid by a resolved reference's id");
-  if (!families.some((call) => call.method === 'queryTable' && call.family === 'awaited')) problems.push("the account view's read is not awaited in a try that reports");
-  if (!/\bnavigateTo\(\s*\{[^}]*\bentityName:\s*\w+\.table\s*,\s*entityId:\s*\w+\.id\b/.test(code)) problems.push("Open customer does not navigate to the resolved reference's own table");
-  if (!/\bdataApi\s*\.\s*updateRow\(\s*'opportunity'\s*,[^;]*\b_customerid_value\s*:/.test(code)) problems.push('Change customer does not write _customerid_value');
-  if (!/<Option\b[^>]*\bvalue=\{`\$\{\s*(\w+)\.table\s*\}:\$\{\s*\1\.id\s*\}`\}/.test(code)) problems.push('the customer choices are not keyed by table and id');
-  const bodies = functionBodies(code, mask);
-  for (const [pattern, kind, what] of [
-    [/\bnavigateTo\(/, 'read', 'Open customer'],
-    [/customerid_account\/accountid eq/, 'read', 'The account view'],
-    [/\bdataApi\s*\.\s*updateRow\(/, 'write', 'Change customer'],
-  ]) {
-    const body = innermostWith(code, bodies, pattern);
-    if (!body) { problems.push(`${what} is not in a named function`); continue; }
-    // reportPageError(PAGE_NAME, 'changeCustomer', undefined, failure, 'write') — the kind is the fifth argument, a retry the sixth.
-    const reports = [...code.slice(body.start, body.end).matchAll(/\breportPageError\(\s*PAGE_NAME\s*,\s*'\w+'\s*,\s*[^,()]+,\s*\w+\s*,\s*'(\w+)'\s*(,[^)]*)?\)/g)];
-    if (!reports.length) problems.push(`${what} reports no failure through reportPageError`);
-    else if (reports.some((report) => report[1] !== kind)) problems.push(`${what} reports its failure as ${reports.map((report) => report[1]).join(', ')}, not ${kind}`);
-    else if (kind === 'write' && reports.some((report) => report[2])) problems.push(`${what} offers a retry for a write`);
-  }
-  return problems;
-}
-
-PHASE5_EXPECTATIONS.set(
-  'Phase 5: The page normalizes every customer with the canonical lookup normalizer and its complete targets, lists the customers of both tables, labels its customer search as a search of the loaded rows, filters an account\'s opportunities through the verified customerid_account path only for an account customer, opens and writes the customer\'s own table, and reports the reads and the write through reportPageError',
-  ({ fixture, files }) => {
-    if (files.length !== 1) return fail(`the scenario has one page; the fixture has ${files.length}`);
-    const [page] = files;
-    const name = fixture?.manifest?.semantics?.lookupMetadata;
-    const text = name ? fixture.artifacts?.[name] : undefined;
-    if (typeof text !== 'string') return fail('the fixture does not carry the lookup metadata the page was built from (fixture.json semantics.lookupMetadata)');
-    let lookups = null;
-    try { lookups = evidenceLookups(JSON.parse(text)); } catch { lookups = null; }
-    if (!lookups) return fail(`${name} is not a successful get-lookup-metadata.js answer`);
-    if (!fixture.runtimeTypes) return fail('RuntimeTypes.ts was not captured');
-    const lookupPaths = lookups.flatMap((lookup) => lookup.paths.map((entry) => ({ table: lookup.table, ...entry })));
-    const problems = [
-      ...pageErrorProblems(page.content).map((problem) => `${page.name}: ${problem}`),
-      ...lookupContractProblems(page.content, { lookups, targetColumns: {} }).map((problem) => `${page.name}: ${problem}`),
-      ...(columnProblems([page], fixture.runtimeTypes, { lookupPaths, targetColumns: {} }) || []),
-      ...customerScenarioProblems(page.content).map((problem) => `${page.name}: ${problem}`),
-    ];
-    return problems.length ? fail(problems[0]) : pass();
   }
 );
 

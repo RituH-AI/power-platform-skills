@@ -587,8 +587,7 @@
         "Phase 1 (Planner): The newly authored plan records its assumptions and every page's data semantics and lookup metadata, the approved preview carries the same records, and provenance is verified with --require-assumptions",
         "Phase 4: RuntimeTypes.ts is generated for opportunity and types each recorded lookup's read property with exactly its recorded targets",
         "Phase 5a: The page is generated only after provenance is verified with --require-assumptions --require-observed-lookups --lookup-metadata on this plan's records",
-        "Phase 5b: Generated .tsx uses only column names verified from RuntimeTypes.ts — no guessed names",
-        "Phase 5: The page normalizes every customer with the canonical lookup normalizer and its complete targets, lists the customers of both tables, labels its customer search as a search of the loaded rows, filters an account's opportunities through the verified customerid_account path only for an account customer, opens and writes the customer's own table, and reports the reads and the write through reportPageError"
+        "Phase 5b: Generated .tsx uses only column names verified from RuntimeTypes.ts — no guessed names"
       ]
     },
     {

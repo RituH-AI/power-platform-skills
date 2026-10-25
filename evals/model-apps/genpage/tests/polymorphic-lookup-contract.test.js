@@ -1,13 +1,14 @@
 'use strict';
-// Lookup identities in a generated page (lib/polymorphic-lookup-contract.js) and the typed-path context of the column check
-// (lib/column-contract.js), graded against a scenario's lookup metadata. The page below is assembled from the canonical normalizer
-// references/rules.md publishes and the CORRECT forms of its five pitfalls; each WRONG form is a one-place change of it. The rows,
-// tables and paths are synthetic, shaped like get-lookup-metadata.js's answer.
+// The canonical lookup normalizer (lib/polymorphic-lookup-contract.js reads it from references/rules.md and checks a page's copy),
+// the published block run against fixture 26's synthetic customer values, and the typed-path context of the column check
+// (lib/column-contract.js). What a page does with a lookup is not graded (EVAL_GUIDE.md). The page below is assembled from the
+// canonical normalizer and the CORRECT forms of the rules' lookup pitfalls; the rows, tables and paths are synthetic, shaped like
+// get-lookup-metadata.js's answer.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { lookupContractProblems, normalizerProblems } = require('../lib/polymorphic-lookup-contract.js');
+const { normalizerProblems } = require('../lib/polymorphic-lookup-contract.js');
 const { columnProblems } = require('../lib/column-contract.js');
 
 const RULES = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'plugins', 'model-apps', 'references', 'rules.md'), 'utf8').replace(/\r\n/g, '\n');
@@ -22,7 +23,6 @@ const LOOKUPS = [{
     { target: 'contact', navigationProperty: 'customerid_contact', referencedKey: 'contactid' },
   ],
 }];
-const SCENARIO = { lookups: LOOKUPS, targetColumns: { account: ['name'] } };
 
 const BODY = `
 type Row = Record<string, unknown>;
@@ -87,10 +87,9 @@ function swap(source, from, to) {
   return source.split(from).join(to);
 }
 
-test('the canonical normalizer and the CORRECT form of every pitfall pass', () => {
+test('the canonical normalizer passes', () => {
   assert.ok(NORMALIZER, 'rules.md publishes the normalizer');
   assert.deepEqual(normalizerProblems(PAGE), []);
-  assert.deepEqual(lookupContractProblems(PAGE, SCENARIO), []);
 });
 
 test('an altered, missing or duplicated normalizer is not the canonical one', () => {
@@ -102,89 +101,10 @@ test('an altered, missing or duplicated normalizer is not the canonical one', ()
     ['a second one', `${PAGE}\nfunction normalizeLookupReference(row: unknown) { return { state: 'invalid' }; }\n`],
   ]) {
     assert.ok(normalizerProblems(source).length > 0, label);
-    assert.ok(lookupContractProblems(source, SCENARIO).length > 0, label);
   }
   // Comments and indentation are not substantive.
   const reindented = swap(PAGE, "  const record = row as Record<string, unknown>;", "    // the row is an object here\n    const record = row as Record<string, unknown>;");
   assert.deepEqual(normalizerProblems(reindented), []);
-});
-
-test('every WRONG form of the pitfalls fails with a reason that names it', () => {
-  const read = "    const normalized = normalizeLookupReference(row, '_customerid_value', ['account', 'contact']);\n    if (normalized.state !== 'resolved') return;\n    const reference = normalized.reference;\n    await Xrm";
-  for (const [label, source, reason] of [
-    ['A: a raw element read', swap(PAGE, "String(row['_customerid_value@OData.Community.Display.V1.FormattedValue'] ?? '')", "String(row['_customerid_value'] ?? '')"), /reads the raw _customerid_value/],
-    ['A: a raw member read', swap(PAGE, "String(row['_customerid_value@OData.Community.Display.V1.FormattedValue'] ?? '')", 'String(row._customerid_value)'), /reads the raw _customerid_value/],
-    ['A: a raw id filter', swap(PAGE, "filter: '_customerid_value ne null'", 'filter: `_customerid_value eq ${String(row)}`'), /not the bare id of a resolved _customerid_value reference/],
-    ['A: a raw retrieveRow id', swap(PAGE, '{ id: reference.id, select:', "{ id: String(row._customerid_value), select:"), /raw lookup value as the id/],
-    ['A: retrieve a fixed table without checking the reference', swap(PAGE, "    if (reference.table !== 'account') return;\n    return dataApi.retrieveRow", '    return dataApi.retrieveRow'), /not the reference's own table/],
-    ['B: a typed path compared before the table is checked', swap(PAGE, "    if (reference.table !== 'account') return;\n    const filter", '    const filter'), /before the page checks that reference\.table is account/],
-    ['B: a typed path compared with a raw value', swap(PAGE, 'customerid_account/accountid eq ${reference.id}', 'customerid_account/accountid eq ${String(row)}'), /not a resolved reference's bare id/],
-    ['C: an invented Owner path', swap(PAGE, 'customerid_account/accountid ne null and', 'ownerid_team/teamid ne null and'), /ownerid_team, which is not a verified concrete lookup path/],
-    ['C: an unverified target column', swap(PAGE, 'contains(customerid_account/name,', 'contains(customerid_account/fullname,'), /customerid_account\/fullname, which is not a verified column of account/],
-    ['D: a fixed navigation target', swap(PAGE, 'entityName: reference.table, entityId: reference.id', "entityName: 'account', entityId: reference.id"), /not the reference's own table/],
-    ['D: a raw navigation id', swap(PAGE, 'entityName: reference.table, entityId: reference.id', "entityName: 'account', entityId: row['_customerid_value'] as string"), /raw/],
-    ['E: a fixed write table', swap(PAGE, '{ _customerid_value: link }', '{ _customerid_value: `/account(${selected.id})` }'), /written to a fixed table/],
-    ['E: a formatter branch that formats another table', swap(PAGE, "? `/account(${selected.id})`", '? `/contact(${selected.id})`'), /do not each format the table they test/],
-    ['E: an empty-string clear', swap(PAGE, '{ _customerid_value: null }', "{ _customerid_value: '' }"), /cleared with an empty string/],
-    ['E: @odata.bind', swap(PAGE, '{ _customerid_value: null }', "{ 'customerid_account@odata.bind': '/accounts(x)' }"), /@odata\.bind/],
-    ['a partial target set', swap(PAGE, "normalizeLookupReference(row, '_customerid_value', ['account', 'contact']);\n    if (normalized.state !== 'resolved') return;\n    const reference = normalized.reference;\n    await", "normalizeLookupReference(row, '_customerid_value', ['account']);\n    if (normalized.state !== 'resolved') return;\n    const reference = normalized.reference;\n    await"), /not its complete metadata target set/],
-    ['a property that is not a recorded lookup', swap(PAGE, read, "    const normalized = normalizeLookupReference(row, '_ownerid_value', ['systemuser', 'team']);\n    if (normalized.state !== 'resolved') return;\n    const reference = normalized.reference;\n    await Xrm"), /not a recorded lookup/],
-    ['no resolved guard', swap(PAGE, read, "    const normalized = normalizeLookupReference(row, '_customerid_value', ['account', 'contact']);\n    const reference = normalized.reference;\n    await Xrm"), /used before the page checks/],
-    ['the target annotation read directly', swap(PAGE, "String(row['_customerid_value@OData.Community.Display.V1.FormattedValue'] ?? '')", "String(row['_customerid_value@Microsoft.Dynamics.CRM.lookuplogicalname'] ?? '')"), /annotation itself/],
-    ['an unverifiable use', swap(PAGE, "const label = (row: Row)", "const key = '_customerid_value';\n  const label = (row: Row)"), /cannot verify/],
-  ]) {
-    const found = lookupContractProblems(source, SCENARIO);
-    assert.ok(found.some((problem) => reason.test(problem)), `${label}: ${JSON.stringify(found)}`);
-  }
-});
-
-test('a table check proves the target only when it dominates the use with the right polarity', () => {
-  const guard = "    if (reference.table !== 'account') return;\n    const filter";
-  for (const [label, from, to] of [
-    ['the inverted guard returns for an account', guard, "    if (reference.table === 'account') return;\n    const filter"],
-    ['a guard that does not leave', guard, "    if (reference.table !== 'account') console.warn('not an account');\n    const filter"],
-    ['a guard in a branch the use is not in', guard, "    if (row) { if (reference.table !== 'account') return; }\n    const filter"],
-    ['a guard in a function only defined', guard, "    const check = () => { if (reference.table !== 'account') return; };\n    const filter"],
-    ['a guard behind else', guard, "    if (!row) return;\n    else if (reference.table !== 'account') return;\n    const filter"],
-    ['a comparison only mentioned', guard, "    const isAccount = reference.table === 'account';\n    const filter"],
-    ['a comparison in a comment', guard, "    // if (reference.table !== 'account') return;\n    const filter"],
-  ]) {
-    const found = lookupContractProblems(swap(PAGE, from, to), SCENARIO);
-    assert.ok(found.some((problem) => /before the page checks that reference\.table is account/.test(problem)), `${label}: ${JSON.stringify(found)}`);
-  }
-  // The use inside the matching positive branch is proven; a braced early exit is too.
-  const positive = swap(PAGE, "    if (reference.table !== 'account') return;\n    const filter = `customerid_account/accountid eq ${reference.id}`;\n    return dataApi.queryTable('opportunity', { select: ['name', '_customerid_value'], filter });",
-    "    if (reference.table === 'account') {\n      const filter = `customerid_account/accountid eq ${reference.id}`;\n      return dataApi.queryTable('opportunity', { select: ['name', '_customerid_value'], filter });\n    }");
-  assert.deepEqual(lookupContractProblems(positive, SCENARIO), []);
-  assert.deepEqual(lookupContractProblems(swap(PAGE, guard, "    if (reference.table !== 'account') { return; }\n    const filter"), SCENARIO), []);
-  // The same rule for a fixed retrieveRow table.
-  const retrieve = "    if (reference.table !== 'account') return;\n    return dataApi.retrieveRow";
-  assert.ok(lookupContractProblems(swap(PAGE, retrieve, "    if (reference.table === 'account') return;\n    return dataApi.retrieveRow"), SCENARIO)
-    .some((problem) => /not the reference's own table/.test(problem)), 'an inverted guard before a fixed retrieveRow table');
-});
-
-test('the resolved pair stays the one the normalizer returned: a written, computed or handed-on pair is refused', () => {
-  const open = "    await Xrm.Navigation.navigateTo({ pageType: 'entityrecord', entityName: reference.table, entityId: reference.id });";
-  for (const [label, line] of [
-    ['its table overwritten', "    reference.table = 'account';"],
-    ['its id overwritten', "    reference.id = '00000000-0000-0000-0000-000000000000';"],
-    ['its table written computed', "    reference['table'] = 'account';"],
-    ['its table deleted', '    delete (reference as any).table;'],
-    ['filled through Object.assign', "    Object.assign(reference, { table: 'account' });"],
-    ['handed on whole', '    rewrite(reference);'],
-    ['the normalization\'s reference replaced', "    (normalized as any).reference = { table: 'account', id: reference.id };"],
-    ['the normalization\'s state written', "    (normalized as any).state = 'resolved';"],
-    ['the normalization handed on', '    rewrite(normalized);'],
-  ]) {
-    const found = lookupContractProblems(swap(PAGE, open, `${line}\n${open}`), SCENARIO);
-    assert.ok(found.some((problem) => /is changed or handed on after the page normalizes it/.test(problem)), `${label}: ${JSON.stringify(found)}`);
-  }
-  // Reads through members stay accepted.
-  assert.deepEqual(lookupContractProblems(swap(PAGE, open, `    const shown = \`\${reference.table}:\${reference.id}\`;\n    void shown;\n${open}`), SCENARIO), []);
-});
-
-test('without scenario lookup metadata nothing is graded as passing', () => {
-  assert.deepEqual(lookupContractProblems(PAGE, { lookups: [] }), ['the scenario names no lookup metadata to grade against']);
 });
 
 // --- the column check's typed-path context ---------------------------------------------------------------------------------------
@@ -228,7 +148,6 @@ test('with lookup context a typed path is checked whole; without it the column c
 // The trusted helper is the rules.md block itself, transpiled with the TypeScript the plugin vendors and called directly — the
 // fixture's page module is never executed to find out what it means.
 const { loadVendoredTypeScript } = require('../../../../plugins/model-apps/scripts/lib/typescript-compiler.js');
-const { evidenceLookups } = require('../lib/polymorphic-lookup-contract.js');
 const FIXTURE_26 = path.join(__dirname, '..', 'fixtures', '26-customer-lookup');
 
 function publishedNormalizer() {
@@ -245,8 +164,8 @@ function publishedNormalizer() {
 test('eval 26: every synthetic customer value gets the state lookup-rows.json records, and the resolved ones stay apart by table and id', () => {
   const normalize = publishedNormalizer();
   const { lookup, rows } = JSON.parse(fs.readFileSync(path.join(FIXTURE_26, 'lookup-rows.json'), 'utf8'));
-  const metadata = evidenceLookups(JSON.parse(fs.readFileSync(path.join(FIXTURE_26, 'lookup-metadata.json'), 'utf8')));
-  const recorded = metadata.find((entry) => entry.table === lookup.table && entry.column === lookup.column);
+  const metadata = JSON.parse(fs.readFileSync(path.join(FIXTURE_26, 'lookup-metadata.json'), 'utf8'));
+  const recorded = metadata.tables.find((table) => table.logicalName === lookup.table).lookups.find((entry) => entry.column === lookup.column);
   assert.deepEqual(recorded.targets, lookup.targets, 'the rows are normalized with the complete target set the metadata read');
   const states = new Set();
   for (const entry of rows) {
@@ -262,13 +181,4 @@ test('eval 26: every synthetic customer value gets the state lookup-rows.json re
   assert.deepEqual(contoso.map(({ reference }) => reference.table), ['account', 'contact']);
   assert.equal(contoso[0].reference.id, contoso[1].reference.id, 'one GUID in both tables');
   assert.ok(keys.has(`account:${contoso[0].reference.id}`) && keys.has(`contact:${contoso[1].reference.id}`));
-});
-
-test('evidenceLookups reads every lookup of a successful metadata answer with its table, and nothing from a failed one', () => {
-  const answer = JSON.parse(fs.readFileSync(path.join(FIXTURE_26, 'lookup-metadata.json'), 'utf8'));
-  const lookups = evidenceLookups(answer);
-  assert.deepEqual(lookups.map((entry) => `${entry.table}.${entry.column}`), ['opportunity.customerid', 'opportunity.ownerid', 'opportunity.parentaccountid', 'opportunity.parentcontactid']);
-  assert.deepEqual(lookups.find((entry) => entry.column === 'ownerid').paths, [], 'a shared path is not a concrete one');
-  assert.equal(evidenceLookups({ ok: false, code: 'LOOKUP_TABLE_NOT_FOUND', error: 'x' }), null);
-  assert.equal(evidenceLookups(null), null);
 });
