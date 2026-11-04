@@ -74,7 +74,7 @@ __export(backups_exports, {
   snapshot: () => snapshot,
   snapshotOrThrow: () => snapshotOrThrow
 });
-import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync, existsSync } from "fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 function getBackupRoot() {
   const base = process.env.FLOWAGENT_HOME ?? process.cwd();
@@ -124,16 +124,25 @@ function pruneRetention(dir) {
   }
   if (entries.length <= RETENTION)
     return;
-  const sorted = entries.map((f) => ({ f, mtime: safeMtime(join(dir, f)) })).sort((a, b) => a.mtime - b.mtime);
-  const drop = sorted.slice(0, sorted.length - RETENTION);
+  const dropCount = entries.length - RETENTION;
+  let drop;
+  if (entries.every(isTimestampBackupFilename)) {
+    drop = entries.sort().slice(0, dropCount).map((f) => ({ f, mode: "filename" }));
+  } else {
+    const sorted = entries.map((f) => ({ f, mtime: safeMtime(join(dir, f)) })).sort((a, b) => a.mtime - b.mtime);
+    drop = sorted.slice(0, dropCount).map((d) => ({ f: d.f, mode: "mtime" }));
+  }
   for (const d of drop) {
     try {
       unlinkSync(join(dir, d.f));
-      logger.debug(`Backup pruned (FIFO): ${d.f}`);
+      logger.debug(`Backup pruned (${d.mode}): ${d.f}`);
     } catch (err) {
       logger.warn(`Backup prune failed for ${d.f}: ${err instanceof Error ? err.message : err}`);
     }
   }
+}
+function isTimestampBackupFilename(filename) {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.json$/.test(filename);
 }
 function safeMtime(p) {
   try {
@@ -146,7 +155,7 @@ function listBackups(envId, flowId) {
   const dir = flowDir(envId, flowId);
   if (!existsSync(dir))
     return [];
-  const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
+  const files = readdirSync(dir).filter((f) => f.endsWith(".json")).sort((a, b) => a < b ? 1 : a > b ? -1 : 0);
   return files.map((filename) => {
     const path7 = join(dir, filename);
     let capturedAt = "";
@@ -154,15 +163,30 @@ function listBackups(envId, flowId) {
     let sizeBytes = 0;
     try {
       sizeBytes = statSync(path7).size;
-      const raw = readFileSync(path7, "utf-8");
-      const parsed = JSON.parse(raw);
-      capturedAt = parsed.capturedAt ?? "";
-      operation = parsed.operation ?? "unknown";
+      const header = readBackupHeader(path7, sizeBytes);
+      capturedAt = header.capturedAt;
+      operation = header.operation;
     } catch (err) {
       logger.warn(`Could not read backup ${filename}: ${err instanceof Error ? err.message : err}`);
     }
     return { filename, capturedAt, operation, path: path7, sizeBytes };
-  }).sort((a, b) => b.capturedAt > a.capturedAt ? 1 : -1);
+  });
+}
+function readBackupHeader(path7, sizeBytes) {
+  if (sizeBytes <= 0)
+    return { capturedAt: "", operation: "unknown" };
+  const headerBytes = Math.min(4096, sizeBytes);
+  const fd = openSync(path7, "r");
+  try {
+    const buf = Buffer.allocUnsafe(headerBytes);
+    const readCount = readSync(fd, buf, 0, headerBytes, 0);
+    const headerText = buf.toString("utf-8", 0, readCount);
+    const capturedAt = headerText.match(/"capturedAt"\s*:\s*"([^"]+)"/)?.[1] ?? "";
+    const operation = headerText.match(/"operation"\s*:\s*"([^"]+)"/)?.[1] ?? "unknown";
+    return { capturedAt, operation };
+  } finally {
+    closeSync(fd);
+  }
 }
 function readBackup(envId, flowId, filename) {
   const path7 = join(flowDir(envId, flowId), filename);
